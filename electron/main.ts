@@ -84,6 +84,40 @@ function getPetsJsonPath(): string {
   return join(__dirname, '..', 'dist', 'pets', 'pets.json')
 }
 
+function isCodexHooksEnabled(config: string | null): boolean {
+  return !config?.includes('hooks = false') && !config?.includes('codex_hooks = false')
+}
+
+function isAgentPetsCodexHookConfigured(): boolean {
+  const hooksRaw = readFile(codexHooksPath())
+  if (!hooksRaw) return false
+
+  try {
+    const config = JSON.parse(hooksRaw)
+    const events = config?.hooks
+    if (!events || typeof events !== 'object') return false
+
+    const hookPaths = [
+      hookScriptPath(),
+      join(hookScriptDeployPath(), 'agent-hook.cmd'),
+    ]
+    return Object.values(events).some((groups: any) => {
+      if (!Array.isArray(groups)) return false
+      return groups.some((group) => {
+        if (!Array.isArray(group?.hooks)) return false
+        return group.hooks.some((hook: any) => {
+          return hook?.type === 'command'
+            && typeof hook?.command === 'string'
+            && hookPaths.some((hookPath) => hook.command.includes(hookPath))
+            && hook.command.includes(' codex')
+        })
+      })
+    })
+  } catch {
+    return false
+  }
+}
+
 app.whenReady().then(() => {
   createPetWindow()
 
@@ -138,7 +172,8 @@ app.whenReady().then(() => {
       },
       codex: {
         hooks: fileExists(codexHooksPath()),
-        enabled: codexConfig?.includes('codex_hooks = true') ?? false,
+        enabled: isCodexHooksEnabled(codexConfig),
+        configured: isAgentPetsCodexHookConfigured(),
         hookScript: fileExists(hookScriptPath()),
       },
       claude: {

@@ -62,15 +62,21 @@ function getSrc(id: string): string {
 
 async function loadImage() {
   const id = props.petId || 'qitian-dasheng'
-  const img = new Image()
   const pet = store.pets.find(p => p.id === id)
 
+  if (!pet && !store.petsLoaded) {
+    return
+  }
+
+  const targetId = pet ? id : 'qitian-dasheng'
+  const img = new Image()
+
   if (pet && !pet.builtIn) {
-    const fileUrl = await window.electronAPI?.getCustomPetSprite(id)
+    const fileUrl = await window.electronAPI?.getCustomPetSprite(targetId)
     if (!fileUrl) return
     img.src = fileUrl
   } else {
-    img.src = getSrc(id)
+    img.src = getSrc(targetId)
   }
 
   img.onload = () => {
@@ -134,6 +140,11 @@ function startAnimation() {
 }
 
 watch(() => props.petId, () => {
+  currentFrame = 0
+  loadImage()
+})
+
+watch(() => store.petsLoaded, () => {
   currentFrame = 0
   loadImage()
 })

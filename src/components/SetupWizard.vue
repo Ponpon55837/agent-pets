@@ -36,7 +36,7 @@ async function detectTools() {
       tools.value[1].detected = status.opencode.desktop
       tools.value[1].connected = status.opencode.desktop
       tools.value[2].detected = status.codex.hooks
-      tools.value[2].connected = status.codex.enabled && status.codex.hookScript
+      tools.value[2].connected = status.codex.enabled && status.codex.configured && status.codex.hookScript
       tools.value[3].detected = status.claude.config
       tools.value[3].connected = status.claude.hookScript
     } else {

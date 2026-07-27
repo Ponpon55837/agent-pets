@@ -28,6 +28,7 @@ export const useAgentStore = defineStore('agent', () => {
   const selectedPet = ref<string>(localStorage.getItem('agent-pet-id') || 'aang-airbender')
   const petScale = ref(parseFloat(localStorage.getItem('agent-pet-scale') || '1'))
   const pets = ref<PetEntry[]>([])
+  const petsLoaded = ref(false)
   const showWizard = ref(false)
 
   const scaledW = computed(() => Math.round(PET_BASE_W * petScale.value))
@@ -154,9 +155,13 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   async function loadPets() {
-    const list = await window.electronAPI?.loadPets()
-    if (list) {
-      pets.value = list
+    try {
+      const list = await window.electronAPI?.loadPets()
+      if (list) {
+        pets.value = list
+      }
+    } finally {
+      petsLoaded.value = true
     }
   }
 
@@ -186,6 +191,7 @@ export const useAgentStore = defineStore('agent', () => {
     scaledW,
     scaledH,
     pets,
+    petsLoaded,
     showWizard,
     activeSessions,
     highestPrioritySession,

@@ -21,6 +21,15 @@ import os from 'os'
 
 const IS_WIN = process.platform === 'win32'
 const IS_MAC = process.platform === 'darwin'
+const CODEX_HOOK_EVENTS = [
+  'SessionStart',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PermissionRequest',
+  'PostToolUse',
+  'Stop',
+  'SessionEnd',
+]
 
 function homeDir() {
   return os.homedir()
@@ -73,57 +82,18 @@ function hookScriptPath() {
   return path.join(hookDeployDir(), 'agent-hook.mjs')
 }
 
+function hookWrapperPath() {
+  return path.join(hookDeployDir(), 'agent-hook.cmd')
+}
+
 function hookScriptContent() {
-  return `#!/usr/bin/env node
-import fs from 'fs';
-let input = '';
-process.stdin.setEncoding('utf-8');
-process.stdin.on('data', (d) => input += d);
-process.stdin.on('end', () => {
-  try {
-    const event = JSON.parse(input);
-    const tool = event.tool || 'unknown';
-    const args = event.args || {};
-    const method = (args.method || '').toLowerCase();
+  return fs.readFileSync(new URL('./agent-hook.mjs', import.meta.url), 'utf-8')
+}
 
-    let petState;
-    if (tool === 'shell' && (method === 'exec' || method === 'spawn')) {
-      petState = 'tool-running';
-    } else if (['webfetch', 'websearch', 'codesearch', 'grep', 'glob', 'read'].includes(tool)) {
-      petState = 'tool-running';
-    } else if (['write', 'edit', 'patch'].includes(tool)) {
-      petState = 'tool-running';
-    } else if (method.includes('permission') || method.includes('grant')) {
-      petState = 'waiting';
-    } else {
-      petState = 'thinking';
-    }
-
-    const state = args.state || petState;
-    const hookType = process.argv[2] || 'codex';
-    const hookEvent = process.argv[3] || 'unknown';
-
-    if (hookType === 'codex' && hookEvent === 'SessionStart') {
-      // nothing
-    }
-
-    const payload = JSON.stringify({ source: hookType, state, tool, args });
-
-    const req = new (await import('http')).default.request({
-      hostname: '127.0.0.1',
-      port: 17373,
-      path: '/v1/events',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
-    }, (res) => { process.exit(0); });
-    req.on('error', () => process.exit(0));
-    req.write(payload);
-    req.end();
-  } catch (e) {
-    process.exit(0);
-  }
-});
-`
+function hookWrapperContent() {
+  return fs
+    .readFileSync(new URL('./agent-hook.cmd', import.meta.url), 'utf-8')
+    .replace('__NODE_EXECUTABLE__', process.execPath)
 }
 
 // ── File helpers ──
@@ -156,6 +126,43 @@ function removeFromFile(filePath, line) {
   const filtered = content.split('\n').filter(l => l.trim() !== line.trim())
   fs.writeFileSync(filePath, filtered.join('\n'), 'utf-8')
   console.log(`  ✓ removed from ${filePath}`)
+}
+
+function enableCodexHooksFeature(filePath) {
+  const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : ''
+  const lines = existing
+    .split(/\r?\n/)
+    .filter(line => !/^\s*codex_hooks\s*=/.test(line))
+
+  const featuresIndex = lines.findIndex(line => /^\s*\[features\]\s*$/.test(line))
+
+  if (featuresIndex === -1) {
+    if (lines.length > 0 && lines[lines.length - 1].trim() !== '') {
+      lines.push('')
+    }
+    lines.push('[features]')
+    lines.push('hooks = true')
+  } else {
+    let insertIndex = featuresIndex + 1
+    let hooksIndex = -1
+
+    for (let i = featuresIndex + 1; i < lines.length; i++) {
+      if (/^\s*\[/.test(lines[i])) break
+      insertIndex = i + 1
+      if (/^\s*hooks\s*=/.test(lines[i])) {
+        hooksIndex = i
+      }
+    }
+
+    if (hooksIndex === -1) {
+      lines.splice(insertIndex, 0, 'hooks = true')
+    } else {
+      lines[hooksIndex] = 'hooks = true'
+    }
+  }
+
+  fs.writeFileSync(filePath, lines.join('\n').replace(/\n*$/, '\n'), 'utf-8')
+  console.log(`  ✓ enabled [features].hooks in ${filePath}`)
 }
 
 function removeFile(filePath) {
@@ -193,14 +200,49 @@ function removeJsonKey(filePath, key) {
 // ── Codex hooks template ──
 function codexHooksJson() {
   const hook = hookScriptPath()
-  const nodeBin = IS_WIN ? 'node' : 'node'
+  const nodeBin = IS_WIN ? process.execPath : 'node'
+  const command = IS_WIN ? `${hookWrapperPath()} codex` : `${nodeBin} "${hook}" codex`
+  const handler = () => ({
+    hooks: [
+      {
+        type: 'command',
+        command,
+        statusMessage: 'Updating Agent Pets status',
+      },
+    ],
+  })
+
   return {
+    description: 'Agent Pets lifecycle hooks for Codex CLI.',
     hooks: {
-      PreToolUse: [{ type: 'command', command: `${nodeBin} "${hook}" codex PreToolUse` }],
-      PostToolUse: [{ type: 'command', command: `${nodeBin} "${hook}" codex PostToolUse` }],
-      Notification: [{ type: 'command', command: `${nodeBin} "${hook}" codex Notification` }],
+      ...Object.fromEntries(CODEX_HOOK_EVENTS.map((event) => [event, [handler()]])),
     }
   }
+}
+
+function hasCommandHook(groups, command) {
+  if (!Array.isArray(groups)) return false
+  return groups.some((group) => {
+    return Array.isArray(group?.hooks)
+      && group.hooks.some((hook) => hook?.type === 'command' && hook?.command === command)
+  })
+}
+
+function removeAgentPetsHooks(groups) {
+  if (!Array.isArray(groups)) return []
+  return groups
+    .map((group) => {
+      if (!Array.isArray(group?.hooks)) return group
+      return {
+        ...group,
+        hooks: group.hooks.filter((hook) => {
+          return typeof hook?.command !== 'string'
+            || !hook.command.includes('agent-hook')
+            || (!hook.command.includes('.desktop-pet') && !hook.command.includes('desktop-pet'))
+        }),
+      }
+    })
+    .filter((group) => !Array.isArray(group?.hooks) || group.hooks.length > 0)
 }
 
 // ── Install functions ──
@@ -209,6 +251,9 @@ function installHookScript() {
   const dir = hookDeployDir()
   ensureDir(dir)
   writeFileEnsured(hookScriptPath(), hookScriptContent())
+  if (IS_WIN) {
+    writeFileEnsured(hookWrapperPath(), hookWrapperContent())
+  }
   if (!IS_WIN) {
     try { fs.chmodSync(hookScriptPath(), 0o700) } catch {}
   }
@@ -282,15 +327,12 @@ function installCodex() {
       const existing = JSON.parse(fs.readFileSync(hooksFile, 'utf-8'))
       existing.hooks = existing.hooks || {}
       for (const [event, arr] of Object.entries(newHooks.hooks)) {
+        delete existing[event]
+        existing.hooks[event] = removeAgentPetsHooks(existing.hooks[event])
         if (!existing.hooks[event]) {
           existing.hooks[event] = arr
-        } else {
-          const existingCmds = existing.hooks[event].map(h => h.command)
-          for (const hook of arr) {
-            if (!existingCmds.includes(hook.command)) {
-              existing.hooks[event].push(hook)
-            }
-          }
+        } else if (!hasCommandHook(existing.hooks[event], arr[0].hooks[0].command)) {
+          existing.hooks[event].push(arr[0])
         }
       }
       writeFileEnsured(hooksFile, JSON.stringify(existing, null, 2))
@@ -303,9 +345,9 @@ function installCodex() {
 
   const configFile = codexConfigPath()
   if (fileExists(configFile)) {
-    appendToFile(configFile, 'codex_hooks = true')
+    enableCodexHooksFeature(configFile)
   } else {
-    writeFileEnsured(configFile, 'codex_hooks = true\n')
+    writeFileEnsured(configFile, '[features]\nhooks = true\n')
   }
 }
 

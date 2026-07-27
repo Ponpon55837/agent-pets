@@ -2,12 +2,9 @@
 
 const PET_URL = 'http://127.0.0.1:17373/v1/events'
 
-const source = process.argv[2]
+const validSources = ['codex', 'codex-desktop', 'claude', 'claude-desktop']
+const source = validSources.includes(process.argv[2]) ? process.argv[2] : 'codex'
 
-if (!source || !['codex', 'codex-desktop', 'claude', 'claude-desktop'].includes(source)) {
-  process.stderr.write(`Usage: agent-hook.mjs <codex|codex-desktop|claude|claude-desktop>\n`)
-  process.exit(1)
-}
 
 function mapCodexEvent(eventName) {
   switch (eventName) {

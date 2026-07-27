@@ -15,14 +15,26 @@ const MAX_BODY_BYTES = 64 * 1024
 
 const VALID_SOURCES = [
   'opencode-cli', 'opencode-desktop',
+  'opencode',
   'codex', 'codex-desktop',
   'claude', 'claude-desktop',
 ]
 
 const VALID_STATES = [
-  'idle', 'thinking', 'tool-running', 'waiting',
+  'idle', 'thinking', 'tool-running',
+  'waiting-permission', 'waiting-input', 'waiting',
   'success', 'error', 'offline',
 ]
+
+function normalizeSource(source: string): string {
+  if (source === 'opencode') return 'opencode-cli'
+  return source
+}
+
+function normalizeState(state: string): string {
+  if (state === 'waiting') return 'waiting-permission'
+  return state
+}
 
 export function createEventServer(petWindow: BrowserWindow) {
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
@@ -77,6 +89,9 @@ export function createEventServer(petWindow: BrowserWindow) {
           response.end(JSON.stringify({ error: 'invalid sessionId' }))
           return
         }
+
+        event.source = normalizeSource(event.source)
+        event.state = normalizeState(event.state)
 
         if (event.project && typeof event.project === 'string') {
           event.project = event.project.split(/[/\\]/).pop() || event.project
