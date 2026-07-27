@@ -1,0 +1,53 @@
+{
+  "name": "agent-pets",
+  "version": "0.1.0",
+  "description": "Desktop pet that shows the status of AI coding agents",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build && electron-builder",
+    "preview": "vite preview",
+    "electron:dev": "vite --config vite.config.ts",
+    "electron:build": "vue-tsc --noEmit && vite build && electron-builder"
+  },
+  "dependencies": {
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "@vue/tsconfig": "^0.9.1",
+    "electron": "^29.4.6",
+    "electron-builder": "^24.13.3",
+    "typescript": "^5.4.3",
+    "vite": "^5.2.6",
+    "vite-plugin-electron": "^0.28.6",
+    "vite-plugin-electron-renderer": "^0.14.5",
+    "vue-tsc": "^2.0.7"
+  },
+  "build": {
+    "appId": "com.agent-pets.app",
+    "productName": "Agent Pets",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": false
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.entertainment"
+    },
+    "portable": {
+      "artifactName": "AgentPets-${version}.exe"
+    },
+    "dmg": {
+      "artifactName": "AgentPets-${version}.dmg"
+    }
+  }
+}

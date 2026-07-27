@@ -1,0 +1,418 @@
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+import { useAgentStore } from '../stores/agentStore'
+import { STATE_LABELS, SOURCE_LABELS } from '../types/agent'
+
+const store = useAgentStore()
+const importing = ref(false)
+
+const sessions = computed(() => {
+  return Object.values(store.sessions)
+})
+
+const scaleOptions = [
+  { value: 0.6, label: 'S' },
+  { value: 0.8, label: 'M' },
+  { value: 1.0, label: 'L' },
+  { value: 1.2, label: 'XL' },
+  { value: 1.5, label: 'XXL' },
+]
+
+function formatTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString()
+}
+
+function formatProject(project?: string): string {
+  if (!project) return ''
+  const parts = project.split(/[/\\]/)
+  return parts[parts.length - 1] || project
+}
+
+async function importPet() {
+  importing.value = true
+  const id = `custom-${Date.now()}`
+  const fileUrl = await window.electronAPI?.importPetSprite(id, 'Custom Pet')
+  if (fileUrl) {
+    await store.loadPets()
+    store.setPet(id)
+  }
+  importing.value = false
+}
+
+function quitApp() {
+  window.electronAPI?.quitApp()
+}
+</script>
+
+<template>
+  <Transition name="panel">
+    <div v-if="store.showPanel" class="status-panel" @click.stop>
+      <div class="panel-header">
+        <button
+          v-if="store.panelView === 'settings'"
+          class="header-btn"
+          @click="store.backToSessions()"
+        >
+          &#8249;
+        </button>
+        <span class="panel-title">
+          {{ store.panelView === 'sessions' ? 'Agent Pets' : 'Settings' }}
+        </span>
+        <div class="header-right">
+          <button
+            v-if="store.panelView === 'sessions'"
+            class="header-btn"
+            title="Settings"
+            @click="store.openSettings()"
+          >
+            &#9881;
+          </button>
+          <button class="header-btn" @click="store.closePanel()">&times;</button>
+        </div>
+      </div>
+
+      <template v-if="store.panelView === 'sessions'">
+        <div v-if="sessions.length === 0" class="panel-empty">
+          No active sessions
+        </div>
+        <div v-else class="session-list">
+          <div
+            v-for="session in sessions"
+            :key="session.key"
+            class="session-item"
+          >
+            <div class="session-source">
+              {{ SOURCE_LABELS[session.source] }}
+            </div>
+            <div class="session-info">
+              <span class="session-state">{{ STATE_LABELS[session.state] }}</span>
+              <span v-if="session.project" class="session-project">
+                {{ formatProject(session.project) }}
+              </span>
+            </div>
+            <div class="session-time">
+              {{ formatTime(session.lastSeenAt) }}
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <template v-else>
+        <div class="settings-content">
+          <div class="settings-section">
+            <div class="section-label">Pet</div>
+            <div class="pet-list">
+              <div
+                v-for="pet in store.pets"
+                :key="pet.id"
+                class="pet-option"
+                :class="{ active: store.selectedPet === pet.id }"
+                @click="store.setPet(pet.id)"
+              >
+                <span class="pet-name">{{ pet.displayName }}</span>
+                <button
+                  v-if="!pet.builtIn"
+                  class="pet-remove"
+                  @click.stop="store.removePet(pet.id)"
+                >
+                  &times;
+                </button>
+              </div>
+            </div>
+            <button class="import-btn" @click="importPet" :disabled="importing">
+              {{ importing ? 'Importing...' : '+ Import Pet' }}
+            </button>
+          </div>
+
+          <div class="settings-section">
+            <div class="section-label">Size</div>
+            <div class="scale-options">
+              <div
+                v-for="opt in scaleOptions"
+                :key="opt.value"
+                class="scale-option"
+                :class="{ active: store.petScale === opt.value }"
+                @click="store.setScale(opt.value)"
+              >
+                {{ opt.label }}
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <button class="setup-btn" @click="store.showWizard = true">Setup Wizard</button>
+          </div>
+
+          <div class="settings-section">
+            <button class="quit-btn" @click="quitApp">Quit</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </Transition>
+</template>
+
+<style scoped>
+.status-panel {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 300px;
+  background: rgba(20, 20, 30, 0.95);
+  border-radius: 12px 12px 0 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: none;
+  color: #e0e0e0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.panel-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.header-right {
+  display: flex;
+  gap: 4px;
+}
+
+.header-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 6px;
+  line-height: 1;
+}
+
+.header-btn:hover {
+  color: #fff;
+}
+
+.panel-empty {
+  padding: 20px 14px;
+  text-align: center;
+  color: #666;
+  font-size: 12px;
+}
+
+.session-list {
+  padding: 6px;
+  overflow-y: auto;
+  max-height: 320px;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.session-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.session-source {
+  font-weight: 600;
+  font-size: 11px;
+  min-width: 50px;
+  color: #8b9cf7;
+}
+
+.session-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.session-state {
+  font-size: 12px;
+}
+
+.session-project {
+  font-size: 10px;
+  color: #666;
+}
+
+.session-time {
+  font-size: 10px;
+  color: #555;
+}
+
+.settings-content {
+  padding: 8px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.section-label {
+  font-size: 10px;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.pet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pet-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.pet-option:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.pet-option.active {
+  background: rgba(139, 156, 247, 0.15);
+  color: #8b9cf7;
+}
+
+.pet-name {
+  flex: 1;
+}
+
+.pet-remove {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.pet-remove:hover {
+  color: #ff6b6b;
+}
+
+.import-btn {
+  width: 100%;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(80, 200, 120, 0.25);
+  background: rgba(80, 200, 120, 0.06);
+  color: #50c878;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.import-btn:hover {
+  background: rgba(80, 200, 120, 0.12);
+}
+
+.import-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.scale-options {
+  display: flex;
+  gap: 4px;
+}
+
+.scale-option {
+  flex: 1;
+  padding: 5px 0;
+  border-radius: 5px;
+  color: #888;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+}
+
+.scale-option:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ccc;
+}
+
+.scale-option.active {
+  background: rgba(139, 156, 247, 0.15);
+  color: #8b9cf7;
+}
+
+.setup-btn {
+  width: 100%;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(139, 156, 247, 0.2);
+  background: rgba(139, 156, 247, 0.06);
+  color: #8b9cf7;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.setup-btn:hover {
+  background: rgba(139, 156, 247, 0.12);
+}
+
+.quit-btn {
+  width: 100%;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 80, 80, 0.25);
+  background: rgba(255, 80, 80, 0.06);
+  color: #ff6b6b;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.quit-btn:hover {
+  background: rgba(255, 80, 80, 0.15);
+  border-color: rgba(255, 80, 80, 0.4);
+}
+
+.panel-enter-active,
+.panel-leave-active {
+  transition: all 0.2s ease;
+}
+
+.panel-enter-from,
+.panel-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+}
+</style>
