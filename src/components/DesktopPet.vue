@@ -109,11 +109,11 @@ function onClick(e: MouseEvent) {
   pointer-events: auto;
   background: rgba(0, 0, 0, 0.7);
   color: #fff;
-  font-size: calc(11px * var(--pet-scale, 1));
-  padding: calc(2px * var(--pet-scale, 1)) calc(8px * var(--pet-scale, 1));
-  border-radius: calc(10px * var(--pet-scale, 1));
+  font-size: max(11px, calc(11px * var(--pet-scale, 1)));
+  padding: max(2px, calc(2px * var(--pet-scale, 1))) max(8px, calc(8px * var(--pet-scale, 1)));
+  border-radius: max(10px, calc(10px * var(--pet-scale, 1)));
   white-space: nowrap;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  margin-top: calc(-8px * var(--pet-scale, 1));
+  margin-top: max(-8px, calc(-8px * var(--pet-scale, 1)));
 }
 </style>
