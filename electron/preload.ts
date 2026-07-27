@@ -33,6 +33,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('add-custom-pet', petData)
   },
 
+  renameCustomPet: (petId: string, newName: string) => {
+    return ipcRenderer.invoke('rename-custom-pet', petId, newName)
+  },
+
   removeCustomPet: (petId: string) => {
     return ipcRenderer.invoke('remove-custom-pet', petId)
   },

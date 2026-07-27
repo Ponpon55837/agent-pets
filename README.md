@@ -135,6 +135,17 @@ Each row represents a different state:
 
 Custom pets are stored in `~/.desktop-pets/custom/`.
 
+### How to Rename / 如何重新命名
+
+1. Open the control panel (click the pet).
+2. Click **⚙** to go to Settings.
+3. Find the custom pet in the list.
+4. Click the **✎** pencil icon next to the pet name.
+5. Type the new name and press **Enter** (or click elsewhere to confirm).
+6. Press **Esc** to cancel.
+
+Built-in pets cannot be renamed.
+
 ---
 
 ## Event Server / 事件伺服器

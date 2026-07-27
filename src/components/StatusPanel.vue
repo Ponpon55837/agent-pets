@@ -5,6 +5,27 @@ import { STATE_LABELS, SOURCE_LABELS } from '../types/agent'
 
 const store = useAgentStore()
 const importing = ref(false)
+const editingPetId = ref<string | null>(null)
+const editName = ref('')
+
+function startRename(pet: { id: string; displayName: string }) {
+  editingPetId.value = pet.id
+  editName.value = pet.displayName
+}
+
+async function confirmRename() {
+  if (!editingPetId.value || !editName.value.trim()) {
+    editingPetId.value = null
+    return
+  }
+  await store.renamePet(editingPetId.value, editName.value.trim())
+  editingPetId.value = null
+}
+
+function cancelRename() {
+  editingPetId.value = null
+  editName.value = ''
+}
 
 const sessions = computed(() => {
   return Object.values(store.sessions)
@@ -109,14 +130,35 @@ function quitApp() {
                 :class="{ active: store.selectedPet === pet.id }"
                 @click="store.setPet(pet.id)"
               >
-                <span class="pet-name">{{ pet.displayName }}</span>
-                <button
-                  v-if="!pet.builtIn"
-                  class="pet-remove"
-                  @click.stop="store.removePet(pet.id)"
-                >
-                  &times;
-                </button>
+                <template v-if="editingPetId === pet.id">
+                  <input
+                    v-model="editName"
+                    class="pet-rename-input"
+                    maxlength="64"
+                    @keyup.enter="confirmRename"
+                    @keyup.escape="cancelRename"
+                    @blur="confirmRename"
+                    @click.stop
+                  />
+                </template>
+                <template v-else>
+                  <span class="pet-name">{{ pet.displayName }}</span>
+                  <template v-if="!pet.builtIn">
+                    <button
+                      class="pet-edit"
+                      title="Rename"
+                      @click.stop="startRename(pet)"
+                    >
+                      &#9998;
+                    </button>
+                    <button
+                      class="pet-remove"
+                      @click.stop="store.removePet(pet.id)"
+                    >
+                      &times;
+                    </button>
+                  </template>
+                </template>
               </div>
             </div>
             <button class="import-btn" @click="importPet" :disabled="importing">
@@ -309,6 +351,36 @@ function quitApp() {
 
 .pet-name {
   flex: 1;
+}
+
+.pet-rename-input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(139, 156, 247, 0.4);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 13px;
+  padding: 2px 6px;
+  outline: none;
+  font-family: inherit;
+}
+
+.pet-rename-input:focus {
+  border-color: #8b9cf7;
+}
+
+.pet-edit {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.pet-edit:hover {
+  color: #8b9cf7;
 }
 
 .pet-remove {

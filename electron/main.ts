@@ -205,6 +205,24 @@ app.whenReady().then(() => {
     return true
   })
 
+  ipcMain.handle('rename-custom-pet', (_event, petId: string, newName: string) => {
+    const safeId = sanitizePetId(petId)
+    if (!safeId) return false
+    if (typeof newName !== 'string' || newName.trim().length === 0) return false
+    const customDir = safeJoin(hookScriptDeployPath(), 'custom', safeId)
+    if (!customDir) return false
+    const petJsonPath = safeJoin(customDir, 'pet.json')
+    if (!petJsonPath || !fs.existsSync(petJsonPath)) return false
+    try {
+      const petData = JSON.parse(fs.readFileSync(petJsonPath, 'utf-8'))
+      petData.displayName = newName.trim().slice(0, 64)
+      writeFileEnsured(petJsonPath, JSON.stringify(petData, null, 2))
+      return true
+    } catch {
+      return false
+    }
+  })
+
   ipcMain.handle('remove-custom-pet', (_event, petId: string) => {
     const safeId = sanitizePetId(petId)
     if (!safeId) return false

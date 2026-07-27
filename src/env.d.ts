@@ -19,6 +19,7 @@ interface Window {
     }>
     loadPets: () => Promise<Array<{ id: string; displayName: string; folder: string; builtIn: boolean }>>
     addCustomPet: (petData: { id: string; displayName: string }) => Promise<boolean>
+    renameCustomPet: (petId: string, newName: string) => Promise<boolean>
     removeCustomPet: (petId: string) => Promise<boolean>
     getCustomPetSprite: (petId: string) => Promise<string | null>
     importPetSprite: (petId: string, displayName: string) => Promise<string | null>

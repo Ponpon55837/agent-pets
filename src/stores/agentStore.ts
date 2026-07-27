@@ -160,6 +160,14 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  async function renamePet(petId: string, newName: string) {
+    const ok = await window.electronAPI?.renameCustomPet(petId, newName)
+    if (ok) {
+      const pet = pets.value.find(p => p.id === petId)
+      if (pet) pet.displayName = newName
+    }
+  }
+
   async function removePet(petId: string) {
     await window.electronAPI?.removeCustomPet(petId)
     pets.value = pets.value.filter(p => p.id !== petId)
@@ -195,6 +203,7 @@ export const useAgentStore = defineStore('agent', () => {
     setScale,
     resizeForContent,
     loadPets,
+    renamePet,
     removePet,
   }
 })
