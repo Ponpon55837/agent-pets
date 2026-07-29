@@ -73,10 +73,11 @@ export const useAgentStore = defineStore('agent', () => {
     const now = Date.now()
     for (const key of Object.keys(sessions.value)) {
       const session = sessions.value[key]
-      if (now - session.lastSeenAt > SESSION_STALE_MS) {
-        if (session.state === 'success') {
-          session.state = 'idle'
-        }
+      if (now - session.lastSeenAt > SESSION_STALE_MS && session.state !== 'offline') {
+        // No update in a long time means the process died without sending a
+        // terminal event (Stop/SessionEnd) — treat it as gone rather than
+        // letting a stuck thinking/tool-running state mask real sessions.
+        session.state = 'offline'
       }
     }
   }

@@ -44,6 +44,11 @@ function claudeDesktopConfigPath(): string {
   return path.join(app.getPath('appData'), 'Claude', 'claude_desktop_config.json')
 }
 
+// --- Claude Code settings.json (shared by CLI & Desktop) ---
+function claudeCodeSettingsPath(): string {
+  return path.join(homeDir(), '.claude', 'settings.json')
+}
+
 // --- Hook script path ---
 function hookScriptPath(): string {
   return path.join(homeDir(), '.desktop-pet', 'agent-hook.mjs')
@@ -97,6 +102,7 @@ export {
   codexHooksPath,
   codexConfigPath,
   claudeDesktopConfigPath,
+  claudeCodeSettingsPath,
   hookScriptPath,
   hookScriptDeployPath,
   ensureDir,

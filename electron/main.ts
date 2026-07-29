@@ -14,6 +14,7 @@ import {
   codexHooksPath,
   codexConfigPath,
   claudeDesktopConfigPath,
+  claudeCodeSettingsPath,
   hookScriptPath,
 } from './setup'
 
@@ -88,12 +89,16 @@ function isCodexHooksEnabled(config: string | null): boolean {
   return !config?.includes('hooks = false') && !config?.includes('codex_hooks = false')
 }
 
-function isAgentPetsCodexHookConfigured(): boolean {
-  const hooksRaw = readFile(codexHooksPath())
-  if (!hooksRaw) return false
+// Codex uses shell-form hooks (single "command" string containing the full
+// invocation). Claude Code uses exec-form (command=node executable, args=[...])
+// since Windows can't run .cmd/.bat files in exec form without a shell — so we
+// check both `command` and `args` combined here.
+function isAgentPetsHookConfigured(settingsPath: string, expectedArg: string): boolean {
+  const raw = readFile(settingsPath)
+  if (!raw) return false
 
   try {
-    const config = JSON.parse(hooksRaw)
+    const config = JSON.parse(raw)
     const events = config?.hooks
     if (!events || typeof events !== 'object') return false
 
@@ -106,10 +111,11 @@ function isAgentPetsCodexHookConfigured(): boolean {
       return groups.some((group) => {
         if (!Array.isArray(group?.hooks)) return false
         return group.hooks.some((hook: any) => {
-          return hook?.type === 'command'
-            && typeof hook?.command === 'string'
-            && hookPaths.some((hookPath) => hook.command.includes(hookPath))
-            && hook.command.includes(' codex')
+          if (hook?.type !== 'command') return false
+          const command = typeof hook.command === 'string' ? hook.command : ''
+          const args = Array.isArray(hook.args) ? hook.args.join(' ') : ''
+          const combined = `${command} ${args}`
+          return hookPaths.some((hookPath) => combined.includes(hookPath)) && combined.includes(expectedArg)
         })
       })
     })
@@ -173,11 +179,16 @@ app.whenReady().then(() => {
       codex: {
         hooks: fileExists(codexHooksPath()),
         enabled: isCodexHooksEnabled(codexConfig),
-        configured: isAgentPetsCodexHookConfigured(),
+        configured: isAgentPetsHookConfigured(codexHooksPath(), ' codex'),
         hookScript: fileExists(hookScriptPath()),
       },
       claude: {
         config: fileExists(claudeDesktopConfigPath()),
+        hookScript: fileExists(hookScriptPath()),
+      },
+      claudeCode: {
+        settings: fileExists(claudeCodeSettingsPath()),
+        configured: isAgentPetsHookConfigured(claudeCodeSettingsPath(), 'claude'),
         hookScript: fileExists(hookScriptPath()),
       },
     }

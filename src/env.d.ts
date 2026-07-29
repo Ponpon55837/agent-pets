@@ -16,6 +16,7 @@ interface Window {
       opencode: { cli: boolean; desktop: boolean }
       codex: { hooks: boolean; enabled: boolean; configured: boolean; hookScript: boolean }
       claude: { config: boolean; hookScript: boolean }
+      claudeCode: { settings: boolean; configured: boolean; hookScript: boolean }
     }>
     loadPets: () => Promise<Array<{ id: string; displayName: string; folder: string; builtIn: boolean }>>
     addCustomPet: (petData: { id: string; displayName: string }) => Promise<boolean>

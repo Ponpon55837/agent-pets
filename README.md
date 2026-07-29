@@ -93,8 +93,7 @@ The Setup Wizard detects installed tools and installs hooks automatically:
 - **OpenCode Desktop** — Adds event webhook to `~/Library/Application Support/opencode/config.json`
 - **Codex CLI** — Creates `~/.codex/hooks.json` and enables hooks in `~/.codex/config.toml`
 - **Codex Desktop** — Same as Codex CLI
-- **Claude Code** — Installs hook to `~/.claude/agent-pet-hook.sh`
-- **Claude Desktop** — Installs hook to `~/.claude/hooks.json`
+- **Claude Code CLI & Desktop** — Adds a `hooks` block to `~/.claude/settings.json` (CLI and Desktop share this config, so one install covers both)
 
 Each tool shows a status dot:
 
@@ -221,8 +220,15 @@ node integrations/install.mjs
 This installs hooks for all detected tools. Hooks are installed to:
 
 - `~/.codex/hooks.json` (Codex)
-- `~/.claude/agent-pet-hook.sh` (Claude Code)
-- `~/.claude/hooks.json` (Claude Desktop)
+- `~/.claude/settings.json` (Claude Code CLI & Desktop)
+- `~/.desktop-pet/agent-hook.mjs` + `agent-hook.cmd` (shared hook script all of the above call into)
+
+Use `--claude-code` to install/uninstall the Claude Code hook only:
+
+```bash
+node integrations/install.mjs --claude-code
+node integrations/install.mjs --uninstall --claude-code
+```
 
 ---
 

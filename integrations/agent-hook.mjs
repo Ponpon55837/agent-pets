@@ -37,10 +37,14 @@ function mapClaudeEvent(eventName, payload) {
       return 'tool-running'
     case 'PermissionRequest':
       return 'waiting-permission'
-    case 'Notification':
-      if (payload?.type === 'permission_prompt') return 'waiting-permission'
-      if (payload?.type === 'idle_prompt') return 'waiting-input'
+    case 'Notification': {
+      // Claude Code's Notification hook sends a human-readable `message`
+      // string, not a structured type — match on its content.
+      const message = String(payload?.message || '').toLowerCase()
+      if (message.includes('permission')) return 'waiting-permission'
+      if (message.includes('waiting') || message.includes('idle')) return 'waiting-input'
       return null
+    }
     case 'PostToolUse':
       return 'thinking'
     case 'Stop':

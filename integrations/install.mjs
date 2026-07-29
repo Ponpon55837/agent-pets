@@ -7,7 +7,8 @@
  *   node integrations/install.mjs                  # install all
  *   node integrations/install.mjs --opencode       # install OpenCode plugin only
  *   node integrations/install.mjs --codex          # install Codex hooks only
- *   node integrations/install.mjs --claude         # install Claude hooks only
+ *   node integrations/install.mjs --claude         # install Claude Desktop config only
+ *   node integrations/install.mjs --claude-code    # install Claude Code (CLI & Desktop) hooks only
  *   node integrations/install.mjs --all            # install all (default)
  *
  * Uninstall:
@@ -30,6 +31,17 @@ const CODEX_HOOK_EVENTS = [
   'Stop',
   'SessionEnd',
 ]
+const CLAUDE_CODE_HOOK_EVENTS = [
+  'SessionStart',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'Notification',
+  'Stop',
+  'StopFailure',
+  'SessionEnd',
+]
+const CLAUDE_CODE_TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse'])
 
 function homeDir() {
   return os.homedir()
@@ -71,6 +83,15 @@ function claudeDesktopDir() {
 
 function claudeDesktopConfigPath() {
   return path.join(claudeDesktopDir(), 'claude_desktop_config.json')
+}
+
+// ── Claude Code paths (CLI & Desktop share the same hook config) ──
+function claudeCodeDir() {
+  return path.join(homeDir(), '.claude')
+}
+
+function claudeCodeSettingsPath() {
+  return path.join(claudeCodeDir(), 'settings.json')
 }
 
 // ── Hook script ──
@@ -220,12 +241,31 @@ function codexHooksJson() {
   }
 }
 
-function hasCommandHook(groups, command) {
-  if (!Array.isArray(groups)) return false
-  return groups.some((group) => {
-    return Array.isArray(group?.hooks)
-      && group.hooks.some((hook) => hook?.type === 'command' && hook?.command === command)
-  })
+// ── Claude Code hooks template ──
+// Windows can't run .cmd/.bat files in "exec form" (command + args, no shell),
+// so unlike Codex's shell-form single string, Claude Code's hooks call node
+// directly with an args array — see https://code.claude.com/docs/en/hooks
+// ("Windows-Specific Execution Issues").
+function claudeCodeHooksJson() {
+  const hook = hookScriptPath()
+  const nodeBin = IS_WIN ? process.execPath : 'node'
+  const handler = (event) => {
+    const entry = { hooks: [{ type: 'command', command: nodeBin, args: [hook, 'claude'] }] }
+    if (CLAUDE_CODE_TOOL_EVENTS.has(event)) entry.matcher = '*'
+    return entry
+  }
+
+  return {
+    hooks: Object.fromEntries(CLAUDE_CODE_HOOK_EVENTS.map((event) => [event, [handler(event)]])),
+  }
+}
+
+function isAgentPetsHook(hook) {
+  if (hook?.type !== 'command') return false
+  const command = typeof hook.command === 'string' ? hook.command : ''
+  const args = Array.isArray(hook.args) ? hook.args.join(' ') : ''
+  const combined = `${command} ${args}`
+  return combined.includes('agent-hook') && combined.includes('desktop-pet')
 }
 
 function removeAgentPetsHooks(groups) {
@@ -235,11 +275,7 @@ function removeAgentPetsHooks(groups) {
       if (!Array.isArray(group?.hooks)) return group
       return {
         ...group,
-        hooks: group.hooks.filter((hook) => {
-          return typeof hook?.command !== 'string'
-            || !hook.command.includes('agent-hook')
-            || (!hook.command.includes('.desktop-pet') && !hook.command.includes('desktop-pet'))
-        }),
+        hooks: group.hooks.filter((hook) => !isAgentPetsHook(hook)),
       }
     })
     .filter((group) => !Array.isArray(group?.hooks) || group.hooks.length > 0)
@@ -329,9 +365,9 @@ function installCodex() {
       for (const [event, arr] of Object.entries(newHooks.hooks)) {
         delete existing[event]
         existing.hooks[event] = removeAgentPetsHooks(existing.hooks[event])
-        if (!existing.hooks[event]) {
+        if (!existing.hooks[event] || existing.hooks[event].length === 0) {
           existing.hooks[event] = arr
-        } else if (!hasCommandHook(existing.hooks[event], arr[0].hooks[0].command)) {
+        } else {
           existing.hooks[event].push(arr[0])
         }
       }
@@ -365,11 +401,42 @@ function installClaude() {
   addJsonKey(configFile, 'agent', hookScriptPath())
 }
 
+function installClaudeCode() {
+  console.log('\n📦 Installing Claude Code (CLI & Desktop) integration...')
+  installHookScript()
+
+  const settingsFile = claudeCodeSettingsPath()
+  ensureDir(claudeCodeDir())
+
+  const newHooks = claudeCodeHooksJson()
+  let existing = {}
+  if (fileExists(settingsFile)) {
+    try {
+      existing = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'))
+    } catch {
+      existing = {}
+    }
+  }
+
+  existing.hooks = existing.hooks || {}
+  for (const [event, arr] of Object.entries(newHooks.hooks)) {
+    existing.hooks[event] = removeAgentPetsHooks(existing.hooks[event])
+    if (!existing.hooks[event] || existing.hooks[event].length === 0) {
+      existing.hooks[event] = arr
+    } else {
+      existing.hooks[event].push(arr[0])
+    }
+  }
+
+  writeFileEnsured(settingsFile, JSON.stringify(existing, null, 2))
+}
+
 function installAll() {
   console.log('🐾 Agent Pets - Integration Installer\n')
   installOpenCode()
   installCodex()
   installClaude()
+  installClaudeCode()
   console.log('\n✅ All integrations installed! Restart your coding tools for changes to take effect.\n')
 }
 
@@ -405,11 +472,38 @@ function uninstallClaude() {
   }
 }
 
+function uninstallClaudeCode() {
+  console.log('\n🗑️  Removing Claude Code (CLI & Desktop) integration...')
+
+  const settingsFile = claudeCodeSettingsPath()
+  if (fileExists(settingsFile)) {
+    try {
+      const existing = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'))
+      if (existing.hooks && typeof existing.hooks === 'object') {
+        for (const event of Object.keys(existing.hooks)) {
+          existing.hooks[event] = removeAgentPetsHooks(existing.hooks[event])
+          if (!existing.hooks[event] || existing.hooks[event].length === 0) {
+            delete existing.hooks[event]
+          }
+        }
+        if (Object.keys(existing.hooks).length === 0) {
+          delete existing.hooks
+        }
+      }
+      writeFileEnsured(settingsFile, JSON.stringify(existing, null, 2))
+      console.log(`  ✓ removed Agent Pets hooks from ${settingsFile}`)
+    } catch {
+      // malformed settings.json, leave untouched
+    }
+  }
+}
+
 function uninstallAll() {
   console.log('🗑️  Agent Pets - Uninstalling integrations...\n')
   uninstallOpenCode()
   uninstallCodex()
   uninstallClaude()
+  uninstallClaudeCode()
   console.log('\n✅ All integrations removed. Restart your coding tools for changes to take effect.\n')
 }
 
@@ -423,6 +517,7 @@ if (isUninstall) {
     case '--opencode': uninstallOpenCode(); break
     case '--codex': uninstallCodex(); break
     case '--claude': uninstallClaude(); break
+    case '--claude-code': uninstallClaudeCode(); break
     default: uninstallAll(); break
   }
 } else {
@@ -430,6 +525,7 @@ if (isUninstall) {
     case '--opencode': installOpenCode(); break
     case '--codex': installCodex(); break
     case '--claude': installClaude(); break
+    case '--claude-code': installClaudeCode(); break
     default: installAll(); break
   }
 }

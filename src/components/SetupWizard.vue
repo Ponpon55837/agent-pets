@@ -16,7 +16,8 @@ const tools = ref<ToolStatus[]>([
   { name: 'OpenCode CLI', detected: false, connected: false, description: 'Plugin at ~/.config/opencode/plugins/' },
   { name: 'OpenCode Desktop', detected: false, connected: false, description: 'Plugin in AppData' },
   { name: 'Codex CLI', detected: false, connected: false, description: 'Hooks at ~/.codex/hooks.json' },
-  { name: 'Claude Desktop', detected: false, connected: false, description: 'Config at AppData/Claude/' },
+  { name: 'Claude Code CLI', detected: false, connected: false, description: 'Hooks at ~/.claude/settings.json' },
+  { name: 'Claude Code Desktop', detected: false, connected: false, description: 'Hooks at ~/.claude/settings.json' },
 ])
 
 const loading = ref(true)
@@ -37,8 +38,10 @@ async function detectTools() {
       tools.value[1].connected = status.opencode.desktop
       tools.value[2].detected = status.codex.hooks
       tools.value[2].connected = status.codex.enabled && status.codex.configured && status.codex.hookScript
-      tools.value[3].detected = status.claude.config
-      tools.value[3].connected = status.claude.hookScript
+      tools.value[3].detected = status.claudeCode.settings
+      tools.value[3].connected = status.claudeCode.configured && status.claudeCode.hookScript
+      tools.value[4].detected = status.claudeCode.settings
+      tools.value[4].connected = status.claudeCode.configured && status.claudeCode.hookScript
     } else {
       error.value = 'Could not detect tools (timeout)'
     }
@@ -110,7 +113,7 @@ onMounted(() => {
 
 .setup-wizard {
   width: 280px;
-  max-height: 360px;
+  max-height: 400px;
   background: rgba(25, 25, 35, 0.98);
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -196,6 +199,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  overflow-y: auto;
 }
 
 .tool-item {
