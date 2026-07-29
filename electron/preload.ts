@@ -17,6 +17,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('pet-resize', { width, height })
   },
 
+  togglePanel: () => {
+    ipcRenderer.send('panel-toggle')
+  },
+
+  resizePanel: (height: number) => {
+    ipcRenderer.send('panel-resize', { height })
+  },
+
+  hidePanel: () => {
+    ipcRenderer.send('panel-hide')
+  },
+
+  onPanelOpened: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('panel-opened', handler)
+    return () => {
+      ipcRenderer.removeListener('panel-opened', handler)
+    }
+  },
+
   quitApp: () => {
     ipcRenderer.send('pet-quit')
   },

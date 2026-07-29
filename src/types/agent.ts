@@ -57,6 +57,30 @@ export const STATE_LABELS: Record<AgentState, string> = {
   error: 'Error',
 }
 
+// Compact form for the pet's floating status line, where every character
+// counts — the full STATE_LABELS stay for the roomy session-list panel.
+export const STATE_LABELS_SHORT: Record<AgentState, string> = {
+  offline: 'Offline',
+  idle: 'Idle',
+  thinking: 'Thinking',
+  'tool-running': 'Running',
+  'waiting-permission': 'Permission',
+  'waiting-input': 'Waiting',
+  success: 'Success',
+  error: 'Error',
+}
+
+export const STATE_COLORS: Record<AgentState, string> = {
+  offline: '#555',
+  idle: '#666',
+  thinking: '#8b9cf7',
+  'tool-running': '#8b9cf7',
+  'waiting-permission': '#c8b450',
+  'waiting-input': '#c8b450',
+  success: '#50c878',
+  error: '#ff6b6b',
+}
+
 export const SOURCE_LABELS: Record<AgentSource, string> = {
   'opencode-cli': 'OpenCode CLI',
   'opencode-desktop': 'OpenCode Desktop',
@@ -65,6 +89,13 @@ export const SOURCE_LABELS: Record<AgentSource, string> = {
   claude: 'Claude CLI',
   'claude-desktop': 'Claude Desktop',
 }
+
+// Groups CLI + Desktop variants of the same tool onto a single status line.
+export const SOURCE_FAMILIES: { key: string; label: string; sources: AgentSource[] }[] = [
+  { key: 'codex', label: 'Codex', sources: ['codex', 'codex-desktop'] },
+  { key: 'claude', label: 'Claude', sources: ['claude', 'claude-desktop'] },
+  { key: 'opencode', label: 'OpenCode', sources: ['opencode-cli', 'opencode-desktop'] },
+]
 
 export const ALL_SOURCES: AgentSource[] = [
   'opencode-cli',

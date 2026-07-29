@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type {
   AgentSession,
   AgentSource,
   AgentState,
   AgentStatusEvent,
 } from '../types/agent'
-import { STATE_PRIORITY } from '../types/agent'
+import { STATE_PRIORITY, SOURCE_FAMILIES } from '../types/agent'
 
 export interface PetEntry {
   id: string
@@ -17,12 +17,12 @@ export interface PetEntry {
 
 const SUCCESS_DISPLAY_MS = 4_000
 const SESSION_STALE_MS = 15 * 60_000
-const PET_BASE_W = 210
-const PET_BASE_H = 230
+const PET_BASE_W = 250 // wide enough for a status line like "OpenCode (CLI+Desktop)"
+const PET_BASE_H = 232 // canvas + 1 status line
+const STATUS_LINE_EXTRA_H = 22 // per additional status line beyond the first
 
 export const useAgentStore = defineStore('agent', () => {
   const sessions = ref<Record<string, AgentSession>>({})
-  const showPanel = ref(false)
   const isDragging = ref(false)
   const panelView = ref<'sessions' | 'settings'>('sessions')
   const selectedPet = ref<string>(localStorage.getItem('agent-pet-id') || 'aang-airbender')
@@ -30,9 +30,6 @@ export const useAgentStore = defineStore('agent', () => {
   const pets = ref<PetEntry[]>([])
   const petsLoaded = ref(false)
   const showWizard = ref(false)
-
-  const scaledW = computed(() => Math.round(PET_BASE_W * petScale.value))
-  const scaledH = computed(() => Math.round(PET_BASE_H * petScale.value))
 
   function setPet(petId: string) {
     selectedPet.value = petId
@@ -42,7 +39,6 @@ export const useAgentStore = defineStore('agent', () => {
   function setScale(scale: number) {
     petScale.value = scale
     localStorage.setItem('agent-pet-scale', String(scale))
-    resizeForContent()
   }
 
   function getSessionKey(source: AgentSource, sessionId: string): string {
@@ -104,6 +100,47 @@ export const useAgentStore = defineStore('agent', () => {
     )
   })
 
+  const hasSuccessSessions = computed(() => {
+    return activeSessions.value.some((s) => s.state === 'success')
+  })
+
+  // One line per tool family (CLI + Desktop combined), only shown while that
+  // family has an active session — up to SOURCE_FAMILIES.length lines total.
+  // `variants` records which of CLI/Desktop are actually active so the line
+  // can still say which one, even though they share a row.
+  const familyLines = computed(() => {
+    return SOURCE_FAMILIES.map((family) => {
+      const familySessions = activeSessions.value.filter((s) => family.sources.includes(s.source))
+      if (familySessions.length === 0) return null
+
+      const top = familySessions.reduce((highest, current) => {
+        const highestPriority = STATE_PRIORITY[highest.state] ?? 0
+        const currentPriority = STATE_PRIORITY[current.state] ?? 0
+        return currentPriority > highestPriority ? current : highest
+      })
+
+      const variants = family.sources
+        .filter((source) => familySessions.some((s) => s.source === source))
+        .map((source) => (source.includes('desktop') ? 'Desktop' : 'CLI'))
+
+      return {
+        key: family.key,
+        label: family.label,
+        variants,
+        state: top.state,
+        project: familySessions.length === 1 ? top.project : undefined,
+        count: familySessions.length,
+      }
+    }).filter((line): line is NonNullable<typeof line> => line !== null)
+  })
+
+  const scaledW = computed(() => Math.round(PET_BASE_W * petScale.value))
+  const scaledH = computed(() => {
+    const lineCount = Math.max(1, familyLines.value.length)
+    const extra = (lineCount - 1) * STATUS_LINE_EXTRA_H
+    return Math.round((PET_BASE_H + extra) * petScale.value)
+  })
+
   const highestPrioritySession = computed<AgentSession | null>(() => {
     const active = activeSessions.value
     if (active.length === 0) return null
@@ -123,37 +160,43 @@ export const useAgentStore = defineStore('agent', () => {
     return highestPrioritySession.value?.source ?? null
   })
 
-  function openPanel() {
-    showPanel.value = true
-    panelView.value = 'sessions'
-    resizeForContent()
+  // The panel lives in its own always-on-top window (see electron/main.ts),
+  // so opening/closing/resizing it never touches the pet window's bounds.
+  function togglePanel() {
+    window.electronAPI?.togglePanel()
   }
 
   function closePanel() {
-    showPanel.value = false
     showWizard.value = false
-    resizeForContent()
+    window.electronAPI?.hidePanel()
   }
 
   function openSettings() {
     panelView.value = 'settings'
-    resizeForContent()
+    window.electronAPI?.resizePanel(420)
   }
 
   function backToSessions() {
     panelView.value = 'sessions'
     showWizard.value = false
-    resizeForContent()
+    window.electronAPI?.resizePanel(380)
   }
 
-  function resizeForContent() {
-    if (showPanel.value) {
-      const h = panelView.value === 'settings' ? 420 : 380
-      window.electronAPI?.resizeWindow(320, h)
-    } else {
-      window.electronAPI?.resizeWindow(scaledW.value, scaledH.value)
-    }
+  // Called by electron/main.ts whenever the panel window transitions from
+  // hidden to visible, so it always opens back on the Sessions view.
+  function handlePanelOpened() {
+    panelView.value = 'sessions'
+    showWizard.value = false
   }
+
+  function resizePetWindow() {
+    window.electronAPI?.resizeWindow(scaledW.value, scaledH.value)
+  }
+
+  // Grows/shrinks the pet window whenever scale or active status-line count
+  // changes — firing from either window's store instance is harmless, since
+  // main process just re-applies the same bounds to the (single) pet window.
+  watch([scaledW, scaledH], resizePetWindow, { immediate: true })
 
   async function loadPets() {
     try {
@@ -184,7 +227,6 @@ export const useAgentStore = defineStore('agent', () => {
 
   return {
     sessions,
-    showPanel,
     isDragging,
     panelView,
     selectedPet,
@@ -195,6 +237,8 @@ export const useAgentStore = defineStore('agent', () => {
     petsLoaded,
     showWizard,
     activeSessions,
+    hasSuccessSessions,
+    familyLines,
     highestPrioritySession,
     currentState,
     currentSource,
@@ -202,13 +246,14 @@ export const useAgentStore = defineStore('agent', () => {
     cleanupStale,
     handleSuccessTimeout,
     removeSession,
-    openPanel,
+    togglePanel,
     closePanel,
     openSettings,
     backToSessions,
+    handlePanelOpened,
     setPet,
     setScale,
-    resizeForContent,
+    resizePetWindow,
     loadPets,
     renamePet,
     removePet,

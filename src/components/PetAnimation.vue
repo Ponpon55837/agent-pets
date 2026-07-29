@@ -48,9 +48,9 @@ const frameInterval: Record<string, number> = {
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const imgRef = ref<HTMLImageElement | null>(null)
-let animFrame: number | null = null
+const imageCache = new Map<string, HTMLImageElement>()
+let animTimer: ReturnType<typeof setTimeout> | null = null
 let currentFrame = 0
-let lastFrameTime = 0
 
 const canvasW = computed(() => Math.round(CELL_W * store.petScale))
 const canvasH = computed(() => Math.round(CELL_H * store.petScale))
@@ -69,6 +69,15 @@ async function loadImage() {
   }
 
   const targetId = pet ? id : 'qitian-dasheng'
+
+  const cached = imageCache.get(targetId)
+  if (cached) {
+    imgRef.value = cached
+    currentFrame = 0
+    draw()
+    return
+  }
+
   const img = new Image()
 
   if (pet && !pet.builtIn) {
@@ -80,6 +89,7 @@ async function loadImage() {
   }
 
   img.onload = () => {
+    imageCache.set(targetId, img)
     imgRef.value = img
     currentFrame = 0
     draw()
@@ -109,9 +119,9 @@ function draw() {
 }
 
 function startAnimation() {
-  if (animFrame !== null) {
-    cancelAnimationFrame(animFrame)
-    animFrame = null
+  if (animTimer !== null) {
+    clearTimeout(animTimer)
+    animTimer = null
   }
 
   const interval = frameInterval[props.state] ?? 400
@@ -122,21 +132,13 @@ function startAnimation() {
     return
   }
 
-  lastFrameTime = 0
-
-  function loop(time: number) {
-    if (lastFrameTime === 0) lastFrameTime = time
-
-    if (time - lastFrameTime >= interval) {
-      currentFrame++
-      lastFrameTime = time
-      draw()
-    }
-
-    animFrame = requestAnimationFrame(loop)
+  function tick() {
+    currentFrame++
+    draw()
+    animTimer = setTimeout(tick, interval)
   }
 
-  animFrame = requestAnimationFrame(loop)
+  animTimer = setTimeout(tick, interval)
 }
 
 watch(() => props.petId, () => {
@@ -160,8 +162,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (animFrame !== null) {
-    cancelAnimationFrame(animFrame)
+  if (animTimer !== null) {
+    clearTimeout(animTimer)
   }
 })
 </script>

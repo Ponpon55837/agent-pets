@@ -1,12 +1,19 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useAgentStore } from '../stores/agentStore'
-import { STATE_LABELS, SOURCE_LABELS } from '../types/agent'
+import { STATE_LABELS, SOURCE_LABELS, STATE_COLORS } from '../types/agent'
 
 const store = useAgentStore()
 const importing = ref(false)
 const editingPetId = ref<string | null>(null)
 const editName = ref('')
+
+// Pet + panel are separate windows with separate store instances now — this
+// window must load its own copy of the pets list rather than relying on the
+// pet window having already populated it.
+onMounted(() => {
+  store.loadPets()
+})
 
 function startRename(pet: { id: string; displayName: string }) {
   editingPetId.value = pet.id
@@ -66,150 +73,148 @@ function quitApp() {
 </script>
 
 <template>
-  <Transition name="panel">
-    <div v-if="store.showPanel" class="status-panel" @click.stop>
-      <div class="panel-header">
+  <div class="status-panel" @click.stop>
+    <div class="panel-header">
+      <button
+        v-if="store.panelView === 'settings'"
+        class="header-btn"
+        @click="store.backToSessions()"
+      >
+        &#8249;
+      </button>
+      <span class="panel-title">
+        {{ store.panelView === 'sessions' ? 'Agent Pets' : 'Settings' }}
+      </span>
+      <div class="header-right">
         <button
-          v-if="store.panelView === 'settings'"
+          v-if="store.panelView === 'sessions'"
           class="header-btn"
-          @click="store.backToSessions()"
+          title="Settings"
+          @click="store.openSettings()"
         >
-          &#8249;
+          &#9881;
         </button>
-        <span class="panel-title">
-          {{ store.panelView === 'sessions' ? 'Agent Pets' : 'Settings' }}
-        </span>
-        <div class="header-right">
-          <button
-            v-if="store.panelView === 'sessions'"
-            class="header-btn"
-            title="Settings"
-            @click="store.openSettings()"
-          >
-            &#9881;
-          </button>
-          <button class="header-btn" @click="store.closePanel()">&times;</button>
+        <button class="header-btn" @click="store.closePanel()">&times;</button>
+      </div>
+    </div>
+
+    <template v-if="store.panelView === 'sessions'">
+      <div v-if="sessions.length === 0" class="panel-empty">
+        No active sessions
+      </div>
+      <div v-else class="session-list">
+        <div
+          v-for="session in sessions"
+          :key="session.key"
+          class="session-item"
+        >
+          <div class="session-source">
+            {{ SOURCE_LABELS[session.source] }}
+          </div>
+          <div class="session-info">
+            <span class="session-state">
+              <span class="state-dot" :style="{ background: STATE_COLORS[session.state] }" />
+              {{ STATE_LABELS[session.state] }}
+            </span>
+            <span v-if="session.project" class="session-project">
+              {{ formatProject(session.project) }}
+            </span>
+          </div>
+          <div class="session-time">
+            {{ formatTime(session.lastSeenAt) }}
+          </div>
         </div>
       </div>
+    </template>
 
-      <template v-if="store.panelView === 'sessions'">
-        <div v-if="sessions.length === 0" class="panel-empty">
-          No active sessions
-        </div>
-        <div v-else class="session-list">
-          <div
-            v-for="session in sessions"
-            :key="session.key"
-            class="session-item"
-          >
-            <div class="session-source">
-              {{ SOURCE_LABELS[session.source] }}
-            </div>
-            <div class="session-info">
-              <span class="session-state">{{ STATE_LABELS[session.state] }}</span>
-              <span v-if="session.project" class="session-project">
-                {{ formatProject(session.project) }}
-              </span>
-            </div>
-            <div class="session-time">
-              {{ formatTime(session.lastSeenAt) }}
-            </div>
-          </div>
-        </div>
-      </template>
-
-      <template v-else>
-        <div class="settings-content">
-          <div class="settings-section">
-            <div class="section-label">Pet</div>
-            <div class="pet-list">
-              <div
-                v-for="pet in store.pets"
-                :key="pet.id"
-                class="pet-option"
-                :class="{ active: store.selectedPet === pet.id }"
-                @click="store.setPet(pet.id)"
-              >
-                <template v-if="editingPetId === pet.id">
-                  <input
-                    v-model="editName"
-                    class="pet-rename-input"
-                    maxlength="64"
-                    @keyup.enter="confirmRename"
-                    @keyup.escape="cancelRename"
-                    @blur="confirmRename"
-                    @click.stop
-                  />
+    <template v-else>
+      <div class="settings-content">
+        <div class="settings-section">
+          <div class="section-label">Pet</div>
+          <div class="pet-list">
+            <div
+              v-for="pet in store.pets"
+              :key="pet.id"
+              class="pet-option"
+              :class="{ active: store.selectedPet === pet.id }"
+              @click="store.setPet(pet.id)"
+            >
+              <template v-if="editingPetId === pet.id">
+                <input
+                  v-model="editName"
+                  class="pet-rename-input"
+                  maxlength="64"
+                  @keyup.enter="confirmRename"
+                  @keyup.escape="cancelRename"
+                  @blur="confirmRename"
+                  @click.stop
+                />
+              </template>
+              <template v-else>
+                <span class="pet-name">{{ pet.displayName }}</span>
+                <template v-if="!pet.builtIn">
+                  <button
+                    class="pet-edit"
+                    title="Rename"
+                    @click.stop="startRename(pet)"
+                  >
+                    &#9998;
+                  </button>
+                  <button
+                    class="pet-remove"
+                    @click.stop="store.removePet(pet.id)"
+                  >
+                    &times;
+                  </button>
                 </template>
-                <template v-else>
-                  <span class="pet-name">{{ pet.displayName }}</span>
-                  <template v-if="!pet.builtIn">
-                    <button
-                      class="pet-edit"
-                      title="Rename"
-                      @click.stop="startRename(pet)"
-                    >
-                      &#9998;
-                    </button>
-                    <button
-                      class="pet-remove"
-                      @click.stop="store.removePet(pet.id)"
-                    >
-                      &times;
-                    </button>
-                  </template>
-                </template>
-              </div>
-            </div>
-            <button class="import-btn" @click="importPet" :disabled="importing">
-              {{ importing ? 'Importing...' : '+ Import Pet' }}
-            </button>
-          </div>
-
-          <div class="settings-section">
-            <div class="section-label">Size</div>
-            <div class="scale-options">
-              <div
-                v-for="opt in scaleOptions"
-                :key="opt.value"
-                class="scale-option"
-                :class="{ active: store.petScale === opt.value }"
-                @click="store.setScale(opt.value)"
-              >
-                {{ opt.label }}
-              </div>
+              </template>
             </div>
           </div>
+          <button class="import-btn" @click="importPet" :disabled="importing">
+            {{ importing ? 'Importing...' : '+ Import Pet' }}
+          </button>
+        </div>
 
-          <div class="settings-section">
-            <button class="setup-btn" @click="store.showWizard = true">Setup Wizard</button>
-          </div>
-
-          <div class="settings-section">
-            <button class="quit-btn" @click="quitApp">Quit</button>
+        <div class="settings-section">
+          <div class="section-label">Size</div>
+          <div class="scale-options">
+            <div
+              v-for="opt in scaleOptions"
+              :key="opt.value"
+              class="scale-option"
+              :class="{ active: store.petScale === opt.value }"
+              @click="store.setScale(opt.value)"
+            >
+              {{ opt.label }}
+            </div>
           </div>
         </div>
-      </template>
-    </div>
-  </Transition>
+
+        <div class="settings-section">
+          <button class="setup-btn" @click="store.showWizard = true">Setup Wizard</button>
+        </div>
+
+        <div class="settings-section">
+          <button class="quit-btn" @click="quitApp">Quit</button>
+        </div>
+      </div>
+    </template>
+  </div>
 </template>
 
 <style scoped>
 .status-panel {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 300px;
+  width: 100%;
+  height: 100%;
   background: rgba(20, 20, 30, 0.95);
-  border-radius: 12px 12px 0 0;
+  border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-bottom: none;
   color: #e0e0e0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 13px;
   overflow: hidden;
   backdrop-filter: blur(12px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
   z-index: 9999;
   display: flex;
   flex-direction: column;
@@ -289,6 +294,16 @@ function quitApp() {
 
 .session-state {
   font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .session-project {
@@ -475,16 +490,5 @@ function quitApp() {
 .quit-btn:hover {
   background: rgba(255, 80, 80, 0.15);
   border-color: rgba(255, 80, 80, 0.4);
-}
-
-.panel-enter-active,
-.panel-leave-active {
-  transition: all 0.2s ease;
-}
-
-.panel-enter-from,
-.panel-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(8px);
 }
 </style>

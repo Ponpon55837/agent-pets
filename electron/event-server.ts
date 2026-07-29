@@ -36,7 +36,7 @@ function normalizeState(state: string): string {
   return state
 }
 
-export function createEventServer(petWindow: BrowserWindow) {
+export function createEventServer(getWindows: () => BrowserWindow[]) {
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     if (request.method !== 'POST' || request.url !== '/v1/events') {
       response.writeHead(404)
@@ -97,7 +97,9 @@ export function createEventServer(petWindow: BrowserWindow) {
           event.project = event.project.split(/[/\\]/).pop() || event.project
         }
 
-        petWindow.webContents.send('agent-status-event', event)
+        for (const win of getWindows()) {
+          win.webContents.send('agent-status-event', event)
+        }
 
         response.writeHead(204)
         response.end()
@@ -106,6 +108,17 @@ export function createEventServer(petWindow: BrowserWindow) {
         response.end(JSON.stringify({ error: 'invalid JSON' }))
       }
     })
+  })
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    // An unhandled 'error' on a net.Server throws and kills the whole process
+    // by default — e.g. a second app instance launched while one is already
+    // running would otherwise crash instead of just failing to bind.
+    if (err.code === 'EADDRINUSE') {
+      console.error('Port 17373 already in use — another Agent Pets instance may be running.')
+    } else {
+      console.error('Event server error:', err)
+    }
   })
 
   server.listen(17373, '127.0.0.1', () => {

@@ -11,6 +11,10 @@ interface Window {
     onAgentStatusEvent: (callback: (event: any) => void) => () => void
     moveWindow: (dx: number, dy: number) => void
     resizeWindow: (width: number, height: number) => void
+    togglePanel: () => void
+    resizePanel: (height: number) => void
+    hidePanel: () => void
+    onPanelOpened: (callback: () => void) => () => void
     quitApp: () => void
     checkIntegration: () => Promise<{
       opencode: { cli: boolean; desktop: boolean }
