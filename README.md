@@ -52,13 +52,15 @@ Download `Agent Pets.dmg`, open it, and drag the app to your Applications folder
 
 | Action | Effect |
 |--------|--------|
-| **Left-click** the pet | Open the control panel |
+| **Left-click** the pet | Open the control panel (opens as its own window, next to the pet — the pet itself never moves) |
 | **Drag** the pet | Move it to a new position |
 | **Right-click** | Nothing (disabled) |
 
+Below the pet, a floating status bar shows up to **3 lines**, one per active tool family (Codex / Claude / OpenCode). CLI and Desktop variants of the same tool are grouped onto a single line (e.g. `Claude (CLI+Desktop) · Thinking`). When nothing is active, a single line shows the pet's overall idle/offline state.
+
 ### Control Panel / 控制面板
 
-Click the pet to open the control panel. It has two views:
+Click the pet to open the control panel — a separate always-on-top window. It has two views:
 
 #### Sessions View (default)
 
