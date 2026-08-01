@@ -13,7 +13,7 @@ Desktop pet that shows real-time status of your AI coding agents.
 - **Real-time status** — See at a glance which agent is running, thinking, or idle.
 - **Draggable pet** — Drag the pet anywhere on your screen.
 - **Multi-agent support** — OpenCode, Codex, Claude Code (CLI & Desktop).
-- **Custom pets** — Import your own spritesheets.
+- **Custom pets** — Import your own spritesheet, or a `.codex-pet.zip` sprite kit from sites like [codex-pets.net](https://codex-pets.net).
 
 ---
 
@@ -40,9 +40,9 @@ Download `Agent Pets.dmg`, open it, and drag the app to your Applications folder
 ### First Run
 
 1. Launch Agent Pets. A small pet will appear on your screen.
-2. The **Setup Wizard** opens automatically. It will detect which AI tools are installed on your machine.
-3. Follow the wizard to install hooks for each detected tool.
-4. Once hooks are installed, the pet's appearance will change to reflect your agents' status.
+2. Click the pet, then **⚙ → Setup Wizard**. It will detect which AI tools are installed on your machine.
+3. Click **Install** next to a tool (or **Install All**) to wire up its hooks — the wizard does not do this automatically, you need to click.
+4. Once hooks are installed, restart your coding tools; the pet's appearance will then change to reflect your agents' status.
 
 ---
 
@@ -64,7 +64,7 @@ Click the pet to open the control panel — a separate always-on-top window. It 
 
 #### Sessions View (default)
 
-Shows all active agent sessions with their current status:
+Shows all sessions (including recently gone-offline ones) with their current status:
 
 - **Idle** — Agent is waiting for input
 - **Thinking** — Agent is processing
@@ -72,6 +72,9 @@ Shows all active agent sessions with their current status:
 - **Waiting Permission** — Agent is waiting for approval
 - **Success** — Task completed successfully
 - **Error** — An error occurred
+- **Offline** — Session ended or went stale
+
+Live states (Thinking / Tool Running / Waiting) show an elapsed-time readout next to the status. If any sessions are offline, a **Clear offline** button appears below the list to remove them from view.
 
 Click the **⚙** icon in the header to switch to Settings.
 
@@ -79,8 +82,9 @@ Click the **⚙** icon in the header to switch to Settings.
 
 - **Pet** — Choose which pet to display. Click a pet name to select it.
 - **Size** — S / M / L / XL / XXL to scale the pet.
-- **+ Import Pet** — Import a custom spritesheet (`.webp`, 8 columns × 11 rows).
-- **Setup Wizard** — Re-run the tool detection wizard.
+- **+ Import Sprite** — Import a custom spritesheet (`.webp`/`.png`/`.jpg`, 8 columns × 11 rows).
+- **+ Import .zip** — Import a `.codex-pet.zip` sprite kit (e.g. downloaded from codex-pets.net) in one click — no manual unzip needed.
+- **Setup Wizard** — Re-run tool detection, or install/reinstall hooks.
 - **Quit** — Exit Agent Pets.
 
 Click **‹** to return to the Sessions view.
@@ -89,20 +93,21 @@ Click **‹** to return to the Sessions view.
 
 ## Setup Wizard / 設定精靈
 
-The Setup Wizard detects installed tools and installs hooks automatically:
+The Setup Wizard detects each tool's config, and installs its hooks when you click a button — it does not install anything on its own:
 
-- **OpenCode CLI** — Adds event webhook to `~/.config/opencode/opencode.json`
-- **OpenCode Desktop** — Adds event webhook to `~/Library/Application Support/opencode/config.json`
+- **OpenCode CLI / Desktop** — Writes a plugin to `~/.config/opencode/plugins/` and the platform's OpenCode Desktop plugin dir
 - **Codex CLI** — Creates `~/.codex/hooks.json` and enables hooks in `~/.codex/config.toml`
-- **Codex Desktop** — Same as Codex CLI
-- **Claude Code CLI & Desktop** — Adds a `hooks` block to `~/.claude/settings.json` (CLI and Desktop share this config, so one install covers both)
+- **Claude Code CLI & Desktop** — Adds a `hooks` block to `~/.claude/settings.json` (CLI and Desktop share this config, so one install covers both; which one actually fired an event is resolved at runtime via Claude Code's `CLAUDE_CODE_ENTRYPOINT` env var, not by the installer)
 
 Each tool shows a status dot:
 
 - 🟢 **Green** — Installed and configured
+- 🟡 **Yellow** — Detected but not (fully) configured
 - 🔴 **Red** — Not detected
 
-Click **Retry** if a tool was not detected but you believe it is installed.
+Click **Install** next to a tool to (re)install just that integration, or **Install All** to do everything at once. Click **Refresh** if a tool's status seems stale.
+
+> Note: there is no separate "Codex Desktop" hook install — only Codex CLI hooks are wired up today.
 
 ---
 
@@ -128,13 +133,21 @@ Each row represents a different state:
 
 ### How to Import / 如何匯入
 
+**From a single spritesheet:**
+
 1. Open the control panel (click the pet).
 2. Click **⚙** to go to Settings.
-3. Click **+ Import Pet**.
-4. Select a `.webp` spritesheet file.
+3. Click **+ Import Sprite**.
+4. Select a `.webp`/`.png`/`.jpg` spritesheet file.
 5. The pet is added to your collection and automatically selected.
 
-Custom pets are stored in `~/.desktop-pets/custom/`.
+**From a `.codex-pet.zip` sprite kit** (e.g. downloaded from [codex-pets.net](https://codex-pets.net)):
+
+1. Open the control panel → **⚙** → Settings.
+2. Click **+ Import .zip** and select the downloaded `.zip`.
+3. The app reads `pet.json` + the spritesheet inside automatically — no manual unzip required.
+
+Custom pets are stored in `~/.desktop-pet/custom/`.
 
 ### How to Rename / 如何重新命名
 
@@ -244,9 +257,10 @@ agent-pets/
 │   ├── event-server.ts      # HTTP event server
 │   └── setup.ts             # Platform-aware paths & setup
 ├── integrations/
-│   ├── install.mjs          # Hook installer
-│   ├── agent-hook.mjs       # Shared hook script
-│   └── codex-hooks.json     # Codex hook definitions
+│   ├── install.mjs          # CLI hook installer (also invoked in-process by the app itself)
+│   ├── agent-hook.mjs       # Shared hook script (bundled into the app via extraResources)
+│   ├── agent-hook.cmd       # Windows wrapper for agent-hook.mjs
+│   └── opencode-plugin.mjs  # OpenCode plugin template
 ├── src/
 │   ├── components/
 │   │   ├── DesktopPet.vue   # Pet window (drag + click)

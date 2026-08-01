@@ -1,31 +1,53 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 
 const emit = defineEmits<{
   (e: 'close'): void
 }>()
+
+type IntegrationTarget = 'opencode' | 'codex' | 'claude' | 'claudeCode'
 
 interface ToolStatus {
   name: string
   detected: boolean
   connected: boolean
   description: string
+  target: IntegrationTarget
 }
 
 const tools = ref<ToolStatus[]>([
-  { name: 'OpenCode CLI', detected: false, connected: false, description: 'Plugin at ~/.config/opencode/plugins/' },
-  { name: 'OpenCode Desktop', detected: false, connected: false, description: 'Plugin in AppData' },
-  { name: 'Codex CLI', detected: false, connected: false, description: 'Hooks at ~/.codex/hooks.json' },
-  { name: 'Claude Code CLI', detected: false, connected: false, description: 'Hooks at ~/.claude/settings.json' },
-  { name: 'Claude Code Desktop', detected: false, connected: false, description: 'Hooks at ~/.claude/settings.json' },
+  { name: 'OpenCode CLI', detected: false, connected: false, description: 'Plugin at ~/.config/opencode/plugins/', target: 'opencode' },
+  { name: 'OpenCode Desktop', detected: false, connected: false, description: 'Plugin in AppData', target: 'opencode' },
+  { name: 'Codex CLI', detected: false, connected: false, description: 'Hooks at ~/.codex/hooks.json', target: 'codex' },
+  { name: 'Claude Code CLI', detected: false, connected: false, description: 'Hooks at ~/.claude/settings.json', target: 'claudeCode' },
+  { name: 'Claude Code Desktop', detected: false, connected: false, description: 'Hooks at ~/.claude/settings.json', target: 'claudeCode' },
 ])
 
 const loading = ref(true)
 const error = ref('')
+const installing = ref<IntegrationTarget | 'all' | null>(null)
+const installError = ref('')
+
+const elapsedMs = ref(0)
+let elapsedTimer: ReturnType<typeof setInterval> | null = null
+
+function startElapsedTimer() {
+  const start = Date.now()
+  elapsedMs.value = 0
+  elapsedTimer = setInterval(() => { elapsedMs.value = Date.now() - start }, 100)
+}
+
+function stopElapsedTimer() {
+  if (elapsedTimer) {
+    clearInterval(elapsedTimer)
+    elapsedTimer = null
+  }
+}
 
 async function detectTools() {
   loading.value = true
   error.value = ''
+  startElapsedTimer()
   try {
     const status = await Promise.race([
       window.electronAPI?.checkIntegration() ?? Promise.resolve(null),
@@ -49,10 +71,30 @@ async function detectTools() {
     error.value = 'Failed to detect tools'
   }
   loading.value = false
+  stopElapsedTimer()
+}
+
+async function install(target?: IntegrationTarget) {
+  installing.value = target ?? 'all'
+  installError.value = ''
+  try {
+    const result = await window.electronAPI?.installIntegrations(target)
+    if (result && !result.ok) {
+      installError.value = result.error || 'Install failed'
+    }
+  } catch {
+    installError.value = 'Install failed'
+  }
+  installing.value = null
+  await detectTools()
 }
 
 onMounted(() => {
   detectTools()
+})
+
+onUnmounted(() => {
+  stopElapsedTimer()
 })
 </script>
 
@@ -65,8 +107,11 @@ onMounted(() => {
       </div>
 
       <div v-if="loading" class="loading">
-        <div class="spinner" />
-        Detecting tools...
+        <div class="pixel-loader">
+          <span v-for="i in 9" :key="i" class="pixel-cell" :style="{ animationDelay: `${(i % 3) * 0.12}s` }" />
+        </div>
+        <span>Detecting tools…</span>
+        <span class="elapsed">{{ (elapsedMs / 1000).toFixed(1) }}s</span>
       </div>
 
       <div v-else-if="error" class="error-msg">
@@ -84,13 +129,25 @@ onMounted(() => {
           <div class="tool-status">
             <span class="status-dot" :class="{ green: tool.connected, yellow: tool.detected && !tool.connected, red: !tool.detected }" />
             <span class="tool-name">{{ tool.name }}</span>
+            <button
+              class="install-btn"
+              :disabled="installing !== null"
+              @click="install(tool.target)"
+            >
+              {{ installing === tool.target ? '...' : tool.connected ? 'Reinstall' : 'Install' }}
+            </button>
           </div>
           <div class="tool-desc">{{ tool.description }}</div>
         </div>
       </div>
 
+      <div v-if="installError" class="error-msg">{{ installError }}</div>
+
       <div class="wizard-actions">
         <button class="action-btn" @click="detectTools">Refresh</button>
+        <button class="action-btn primary" :disabled="installing !== null" @click="install()">
+          {{ installing === 'all' ? 'Installing...' : 'Install All' }}
+        </button>
       </div>
     </div>
   </div>
@@ -161,17 +218,30 @@ onMounted(() => {
   gap: 8px;
 }
 
-.spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.1);
-  border-top-color: #8b9cf7;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+.pixel-loader {
+  display: grid;
+  grid-template-columns: repeat(3, 4px);
+  grid-template-rows: repeat(3, 4px);
+  gap: 2px;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+.pixel-cell {
+  width: 4px;
+  height: 4px;
+  background: #8b9cf7;
+  border-radius: 1px;
+  animation: pixel-shimmer 1.05s ease-in-out infinite;
+}
+
+@keyframes pixel-shimmer {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+.elapsed {
+  font-variant-numeric: tabular-nums;
+  color: #555;
+  font-size: 10px;
 }
 
 .error-msg {
@@ -225,6 +295,26 @@ onMounted(() => {
   gap: 6px;
 }
 
+.install-btn {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #ccc;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.install-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.install-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .status-dot {
   width: 6px;
   height: 6px;
@@ -272,5 +362,20 @@ onMounted(() => {
 
 .action-btn:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.action-btn.primary {
+  background: rgba(139, 156, 247, 0.15);
+  border-color: rgba(139, 156, 247, 0.4);
+  color: #cdd4ff;
+}
+
+.action-btn.primary:hover:not(:disabled) {
+  background: rgba(139, 156, 247, 0.25);
 }
 </style>

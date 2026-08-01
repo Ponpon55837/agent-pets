@@ -11,6 +11,7 @@
     "electron:build": "vue-tsc --noEmit && vite build && electron-builder"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "pinia": "^2.1.7",
     "vue": "^3.4.21"
   },
@@ -34,6 +35,16 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "integrations",
+        "to": "integrations",
+        "filter": [
+          "agent-hook.mjs",
+          "agent-hook.cmd"
+        ]
+      }
     ],
     "win": {
       "target": "portable",

@@ -3,7 +3,16 @@
 const PET_URL = 'http://127.0.0.1:17373/v1/events'
 
 const validSources = ['codex', 'codex-desktop', 'claude', 'claude-desktop']
-const source = validSources.includes(process.argv[2]) ? process.argv[2] : 'codex'
+let source = validSources.includes(process.argv[2]) ? process.argv[2] : 'codex'
+
+// Claude Code CLI and Claude Desktop share the same ~/.claude/settings.json
+// hooks config, so the installer can't hardcode which one is firing — the
+// invoked arg is always 'claude'. Claude Code sets CLAUDE_CODE_ENTRYPOINT in
+// the hook's environment to say how it was launched (cli, claude-desktop,
+// claude-vscode, sdk-*, etc.), so resolve the real source from that instead.
+if (source === 'claude' && process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop') {
+  source = 'claude-desktop'
+}
 
 
 function mapCodexEvent(eventName) {

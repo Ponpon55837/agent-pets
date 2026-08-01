@@ -45,6 +45,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('integration-status')
   },
 
+  installIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => {
+    return ipcRenderer.invoke('install-integrations', target)
+  },
+
+  uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => {
+    return ipcRenderer.invoke('uninstall-integrations', target)
+  },
+
   loadPets: () => {
     return ipcRenderer.invoke('load-pets')
   },
@@ -67,5 +75,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   importPetSprite: (petId: string, displayName: string) => {
     return ipcRenderer.invoke('import-pet-sprite', petId, displayName)
+  },
+
+  importPetZip: () => {
+    return ipcRenderer.invoke('import-pet-zip')
   },
 })

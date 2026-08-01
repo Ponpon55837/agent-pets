@@ -2,6 +2,7 @@ import { app, BrowserWindow, screen, ipcMain, dialog } from 'electron'
 import { join, resolve } from 'path'
 import * as fs from 'fs'
 import * as path from 'path'
+import { unzipSync } from 'fflate'
 import { createEventServer } from './event-server'
 import {
   hookScriptDeployPath,
@@ -16,6 +17,9 @@ import {
   claudeDesktopConfigPath,
   claudeCodeSettingsPath,
   hookScriptPath,
+  installIntegration,
+  uninstallIntegration,
+  type IntegrationTarget,
 } from './setup'
 
 let petWindow: BrowserWindow | null = null
@@ -329,6 +333,24 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('install-integrations', (_event, target?: IntegrationTarget) => {
+    try {
+      installIntegration(target)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('uninstall-integrations', (_event, target?: IntegrationTarget) => {
+    try {
+      uninstallIntegration(target)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   ipcMain.handle('load-pets', () => {
     const builtinPath = getPetsJsonPath()
     let builtin: Array<{ id: string; displayName: string; folder: string; builtIn: boolean }> = []
@@ -425,6 +447,68 @@ app.whenReady().then(() => {
       return `file:///${spritePath.replace(/\\/g, '/')}`
     }
     return null
+  })
+
+  // Accepts sprite kits from community sites like codex-pets.net: a .zip
+  // containing pet.json + a spritesheet image, laid out on the same
+  // 192x208-per-frame grid our own built-in pets use (see PetAnimation.vue).
+  ipcMain.handle('import-pet-zip', async () => {
+    const owner = panelWindow ?? petWindow
+    if (!owner) return { ok: false, error: 'No window available' }
+
+    dialogOpen = true
+    const result = await dialog.showOpenDialog(owner, {
+      title: 'Select a sprite kit (.codex-pet.zip)',
+      filters: [{ name: 'Pet sprite kit', extensions: ['zip'] }],
+      properties: ['openFile'],
+    })
+    dialogOpen = false
+    if (result.canceled || result.filePaths.length === 0) return { ok: false, error: 'cancelled' }
+
+    try {
+      const zipBuf = fs.readFileSync(result.filePaths[0])
+      const entries = unzipSync(new Uint8Array(zipBuf))
+
+      const petJsonName = Object.keys(entries).find((name) => /(^|\/)pet\.json$/i.test(name))
+      if (!petJsonName) return { ok: false, error: 'No pet.json found in this zip' }
+
+      const petData = JSON.parse(Buffer.from(entries[petJsonName]).toString('utf-8'))
+      const rawId = String(petData.id || petData.displayName || `imported-${Date.now()}`)
+      const safeId = sanitizePetId(rawId) || sanitizePetId(`pet-${Date.now()}`)
+      if (!safeId) return { ok: false, error: 'Could not derive a valid pet id' }
+
+      const imageExt = /\.(webp|png|jpe?g)$/i
+      const wantedBase = petData.spritesheetPath
+        ? path.basename(String(petData.spritesheetPath)).toLowerCase()
+        : null
+      const spriteName =
+        Object.keys(entries).find((name) => path.basename(name).toLowerCase() === wantedBase) ??
+        Object.keys(entries).find((name) => imageExt.test(name))
+      if (!spriteName) return { ok: false, error: 'No spritesheet image found in this zip' }
+
+      const customDir = safeJoin(hookScriptDeployPath(), 'custom', safeId)
+      if (!customDir) return { ok: false, error: 'Invalid destination path' }
+      ensureDir(customDir)
+
+      // Renderer sniffs the actual image bytes rather than trusting the
+      // extension (see importPetSprite below), so normalizing to
+      // spritesheet.webp here is safe even for a source .png/.jpg.
+      fs.writeFileSync(join(customDir, 'spritesheet.webp'), Buffer.from(entries[spriteName]))
+
+      const petJson = {
+        id: safeId,
+        displayName: String(petData.displayName || rawId).slice(0, 64),
+        description: String(petData.description || 'Imported pet').slice(0, 500),
+        spritesheetPath: 'spritesheet.webp',
+        spriteVersionNumber: 2,
+        kind: petData.kind === 'animal' ? 'animal' : 'person',
+      }
+      writeFileEnsured(join(customDir, 'pet.json'), JSON.stringify(petJson, null, 2))
+
+      return { ok: true, id: safeId, displayName: petJson.displayName }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.handle('import-pet-sprite', async (_event, petId: string, displayName: string) => {

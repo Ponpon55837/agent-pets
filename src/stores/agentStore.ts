@@ -94,6 +94,14 @@ export const useAgentStore = defineStore('agent', () => {
     delete sessions.value[key]
   }
 
+  function clearOfflineSessions() {
+    for (const key of Object.keys(sessions.value)) {
+      if (sessions.value[key].state === 'offline') {
+        delete sessions.value[key]
+      }
+    }
+  }
+
   const activeSessions = computed(() => {
     return Object.values(sessions.value).filter(
       (s) => s.state !== 'offline'
@@ -246,6 +254,7 @@ export const useAgentStore = defineStore('agent', () => {
     cleanupStale,
     handleSuccessTimeout,
     removeSession,
+    clearOfflineSessions,
     togglePanel,
     closePanel,
     openSettings,

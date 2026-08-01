@@ -22,11 +22,14 @@ interface Window {
       claude: { config: boolean; hookScript: boolean }
       claudeCode: { settings: boolean; configured: boolean; hookScript: boolean }
     }>
+    installIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => Promise<{ ok: boolean; error?: string }>
+    uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => Promise<{ ok: boolean; error?: string }>
     loadPets: () => Promise<Array<{ id: string; displayName: string; folder: string; builtIn: boolean }>>
     addCustomPet: (petData: { id: string; displayName: string }) => Promise<boolean>
     renameCustomPet: (petId: string, newName: string) => Promise<boolean>
     removeCustomPet: (petId: string) => Promise<boolean>
     getCustomPetSprite: (petId: string) => Promise<string | null>
     importPetSprite: (petId: string, displayName: string) => Promise<string | null>
+    importPetZip: () => Promise<{ ok: boolean; id?: string; displayName?: string; error?: string }>
   }
 }

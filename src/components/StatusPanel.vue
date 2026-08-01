@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAgentStore } from '../stores/agentStore'
 import { STATE_LABELS, SOURCE_LABELS, STATE_COLORS } from '../types/agent'
 
@@ -7,6 +7,25 @@ const store = useAgentStore()
 const importing = ref(false)
 const editingPetId = ref<string | null>(null)
 const editName = ref('')
+
+// Drives the "Xs" elapsed-time readout on in-flight sessions (thinking /
+// tool-running / waiting-*), matching the "Churning 7.2s" style loader.
+const nowTick = ref(Date.now())
+let tickTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  tickTimer = setInterval(() => { nowTick.value = Date.now() }, 1000)
+})
+onUnmounted(() => {
+  if (tickTimer) clearInterval(tickTimer)
+})
+
+const LIVE_STATES = new Set(['thinking', 'tool-running', 'waiting-permission', 'waiting-input'])
+
+function elapsedLabel(session: { state: string; lastSeenAt: number }): string | null {
+  if (!LIVE_STATES.has(session.state)) return null
+  const secs = Math.max(0, (nowTick.value - session.lastSeenAt) / 1000)
+  return `${secs.toFixed(1)}s`
+}
 
 // Pet + panel are separate windows with separate store instances now — this
 // window must load its own copy of the pets list rather than relying on the
@@ -38,6 +57,8 @@ const sessions = computed(() => {
   return Object.values(store.sessions)
 })
 
+const hasOffline = computed(() => sessions.value.some((s) => s.state === 'offline'))
+
 const scaleOptions = [
   { value: 0.6, label: 'S' },
   { value: 0.8, label: 'M' },
@@ -65,6 +86,22 @@ async function importPet() {
     store.setPet(id)
   }
   importing.value = false
+}
+
+const importingZip = ref(false)
+const importZipError = ref('')
+
+async function importPetZip() {
+  importingZip.value = true
+  importZipError.value = ''
+  const result = await window.electronAPI?.importPetZip()
+  if (result?.ok && result.id) {
+    await store.loadPets()
+    store.setPet(result.id)
+  } else if (result && !result.ok && result.error !== 'cancelled') {
+    importZipError.value = result.error || 'Import failed'
+  }
+  importingZip.value = false
 }
 
 function quitApp() {
@@ -102,29 +139,41 @@ function quitApp() {
       <div v-if="sessions.length === 0" class="panel-empty">
         No active sessions
       </div>
-      <div v-else class="session-list">
-        <div
-          v-for="session in sessions"
-          :key="session.key"
-          class="session-item"
-        >
-          <div class="session-source">
-            {{ SOURCE_LABELS[session.source] }}
-          </div>
-          <div class="session-info">
-            <span class="session-state">
-              <span class="state-dot" :style="{ background: STATE_COLORS[session.state] }" />
-              {{ STATE_LABELS[session.state] }}
-            </span>
-            <span v-if="session.project" class="session-project">
-              {{ formatProject(session.project) }}
-            </span>
-          </div>
-          <div class="session-time">
-            {{ formatTime(session.lastSeenAt) }}
+      <template v-else>
+        <div class="session-list">
+          <div
+            v-for="session in sessions"
+            :key="session.key"
+            class="session-item"
+          >
+            <div class="session-source">
+              {{ SOURCE_LABELS[session.source] }}
+            </div>
+            <div class="session-info">
+              <span
+                class="state-chip"
+                :class="{ live: LIVE_STATES.has(session.state) }"
+                :style="{ color: STATE_COLORS[session.state], borderColor: STATE_COLORS[session.state] + '40', background: STATE_COLORS[session.state] + '1a' }"
+              >
+                <span class="state-dot" :style="{ background: STATE_COLORS[session.state] }" />
+                {{ STATE_LABELS[session.state] }}
+                <span v-if="elapsedLabel(session)" class="state-elapsed">{{ elapsedLabel(session) }}</span>
+              </span>
+              <span v-if="session.project" class="session-project">
+                {{ formatProject(session.project) }}
+              </span>
+            </div>
+            <div class="session-time">
+              {{ formatTime(session.lastSeenAt) }}
+            </div>
           </div>
         </div>
-      </div>
+        <div v-if="hasOffline" class="session-footer">
+          <button class="clear-offline-btn" @click="store.clearOfflineSessions()">
+            Clear offline
+          </button>
+        </div>
+      </template>
     </template>
 
     <template v-else>
@@ -170,9 +219,15 @@ function quitApp() {
               </template>
             </div>
           </div>
-          <button class="import-btn" @click="importPet" :disabled="importing">
-            {{ importing ? 'Importing...' : '+ Import Pet' }}
-          </button>
+          <div class="import-row">
+            <button class="import-btn" @click="importPet" :disabled="importing">
+              {{ importing ? 'Importing...' : '+ Import Sprite' }}
+            </button>
+            <button class="import-btn" @click="importPetZip" :disabled="importingZip">
+              {{ importingZip ? 'Importing...' : '+ Import .zip' }}
+            </button>
+          </div>
+          <div v-if="importZipError" class="import-error">{{ importZipError }}</div>
         </div>
 
         <div class="settings-section">
@@ -292,11 +347,15 @@ function quitApp() {
   gap: 1px;
 }
 
-.session-state {
-  font-size: 12px;
+.state-chip {
+  font-size: 11px;
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  width: fit-content;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
 }
 
 .state-dot {
@@ -304,6 +363,21 @@ function quitApp() {
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+.state-chip.live .state-dot {
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+
+.state-elapsed {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+  font-size: 10px;
 }
 
 .session-project {
@@ -314,6 +388,28 @@ function quitApp() {
 .session-time {
   font-size: 10px;
   color: #555;
+}
+
+.session-footer {
+  padding: 4px 10px 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.clear-offline-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: #888;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.clear-offline-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ccc;
 }
 
 .settings-content {
@@ -412,8 +508,18 @@ function quitApp() {
   color: #ff6b6b;
 }
 
+.import-row {
+  display: flex;
+  gap: 6px;
+}
+
+.import-error {
+  font-size: 10px;
+  color: #ff6b6b;
+}
+
 .import-btn {
-  width: 100%;
+  flex: 1;
   padding: 6px 12px;
   border-radius: 6px;
   border: 1px solid rgba(80, 200, 120, 0.25);
