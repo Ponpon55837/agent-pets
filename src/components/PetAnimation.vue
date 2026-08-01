@@ -37,7 +37,9 @@ const stateToRow: Record<string, number> = {
 }
 
 const stateFrameCount: Record<string, number> = {
-  'offline': 1,
+  // Offline uses the calm idle loop rather than a frozen first frame. The
+  // slow cadence makes it visibly alive without implying active work.
+  'offline': 6,
   'idle': 6,
   'thinking': 6,
   'tool-running': 6,
@@ -48,14 +50,14 @@ const stateFrameCount: Record<string, number> = {
 }
 
 const frameInterval: Record<string, number> = {
-  'offline': 0,
-  'idle': 600,
-  'thinking': 500,
-  'tool-running': 500,
-  'waiting-permission': 800,
-  'waiting-input': 800,
-  'success': 400,
-  'error': 350,
+  'offline': 950,
+  'idle': 700,
+  'thinking': 680,
+  'tool-running': 360,
+  'waiting-permission': 850,
+  'waiting-input': 1050,
+  'success': 190,
+  'error': 260,
 }
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -217,6 +219,7 @@ function startAnimation() {
   }
 
   const interval = currentInterval()
+  const maxFrames = stateFrameCount[props.state] ?? 1
 
   if (interval === 0) {
     currentFrame = 0
@@ -226,6 +229,15 @@ function startAnimation() {
 
   function tick() {
     currentFrame++
+    // Success and error are reactions, not ongoing activities. Play their
+    // row once, then hold the final frame until the store reports another
+    // state instead of looping the same celebration/failure forever.
+    if ((props.state === 'success' || props.state === 'error') && currentFrame >= maxFrames - 1) {
+      currentFrame = maxFrames - 1
+      draw()
+      animTimer = null
+      return
+    }
     draw()
     animTimer = setTimeout(tick, currentInterval())
   }
@@ -296,6 +308,11 @@ onUnmounted(() => {
       'pet-fidgeting': store.reactionsEnabled && isFidgeting && !isReacting && urgencyLevel === 0,
       'pet-urgent-1': store.reactionsEnabled && !isReacting && urgencyLevel === 1,
       'pet-urgent-2': store.reactionsEnabled && !isReacting && urgencyLevel === 2,
+      'pet-idle-ambient': store.reactionsEnabled && props.state === 'idle' && !isReacting && !isFidgeting,
+      'pet-thinking-ambient': store.reactionsEnabled && props.state === 'thinking' && !isReacting,
+      'pet-tool-ambient': store.reactionsEnabled && props.state === 'tool-running' && !isReacting,
+      'pet-waiting-input': store.reactionsEnabled && props.state === 'waiting-input' && !isReacting && urgencyLevel === 0,
+      'pet-offline-ambient': props.state === 'offline',
       'pet-mood-happy': moodTier === 'happy',
       'pet-mood-low': moodTier === 'low',
     }"
@@ -306,6 +323,56 @@ onUnmounted(() => {
 .pet-canvas {
   image-rendering: pixelated;
   transform-origin: 50% 100%;
+}
+
+.pet-canvas.pet-offline-ambient {
+  animation: pet-offline-breathe 3.8s ease-in-out infinite;
+}
+
+/* Ambient behavior is deliberately subtle and only enabled with the
+   reactions setting. The spritesheet remains responsible for the main pose;
+   these small loops keep long-running states from feeling frozen. */
+.pet-canvas.pet-idle-ambient {
+  animation: pet-breathe 3.8s ease-in-out infinite;
+}
+
+.pet-canvas.pet-thinking-ambient {
+  animation: pet-think 2.8s ease-in-out infinite;
+}
+
+.pet-canvas.pet-tool-ambient {
+  animation: pet-tool-pulse 1.15s ease-in-out infinite;
+}
+
+.pet-canvas.pet-waiting-input {
+  animation: pet-listen 2.4s ease-in-out infinite;
+}
+
+@keyframes pet-breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.012, 0.992); }
+}
+
+@keyframes pet-offline-breathe {
+  0%, 100% { transform: translateY(0) scale(1, 1); opacity: 0.86; }
+  50% { transform: translateY(-2px) scale(1.018, 0.988); opacity: 1; }
+}
+
+@keyframes pet-think {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+@keyframes pet-tool-pulse {
+  0%, 100% { transform: translateY(0) scale(1); }
+  45% { transform: translateY(-1px) scale(1.008); }
+  70% { transform: translateY(0) scale(1); }
+}
+
+@keyframes pet-listen {
+  0%, 100% { transform: rotate(0deg); }
+  35% { transform: rotate(-1.5deg); }
+  65% { transform: rotate(1deg); }
 }
 
 .pet-canvas.pet-reacting {
