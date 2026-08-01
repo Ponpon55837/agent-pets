@@ -340,12 +340,10 @@ function installOpenCode() {
   ensureDir(desktopDir)
   const desktopPluginPath = path.join(desktopDir, 'desktop-pet.js')
   // OpenCode's real plugin shape: an (async) function receiving a context
-  // object that returns a hooks object keyed by event name — not the
-  // eventBus.on(...) API this used to (wrongly) assume. Hook names per
-  // OpenCode's docs: session.created / session.idle / session.error /
-  // tool.execute.before / tool.execute.after. There's no direct "user
-  // prompt submitted" hook, so the pet won't show "thinking" until the
-  // first tool call — a known gap, not a bug.
+  // object that returns a hooks object. Tool lifecycle hooks are direct keys;
+  // session lifecycle notifications arrive through the generic `event` hook.
+  // There's no direct "user prompt submitted" hook, so the pet won't show
+  // "thinking" until the first tool call — a known gap, not a bug.
   const pluginContent = `import http from 'http';
 
 const sessionId = 'opencode-' + process.pid + '-' + Date.now();
@@ -383,11 +381,21 @@ function setState(state, toolName) {
 }
 
 const DesktopPetPlugin = async () => ({
-  'session.created': async () => { setState('idle'); },
   'tool.execute.before': async (input) => { setState('tool-running', input && input.tool); },
   'tool.execute.after': async () => { setState('thinking'); },
-  'session.idle': async () => { setState('success'); },
-  'session.error': async () => { setState('error'); },
+  // OpenCode lifecycle notifications arrive through the generic event hook.
+  // They are not direct hook keys in the current plugin API.
+  event: async ({ event }) => {
+    if (event.type === 'session.status') {
+      if (event.properties.status.type === 'busy') setState('thinking');
+      if (event.properties.status.type === 'retry') setState('thinking');
+      if (event.properties.status.type === 'idle') setState('idle');
+    } else if (event.type === 'session.idle') {
+      setState('idle');
+    } else if (event.type === 'session.error') {
+      setState('error');
+    }
+  },
 });
 
 export default DesktopPetPlugin;
