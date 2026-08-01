@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAgentStore } from '../stores/agentStore'
-import { STATE_LABELS, SOURCE_LABELS, STATE_COLORS } from '../types/agent'
+import { STATE_LABELS, SOURCE_LABELS, STATE_COLORS, SOURCE_FAMILIES } from '../types/agent'
 import { formatProject } from '../utils/format'
 
 const store = useAgentStore()
@@ -242,6 +242,28 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
           </div>
           <div class="mood-bar">
             <div class="mood-fill" :style="{ width: store.mood + '%' }" />
+          </div>
+        </div>
+
+        <div v-if="store.multiPetEnabled" class="settings-section">
+          <div class="section-label">Per-Agent Pet</div>
+          <div class="family-pet-list">
+            <label v-for="family in SOURCE_FAMILIES" :key="family.key" class="family-pet-row">
+              <span class="family-pet-name">
+                <span class="family-pet-dot" :class="`family-${family.key}`" />
+                {{ family.label }}
+              </span>
+              <select
+                class="family-pet-select"
+                :value="store.familyPetIds[family.key] || ''"
+                @change="store.setFamilyPet(family.key, ($event.target as HTMLSelectElement).value || null)"
+              >
+                <option value="">Default</option>
+                <option v-for="pet in store.visiblePets" :key="pet.id" :value="pet.id">
+                  {{ pet.displayName }}
+                </option>
+              </select>
+            </label>
           </div>
         </div>
 
@@ -491,6 +513,97 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.family-pet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 3px 0;
+}
+
+.family-pet-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  padding: 3px 5px 3px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.family-pet-row:hover {
+  border-color: rgba(139, 156, 247, 0.25);
+  background: rgba(139, 156, 247, 0.06);
+}
+
+.family-pet-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #c8c8d2;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.family-pet-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.family-pet-dot.family-codex {
+  color: #8b9cf7;
+  background: #8b9cf7;
+}
+
+.family-pet-dot.family-claude {
+  color: #d59bff;
+  background: #d59bff;
+}
+
+.family-pet-dot.family-opencode {
+  color: #50c878;
+  background: #50c878;
+}
+
+.family-pet-select {
+  width: 132px;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 6px 28px 6px 9px;
+  border: 1px solid rgba(139, 156, 247, 0.22);
+  border-radius: 6px;
+  outline: none;
+  background-color: rgba(17, 17, 27, 0.9);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='m1 1 4 4 4-4' fill='none' stroke='%238b9cf7' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  color: #cdd4ff;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+}
+
+.family-pet-select:hover {
+  border-color: rgba(139, 156, 247, 0.5);
+  background-color: rgba(30, 30, 45, 0.95);
+}
+
+.family-pet-select:focus {
+  border-color: #8b9cf7;
+  box-shadow: 0 0 0 2px rgba(139, 156, 247, 0.14);
+}
+
+.family-pet-select option {
+  background: #1b1b29;
+  color: #ddd;
 }
 
 .section-label {

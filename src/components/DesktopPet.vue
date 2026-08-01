@@ -15,7 +15,7 @@ const multiPetRefs = ref<InstanceType<typeof PetAnimation>[]>([])
 // to a single line showing the pet's overall (idle/offline) state.
 const displayLines = computed(() => {
   if (store.familyLines.length > 0) return store.familyLines
-  return [{ key: 'overall', label: '', variants: [], state: store.currentState, project: undefined, count: 0, since: undefined }]
+  return [{ key: 'overall', label: '', variants: [], state: store.currentState, project: undefined, count: 0, since: undefined, petId: store.activePetId }]
 })
 
 // With only one active family, one pet reflects it (and the status lines
@@ -96,13 +96,17 @@ function onClick(e: MouseEvent) {
             <PetAnimation
               ref="multiPetRefs"
               :state="line.state"
-              :pet-id="store.selectedPet"
+              :pet-id="line.petId"
               :since="line.since"
               :mood="store.mood"
             />
-            <span class="multi-pet-label" :style="{ color: STATE_COLORS[line.state] }">
-              {{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span>
-            </span>
+            <div class="status-line multi-pet-status-line">
+              <span class="line-dot" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
+              <span class="line-text">
+                <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
+                <span class="line-sep">·</span>{{ STATE_LABELS_SHORT[line.state] }}
+              </span>
+            </div>
           </div>
         </div>
       </template>
@@ -111,7 +115,7 @@ function onClick(e: MouseEvent) {
         <PetAnimation
           ref="petAnimRef"
           :state="store.currentState"
-          :pet-id="store.selectedPet"
+          :pet-id="store.activePetId"
           :since="store.highestPrioritySession?.lastSeenAt"
           :mood="store.mood"
         />
@@ -176,15 +180,12 @@ function onClick(e: MouseEvent) {
   gap: max(2px, calc(2px * var(--pet-scale, 1)));
 }
 
-.multi-pet-label {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: max(9px, calc(9.5px * var(--pet-scale, 1)));
-  font-weight: 600;
-  max-width: max(70px, calc(80px * var(--pet-scale, 1)));
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+.multi-pet-status-line {
+  /* Keep the same status-pill treatment as single-pet mode, but constrain
+     each pill to its own sprite column instead of the full pet window. */
+  width: calc(192px * var(--pet-scale, 1) - 12px);
+  max-width: calc(192px * var(--pet-scale, 1) - 12px);
+  margin-top: max(-8px, calc(-8px * var(--pet-scale, 1)));
 }
 
 .status-lines {

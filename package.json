@@ -1,6 +1,6 @@
 {
   "name": "agent-pets",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Desktop pet that shows the status of AI coding agents",
   "license": "MIT",
   "main": "dist-electron/main.js",

@@ -141,6 +141,12 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <div class="wizard-note">
+        Codex Desktop currently has no separate hook API. The Codex entry above
+        installs the shared <code>~/.codex/hooks.json</code> integration for the
+        CLI; Desktop reports status only if its build runs the same hooks.
+      </div>
+
       <div v-if="installError" class="error-msg">{{ installError }}</div>
 
       <div class="wizard-actions">
@@ -341,6 +347,16 @@ onUnmounted(() => {
   color: #555;
   margin-top: 2px;
   margin-left: 12px;
+}
+
+.wizard-note {
+  font-size: 10px;
+  line-height: 1.4;
+  color: #888;
+  padding: 7px 8px;
+  border-radius: 5px;
+  background: rgba(255, 200, 100, 0.06);
+  border: 1px solid rgba(255, 200, 100, 0.12);
 }
 
 .wizard-actions {

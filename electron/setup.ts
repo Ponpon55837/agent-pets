@@ -68,6 +68,10 @@ function openCodeDesktopPluginPath(): string {
 }
 
 // --- Codex hooks.json ---
+// Codex CLI and Codex Desktop currently share ~/.codex, but Desktop does not
+// expose a separate integration API. Installing this file therefore only
+// guarantees CLI support; Desktop support depends on whether that build runs
+// the same hook pipeline.
 function codexHooksPath(): string {
   return path.join(homeDir(), '.codex', 'hooks.json')
 }

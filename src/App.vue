@@ -27,6 +27,13 @@ function handleStorage(e: StorageEvent) {
     store.loadPets().then(() => {
       store.selectedPet = e.newValue as string
     })
+  } else if (e.key === 'agent-pet-family-map') {
+    try {
+      const parsed = e.newValue ? JSON.parse(e.newValue) : {}
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        store.familyPetIds = parsed
+      }
+    } catch {}
   } else if (e.key === 'agent-pet-sound') {
     store.soundEnabled = e.newValue === '1'
   } else if (e.key === 'agent-pet-multi') {

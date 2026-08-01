@@ -49,12 +49,52 @@ export const useAgentStore = defineStore('agent', () => {
   }
   const hiddenBuiltinIds = ref<string[]>(loadHiddenBuiltins())
   const visiblePets = computed(() => pets.value.filter(p => !hiddenBuiltinIds.value.includes(p.id)))
+
+  // Per-family skin overrides (e.g. Codex looks like the cat, Claude looks
+  // like the monkey king) — a family with no entry here just falls back to
+  // the global `selectedPet`. Keyed by SOURCE_FAMILIES[].key.
+  function loadFamilyPetIds(): Record<string, string> {
+    try {
+      const raw = JSON.parse(localStorage.getItem('agent-pet-family-map') || '{}')
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        const out: Record<string, string> = {}
+        for (const [k, v] of Object.entries(raw)) {
+          if (typeof v === 'string') out[k] = v
+        }
+        return out
+      }
+    } catch {}
+    return {}
+  }
+  const familyPetIds = ref<Record<string, string>>(loadFamilyPetIds())
+
+  function setFamilyPet(familyKey: string, petId: string | null) {
+    const next = { ...familyPetIds.value }
+    if (petId) {
+      next[familyKey] = petId
+    } else {
+      delete next[familyKey]
+    }
+    familyPetIds.value = next
+    localStorage.setItem('agent-pet-family-map', JSON.stringify(next))
+  }
+
+  // Falls back to the global default if the family has no override, or its
+  // override points at a pet that's since been removed/hidden.
+  function getPetForFamily(familyKey: string): string {
+    const override = familyPetIds.value[familyKey]
+    if (override && visiblePets.value.some(p => p.id === override)) {
+      return override
+    }
+    return selectedPet.value
+  }
+
   const showWizard = ref(false)
   const toast = ref<{ text: string; tone: 'success' | 'error' } | null>(null)
   let toastTimer: ReturnType<typeof setTimeout> | null = null
 
   // Light meta-progression: nudges up on success, down on error, persisted
-  // across restarts. Purely cosmetic (biases idle expression) — no gameplay
+  // across restarts. Purely cosmetic (biases the pet's overall appearance) — no gameplay
   // stakes, just a bit of a "the pet has been having a good day" feel.
   // Resets to baseline at the start of each new (local) day — a fresh start
   // rather than carrying yesterday's mood forward indefinitely.
@@ -261,6 +301,7 @@ export const useAgentStore = defineStore('agent', () => {
         project: familySessions.length === 1 ? top.project : undefined,
         count: familySessions.length,
         since: top.lastSeenAt,
+        petId: getPetForFamily(family.key),
       }
     }).filter((line): line is NonNullable<typeof line> => line !== null)
   })
@@ -307,6 +348,21 @@ export const useAgentStore = defineStore('agent', () => {
 
   const currentSource = computed(() => {
     return highestPrioritySession.value?.source ?? null
+  })
+
+  // Reverse-lookup from the currently-controlling source into its tool
+  // family for multi-pet skin selection.
+  const currentFamilyKey = computed<string | null>(() => {
+    const source = currentSource.value
+    if (!source) return null
+    return SOURCE_FAMILIES.find(f => f.sources.includes(source))?.key ?? null
+  })
+
+  const activePetId = computed(() => {
+    // Per-family skins are a multi-pet feature. When that mode is off, keep
+    // the original single-pet behavior: always render the global selection.
+    if (!multiPetEnabled.value) return selectedPet.value
+    return currentFamilyKey.value ? getPetForFamily(currentFamilyKey.value) : selectedPet.value
   })
 
   // Live "what's it doing right now" bubble text — only meaningful while a
@@ -391,6 +447,12 @@ export const useAgentStore = defineStore('agent', () => {
     if (selectedPet.value === petId) {
       setPet(visiblePets.value[0]?.id || DEFAULT_PET_ID)
     }
+
+    for (const [familyKey, assignedId] of Object.entries(familyPetIds.value)) {
+      if (assignedId === petId) {
+        setFamilyPet(familyKey, null)
+      }
+    }
   }
 
   return {
@@ -403,6 +465,7 @@ export const useAgentStore = defineStore('agent', () => {
     scaledH,
     pets,
     visiblePets,
+    familyPetIds,
     petsLoaded,
     defaultPetId: DEFAULT_PET_ID,
     showWizard,
@@ -419,6 +482,8 @@ export const useAgentStore = defineStore('agent', () => {
     highestPrioritySession,
     currentState,
     currentSource,
+    currentFamilyKey,
+    activePetId,
     activityText,
     handleEvent,
     cleanupStale,
@@ -436,6 +501,8 @@ export const useAgentStore = defineStore('agent', () => {
     setMultiPetEnabled,
     setReactionsEnabled,
     setBubbleEnabled,
+    setFamilyPet,
+    getPetForFamily,
     resetMood,
     resizePetWindow,
     loadPets,
