@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAgentStore } from '../stores/agentStore'
 import { STATE_LABELS, SOURCE_LABELS, STATE_COLORS } from '../types/agent'
+import { formatProject } from '../utils/format'
 
 const store = useAgentStore()
 const importing = ref(false)
@@ -71,12 +72,6 @@ function formatTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString()
 }
 
-function formatProject(project?: string): string {
-  if (!project) return ''
-  const parts = project.split(/[/\\]/)
-  return parts[parts.length - 1] || project
-}
-
 async function importPet() {
   importing.value = true
   const id = `custom-${Date.now()}`
@@ -106,6 +101,15 @@ async function importPetZip() {
 
 function quitApp() {
   window.electronAPI?.quitApp()
+}
+
+function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boolean }) {
+  const message = pet.builtIn
+    ? `Hide "${pet.displayName}" from your pet list? You can't undo this from the UI, but the bundled sprite itself is untouched.`
+    : `Remove "${pet.displayName}"? This deletes the imported sprite files and can't be undone.`
+  if (window.confirm(message)) {
+    store.removePet(pet.id)
+  }
 }
 </script>
 
@@ -182,7 +186,7 @@ function quitApp() {
           <div class="section-label">Pet</div>
           <div class="pet-list">
             <div
-              v-for="pet in store.pets"
+              v-for="pet in store.visiblePets"
               :key="pet.id"
               class="pet-option"
               :class="{ active: store.selectedPet === pet.id }"
@@ -201,21 +205,22 @@ function quitApp() {
               </template>
               <template v-else>
                 <span class="pet-name">{{ pet.displayName }}</span>
-                <template v-if="!pet.builtIn">
-                  <button
-                    class="pet-edit"
-                    title="Rename"
-                    @click.stop="startRename(pet)"
-                  >
-                    &#9998;
-                  </button>
-                  <button
-                    class="pet-remove"
-                    @click.stop="store.removePet(pet.id)"
-                  >
-                    &times;
-                  </button>
-                </template>
+                <button
+                  v-if="!pet.builtIn"
+                  class="pet-edit"
+                  title="Rename"
+                  @click.stop="startRename(pet)"
+                >
+                  &#9998;
+                </button>
+                <button
+                  v-if="pet.id !== store.defaultPetId"
+                  class="pet-remove"
+                  :title="pet.builtIn ? 'Hide' : 'Remove'"
+                  @click.stop="confirmRemovePet(pet)"
+                >
+                  &times;
+                </button>
               </template>
             </div>
           </div>
@@ -231,6 +236,16 @@ function quitApp() {
         </div>
 
         <div class="settings-section">
+          <div class="mood-header">
+            <div class="section-label">Mood</div>
+            <button class="mood-reset-btn" title="Reset to baseline" @click="store.resetMood()">Reset</button>
+          </div>
+          <div class="mood-bar">
+            <div class="mood-fill" :style="{ width: store.mood + '%' }" />
+          </div>
+        </div>
+
+        <div class="settings-section">
           <div class="section-label">Size</div>
           <div class="scale-options">
             <div
@@ -243,6 +258,56 @@ function quitApp() {
               {{ opt.label }}
             </div>
           </div>
+        </div>
+
+        <div class="settings-section toggle-group">
+          <label class="toggle-row">
+            <span class="section-label">Sound</span>
+            <span class="switch">
+              <input
+                type="checkbox"
+                :checked="store.soundEnabled"
+                @change="store.setSoundEnabled(($event.target as HTMLInputElement).checked)"
+              />
+              <span class="switch-track"><span class="switch-thumb" /></span>
+            </span>
+          </label>
+
+          <label class="toggle-row">
+            <span class="section-label">Bounce &amp; shake</span>
+            <span class="switch">
+              <input
+                type="checkbox"
+                :checked="store.reactionsEnabled"
+                @change="store.setReactionsEnabled(($event.target as HTMLInputElement).checked)"
+              />
+              <span class="switch-track"><span class="switch-thumb" /></span>
+            </span>
+          </label>
+
+          <label class="toggle-row">
+            <span class="section-label">Bubble</span>
+            <span class="switch">
+              <input
+                type="checkbox"
+                :checked="store.bubbleEnabled"
+                @change="store.setBubbleEnabled(($event.target as HTMLInputElement).checked)"
+              />
+              <span class="switch-track"><span class="switch-thumb" /></span>
+            </span>
+          </label>
+
+          <label class="toggle-row">
+            <span class="section-label">Multi-pet</span>
+            <span class="switch">
+              <input
+                type="checkbox"
+                :checked="store.multiPetEnabled"
+                @change="store.setMultiPetEnabled(($event.target as HTMLInputElement).checked)"
+              />
+              <span class="switch-track"><span class="switch-thumb" /></span>
+            </span>
+          </label>
         </div>
 
         <div class="settings-section">
@@ -417,6 +482,9 @@ function quitApp() {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .settings-section {
@@ -436,6 +504,8 @@ function quitApp() {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  max-height: 140px;
+  overflow-y: auto;
 }
 
 .pet-option {
@@ -537,6 +607,97 @@ function quitApp() {
 .import-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.toggle-group {
+  gap: 8px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+
+.switch {
+  position: relative;
+  display: inline-flex;
+  width: 34px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  transition: background 0.2s ease;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 0.2s ease;
+}
+
+.switch input:checked ~ .switch-track {
+  background: #8b9cf7;
+}
+
+.switch input:checked ~ .switch-track .switch-thumb {
+  transform: translateX(14px);
+}
+
+.mood-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mood-reset-btn {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: #888;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.mood-reset-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ccc;
+}
+
+.mood-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.mood-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff6b6b, #c8b450, #50c878);
+  transition: width 0.3s ease;
 }
 
 .scale-options {

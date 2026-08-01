@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('pet-move', { dx, dy })
   },
 
+  notifyDragEnd: () => {
+    ipcRenderer.send('pet-drag-end')
+  },
+
   resizeWindow: (width: number, height: number) => {
     ipcRenderer.send('pet-resize', { width, height })
   },

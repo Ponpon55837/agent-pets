@@ -10,6 +10,7 @@ interface Window {
   electronAPI?: {
     onAgentStatusEvent: (callback: (event: any) => void) => () => void
     moveWindow: (dx: number, dy: number) => void
+    notifyDragEnd: () => void
     resizeWindow: (width: number, height: number) => void
     togglePanel: () => void
     resizePanel: (height: number) => void

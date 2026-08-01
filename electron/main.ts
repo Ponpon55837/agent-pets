@@ -5,6 +5,7 @@ import * as path from 'path'
 import { unzipSync } from 'fflate'
 import { createEventServer } from './event-server'
 import {
+  IS_MAC,
   hookScriptDeployPath,
   ensureDir,
   writeFileEnsured,
@@ -19,6 +20,8 @@ import {
   hookScriptPath,
   installIntegration,
   uninstallIntegration,
+  readWindowState,
+  writeWindowState,
   type IntegrationTarget,
 } from './setup'
 
@@ -100,11 +103,21 @@ function createPetWindow() {
   const w = Math.round(250 * scale)
   const h = Math.round(232 * scale)
 
+  // Restore wherever the user last dragged it to, rather than always
+  // snapping back to the bottom-right default on every relaunch. Re-clamped
+  // to the current work area in case it was saved on a monitor that's no
+  // longer connected.
+  const saved = readWindowState()
+  const defaultX = screenWidth - w - 30
+  const defaultY = screenHeight - h - 30
+  const x = saved ? clamp(saved.x, 0, Math.max(0, screenWidth - w)) : defaultX
+  const y = saved ? clamp(saved.y, 0, Math.max(0, screenHeight - h)) : defaultY
+
   petWindow = new BrowserWindow({
     width: w,
     height: h,
-    x: screenWidth - w - 30,
-    y: screenHeight - h - 30,
+    x,
+    y,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -119,6 +132,14 @@ function createPetWindow() {
   })
 
   petWindow.setIgnoreMouseEvents(false)
+
+  // Without this, macOS ties the window to the Space it was created on —
+  // alwaysOnTop alone does not make it follow you across a Space switch.
+  // No Windows equivalent: virtual-desktop pinning there is a per-window
+  // right-click toggle in Task View, not something Electron can set for us.
+  if (IS_MAC) {
+    petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  }
 
   if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) {
     petWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
@@ -157,6 +178,10 @@ function createPanelWindow() {
       nodeIntegration: false,
     },
   })
+
+  if (IS_MAC) {
+    panelWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  }
 
   if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) {
     panelWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#panel`)
@@ -255,6 +280,14 @@ app.whenReady().then(() => {
     petWindow.setPosition(x + dx, y + dy)
     anchorBottomCenter = null
     panelWindow?.hide()
+  })
+
+  // Fired once when a drag ends (not per mousemove) so we're not hitting
+  // disk on every pixel of movement.
+  ipcMain.on('pet-drag-end', () => {
+    if (!petWindow) return
+    const [x, y] = petWindow.getPosition()
+    writeWindowState(x, y)
   })
 
   ipcMain.on('panel-toggle', () => {

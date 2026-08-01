@@ -6,7 +6,8 @@ import type {
   AgentState,
   AgentStatusEvent,
 } from '../types/agent'
-import { STATE_PRIORITY, SOURCE_FAMILIES } from '../types/agent'
+import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '../types/agent'
+import { formatProject } from '../utils/format'
 
 export interface PetEntry {
   id: string
@@ -20,6 +21,11 @@ const SESSION_STALE_MS = 15 * 60_000
 const PET_BASE_W = 250 // wide enough for a status line like "OpenCode (CLI+Desktop)"
 const PET_BASE_H = 232 // canvas + 1 status line
 const STATUS_LINE_EXTRA_H = 22 // per additional status line beyond the first
+const TOAST_DISPLAY_MS = 3_500
+// Always kept available as the ultimate fallback (see PetAnimation's
+// loadImage and the various "|| 'aang-airbender'" defaults below) — so it's
+// the one pet that can't be removed/hidden from the list.
+const DEFAULT_PET_ID = 'aang-airbender'
 
 export const useAgentStore = defineStore('agent', () => {
   const sessions = ref<Record<string, AgentSession>>({})
@@ -29,7 +35,104 @@ export const useAgentStore = defineStore('agent', () => {
   const petScale = ref(parseFloat(localStorage.getItem('agent-pet-scale') || '1'))
   const pets = ref<PetEntry[]>([])
   const petsLoaded = ref(false)
+
+  // Built-in pets ship as bundled assets, so "removing" one just hides it
+  // from your own picker rather than deleting a file — persisted the same
+  // way custom-pet deletion is, just via a local id list instead of disk.
+  function loadHiddenBuiltins(): string[] {
+    try {
+      const raw = JSON.parse(localStorage.getItem('agent-pet-hidden') || '[]')
+      return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string') : []
+    } catch {
+      return []
+    }
+  }
+  const hiddenBuiltinIds = ref<string[]>(loadHiddenBuiltins())
+  const visiblePets = computed(() => pets.value.filter(p => !hiddenBuiltinIds.value.includes(p.id)))
   const showWizard = ref(false)
+  const toast = ref<{ text: string; tone: 'success' | 'error' } | null>(null)
+  let toastTimer: ReturnType<typeof setTimeout> | null = null
+
+  // Light meta-progression: nudges up on success, down on error, persisted
+  // across restarts. Purely cosmetic (biases idle expression) — no gameplay
+  // stakes, just a bit of a "the pet has been having a good day" feel.
+  // Resets to baseline at the start of each new (local) day — a fresh start
+  // rather than carrying yesterday's mood forward indefinitely.
+  function todayKey(): string {
+    const d = new Date()
+    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
+  }
+
+  let initialMood = clampMood(parseFloat(localStorage.getItem('agent-pet-mood') || '50'))
+  if (localStorage.getItem('agent-pet-mood-date') !== todayKey()) {
+    initialMood = 50
+    localStorage.setItem('agent-pet-mood', '50')
+    localStorage.setItem('agent-pet-mood-date', todayKey())
+  }
+  const mood = ref(initialMood)
+
+  // Off by default so the app doesn't surprise anyone with sudden audio;
+  // opt-in via the Settings toggle.
+  const soundEnabled = ref(localStorage.getItem('agent-pet-sound') === '1')
+
+  // Off by default — showing one pet per active tool family is a bigger
+  // visual/layout change than the other additions, so it stays opt-in
+  // rather than silently changing behavior for people with 2+ tools running.
+  const multiPetEnabled = ref(localStorage.getItem('agent-pet-multi') === '1')
+
+  // Off by default — the click/state-change bounce, idle fidget sway, and
+  // waiting-permission shake found it distracting. Off leaves the core
+  // sprite state animation (and frame speed-up / mood glow) untouched.
+  const reactionsEnabled = ref(localStorage.getItem('agent-pet-fx') === '1')
+
+  // Off by default — the completion toast / "what's it doing" bubble.
+  const bubbleEnabled = ref(localStorage.getItem('agent-pet-bubble') === '1')
+
+  function clampMood(value: number): number {
+    if (Number.isNaN(value)) return 50
+    return Math.max(0, Math.min(100, value))
+  }
+
+  function adjustMood(delta: number) {
+    mood.value = clampMood(mood.value + delta)
+    localStorage.setItem('agent-pet-mood', String(mood.value))
+  }
+
+  // Always sets to exactly the neutral baseline — never used to push mood
+  // higher than 50, so it can't be spammed as a way to farm mood up.
+  function resetMood() {
+    mood.value = 50
+    localStorage.setItem('agent-pet-mood', '50')
+    localStorage.setItem('agent-pet-mood-date', todayKey())
+  }
+
+  function showToast(source: AgentSource, project: string | undefined, tone: 'success' | 'error') {
+    const label = SOURCE_LABELS[source]
+    const proj = formatProject(project)
+    toast.value = { text: proj ? `${label} · ${proj}` : label, tone }
+    if (toastTimer) clearTimeout(toastTimer)
+    toastTimer = setTimeout(() => { toast.value = null }, TOAST_DISPLAY_MS)
+  }
+
+  function setSoundEnabled(enabled: boolean) {
+    soundEnabled.value = enabled
+    localStorage.setItem('agent-pet-sound', enabled ? '1' : '0')
+  }
+
+  function setMultiPetEnabled(enabled: boolean) {
+    multiPetEnabled.value = enabled
+    localStorage.setItem('agent-pet-multi', enabled ? '1' : '0')
+  }
+
+  function setReactionsEnabled(enabled: boolean) {
+    reactionsEnabled.value = enabled
+    localStorage.setItem('agent-pet-fx', enabled ? '1' : '0')
+  }
+
+  function setBubbleEnabled(enabled: boolean) {
+    bubbleEnabled.value = enabled
+    localStorage.setItem('agent-pet-bubble', enabled ? '1' : '0')
+  }
 
   function setPet(petId: string) {
     selectedPet.value = petId
@@ -45,14 +148,20 @@ export const useAgentStore = defineStore('agent', () => {
     return `${source}:${sessionId}`
   }
 
-  function handleEvent(event: AgentStatusEvent) {
+  // Returns which (if any) sound cue this event is worth playing, so the
+  // caller (App.vue) can decide whether/where to actually play it — this
+  // store instance is shared by both the pet and panel windows, and audio
+  // must only come from one of them or it plays twice.
+  function handleEvent(event: AgentStatusEvent): 'success' | 'error' | 'waiting-permission' | null {
     const key = getSessionKey(event.source, event.sessionId)
     const existing = sessions.value[key]
+    const prevState = existing?.state
 
     if (existing) {
       existing.state = event.state
       existing.lastSeenAt = event.timestamp
       existing.project = event.project
+      existing.toolName = event.toolName
     } else {
       sessions.value[key] = {
         key,
@@ -61,8 +170,21 @@ export const useAgentStore = defineStore('agent', () => {
         project: event.project,
         state: event.state,
         lastSeenAt: event.timestamp,
+        toolName: event.toolName,
       }
     }
+
+    if ((event.state === 'success' || event.state === 'error') && prevState !== event.state) {
+      showToast(event.source, event.project, event.state)
+      adjustMood(event.state === 'success' ? 4 : -6)
+      return event.state
+    }
+
+    if (event.state === 'waiting-permission' && prevState !== 'waiting-permission') {
+      return 'waiting-permission'
+    }
+
+    return null
   }
 
   function cleanupStale() {
@@ -138,14 +260,33 @@ export const useAgentStore = defineStore('agent', () => {
         state: top.state,
         project: familySessions.length === 1 ? top.project : undefined,
         count: familySessions.length,
+        since: top.lastSeenAt,
       }
     }).filter((line): line is NonNullable<typeof line> => line !== null)
   })
 
-  const scaledW = computed(() => Math.round(PET_BASE_W * petScale.value))
+  // When more than one tool family is active at once and the user has opted
+  // in, the pet window shows one small pet per family side by side instead
+  // of collapsing them all into a single highest-priority pet.
+  const isMultiPet = computed(() => multiPetEnabled.value && familyLines.value.length > 1)
+
+  const MULTI_PET_CELL_W = 204 // sprite cell (192) + a small gap
+  const scaledW = computed(() => {
+    if (isMultiPet.value) {
+      const count = familyLines.value.length
+      return Math.round((count * MULTI_PET_CELL_W + 16) * petScale.value)
+    }
+    return Math.round(PET_BASE_W * petScale.value)
+  })
   const scaledH = computed(() => {
     const lineCount = Math.max(1, familyLines.value.length)
-    const extra = (lineCount - 1) * STATUS_LINE_EXTRA_H
+    // Multi-pet mode lays families out side by side with one short label
+    // each, instead of stacking a status line per family, so it doesn't
+    // need the per-line height growth the single-pet mode does.
+    const extra = isMultiPet.value ? 0 : (lineCount - 1) * STATUS_LINE_EXTRA_H
+    // The toast/activity bubble deliberately does NOT grow the window here
+    // (see DesktopPet.vue) — it overlays the existing canvas instead, so
+    // showing/hiding it never triggers a resize+reposition of the window.
     return Math.round((PET_BASE_H + extra) * petScale.value)
   })
 
@@ -166,6 +307,14 @@ export const useAgentStore = defineStore('agent', () => {
 
   const currentSource = computed(() => {
     return highestPrioritySession.value?.source ?? null
+  })
+
+  // Live "what's it doing right now" bubble text — only meaningful while a
+  // tool is actively running and the hook payload included a tool name.
+  const activityText = computed<string | null>(() => {
+    const s = highestPrioritySession.value
+    if (!s || s.state !== 'tool-running' || !s.toolName) return null
+    return s.toolName
   })
 
   // The panel lives in its own always-on-top window (see electron/main.ts),
@@ -226,10 +375,21 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   async function removePet(petId: string) {
-    await window.electronAPI?.removeCustomPet(petId)
-    pets.value = pets.value.filter(p => p.id !== petId)
+    if (petId === DEFAULT_PET_ID) return
+
+    const pet = pets.value.find(p => p.id === petId)
+    if (pet?.builtIn) {
+      if (!hiddenBuiltinIds.value.includes(petId)) {
+        hiddenBuiltinIds.value = [...hiddenBuiltinIds.value, petId]
+        localStorage.setItem('agent-pet-hidden', JSON.stringify(hiddenBuiltinIds.value))
+      }
+    } else {
+      await window.electronAPI?.removeCustomPet(petId)
+      pets.value = pets.value.filter(p => p.id !== petId)
+    }
+
     if (selectedPet.value === petId) {
-      setPet(pets.value[0]?.id || 'aang-airbender')
+      setPet(visiblePets.value[0]?.id || DEFAULT_PET_ID)
     }
   }
 
@@ -242,14 +402,24 @@ export const useAgentStore = defineStore('agent', () => {
     scaledW,
     scaledH,
     pets,
+    visiblePets,
     petsLoaded,
+    defaultPetId: DEFAULT_PET_ID,
     showWizard,
+    toast,
+    mood,
+    soundEnabled,
+    multiPetEnabled,
+    reactionsEnabled,
+    bubbleEnabled,
+    isMultiPet,
     activeSessions,
     hasSuccessSessions,
     familyLines,
     highestPrioritySession,
     currentState,
     currentSource,
+    activityText,
     handleEvent,
     cleanupStale,
     handleSuccessTimeout,
@@ -262,6 +432,11 @@ export const useAgentStore = defineStore('agent', () => {
     handlePanelOpened,
     setPet,
     setScale,
+    setSoundEnabled,
+    setMultiPetEnabled,
+    setReactionsEnabled,
+    setBubbleEnabled,
+    resetMood,
     resizePetWindow,
     loadPets,
     renamePet,

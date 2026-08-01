@@ -2,6 +2,7 @@ import { app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { execFileSync } from 'child_process'
 
 const IS_WIN = process.platform === 'win32'
 const IS_MAC = process.platform === 'darwin'
@@ -14,17 +15,56 @@ function appDataDir(): string {
   return app.getPath('userData')
 }
 
+// GUI apps (Codex Desktop, Claude Desktop, ...) launched from Finder/Dock get
+// launchd's minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) — it doesn't include
+// Homebrew or nvm, so a bare "node" in a hook command silently fails to even
+// start. Resolve an absolute path once at install time instead: ask a login
+// shell (which sources the user's real PATH) where node actually is, same
+// fix GUI apps commonly need (e.g. the "fix-path" pattern). Falls back to
+// common install locations, then the bare command as a last resort.
+let cachedNodeBin: string | null = null
+function resolveNodeBin(): string {
+  if (IS_WIN) return process.execPath
+  if (cachedNodeBin) return cachedNodeBin
+
+  try {
+    const shell = process.env.SHELL || '/bin/zsh'
+    const out = execFileSync(shell, ['-ilc', 'command -v node'], {
+      encoding: 'utf-8',
+      timeout: 3000,
+    }).trim()
+    const resolved = out.split('\n').pop()?.trim()
+    if (resolved && fs.existsSync(resolved)) {
+      cachedNodeBin = resolved
+      return resolved
+    }
+  } catch {}
+
+  for (const candidate of ['/opt/homebrew/bin/node', '/usr/local/bin/node']) {
+    if (fs.existsSync(candidate)) {
+      cachedNodeBin = candidate
+      return candidate
+    }
+  }
+
+  return 'node'
+}
+
 // --- OpenCode CLI plugin ---
+// OpenCode scans "plugin" (singular) — not "plugins" — and only picks up
+// .js files there, not .mjs. Both confirmed live: a console.error marker
+// injected into the pre-existing superpowers.js fired; the same marker in
+// our desktop-pet.mjs never did, until renamed to .js.
 function openCodeCliPluginPath(): string {
-  return path.join(homeDir(), '.config', 'opencode', 'plugins', 'desktop-pet.mjs')
+  return path.join(homeDir(), '.config', 'opencode', 'plugin', 'desktop-pet.js')
 }
 
 // --- OpenCode Desktop plugin ---
 function openCodeDesktopPluginPath(): string {
   if (IS_MAC) {
-    return path.join(homeDir(), 'Library', 'Application Support', 'opencode', 'plugins', 'desktop-pet.mjs')
+    return path.join(homeDir(), 'Library', 'Application Support', 'opencode', 'plugin', 'desktop-pet.js')
   }
-  return path.join(app.getPath('appData'), 'opencode', 'plugins', 'desktop-pet.mjs')
+  return path.join(app.getPath('appData'), 'opencode', 'plugin', 'desktop-pet.js')
 }
 
 // --- Codex hooks.json ---
@@ -47,6 +87,27 @@ function claudeDesktopConfigPath(): string {
 // --- Claude Code settings.json (shared by CLI & Desktop) ---
 function claudeCodeSettingsPath(): string {
   return path.join(homeDir(), '.claude', 'settings.json')
+}
+
+// --- Pet window position (persisted across restarts) ---
+function windowStatePath(): string {
+  return path.join(appDataDir(), 'window-state.json')
+}
+
+function readWindowState(): { x: number; y: number } | null {
+  const raw = readFile(windowStatePath())
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+      return { x: parsed.x, y: parsed.y }
+    }
+  } catch {}
+  return null
+}
+
+function writeWindowState(x: number, y: number): void {
+  writeFileEnsured(windowStatePath(), JSON.stringify({ x, y }))
 }
 
 // --- Hook script path ---
@@ -192,15 +253,28 @@ function installHookScript(): void {
 }
 
 // --- OpenCode plugin content ---
+// OpenCode's real plugin shape: an (async) function that receives a context
+// object and returns a hooks object keyed by event name — not the
+// eventBus.on(...) API this used to (wrongly) assume. Hook names confirmed
+// against OpenCode's docs: session.created / session.idle / session.error /
+// tool.execute.before / tool.execute.after. There's no direct "user prompt
+// submitted" hook exposed, so the pet won't show "thinking" until the first
+// tool call — a known gap, not a bug.
 function openCodePluginContent(source: 'opencode-desktop' | 'opencode-cli'): string {
   return `import http from 'http';
 
-const PET_STATES = ['thinking', 'tool-running', 'waiting', 'success', 'error'];
+const sessionId = 'opencode-' + process.pid + '-' + Date.now();
 let currentState = null;
 let stateTimer = null;
 
-function sendEvent(state) {
-  const payload = JSON.stringify({ source: '${source}', state });
+function sendEvent(state, toolName) {
+  const payload = JSON.stringify({
+    source: '${source}',
+    sessionId,
+    state,
+    timestamp: Date.now(),
+    toolName,
+  });
   const req = http.request({
     hostname: '127.0.0.1',
     port: 17373,
@@ -213,23 +287,26 @@ function sendEvent(state) {
   req.end();
 }
 
-function setState(state) {
+function setState(state, toolName) {
   if (state === currentState) return;
   currentState = state;
   if (stateTimer) clearTimeout(stateTimer);
   if (state === 'success' || state === 'error') {
     stateTimer = setTimeout(() => { currentState = null; }, 4000);
   }
-  sendEvent(state);
+  sendEvent(state, toolName);
 }
 
-export default function desktopPetPlugin({ eventBus }) {
-  eventBus.on('session.start', () => { setState('thinking'); });
-  eventBus.on('message.send', () => { setState('thinking'); });
-  eventBus.on('tool.call', () => { setState('tool-running'); });
-  eventBus.on('tool.result', () => { setState('success'); });
-  eventBus.on('session.end', () => { setState('idle'); });
-}
+const DesktopPetPlugin = async () => ({
+  'session.created': async () => { setState('idle'); },
+  'tool.execute.before': async (input) => { setState('tool-running', input && input.tool); },
+  'tool.execute.after': async () => { setState('thinking'); },
+  'session.idle': async () => { setState('success'); },
+  'session.error': async () => { setState('error'); },
+});
+
+export default DesktopPetPlugin;
+export { DesktopPetPlugin };
 `
 }
 
@@ -256,7 +333,7 @@ const CODEX_HOOK_EVENTS = [
 
 function codexHooksJson(): any {
   const hook = hookScriptPath()
-  const nodeBin = IS_WIN ? process.execPath : 'node'
+  const nodeBin = resolveNodeBin()
   const command = IS_WIN ? `${hookWrapperPath()} codex` : `${nodeBin} "${hook}" codex`
   const handler = () => ({
     hooks: [
@@ -376,7 +453,7 @@ const CLAUDE_CODE_TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse'])
 
 function claudeCodeHooksJson(): any {
   const hook = hookScriptPath()
-  const nodeBin = IS_WIN ? process.execPath : 'node'
+  const nodeBin = resolveNodeBin()
   const handler = (event: string) => {
     const entry: any = { hooks: [{ type: 'command', command: nodeBin, args: [hook, 'claude'] }] }
     if (CLAUDE_CODE_TOOL_EVENTS.has(event)) entry.matcher = '*'
@@ -489,4 +566,6 @@ export {
   removeFromFile,
   installIntegration,
   uninstallIntegration,
+  readWindowState,
+  writeWindowState,
 }

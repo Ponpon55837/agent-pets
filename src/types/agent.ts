@@ -33,6 +33,7 @@ export interface AgentSession {
   project?: string
   state: AgentState
   lastSeenAt: number
+  toolName?: string
 }
 
 export const STATE_PRIORITY: Record<AgentState, number> = {

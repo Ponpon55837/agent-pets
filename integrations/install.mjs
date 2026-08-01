@@ -19,9 +19,44 @@
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { execFileSync } from 'child_process'
 
 const IS_WIN = process.platform === 'win32'
 const IS_MAC = process.platform === 'darwin'
+
+// GUI apps (Codex Desktop, Claude Desktop, ...) launched from Finder/Dock get
+// launchd's minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) — it doesn't include
+// Homebrew or nvm, so a bare "node" in a hook command silently fails to even
+// start. Resolve an absolute path once at install time instead: ask a login
+// shell (which sources the user's real PATH) where node actually is. Falls
+// back to common install locations, then the bare command as a last resort.
+let cachedNodeBin = null
+function resolveNodeBin() {
+  if (IS_WIN) return process.execPath
+  if (cachedNodeBin) return cachedNodeBin
+
+  try {
+    const shell = process.env.SHELL || '/bin/zsh'
+    const out = execFileSync(shell, ['-ilc', 'command -v node'], {
+      encoding: 'utf-8',
+      timeout: 3000,
+    }).trim()
+    const resolved = out.split('\n').pop()?.trim()
+    if (resolved && fs.existsSync(resolved)) {
+      cachedNodeBin = resolved
+      return resolved
+    }
+  } catch {}
+
+  for (const candidate of ['/opt/homebrew/bin/node', '/usr/local/bin/node']) {
+    if (fs.existsSync(candidate)) {
+      cachedNodeBin = candidate
+      return candidate
+    }
+  }
+
+  return 'node'
+}
 const CODEX_HOOK_EVENTS = [
   'SessionStart',
   'UserPromptSubmit',
@@ -48,16 +83,18 @@ function homeDir() {
 }
 
 // ── OpenCode paths ──
+// OpenCode scans "plugin" (singular), not "plugins" — confirmed against a
+// real install where its own bundled plugins live in ~/.config/opencode/plugin/.
 function openCodeCliPluginDir() {
-  return path.join(homeDir(), '.config', 'opencode', 'plugins')
+  return path.join(homeDir(), '.config', 'opencode', 'plugin')
 }
 
 function openCodeDesktopPluginDir() {
   if (IS_MAC) {
-    return path.join(homeDir(), 'Library', 'Application Support', 'opencode', 'plugins')
+    return path.join(homeDir(), 'Library', 'Application Support', 'opencode', 'plugin')
   }
   // Windows
-  return path.join(process.env.APPDATA || path.join(homeDir(), 'AppData', 'Roaming'), 'opencode', 'plugins')
+  return path.join(process.env.APPDATA || path.join(homeDir(), 'AppData', 'Roaming'), 'opencode', 'plugin')
 }
 
 // ── Codex paths ──
@@ -221,7 +258,7 @@ function removeJsonKey(filePath, key) {
 // ── Codex hooks template ──
 function codexHooksJson() {
   const hook = hookScriptPath()
-  const nodeBin = IS_WIN ? process.execPath : 'node'
+  const nodeBin = resolveNodeBin()
   const command = IS_WIN ? `${hookWrapperPath()} codex` : `${nodeBin} "${hook}" codex`
   const handler = () => ({
     hooks: [
@@ -248,7 +285,7 @@ function codexHooksJson() {
 // ("Windows-Specific Execution Issues").
 function claudeCodeHooksJson() {
   const hook = hookScriptPath()
-  const nodeBin = IS_WIN ? process.execPath : 'node'
+  const nodeBin = resolveNodeBin()
   const handler = (event) => {
     const entry = { hooks: [{ type: 'command', command: nodeBin, args: [hook, 'claude'] }] }
     if (CLAUDE_CODE_TOOL_EVENTS.has(event)) entry.matcher = '*'
@@ -301,15 +338,28 @@ function installOpenCode() {
   // Desktop
   const desktopDir = openCodeDesktopPluginDir()
   ensureDir(desktopDir)
-  const desktopPluginPath = path.join(desktopDir, 'desktop-pet.mjs')
+  const desktopPluginPath = path.join(desktopDir, 'desktop-pet.js')
+  // OpenCode's real plugin shape: an (async) function receiving a context
+  // object that returns a hooks object keyed by event name — not the
+  // eventBus.on(...) API this used to (wrongly) assume. Hook names per
+  // OpenCode's docs: session.created / session.idle / session.error /
+  // tool.execute.before / tool.execute.after. There's no direct "user
+  // prompt submitted" hook, so the pet won't show "thinking" until the
+  // first tool call — a known gap, not a bug.
   const pluginContent = `import http from 'http';
 
-const PET_STATES = ['thinking', 'tool-running', 'waiting', 'success', 'error'];
+const sessionId = 'opencode-' + process.pid + '-' + Date.now();
 let currentState = null;
 let stateTimer = null;
 
-function sendEvent(state) {
-  const payload = JSON.stringify({ source: 'opencode-desktop', state });
+function sendEvent(state, toolName) {
+  const payload = JSON.stringify({
+    source: 'opencode-desktop',
+    sessionId,
+    state,
+    timestamp: Date.now(),
+    toolName,
+  });
   const req = http.request({
     hostname: '127.0.0.1',
     port: 17373,
@@ -322,30 +372,33 @@ function sendEvent(state) {
   req.end();
 }
 
-function setState(state) {
+function setState(state, toolName) {
   if (state === currentState) return;
   currentState = state;
   if (stateTimer) clearTimeout(stateTimer);
   if (state === 'success' || state === 'error') {
     stateTimer = setTimeout(() => { currentState = null; }, 4000);
   }
-  sendEvent(state);
+  sendEvent(state, toolName);
 }
 
-export default function desktopPetPlugin({ eventBus }) {
-  eventBus.on('session.start', () => { setState('thinking'); });
-  eventBus.on('message.send', () => { setState('thinking'); });
-  eventBus.on('tool.call', () => { setState('tool-running'); });
-  eventBus.on('tool.result', () => { setState('success'); });
-  eventBus.on('session.end', () => { setState('idle'); });
-}
+const DesktopPetPlugin = async () => ({
+  'session.created': async () => { setState('idle'); },
+  'tool.execute.before': async (input) => { setState('tool-running', input && input.tool); },
+  'tool.execute.after': async () => { setState('thinking'); },
+  'session.idle': async () => { setState('success'); },
+  'session.error': async () => { setState('error'); },
+});
+
+export default DesktopPetPlugin;
+export { DesktopPetPlugin };
 `
   writeFileEnsured(desktopPluginPath, pluginContent)
 
   // CLI
-  const cliDir = path.join(homeDir(), '.config', 'opencode', 'plugins')
+  const cliDir = openCodeCliPluginDir()
   ensureDir(cliDir)
-  const cliPluginPath = path.join(cliDir, 'desktop-pet.mjs')
+  const cliPluginPath = path.join(cliDir, 'desktop-pet.js')
   const cliPluginContent = pluginContent.replace("source: 'opencode-desktop'", "source: 'opencode-cli'")
   writeFileEnsured(cliPluginPath, cliPluginContent)
 }
@@ -443,8 +496,8 @@ function installAll() {
 // ── Uninstall functions ──
 function uninstallOpenCode() {
   console.log('\n🗑️  Removing OpenCode plugin...')
-  removeFile(path.join(openCodeDesktopPluginDir(), 'desktop-pet.mjs'))
-  removeFile(path.join(openCodeCliPluginDir(), 'desktop-pet.mjs'))
+  removeFile(path.join(openCodeDesktopPluginDir(), 'desktop-pet.js'))
+  removeFile(path.join(openCodeCliPluginDir(), 'desktop-pet.js'))
 }
 
 function uninstallCodex() {

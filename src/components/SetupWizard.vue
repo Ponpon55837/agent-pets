@@ -16,7 +16,7 @@ interface ToolStatus {
 }
 
 const tools = ref<ToolStatus[]>([
-  { name: 'OpenCode CLI', detected: false, connected: false, description: 'Plugin at ~/.config/opencode/plugins/', target: 'opencode' },
+  { name: 'OpenCode CLI', detected: false, connected: false, description: 'Plugin at ~/.config/opencode/plugin/', target: 'opencode' },
   { name: 'OpenCode Desktop', detected: false, connected: false, description: 'Plugin in AppData', target: 'opencode' },
   { name: 'Codex CLI', detected: false, connected: false, description: 'Hooks at ~/.codex/hooks.json', target: 'codex' },
   { name: 'Claude Code CLI', detected: false, connected: false, description: 'Hooks at ~/.claude/settings.json', target: 'claudeCode' },

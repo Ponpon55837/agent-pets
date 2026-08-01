@@ -4,6 +4,7 @@ import { useAgentStore } from './stores/agentStore'
 import DesktopPet from './components/DesktopPet.vue'
 import StatusPanel from './components/StatusPanel.vue'
 import SetupWizard from './components/SetupWizard.vue'
+import { playCue } from './utils/sound'
 
 const store = useAgentStore()
 const isPanelWindow = window.location.hash === '#panel'
@@ -26,6 +27,16 @@ function handleStorage(e: StorageEvent) {
     store.loadPets().then(() => {
       store.selectedPet = e.newValue as string
     })
+  } else if (e.key === 'agent-pet-sound') {
+    store.soundEnabled = e.newValue === '1'
+  } else if (e.key === 'agent-pet-multi') {
+    store.multiPetEnabled = e.newValue === '1'
+  } else if (e.key === 'agent-pet-fx') {
+    store.reactionsEnabled = e.newValue === '1'
+  } else if (e.key === 'agent-pet-bubble') {
+    store.bubbleEnabled = e.newValue === '1'
+  } else if (e.key === 'agent-pet-mood' && e.newValue) {
+    store.mood = parseFloat(e.newValue)
   }
 }
 
@@ -36,7 +47,12 @@ onMounted(() => {
   const electronAPI = (window as any).electronAPI
   if (electronAPI?.onAgentStatusEvent) {
     cleanupListener = electronAPI.onAgentStatusEvent((event: unknown) => {
-      store.handleEvent(event as any)
+      const cue = store.handleEvent(event as any)
+      // Both windows' stores process every event identically, so only the
+      // pet window actually plays audio — otherwise it'd sound twice.
+      if (cue && !isPanelWindow && store.soundEnabled) {
+        playCue(cue)
+      }
     })
   }
   if (isPanelWindow && electronAPI?.onPanelOpened) {
