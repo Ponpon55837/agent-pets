@@ -6,3 +6,4 @@ release
 .DS_Store
 .mcp.json
 opencode.json
+/.codex/config.toml
