@@ -24,8 +24,42 @@ function appDataDir(): string {
 // common install locations, then the bare command as a last resort.
 let cachedNodeBin: string | null = null
 function resolveNodeBin(): string {
-  if (IS_WIN) return process.execPath
   if (cachedNodeBin) return cachedNodeBin
+
+  if (IS_WIN) {
+    // In a packaged Electron app, process.execPath is Agent Pets.exe, not
+    // node.exe. Using it for hooks launches another pet for every lifecycle
+    // event. Prefer standard Node.js locations, then the user's PATH.
+    const candidates = [
+      process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'nodejs', 'node.exe') : '',
+      process.env['ProgramFiles(x86)'] ? path.join(process.env['ProgramFiles(x86)'], 'nodejs', 'node.exe') : '',
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs', 'node.exe') : '',
+    ].filter(Boolean)
+
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        cachedNodeBin = candidate
+        return candidate
+      }
+    }
+
+    try {
+      const out = execFileSync('where.exe', ['node.exe'], {
+        encoding: 'utf-8',
+        timeout: 3000,
+      })
+      const resolved = out
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .find(line => line && fs.existsSync(line))
+      if (resolved) {
+        cachedNodeBin = resolved
+        return resolved
+      }
+    } catch {}
+
+    return 'node'
+  }
 
   try {
     const shell = process.env.SHELL || '/bin/zsh'
@@ -241,7 +275,7 @@ function hookScriptContent(): string {
 function hookWrapperContent(): string {
   return fs
     .readFileSync(path.join(integrationsDir(), 'agent-hook.cmd'), 'utf-8')
-    .replace('__NODE_EXECUTABLE__', process.execPath)
+    .replace('__NODE_EXECUTABLE__', resolveNodeBin())
 }
 
 function installHookScript(): void {
@@ -528,6 +562,66 @@ function uninstallClaudeCode(): void {
   }
 }
 
+// Repair hooks written by older Windows builds. Those builds used Electron's
+// process.execPath as the hook runtime, so their hooks point back to
+// Agent Pets.exe and recursively launch the desktop app on every event.
+function rewriteInstalledAgentPetsHooks(filePath: string, target: 'codex' | 'claude'): boolean {
+  const raw = readFile(filePath)
+  if (!raw) return false
+
+  try {
+    const config = JSON.parse(raw)
+    if (!config.hooks || typeof config.hooks !== 'object') return false
+
+    const hookPath = hookScriptPath()
+    const codexCommand = `${hookWrapperPath()} codex`
+    const nodeBin = target === 'claude' ? resolveNodeBin() : ''
+    let changed = false
+
+    for (const groups of Object.values(config.hooks) as any[]) {
+      if (!Array.isArray(groups)) continue
+      for (const group of groups) {
+        if (!Array.isArray(group?.hooks)) continue
+        for (const hook of group.hooks) {
+          if (!isAgentPetsHook(hook)) continue
+
+          if (target === 'codex') {
+            if (hook.command !== codexCommand) {
+              hook.command = codexCommand
+              changed = true
+            }
+            if ('args' in hook) {
+              delete hook.args
+              changed = true
+            }
+          } else {
+            const nextArgs = [hookPath, 'claude']
+            if (hook.command !== nodeBin || JSON.stringify(hook.args) !== JSON.stringify(nextArgs)) {
+              hook.command = nodeBin
+              hook.args = nextArgs
+              changed = true
+            }
+          }
+        }
+      }
+    }
+
+    if (changed) writeFileEnsured(filePath, JSON.stringify(config, null, 2))
+    return changed
+  } catch {
+    return false
+  }
+}
+
+function repairWindowsInstalledHooks(): void {
+  if (!IS_WIN) return
+
+  const codexChanged = rewriteInstalledAgentPetsHooks(codexHooksPath(), 'codex')
+  const claudeChanged = rewriteInstalledAgentPetsHooks(claudeCodeSettingsPath(), 'claude')
+
+  if (codexChanged || claudeChanged) installHookScript()
+}
+
 export type IntegrationTarget = 'opencode' | 'codex' | 'claude' | 'claudeCode'
 
 function installIntegration(target?: IntegrationTarget): void {
@@ -578,6 +672,7 @@ export {
   removeFromFile,
   installIntegration,
   uninstallIntegration,
+  repairWindowsInstalledHooks,
   readWindowState,
   writeWindowState,
 }

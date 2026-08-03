@@ -20,6 +20,7 @@ import {
   hookScriptPath,
   installIntegration,
   uninstallIntegration,
+  repairWindowsInstalledHooks,
   readWindowState,
   writeWindowState,
   type IntegrationTarget,
@@ -30,6 +31,20 @@ let panelWindow: BrowserWindow | null = null
 let anchorBottomCenter: { x: number; y: number } | null = null
 let resizeAnimHandle: ReturnType<typeof setInterval> | null = null
 let dialogOpen = false
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (petWindow) {
+      if (petWindow.isMinimized()) petWindow.restore()
+      petWindow.show()
+      petWindow.focus()
+    }
+  })
+}
 
 const PANEL_WIDTH = 320
 const PANEL_GAP = 6
@@ -269,6 +284,9 @@ function isAgentPetsHookConfigured(settingsPath: string, expectedArg: string): b
 }
 
 app.whenReady().then(() => {
+  if (!hasSingleInstanceLock) return
+
+  repairWindowsInstalledHooks()
   createPetWindow()
   createPanelWindow()
 
