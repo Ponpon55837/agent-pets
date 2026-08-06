@@ -21,6 +21,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('pet-resize', { width, height })
   },
 
+  setMousePassthrough: (ignore: boolean) => {
+    ipcRenderer.send('pet-mouse-passthrough', { ignore })
+  },
+
   togglePanel: () => {
     ipcRenderer.send('panel-toggle')
   },
@@ -43,6 +47,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   quitApp: () => {
     ipcRenderer.send('pet-quit')
+  },
+
+  restartApp: () => {
+    ipcRenderer.send('pet-restart')
   },
 
   checkIntegration: () => {

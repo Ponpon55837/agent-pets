@@ -2,7 +2,9 @@
   "name": "agent-pets",
   "version": "0.3.1",
   "description": "Desktop pet that shows the status of AI coding agents",
+  "author": "Upfloor5",
   "license": "MIT",
+  "packageManager": "pnpm@11.16.0",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -49,6 +51,7 @@
     ],
     "win": {
       "target": "portable",
+      "icon": "build/icon.png",
       "signAndEditExecutable": false
     },
     "mac": {

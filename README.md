@@ -78,17 +78,25 @@ Click the **⚙** icon in the header to switch to Settings.
 
 #### Settings View
 
-- **Pet** — Choose which pet to display. Click a pet name to select it.
+The panel is split into **Settings** and **Pets** tabs.
+
+**Settings tab**
+
 - **Size** — S / M / L / XL / XXL to scale the pet.
-- **+ Import Sprite** — Import a custom spritesheet (`.webp`/`.png`/`.jpg`, 8 columns × 11 rows).
-- **+ Import .zip** — Import a `.codex-pet.zip` sprite kit (e.g. downloaded from codex-pets.net) in one click — no manual unzip needed.
 - **Mood** — A meter that nudges up on task success and down on error; purely cosmetic, tints the pet with a warm glow (high mood) or a slight dim (low mood) — applied across every state, not just idle. Resets to baseline automatically at the start of each new day, or click **Reset** to do it manually (always goes back to exactly baseline — not something you can farm higher by spamming it).
 - **Sound** — Short synthesized cues (Web Audio, no audio files) for success/error/waiting-permission. **Off by default.**
 - **Bounce & shake** — Click/state-change bounce, idle fidget sway, and waiting-permission shake. **Off by default.**
 - **Bubble** — The completion toast and "what's it doing" activity bubble above the pet. **Off by default.**
-- **Multi-pet** — Show one small pet per active tool family instead of collapsing to the single highest-priority one, when 2+ are running at once. **Off by default.**
 - **Setup Wizard** — Re-run tool detection, or install/reinstall hooks.
+- **Restart Pet** — Fully relaunch Agent Pets if the pet or its animation gets stuck.
 - **Quit** — Exit Agent Pets.
+
+**Pets tab**
+
+- **Pet** — Choose which pet to display. Click a pet name to select it.
+- **+ Import Sprite** — Import a custom spritesheet (`.webp`/`.png`/`.jpg`, 8 columns × 11 rows).
+- **+ Import .zip** — Import a `.codex-pet.zip` sprite kit (e.g. downloaded from codex-pets.net) in one click — no manual unzip needed.
+- **Multi-pet** — Show one small pet per active tool family instead of collapsing to the single highest-priority one, when 2+ are running at once. **Off by default.** Per-agent pet choices appear here when enabled.
 
 Click **‹** to return to the Sessions view.
 
@@ -217,26 +225,26 @@ Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that r
 ### Prerequisites
 
 - Node.js 18+
-- npm
+- pnpm 11+
 
 ### Setup
 
 ```bash
 git clone https://github.com/Ponpon55837/agent-pets.git
 cd agent-pets
-npm install
+pnpm install
 ```
 
 ### Run in Dev Mode
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 ### Build
 
 ```bash
-npm run build
+pnpm build
 ```
 
 The output will be in `release/`.

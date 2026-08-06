@@ -13,6 +13,40 @@ let cleanupListener: (() => void) | null = null
 let cleanupPanelOpened: (() => void) | null = null
 let staleTimer: ReturnType<typeof setInterval> | null = null
 let successTimer: ReturnType<typeof setInterval> | null = null
+let petMousePassthrough = false
+
+function isOpaqueCanvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number): boolean {
+  const rect = canvas.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return false
+
+  const x = Math.floor((clientX - rect.left) * canvas.width / rect.width)
+  const y = Math.floor((clientY - rect.top) * canvas.height / rect.height)
+  if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return false
+
+  try {
+    return (canvas.getContext('2d')?.getImageData(x, y, 1, 1).data[3] ?? 0) > 16
+  } catch {
+    // A custom file URL can make a canvas unreadable on some platforms.
+    // Keep that canvas usable rather than making the whole pet click-through.
+    return true
+  }
+}
+
+function isPetHitTarget(clientX: number, clientY: number): boolean {
+  const target = document.elementFromPoint(clientX, clientY)
+  if (!(target instanceof Element)) return false
+  if (target.closest('[data-pet-hit-target="solid"]')) return true
+
+  const canvas = target.closest('canvas.pet-canvas')
+  return canvas instanceof HTMLCanvasElement && isOpaqueCanvasPoint(canvas, clientX, clientY)
+}
+
+function handlePetMouseMove(event: MouseEvent) {
+  const ignore = !store.isDragging && !isPetHitTarget(event.clientX, event.clientY)
+  if (ignore === petMousePassthrough) return
+  petMousePassthrough = ignore
+  window.electronAPI?.setMousePassthrough(ignore)
+}
 
 // Pet and panel are separate windows/renderer processes, each with its own
 // Pinia store instance. selectedPet/petScale are user choices made in the
@@ -67,6 +101,9 @@ onMounted(() => {
       store.handlePanelOpened()
     })
   }
+  if (!isPanelWindow && electronAPI?.setMousePassthrough) {
+    window.addEventListener('mousemove', handlePetMouseMove, true)
+  }
 
   window.addEventListener('storage', handleStorage)
 
@@ -99,6 +136,7 @@ watch(() => store.hasSuccessSessions, (active) => {
 onUnmounted(() => {
   cleanupListener?.()
   cleanupPanelOpened?.()
+  window.removeEventListener('mousemove', handlePetMouseMove, true)
   window.removeEventListener('storage', handleStorage)
   if (staleTimer) clearInterval(staleTimer)
   if (successTimer) clearInterval(successTimer)
@@ -122,6 +160,42 @@ onUnmounted(() => {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+/* One unobtrusive overlay-style scrollbar across the whole app. Keeping this
+   global also covers modal surfaces such as Setup Wizard and future scrollers.
+   Avoid standard scrollbar properties because Chromium on Windows otherwise
+   falls back to the native track and arrow buttons. */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.34);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-button {
+  -webkit-appearance: none;
+  display: none;
+  width: 0;
+  height: 0;
+  background: transparent;
 }
 
 html, body, #app {

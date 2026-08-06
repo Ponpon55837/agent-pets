@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAgentStore } from '../stores/agentStore'
 import { STATE_LABELS, SOURCE_LABELS, STATE_COLORS, SOURCE_FAMILIES } from '../types/agent'
 import { formatProject } from '../utils/format'
@@ -8,6 +8,11 @@ const store = useAgentStore()
 const importing = ref(false)
 const editingPetId = ref<string | null>(null)
 const editName = ref('')
+const settingsTab = ref<'general' | 'pets'>('general')
+
+watch(() => store.panelView, (view) => {
+  if (view === 'settings') settingsTab.value = 'general'
+})
 
 // Drives the "Xs" elapsed-time readout on in-flight sessions (thinking /
 // tool-running / waiting-*), matching the "Churning 7.2s" style loader.
@@ -103,6 +108,10 @@ function quitApp() {
   window.electronAPI?.quitApp()
 }
 
+function restartApp() {
+  window.electronAPI?.restartApp()
+}
+
 function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boolean }) {
   const message = pet.builtIn
     ? `Hide "${pet.displayName}" from your pet list? You can't undo this from the UI, but the bundled sprite itself is untouched.`
@@ -181,164 +190,195 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
     </template>
 
     <template v-else>
+      <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+        <button
+          class="settings-tab"
+          :class="{ active: settingsTab === 'general' }"
+          role="tab"
+          :aria-selected="settingsTab === 'general'"
+          @click="settingsTab = 'general'"
+        >
+          Settings
+        </button>
+        <button
+          class="settings-tab"
+          :class="{ active: settingsTab === 'pets' }"
+          role="tab"
+          :aria-selected="settingsTab === 'pets'"
+          @click="settingsTab = 'pets'"
+        >
+          Pets
+        </button>
+      </div>
+
       <div class="settings-content">
-        <div class="settings-section">
-          <div class="section-label">Pet</div>
-          <div class="pet-list">
-            <div
-              v-for="pet in store.visiblePets"
-              :key="pet.id"
-              class="pet-option"
-              :class="{ active: store.selectedPet === pet.id }"
-              @click="store.setPet(pet.id)"
-            >
-              <template v-if="editingPetId === pet.id">
-                <input
-                  v-model="editName"
-                  class="pet-rename-input"
-                  maxlength="64"
-                  @keyup.enter="confirmRename"
-                  @keyup.escape="cancelRename"
-                  @blur="confirmRename"
-                  @click.stop
-                />
-              </template>
-              <template v-else>
-                <span class="pet-name">{{ pet.displayName }}</span>
-                <button
-                  v-if="!pet.builtIn"
-                  class="pet-edit"
-                  title="Rename"
-                  @click.stop="startRename(pet)"
-                >
-                  &#9998;
-                </button>
-                <button
-                  v-if="pet.id !== store.defaultPetId"
-                  class="pet-remove"
-                  :title="pet.builtIn ? 'Hide' : 'Remove'"
-                  @click.stop="confirmRemovePet(pet)"
-                >
-                  &times;
-                </button>
-              </template>
+        <template v-if="settingsTab === 'general'">
+          <div class="settings-section">
+            <div class="mood-header">
+              <div class="section-label">Mood</div>
+              <button class="mood-reset-btn" title="Reset to baseline" @click="store.resetMood()">Reset</button>
+            </div>
+            <div class="mood-bar">
+              <div class="mood-fill" :style="{ width: store.mood + '%' }" />
             </div>
           </div>
-          <div class="import-row">
-            <button class="import-btn" @click="importPet" :disabled="importing">
-              {{ importing ? 'Importing...' : '+ Import Sprite' }}
-            </button>
-            <button class="import-btn" @click="importPetZip" :disabled="importingZip">
-              {{ importingZip ? 'Importing...' : '+ Import .zip' }}
-            </button>
-          </div>
-          <div v-if="importZipError" class="import-error">{{ importZipError }}</div>
-        </div>
 
-        <div class="settings-section">
-          <div class="mood-header">
-            <div class="section-label">Mood</div>
-            <button class="mood-reset-btn" title="Reset to baseline" @click="store.resetMood()">Reset</button>
-          </div>
-          <div class="mood-bar">
-            <div class="mood-fill" :style="{ width: store.mood + '%' }" />
-          </div>
-        </div>
-
-        <div v-if="store.multiPetEnabled" class="settings-section">
-          <div class="section-label">Per-Agent Pet</div>
-          <div class="family-pet-list">
-            <label v-for="family in SOURCE_FAMILIES" :key="family.key" class="family-pet-row">
-              <span class="family-pet-name">
-                <span class="family-pet-dot" :class="`family-${family.key}`" />
-                {{ family.label }}
-              </span>
-              <select
-                class="family-pet-select"
-                :value="store.familyPetIds[family.key] || ''"
-                @change="store.setFamilyPet(family.key, ($event.target as HTMLSelectElement).value || null)"
+          <div class="settings-section">
+            <div class="section-label">Size</div>
+            <div class="scale-options">
+              <div
+                v-for="opt in scaleOptions"
+                :key="opt.value"
+                class="scale-option"
+                :class="{ active: store.petScale === opt.value }"
+                @click="store.setScale(opt.value)"
               >
-                <option value="">Default</option>
-                <option v-for="pet in store.visiblePets" :key="pet.id" :value="pet.id">
-                  {{ pet.displayName }}
-                </option>
-              </select>
+                {{ opt.label }}
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section toggle-group">
+            <label class="toggle-row">
+              <span class="section-label">Sound</span>
+              <span class="switch">
+                <input
+                  type="checkbox"
+                  :checked="store.soundEnabled"
+                  @change="store.setSoundEnabled(($event.target as HTMLInputElement).checked)"
+                />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
+            </label>
+
+            <label class="toggle-row">
+              <span class="section-label">Bounce &amp; shake</span>
+              <span class="switch">
+                <input
+                  type="checkbox"
+                  :checked="store.reactionsEnabled"
+                  @change="store.setReactionsEnabled(($event.target as HTMLInputElement).checked)"
+                />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
+            </label>
+
+            <label class="toggle-row">
+              <span class="section-label">Bubble</span>
+              <span class="switch">
+                <input
+                  type="checkbox"
+                  :checked="store.bubbleEnabled"
+                  @change="store.setBubbleEnabled(($event.target as HTMLInputElement).checked)"
+                />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
             </label>
           </div>
-        </div>
 
-        <div class="settings-section">
-          <div class="section-label">Size</div>
-          <div class="scale-options">
-            <div
-              v-for="opt in scaleOptions"
-              :key="opt.value"
-              class="scale-option"
-              :class="{ active: store.petScale === opt.value }"
-              @click="store.setScale(opt.value)"
-            >
-              {{ opt.label }}
+          <div class="settings-section">
+            <button class="setup-btn" @click="store.showWizard = true">Setup Wizard</button>
+          </div>
+
+          <div class="settings-section">
+            <button class="restart-btn" @click="restartApp">Restart Pet</button>
+          </div>
+
+          <div class="settings-section">
+            <button class="quit-btn" @click="quitApp">Quit</button>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="settings-section">
+            <div class="section-label">Pet</div>
+            <div class="pet-list">
+              <div
+                v-for="pet in store.visiblePets"
+                :key="pet.id"
+                class="pet-option"
+                :class="{ active: store.selectedPet === pet.id }"
+                @click="store.setPet(pet.id)"
+              >
+                <template v-if="editingPetId === pet.id">
+                  <input
+                    v-model="editName"
+                    class="pet-rename-input"
+                    maxlength="64"
+                    @keyup.enter="confirmRename"
+                    @keyup.escape="cancelRename"
+                    @blur="confirmRename"
+                    @click.stop
+                  />
+                </template>
+                <template v-else>
+                  <span class="pet-name">{{ pet.displayName }}</span>
+                  <button
+                    v-if="!pet.builtIn"
+                    class="pet-edit"
+                    title="Rename"
+                    @click.stop="startRename(pet)"
+                  >
+                    &#9998;
+                  </button>
+                  <button
+                    v-if="pet.id !== store.defaultPetId"
+                    class="pet-remove"
+                    :title="pet.builtIn ? 'Hide' : 'Remove'"
+                    @click.stop="confirmRemovePet(pet)"
+                  >
+                    &times;
+                  </button>
+                </template>
+              </div>
+            </div>
+            <div class="import-row">
+              <button class="import-btn" @click="importPet" :disabled="importing">
+                {{ importing ? 'Importing...' : '+ Import Sprite' }}
+              </button>
+              <button class="import-btn" @click="importPetZip" :disabled="importingZip">
+                {{ importingZip ? 'Importing...' : '+ Import .zip' }}
+              </button>
+            </div>
+            <div v-if="importZipError" class="import-error">{{ importZipError }}</div>
+          </div>
+
+          <div class="settings-section toggle-group">
+            <label class="toggle-row">
+              <span class="section-label">Multi-pet</span>
+              <span class="switch">
+                <input
+                  type="checkbox"
+                  :checked="store.multiPetEnabled"
+                  @change="store.setMultiPetEnabled(($event.target as HTMLInputElement).checked)"
+                />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
+            </label>
+          </div>
+
+          <div v-if="store.multiPetEnabled" class="settings-section">
+            <div class="section-label">Per-Agent Pet</div>
+            <div class="family-pet-list">
+              <label v-for="family in SOURCE_FAMILIES" :key="family.key" class="family-pet-row">
+                <span class="family-pet-name">
+                  <span class="family-pet-dot" :class="`family-${family.key}`" />
+                  {{ family.label }}
+                </span>
+                <select
+                  class="family-pet-select"
+                  :value="store.familyPetIds[family.key] || ''"
+                  @change="store.setFamilyPet(family.key, ($event.target as HTMLSelectElement).value || null)"
+                >
+                  <option value="">Default</option>
+                  <option v-for="pet in store.visiblePets" :key="pet.id" :value="pet.id">
+                    {{ pet.displayName }}
+                  </option>
+                </select>
+              </label>
             </div>
           </div>
-        </div>
-
-        <div class="settings-section toggle-group">
-          <label class="toggle-row">
-            <span class="section-label">Sound</span>
-            <span class="switch">
-              <input
-                type="checkbox"
-                :checked="store.soundEnabled"
-                @change="store.setSoundEnabled(($event.target as HTMLInputElement).checked)"
-              />
-              <span class="switch-track"><span class="switch-thumb" /></span>
-            </span>
-          </label>
-
-          <label class="toggle-row">
-            <span class="section-label">Bounce &amp; shake</span>
-            <span class="switch">
-              <input
-                type="checkbox"
-                :checked="store.reactionsEnabled"
-                @change="store.setReactionsEnabled(($event.target as HTMLInputElement).checked)"
-              />
-              <span class="switch-track"><span class="switch-thumb" /></span>
-            </span>
-          </label>
-
-          <label class="toggle-row">
-            <span class="section-label">Bubble</span>
-            <span class="switch">
-              <input
-                type="checkbox"
-                :checked="store.bubbleEnabled"
-                @change="store.setBubbleEnabled(($event.target as HTMLInputElement).checked)"
-              />
-              <span class="switch-track"><span class="switch-thumb" /></span>
-            </span>
-          </label>
-
-          <label class="toggle-row">
-            <span class="section-label">Multi-pet</span>
-            <span class="switch">
-              <input
-                type="checkbox"
-                :checked="store.multiPetEnabled"
-                @change="store.setMultiPetEnabled(($event.target as HTMLInputElement).checked)"
-              />
-              <span class="switch-track"><span class="switch-thumb" /></span>
-            </span>
-          </label>
-        </div>
-
-        <div class="settings-section">
-          <button class="setup-btn" @click="store.showWizard = true">Setup Wizard</button>
-        </div>
-
-        <div class="settings-section">
-          <button class="quit-btn" @click="quitApp">Quit</button>
-        </div>
+        </template>
       </div>
     </template>
   </div>
@@ -373,6 +413,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 .panel-title {
   font-weight: 600;
   font-size: 13px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
 }
 
 .header-right {
@@ -383,7 +424,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 .header-btn {
   background: none;
   border: none;
-  color: #888;
+  color: #a8adbd;
   font-size: 18px;
   cursor: pointer;
   padding: 0 6px;
@@ -397,7 +438,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 .panel-empty {
   padding: 20px 14px;
   text-align: center;
-  color: #666;
+  color: #a3a7b4;
   font-size: 12px;
 }
 
@@ -469,12 +510,14 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 
 .session-project {
   font-size: 10px;
-  color: #666;
+  color: #a4a8b4;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
 }
 
 .session-time {
   font-size: 10px;
-  color: #555;
+  color: #8f94a3;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
 }
 
 .session-footer {
@@ -488,7 +531,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.03);
-  color: #888;
+  color: #a4a8b4;
   font-size: 10px;
   cursor: pointer;
   transition: all 0.15s;
@@ -497,6 +540,42 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 .clear-offline-btn:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #ccc;
+}
+
+.settings-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 3px;
+  margin: 8px 12px 0;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.settings-tab {
+  flex: 1;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #a3a8ba;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.settings-tab:hover {
+  color: #c8c8d2;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.settings-tab.active {
+  color: #e5e7ff;
+  background: rgba(139, 156, 247, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(139, 156, 247, 0.2);
 }
 
 .settings-content {
@@ -608,9 +687,10 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 
 .section-label {
   font-size: 10px;
-  color: #555;
+  color: #9da3b5;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 
 .pet-list {
@@ -666,7 +746,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 .pet-edit {
   background: none;
   border: none;
-  color: #666;
+  color: #9499aa;
   font-size: 13px;
   cursor: pointer;
   padding: 0 4px;
@@ -680,7 +760,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 .pet-remove {
   background: none;
   border: none;
-  color: #666;
+  color: #9499aa;
   font-size: 14px;
   cursor: pointer;
   padding: 0 4px;
@@ -789,7 +869,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.03);
-  color: #888;
+  color: #a4a8b4;
   font-size: 9px;
   cursor: pointer;
 }
@@ -822,7 +902,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   flex: 1;
   padding: 5px 0;
   border-radius: 5px;
-  color: #888;
+  color: #a4a8b4;
   font-size: 12px;
   cursor: pointer;
   text-align: center;
@@ -853,6 +933,23 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 
 .setup-btn:hover {
   background: rgba(139, 156, 247, 0.12);
+}
+
+.restart-btn {
+  width: 100%;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 190, 90, 0.25);
+  background: rgba(255, 190, 90, 0.06);
+  color: #ffc56d;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.restart-btn:hover {
+  background: rgba(255, 190, 90, 0.14);
+  border-color: rgba(255, 190, 90, 0.42);
 }
 
 .quit-btn {

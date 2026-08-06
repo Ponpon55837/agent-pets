@@ -78,17 +78,25 @@
 
 #### Settings 畫面
 
-- **Pet** — 選擇要顯示哪隻寵物，點名字即可切換。
+面板分成 **Settings** 與 **Pets** 兩個分頁。
+
+**Settings 分頁**
+
 - **Size** — S / M / L / XL / XXL 調整寵物大小。
-- **+ Import Sprite** — 匯入自訂精靈圖（`.webp`/`.png`/`.jpg`，8 欄 × 11 列）。
-- **+ Import .zip** — 一鍵匯入 `.codex-pet.zip` 素材包（例如從 codex-pets.net 下載的），不用手動解壓縮。
 - **Mood** — 任務成功會微幅上升、失敗會下降的心情值，純裝飾用途，心情好時寵物會帶一層暖色光暈、心情差時會稍微變暗——所有狀態都會套用，不是只有待機時。每天開始會自動重設回基準值，也可以點 **Reset** 手動重設（永遠是重設回基準值本身，不是加分，所以沒辦法靠一直點來刷高）。
 - **Sound** — 成功/失敗/等待核准時的短音效（用 Web Audio 即時合成，不需要音檔）。**預設關閉。**
 - **Bounce & shake** — 點擊/狀態切換時的彈跳、閒置搖擺、waiting-permission 抖動。**預設關閉。**
 - **Bubble** — 完成提示氣泡跟寵物上方「正在做什麼」的活動氣泡。**預設關閉。**
-- **Multi-pet** — 同時有 2 個以上工具家族在跑時，改成每個家族各顯示一隻小寵物，而不是只顯示優先權最高的那隻。**預設關閉。**
 - **Setup Wizard** — 重新偵測工具，或安裝/重新安裝 hooks。
+- **Restart Pet** — 寵物或動畫卡住時，完整重新啟動 Agent Pets。
 - **Quit** — 結束 Agent Pets。
+
+**Pets 分頁**
+
+- **Pet** — 選擇要顯示哪隻寵物，點名字即可切換。
+- **+ Import Sprite** — 匯入自訂精靈圖（`.webp`/`.png`/`.jpg`，8 欄 × 11 列）。
+- **+ Import .zip** — 一鍵匯入 `.codex-pet.zip` 素材包（例如從 codex-pets.net 下載的），不用手動解壓縮。
+- **Multi-pet** — 同時有 2 個以上工具家族在跑時，改成每個家族各顯示一隻小寵物，而不是只顯示優先權最高的那隻。**預設關閉。** 開啟後，每個工具的寵物選擇也會顯示在這個分頁。
 
 點 **‹** 回到 Sessions 畫面。
 
@@ -217,26 +225,26 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 ### 前置需求
 
 - Node.js 18+
-- npm
+- pnpm 11+
 
 ### 環境設置
 
 ```bash
 git clone https://github.com/Ponpon55837/agent-pets.git
 cd agent-pets
-npm install
+pnpm install
 ```
 
 ### 開發模式執行
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 ### 建置
 
 ```bash
-npm run build
+pnpm build
 ```
 
 輸出會在 `release/` 目錄下。

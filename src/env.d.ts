@@ -12,11 +12,13 @@ interface Window {
     moveWindow: (dx: number, dy: number) => void
     notifyDragEnd: () => void
     resizeWindow: (width: number, height: number) => void
+    setMousePassthrough: (ignore: boolean) => void
     togglePanel: () => void
     resizePanel: (height: number) => void
     hidePanel: () => void
     onPanelOpened: (callback: () => void) => () => void
     quitApp: () => void
+    restartApp: () => void
     checkIntegration: () => Promise<{
       opencode: { cli: boolean; desktop: boolean }
       codex: { hooks: boolean; enabled: boolean; configured: boolean; hookScript: boolean }

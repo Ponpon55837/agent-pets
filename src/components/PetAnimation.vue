@@ -25,39 +25,35 @@ const store = useAgentStore()
 const CELL_W = 192
 const CELL_H = 208
 
-const stateToRow: Record<string, number> = {
-  'offline': 0,
-  'idle': 0,
-  'thinking': 7,
-  'tool-running': 7,
-  'waiting-permission': 6,
-  'waiting-input': 6,
-  'success': 8,
-  'error': 5,
+type MotionName = 'idle' | 'waving' | 'jumping' | 'failed' | 'waiting' | 'running' | 'review'
+
+interface MotionDefinition {
+  name: MotionName
+  row: number
+  frameDurations: readonly number[]
 }
 
-const stateFrameCount: Record<string, number> = {
-  // Offline uses the calm idle loop rather than a frozen first frame. The
-  // slow cadence makes it visibly alive without implying active work.
-  'offline': 6,
-  'idle': 6,
-  'thinking': 6,
-  'tool-running': 6,
-  'waiting-permission': 6,
-  'waiting-input': 6,
-  'success': 6,
-  'error': 8,
+interface MotionStep {
+  motion: MotionDefinition
+  loops: number
 }
 
-const frameInterval: Record<string, number> = {
-  'offline': 950,
-  'idle': 700,
-  'thinking': 680,
-  'tool-running': 360,
-  'waiting-permission': 850,
-  'waiting-input': 1050,
-  'success': 190,
-  'error': 260,
+interface MotionPlan {
+  steps: MotionStep[]
+  repeat: boolean
+}
+
+// Keep these aligned with the v2 pet atlas contract. Apart from making each
+// action read at its intended cadence, the per-row frame counts prevent short
+// actions such as waving and jumping from stepping into transparent cells.
+const motions: Record<MotionName, MotionDefinition> = {
+  idle: { name: 'idle', row: 0, frameDurations: [280, 110, 110, 140, 140, 320] },
+  waving: { name: 'waving', row: 3, frameDurations: [140, 140, 140, 280] },
+  jumping: { name: 'jumping', row: 4, frameDurations: [140, 140, 140, 140, 280] },
+  failed: { name: 'failed', row: 5, frameDurations: [140, 140, 140, 140, 140, 140, 140, 240] },
+  waiting: { name: 'waiting', row: 6, frameDurations: [150, 150, 150, 150, 150, 260] },
+  running: { name: 'running', row: 7, frameDurations: [120, 120, 120, 120, 120, 220] },
+  review: { name: 'review', row: 8, frameDurations: [150, 150, 150, 150, 150, 280] },
 }
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -65,6 +61,12 @@ const imgRef = ref<HTMLImageElement | null>(null)
 const imageCache = new Map<string, HTMLImageElement>()
 let animTimer: ReturnType<typeof setTimeout> | null = null
 let currentFrame = 0
+let currentStep = 0
+let completedLoops = 0
+let motionPlan: MotionPlan = { steps: [{ motion: motions.idle, loops: Number.POSITIVE_INFINITY }], repeat: false }
+let activeMotion = motions.idle
+const activeMotionName = ref<MotionName>('idle')
+const activeMotionRow = ref(0)
 
 // One-shot squash/stretch "reaction" bounce, layered on top of the looping
 // state animation via a CSS class rather than extra spritesheet frames, so
@@ -139,11 +141,91 @@ const urgencyLevel = computed(() => {
   return 0
 })
 
-function currentInterval(): number {
-  const base = frameInterval[props.state] ?? 400
-  if (urgencyLevel.value === 2) return Math.max(120, Math.round(base * 0.45))
-  if (urgencyLevel.value === 1) return Math.max(180, Math.round(base * 0.7))
-  return base
+function motionPlanForState(): MotionPlan {
+  // Stagger long-idle gestures between pets while keeping the sequence stable
+  // for a given pet instead of choosing a new random delay every cycle.
+  const idleLoops = 10 + [...props.petId].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 5
+
+  switch (props.state) {
+    case 'idle':
+      return {
+        steps: [
+          { motion: motions.idle, loops: idleLoops },
+          { motion: motions.waving, loops: 1 },
+        ],
+        repeat: true,
+      }
+    case 'thinking':
+      return {
+        steps: [
+          { motion: motions.review, loops: 2 },
+          { motion: motions.running, loops: 2 },
+        ],
+        repeat: true,
+      }
+    case 'tool-running':
+      return {
+        steps: [
+          { motion: motions.running, loops: 4 },
+          { motion: motions.review, loops: 1 },
+        ],
+        repeat: true,
+      }
+    case 'waiting-permission':
+    case 'waiting-input':
+      if (urgencyLevel.value === 0) {
+        return {
+          steps: [{ motion: motions.waiting, loops: Number.POSITIVE_INFINITY }],
+          repeat: false,
+        }
+      }
+      return {
+        steps: [
+          { motion: motions.waiting, loops: urgencyLevel.value === 2 ? 2 : 3 },
+          { motion: motions.waving, loops: 1 },
+        ],
+        repeat: true,
+      }
+    case 'success':
+      return {
+        steps: [
+          { motion: motions.jumping, loops: 1 },
+          { motion: motions.waving, loops: 1 },
+          { motion: motions.idle, loops: Number.POSITIVE_INFINITY },
+        ],
+        repeat: false,
+      }
+    case 'error':
+      return {
+        steps: [{ motion: motions.failed, loops: 1 }],
+        repeat: false,
+      }
+    case 'offline':
+    default:
+      return {
+        steps: [{ motion: motions.idle, loops: Number.POSITIVE_INFINITY }],
+        repeat: false,
+      }
+  }
+}
+
+function frameDelay(): number {
+  let multiplier = 1
+  if (props.state === 'offline') multiplier = 2.4
+  else if (props.state === 'idle') multiplier = 1.25
+  else if (urgencyLevel.value === 2) multiplier = 0.6
+  else if (urgencyLevel.value === 1) multiplier = 0.78
+
+  return Math.max(80, Math.round(activeMotion.frameDurations[currentFrame] * multiplier))
+}
+
+function selectStep(index: number) {
+  currentStep = index
+  completedLoops = 0
+  currentFrame = 0
+  activeMotion = motionPlan.steps[currentStep].motion
+  activeMotionName.value = activeMotion.name
+  activeMotionRow.value = activeMotion.row
 }
 
 const canvasW = computed(() => Math.round(CELL_W * store.petScale))
@@ -195,11 +277,11 @@ function draw() {
   const img = imgRef.value
   if (!canvas || !img || !img.complete) return
 
-  const ctx = canvas.getContext('2d')
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
   if (!ctx) return
 
-  const row = stateToRow[props.state] ?? 0
-  const maxFrames = stateFrameCount[props.state] ?? 1
+  const row = activeMotion.row
+  const maxFrames = activeMotion.frameDurations.length
   const frame = currentFrame % maxFrames
 
   ctx.clearRect(0, 0, CELL_W, CELL_H)
@@ -218,36 +300,53 @@ function startAnimation() {
     animTimer = null
   }
 
-  const interval = currentInterval()
-  const maxFrames = stateFrameCount[props.state] ?? 1
-
-  if (interval === 0) {
-    currentFrame = 0
-    draw()
-    return
-  }
+  motionPlan = motionPlanForState()
+  selectStep(0)
+  draw()
 
   function tick() {
-    currentFrame++
-    // Success and error are reactions, not ongoing activities. Play their
-    // row once, then hold the final frame until the store reports another
-    // state instead of looping the same celebration/failure forever.
-    if ((props.state === 'success' || props.state === 'error') && currentFrame >= maxFrames - 1) {
-      currentFrame = maxFrames - 1
+    if (currentFrame < activeMotion.frameDurations.length - 1) {
+      currentFrame++
       draw()
-      animTimer = null
+      animTimer = setTimeout(tick, frameDelay())
       return
     }
-    draw()
-    animTimer = setTimeout(tick, currentInterval())
+
+    completedLoops++
+    const step = motionPlan.steps[currentStep]
+    if (completedLoops < step.loops) {
+      currentFrame = 0
+      draw()
+      animTimer = setTimeout(tick, frameDelay())
+      return
+    }
+
+    if (currentStep < motionPlan.steps.length - 1) {
+      selectStep(currentStep + 1)
+      draw()
+      animTimer = setTimeout(tick, frameDelay())
+      return
+    }
+
+    if (motionPlan.repeat) {
+      selectStep(0)
+      draw()
+      animTimer = setTimeout(tick, frameDelay())
+      return
+    }
+
+    // Non-repeating plans (notably failure) deliberately hold their final
+    // frame until the store reports the next state.
+    animTimer = null
   }
 
-  animTimer = setTimeout(tick, interval)
+  animTimer = setTimeout(tick, frameDelay())
 }
 
 watch(() => props.petId, () => {
   currentFrame = 0
   loadImage()
+  startAnimation()
 })
 
 watch(() => store.petsLoaded, () => {
@@ -256,7 +355,6 @@ watch(() => store.petsLoaded, () => {
 })
 
 watch(() => props.state, (newState, oldState) => {
-  currentFrame = 0
   startAnimation()
   if (oldState !== undefined && newState !== oldState) {
     playReaction()
@@ -270,6 +368,12 @@ watch(() => props.state, (newState, oldState) => {
     startUrgencyTimer()
   } else {
     stopUrgencyTimer()
+  }
+})
+
+watch(urgencyLevel, (newLevel, oldLevel) => {
+  if (isWaiting.value && newLevel !== oldLevel) {
+    startAnimation()
   }
 })
 
@@ -301,6 +405,8 @@ onUnmounted(() => {
     ref="canvasRef"
     :width="CELL_W"
     :height="CELL_H"
+    :data-animation-action="activeMotionName"
+    :data-animation-row="activeMotionRow"
     :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
     class="pet-canvas"
     :class="{

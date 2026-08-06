@@ -82,10 +82,10 @@ function onClick(e: MouseEvent) {
       @contextmenu.prevent
     >
       <Transition v-if="store.bubbleEnabled" name="toast" mode="out-in">
-        <div v-if="store.toast" key="toast" class="pet-toast" :class="store.toast.tone">
+        <div v-if="store.toast" key="toast" class="pet-toast" :class="store.toast.tone" data-pet-hit-target="solid">
           {{ store.toast.text }}
         </div>
-        <div v-else-if="!isMultiPet && store.activityText" key="activity" class="pet-toast activity">
+        <div v-else-if="!isMultiPet && store.activityText" key="activity" class="pet-toast activity" data-pet-hit-target="solid">
           🔧 {{ store.activityText }}
         </div>
       </Transition>
@@ -100,7 +100,7 @@ function onClick(e: MouseEvent) {
               :since="line.since"
               :mood="store.mood"
             />
-            <div class="status-line multi-pet-status-line">
+            <div class="status-line multi-pet-status-line" data-pet-hit-target="solid">
               <span class="line-dot" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
               <span class="line-text">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
@@ -120,7 +120,7 @@ function onClick(e: MouseEvent) {
           :mood="store.mood"
         />
         <TransitionGroup tag="div" name="status-line" class="status-lines">
-          <div v-for="line in displayLines" :key="line.key" class="status-line">
+          <div v-for="line in displayLines" :key="line.key" class="status-line" data-pet-hit-target="solid">
             <span class="line-dot" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
             <span class="line-text">
               <template v-if="line.label">

@@ -83,6 +83,7 @@ function animateBounds(target: { x: number; y: number; width: number; height: nu
       width: Math.round(start.width + (target.width - start.width) * eased),
       height: Math.round(start.height + (target.height - start.height) * eased),
     })
+    repositionVisiblePanel()
 
     if (t >= 1 && resizeAnimHandle) {
       clearInterval(resizeAnimHandle)
@@ -221,20 +222,36 @@ function createPanelWindow() {
 }
 
 function computePanelBounds(height: number) {
-  const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize
-
   if (!petWindow) {
-    return { x: 0, y: 0, width: PANEL_WIDTH, height }
+    const { workArea } = screen.getPrimaryDisplay()
+    return { x: workArea.x, y: workArea.y, width: PANEL_WIDTH, height }
   }
 
   const petBounds = petWindow.getBounds()
+  const { workArea } = screen.getDisplayMatching(petBounds)
+  const maxX = Math.max(workArea.x, workArea.x + workArea.width - PANEL_WIDTH)
+  const maxY = Math.max(workArea.y, workArea.y + workArea.height - height)
   let x = petBounds.x + Math.round(petBounds.width / 2) - Math.round(PANEL_WIDTH / 2)
-  let y = petBounds.y - height - PANEL_GAP
+  const aboveY = petBounds.y - height - PANEL_GAP
+  const belowY = petBounds.y + petBounds.height + PANEL_GAP
+  let y = aboveY
 
-  x = clamp(x, 0, screenW - PANEL_WIDTH)
-  y = clamp(y, 0, screenH - height)
+  // Keep the panel touching the pet even near a work-area edge. Prefer above,
+  // but place it below when there is no room instead of clamping it far away.
+  if (aboveY < workArea.y && belowY + height <= workArea.y + workArea.height) {
+    y = belowY
+  }
+
+  x = clamp(x, workArea.x, maxX)
+  y = clamp(y, workArea.y, maxY)
 
   return { x, y, width: PANEL_WIDTH, height }
+}
+
+function repositionVisiblePanel() {
+  if (!panelWindow?.isVisible()) return
+  const [, height] = panelWindow.getSize()
+  panelWindow.setBounds(computePanelBounds(height))
 }
 
 function getPetsJsonPath(): string {
@@ -308,6 +325,17 @@ app.whenReady().then(() => {
     writeWindowState(x, y)
   })
 
+  ipcMain.on('pet-mouse-passthrough', (event, { ignore }) => {
+    if (!petWindow || event.sender !== petWindow.webContents || typeof ignore !== 'boolean') return
+    if (ignore) {
+      // Forward mousemove events while click-through is active so the
+      // renderer can make the visible pet interactive again on hover.
+      petWindow.setIgnoreMouseEvents(true, { forward: true })
+    } else {
+      petWindow.setIgnoreMouseEvents(false)
+    }
+  })
+
   ipcMain.on('panel-toggle', () => {
     if (!panelWindow) return
     if (panelWindow.isVisible()) {
@@ -330,7 +358,7 @@ app.whenReady().then(() => {
 
   ipcMain.on('pet-resize', (_event, { width, height }) => {
     if (!petWindow) return
-    const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize
+    const { workArea } = screen.getDisplayMatching(petWindow.getBounds())
 
     if (!anchorBottomCenter) {
       const [x, y] = petWindow.getPosition()
@@ -344,8 +372,10 @@ app.whenReady().then(() => {
     let newX = anchorBottomCenter.x - Math.round(width / 2)
     let newY = anchorBottomCenter.y - height
 
-    newX = clamp(newX, 0, screenW - width)
-    newY = clamp(newY, 0, screenH - height)
+    const maxX = Math.max(workArea.x, workArea.x + workArea.width - width)
+    const maxY = Math.max(workArea.y, workArea.y + workArea.height - height)
+    newX = clamp(newX, workArea.x, maxX)
+    newY = clamp(newY, workArea.y, maxY)
 
     animateBounds({ x: newX, y: newY, width, height })
 
@@ -357,6 +387,11 @@ app.whenReady().then(() => {
 
   ipcMain.on('pet-quit', () => {
     app.quit()
+  })
+
+  ipcMain.on('pet-restart', () => {
+    app.relaunch()
+    app.exit(0)
   })
 
   ipcMain.handle('integration-status', () => {
