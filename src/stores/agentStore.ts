@@ -22,6 +22,8 @@ const PET_BASE_W = 250 // wide enough for a status line like "OpenCode (CLI+Desk
 const PET_BASE_H = 232 // canvas + 1 status line
 const STATUS_LINE_EXTRA_H = 22 // per additional status line beyond the first
 const TOAST_DISPLAY_MS = 3_500
+const MOOD_BASELINE = 10
+const MOOD_SYSTEM_VERSION = '2'
 // Always kept available as the ultimate fallback (see PetAnimation's
 // loadImage and the various "|| 'aang-airbender'" defaults below) — so it's
 // the one pet that can't be removed/hidden from the list.
@@ -103,11 +105,14 @@ export const useAgentStore = defineStore('agent', () => {
     return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
   }
 
-  let initialMood = clampMood(parseFloat(localStorage.getItem('agent-pet-mood') || '50'))
-  if (localStorage.getItem('agent-pet-mood-date') !== todayKey()) {
-    initialMood = 50
-    localStorage.setItem('agent-pet-mood', '50')
+  let initialMood = clampMood(parseFloat(localStorage.getItem('agent-pet-mood') || String(MOOD_BASELINE)))
+  const needsMoodReset = localStorage.getItem('agent-pet-mood-version') !== MOOD_SYSTEM_VERSION
+    || localStorage.getItem('agent-pet-mood-date') !== todayKey()
+  if (needsMoodReset) {
+    initialMood = MOOD_BASELINE
+    localStorage.setItem('agent-pet-mood', String(MOOD_BASELINE))
     localStorage.setItem('agent-pet-mood-date', todayKey())
+    localStorage.setItem('agent-pet-mood-version', MOOD_SYSTEM_VERSION)
   }
   const mood = ref(initialMood)
 
@@ -129,7 +134,7 @@ export const useAgentStore = defineStore('agent', () => {
   const bubbleEnabled = ref(localStorage.getItem('agent-pet-bubble') === '1')
 
   function clampMood(value: number): number {
-    if (Number.isNaN(value)) return 50
+    if (Number.isNaN(value)) return MOOD_BASELINE
     return Math.max(0, Math.min(100, value))
   }
 
@@ -138,12 +143,13 @@ export const useAgentStore = defineStore('agent', () => {
     localStorage.setItem('agent-pet-mood', String(mood.value))
   }
 
-  // Always sets to exactly the neutral baseline — never used to push mood
-  // higher than 50, so it can't be spammed as a way to farm mood up.
+  // Always sets to the low daily baseline, so the visible energy build-up is
+  // earned through successful tasks rather than starting halfway charged.
   function resetMood() {
-    mood.value = 50
-    localStorage.setItem('agent-pet-mood', '50')
+    mood.value = MOOD_BASELINE
+    localStorage.setItem('agent-pet-mood', String(MOOD_BASELINE))
     localStorage.setItem('agent-pet-mood-date', todayKey())
+    localStorage.setItem('agent-pet-mood-version', MOOD_SYSTEM_VERSION)
   }
 
   function showToast(source: AgentSource, project: string | undefined, tone: 'success' | 'error') {

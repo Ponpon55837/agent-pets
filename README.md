@@ -83,7 +83,7 @@ The panel is split into **Settings** and **Pets** tabs.
 **Settings tab**
 
 - **Size** — S / M / L / XL / XXL to scale the pet.
-- **Mood** — A meter that nudges up on task success and down on error; purely cosmetic, tints the pet with a warm glow (high mood) or a slight dim (low mood) — applied across every state, not just idle. Resets to baseline automatically at the start of each new day, or click **Reset** to do it manually (always goes back to exactly baseline — not something you can farm higher by spamming it).
+- **Mood** — Starts each day at a low baseline of 10, rises on task success, and falls on error. As it grows, an animated energy layer built from the current pet frame intensifies around the pet's own silhouette, reaching overdrive at 90+. Click **Reset** to return to 10; it never grants extra mood.
 - **Sound** — Short synthesized cues (Web Audio, no audio files) for success/error/waiting-permission. **Off by default.**
 - **Bounce & shake** — Click/state-change bounce, idle fidget sway, and waiting-permission shake. **Off by default.**
 - **Bubble** — The completion toast and "what's it doing" activity bubble above the pet. **Off by default.**

@@ -10,14 +10,43 @@ const props = defineProps<{
   mood?: number
 }>()
 
-// Purely cosmetic bias from the mood meter — a warm glow when things have
-// been going well, a slight dim/desaturate when they haven't. No new sprite
-// frames needed, same CSS-filter trick as the rest of the reaction layer.
+// Keep low mood close to the pet's original colors; most of the visible
+// progression comes from the silhouette aura instead of dimming the pet.
 const moodTier = computed<'happy' | 'neutral' | 'low'>(() => {
   if (props.mood === undefined) return 'neutral'
   if (props.mood >= 70) return 'happy'
   if (props.mood <= 25) return 'low'
   return 'neutral'
+})
+
+type MoodEnergyTier = 'resting' | 'charged' | 'radiant' | 'overdrive'
+
+const moodValue = computed(() => Math.max(0, Math.min(100, props.mood ?? 10)))
+const moodEnergyTier = computed<MoodEnergyTier>(() => {
+  if (moodValue.value >= 90) return 'overdrive'
+  if (moodValue.value >= 70) return 'radiant'
+  if (moodValue.value >= 40) return 'charged'
+  return 'resting'
+})
+const moodAuraStyle = computed<Record<string, string>>(() => {
+  const energy = Math.max(0, (moodValue.value - 10) / 90)
+  const auraSpeed = 3.8 - energy * 2.1
+  const outerEnergy = Math.max(0, (moodValue.value - 60) / 40)
+  const innerScale = 1 + energy * 0.018
+  const outerScale = 1.012 + energy * 0.028
+  return {
+    '--aura-inner-opacity': (energy * 0.4).toFixed(3),
+    '--aura-outer-opacity': (outerEnergy * 0.22).toFixed(3),
+    '--aura-inner-scale': innerScale.toFixed(3),
+    '--aura-inner-peak': (innerScale + 0.006).toFixed(3),
+    '--aura-outer-scale': outerScale.toFixed(3),
+    '--aura-outer-peak': (outerScale + 0.01).toFixed(3),
+    '--aura-speed': `${auraSpeed.toFixed(2)}s`,
+    '--aura-speed-fast': `${(auraSpeed * 0.72).toFixed(2)}s`,
+    '--aura-brightness': (1.05 + energy * 0.45).toFixed(3),
+    '--aura-blur': `${(0.45 + energy * 0.75).toFixed(2)}px`,
+    '--aura-blur-wide': `${(1.4 + energy * 1.8).toFixed(2)}px`,
+  }
 })
 
 const store = useAgentStore()
@@ -57,8 +86,12 @@ const motions: Record<MotionName, MotionDefinition> = {
 }
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+const auraInnerRef = ref<HTMLCanvasElement | null>(null)
+const auraOuterRef = ref<HTMLCanvasElement | null>(null)
 const imgRef = ref<HTMLImageElement | null>(null)
 const imageCache = new Map<string, HTMLImageElement>()
+const auraTintCache = new Map<string, string>()
+let auraTint = 'rgb(235, 242, 255)'
 let animTimer: ReturnType<typeof setTimeout> | null = null
 let currentFrame = 0
 let currentStep = 0
@@ -158,16 +191,16 @@ function motionPlanForState(): MotionPlan {
     case 'thinking':
       return {
         steps: [
-          { motion: motions.review, loops: 2 },
-          { motion: motions.running, loops: 2 },
+          { motion: motions.review, loops: 8 },
+          { motion: motions.running, loops: 12 },
         ],
         repeat: true,
       }
     case 'tool-running':
       return {
         steps: [
-          { motion: motions.running, loops: 4 },
-          { motion: motions.review, loops: 1 },
+          { motion: motions.running, loops: 12 },
+          { motion: motions.review, loops: 8 },
         ],
         repeat: true,
       }
@@ -181,8 +214,8 @@ function motionPlanForState(): MotionPlan {
       }
       return {
         steps: [
-          { motion: motions.waiting, loops: urgencyLevel.value === 2 ? 2 : 3 },
-          { motion: motions.waving, loops: 1 },
+          { motion: motions.waiting, loops: 12 },
+          { motion: motions.waving, loops: urgencyLevel.value === 2 ? 8 : 6 },
         ],
         repeat: true,
       }
@@ -236,6 +269,67 @@ function getSrc(id: string): string {
   return `${base}pets/${id}/spritesheet.webp`
 }
 
+function deriveAuraTintFromPixels(pixels: Uint8ClampedArray): string {
+  try {
+    let red = 0
+    let green = 0
+    let blue = 0
+    let weightTotal = 0
+    let fallbackRed = 0
+    let fallbackGreen = 0
+    let fallbackBlue = 0
+    let fallbackWeight = 0
+
+    for (let index = 0; index < pixels.length; index += 16) {
+      const alpha = pixels[index + 3] / 255
+      if (alpha < 0.25) continue
+      const r = pixels[index]
+      const g = pixels[index + 1]
+      const b = pixels[index + 2]
+      const chroma = Math.max(r, g, b) - Math.min(r, g, b)
+      const brightness = Math.max(r, g, b)
+      const fallback = alpha * Math.max(0.2, brightness / 255)
+      fallbackRed += r * fallback
+      fallbackGreen += g * fallback
+      fallbackBlue += b * fallback
+      fallbackWeight += fallback
+      if (chroma < 24 || brightness < 48) continue
+      const weight = alpha * chroma * (0.55 + brightness / 510)
+      red += r * weight
+      green += g * weight
+      blue += b * weight
+      weightTotal += weight
+    }
+
+    const divisor = weightTotal || fallbackWeight
+    if (!divisor) return auraTint
+    const sourceRed = weightTotal ? red : fallbackRed
+    const sourceGreen = weightTotal ? green : fallbackGreen
+    const sourceBlue = weightTotal ? blue : fallbackBlue
+    const channels = [sourceRed / divisor, sourceGreen / divisor, sourceBlue / divisor]
+    const strongest = Math.max(...channels)
+    const lift = strongest > 0 ? Math.min(1.65, 220 / strongest) : 1
+    const [r, g, b] = channels.map(channel => Math.round(Math.min(255, channel * lift + 18)))
+    return `rgb(${r}, ${g}, ${b})`
+  } catch {
+    return auraTint
+  }
+}
+
+function deriveAuraTint(img: HTMLImageElement): string {
+  try {
+    const sample = document.createElement('canvas')
+    sample.width = CELL_W
+    sample.height = CELL_H
+    const ctx = sample.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return auraTint
+    ctx.drawImage(img, 0, 0, CELL_W, CELL_H, 0, 0, CELL_W, CELL_H)
+    return deriveAuraTintFromPixels(ctx.getImageData(0, 0, CELL_W, CELL_H).data)
+  } catch {
+    return auraTint
+  }
+}
+
 async function loadImage() {
   const id = props.petId || 'qitian-dasheng'
   const pet = store.pets.find(p => p.id === id)
@@ -249,6 +343,8 @@ async function loadImage() {
   const cached = imageCache.get(targetId)
   if (cached) {
     imgRef.value = cached
+    auraTint = auraTintCache.get(targetId) || deriveAuraTint(cached)
+    auraTintCache.set(targetId, auraTint)
     currentFrame = 0
     draw()
     return
@@ -267,31 +363,55 @@ async function loadImage() {
   img.onload = () => {
     imageCache.set(targetId, img)
     imgRef.value = img
+    auraTint = deriveAuraTint(img)
+    auraTintCache.set(targetId, auraTint)
     currentFrame = 0
     draw()
   }
 }
 
 function draw() {
-  const canvas = canvasRef.value
   const img = imgRef.value
-  if (!canvas || !img || !img.complete) return
-
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) return
+  if (!img || !img.complete) return
 
   const row = activeMotion.row
   const maxFrames = activeMotion.frameDurations.length
   const frame = currentFrame % maxFrames
 
-  ctx.clearRect(0, 0, CELL_W, CELL_H)
-  ctx.drawImage(
-    img,
-    frame * CELL_W, row * CELL_H,
-    CELL_W, CELL_H,
-    0, 0,
-    CELL_W, CELL_H
-  )
+  const targets = [
+    { canvas: canvasRef.value, tint: false },
+    { canvas: auraInnerRef.value, tint: true },
+    { canvas: auraOuterRef.value, tint: true },
+  ]
+  for (const target of targets) {
+    const { canvas, tint } = target
+    if (!canvas) continue
+    const ctx = canvas.getContext('2d', canvas === canvasRef.value ? { willReadFrequently: true } : undefined)
+    if (!ctx) continue
+
+    ctx.clearRect(0, 0, CELL_W, CELL_H)
+    ctx.drawImage(
+      img,
+      frame * CELL_W, row * CELL_H,
+      CELL_W, CELL_H,
+      0, 0,
+      CELL_W, CELL_H
+    )
+    if (!tint) {
+      try {
+        auraTint = deriveAuraTintFromPixels(ctx.getImageData(0, 0, CELL_W, CELL_H).data)
+      } catch {
+        // Custom file URLs can make the canvas unreadable on some platforms.
+        // Keep the last safe tint instead of interrupting the pet animation.
+      }
+    }
+    if (tint) {
+      ctx.globalCompositeOperation = 'source-in'
+      ctx.fillStyle = auraTint
+      ctx.fillRect(0, 0, CELL_W, CELL_H)
+      ctx.globalCompositeOperation = 'source-over'
+    }
+  }
 }
 
 function startAnimation() {
@@ -401,32 +521,102 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <canvas
-    ref="canvasRef"
-    :width="CELL_W"
-    :height="CELL_H"
-    :data-animation-action="activeMotionName"
-    :data-animation-row="activeMotionRow"
-    :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
-    class="pet-canvas"
-    :class="{
-      'pet-reacting': store.reactionsEnabled && isReacting,
-      'pet-fidgeting': store.reactionsEnabled && isFidgeting && !isReacting && urgencyLevel === 0,
-      'pet-urgent-1': store.reactionsEnabled && !isReacting && urgencyLevel === 1,
-      'pet-urgent-2': store.reactionsEnabled && !isReacting && urgencyLevel === 2,
-      'pet-idle-ambient': store.reactionsEnabled && props.state === 'idle' && !isReacting && !isFidgeting,
-      'pet-thinking-ambient': store.reactionsEnabled && props.state === 'thinking' && !isReacting,
-      'pet-tool-ambient': store.reactionsEnabled && props.state === 'tool-running' && !isReacting,
-      'pet-waiting-input': store.reactionsEnabled && props.state === 'waiting-input' && !isReacting && urgencyLevel === 0,
-      'pet-offline-ambient': props.state === 'offline',
-      'pet-mood-happy': moodTier === 'happy',
-      'pet-mood-low': moodTier === 'low',
-    }"
-  />
+  <div
+    class="pet-visual"
+    :class="[`mood-energy-${moodEnergyTier}`, { 'multi-pet-energy': store.isMultiPet }]"
+    :style="[{ width: canvasW + 'px', height: canvasH + 'px' }, moodAuraStyle]"
+    :data-mood="moodValue"
+    :data-mood-energy="moodEnergyTier"
+  >
+    <canvas
+      ref="auraOuterRef"
+      :width="CELL_W"
+      :height="CELL_H"
+      :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
+      class="pet-aura-canvas pet-aura-outer"
+      aria-hidden="true"
+    />
+    <canvas
+      ref="auraInnerRef"
+      :width="CELL_W"
+      :height="CELL_H"
+      :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
+      class="pet-aura-canvas pet-aura-inner"
+      aria-hidden="true"
+    />
+
+    <canvas
+      ref="canvasRef"
+      :width="CELL_W"
+      :height="CELL_H"
+      :data-animation-action="activeMotionName"
+      :data-animation-row="activeMotionRow"
+      :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
+      class="pet-canvas"
+      :class="{
+        'pet-reacting': store.reactionsEnabled && isReacting,
+        'pet-fidgeting': store.reactionsEnabled && isFidgeting && !isReacting && urgencyLevel === 0,
+        'pet-urgent-1': store.reactionsEnabled && !isReacting && urgencyLevel === 1,
+        'pet-urgent-2': store.reactionsEnabled && !isReacting && urgencyLevel === 2,
+        'pet-idle-ambient': store.reactionsEnabled && props.state === 'idle' && !isReacting && !isFidgeting,
+        'pet-thinking-ambient': store.reactionsEnabled && props.state === 'thinking' && !isReacting,
+        'pet-tool-ambient': store.reactionsEnabled && props.state === 'tool-running' && !isReacting,
+        'pet-waiting-input': store.reactionsEnabled && props.state === 'waiting-input' && !isReacting && urgencyLevel === 0,
+        'pet-offline-ambient': props.state === 'offline',
+        'pet-mood-happy': moodTier === 'happy',
+        'pet-mood-low': moodTier === 'low',
+      }"
+    />
+  </div>
 </template>
 
 <style scoped>
+.pet-visual {
+  position: relative;
+  flex: none;
+  isolation: isolate;
+  pointer-events: none;
+}
+
+.pet-aura-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: block;
+  image-rendering: pixelated;
+  transform-origin: 50% 72%;
+  mix-blend-mode: screen;
+  will-change: transform, filter, opacity;
+  pointer-events: none;
+}
+
+.pet-aura-inner {
+  opacity: var(--aura-inner-opacity);
+  filter: brightness(var(--aura-brightness)) blur(var(--aura-blur));
+  animation: silhouette-aura-inner var(--aura-speed) ease-in-out infinite;
+}
+
+.pet-aura-outer {
+  opacity: var(--aura-outer-opacity);
+  filter: brightness(var(--aura-brightness)) blur(var(--aura-blur-wide));
+  animation: silhouette-aura-outer var(--aura-speed-fast) ease-in-out -0.4s infinite;
+}
+
+@keyframes silhouette-aura-inner {
+  0%, 100% { transform: translateY(0) scale(var(--aura-inner-scale)); }
+  50% { transform: translateY(-1px) scale(var(--aura-inner-peak)); }
+}
+
+@keyframes silhouette-aura-outer {
+  0%, 100% { transform: translateY(0) scale(var(--aura-outer-scale)); }
+  50% { transform: translateY(-2px) scale(var(--aura-outer-peak)); }
+}
+
 .pet-canvas {
+  position: relative;
+  z-index: 2;
+  display: block;
+  pointer-events: auto;
   image-rendering: pixelated;
   transform-origin: 50% 100%;
 }
@@ -524,10 +714,16 @@ onUnmounted(() => {
 }
 
 .pet-canvas.pet-mood-happy {
-  filter: drop-shadow(0 0 6px rgba(255, 210, 120, 0.55)) saturate(1.15);
+  filter: saturate(1.08) brightness(1.03);
 }
 
 .pet-canvas.pet-mood-low {
-  filter: grayscale(0.45) brightness(0.88);
+  filter: saturate(0.96) brightness(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pet-aura-canvas {
+    animation: none;
+  }
 }
 </style>

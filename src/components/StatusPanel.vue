@@ -9,6 +9,12 @@ const importing = ref(false)
 const editingPetId = ref<string | null>(null)
 const editName = ref('')
 const settingsTab = ref<'general' | 'pets'>('general')
+const moodStage = computed(() => {
+  if (store.mood >= 90) return 'Overdrive'
+  if (store.mood >= 70) return 'Radiant'
+  if (store.mood >= 40) return 'Charged'
+  return 'Resting'
+})
 
 watch(() => store.panelView, (view) => {
   if (view === 'settings') settingsTab.value = 'general'
@@ -215,10 +221,20 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
         <template v-if="settingsTab === 'general'">
           <div class="settings-section">
             <div class="mood-header">
-              <div class="section-label">Mood</div>
+              <div class="mood-title">
+                <div class="section-label">Mood</div>
+                <span class="mood-readout">{{ store.mood }} · {{ moodStage }}</span>
+              </div>
               <button class="mood-reset-btn" title="Reset to baseline" @click="store.resetMood()">Reset</button>
             </div>
-            <div class="mood-bar">
+            <div
+              class="mood-bar"
+              role="progressbar"
+              aria-label="Pet mood"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="store.mood"
+            >
               <div class="mood-fill" :style="{ width: store.mood + '%' }" />
             </div>
           </div>
@@ -933,6 +949,19 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 
 .setup-btn:hover {
   background: rgba(139, 156, 247, 0.12);
+}
+
+.mood-title {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.mood-readout {
+  color: #cbd2e8;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 
 .restart-btn {
