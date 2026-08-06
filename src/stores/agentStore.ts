@@ -24,10 +24,23 @@ const STATUS_LINE_EXTRA_H = 22 // per additional status line beyond the first
 const TOAST_DISPLAY_MS = 3_500
 const MOOD_BASELINE = 10
 const MOOD_SYSTEM_VERSION = '2'
+const MOOD_SUCCESS_REWARD = 4
+const MOOD_ERROR_PENALTY = 6
+const MOOD_TOOL_COMPLETIONS_PER_POINT = 2
+const MOOD_TOOL_PROGRESS_CAP = 8
+const MOOD_TIME_INTERVAL_MS = 5 * 60_000
+const MOOD_TIME_PROGRESS_CAP = 4
 // Always kept available as the ultimate fallback (see PetAnimation's
 // loadImage and the various "|| 'aang-airbender'" defaults below) — so it's
 // the one pet that can't be removed/hidden from the list.
 const DEFAULT_PET_ID = 'aang-airbender'
+
+interface MoodTaskProgress {
+  startedAt: number
+  completedTools: number
+  toolPoints: number
+  timePoints: number
+}
 
 export const useAgentStore = defineStore('agent', () => {
   const sessions = ref<Record<string, AgentSession>>({})
@@ -94,9 +107,10 @@ export const useAgentStore = defineStore('agent', () => {
   const showWizard = ref(false)
   const toast = ref<{ text: string; tone: 'success' | 'error' } | null>(null)
   let toastTimer: ReturnType<typeof setTimeout> | null = null
+  const moodTaskProgress = new Map<string, MoodTaskProgress>()
 
-  // Light meta-progression: nudges up on success, down on error, persisted
-  // across restarts. Purely cosmetic (biases the pet's overall appearance) — no gameplay
+  // Light meta-progression rewards completed tools, sustained work, and
+  // successful finishes while errors pull it down. It has no gameplay
   // stakes, just a bit of a "the pet has been having a good day" feel.
   // Resets to baseline at the start of each new (local) day — a fresh start
   // rather than carrying yesterday's mood forward indefinitely.
@@ -147,6 +161,7 @@ export const useAgentStore = defineStore('agent', () => {
   // earned through successful tasks rather than starting halfway charged.
   function resetMood() {
     mood.value = MOOD_BASELINE
+    moodTaskProgress.clear()
     localStorage.setItem('agent-pet-mood', String(MOOD_BASELINE))
     localStorage.setItem('agent-pet-mood-date', todayKey())
     localStorage.setItem('agent-pet-mood-version', MOOD_SYSTEM_VERSION)
@@ -194,6 +209,62 @@ export const useAgentStore = defineStore('agent', () => {
     return `${source}:${sessionId}`
   }
 
+  function isWorkingState(state: AgentState): boolean {
+    return state === 'thinking'
+      || state === 'tool-running'
+      || state === 'waiting-permission'
+      || state === 'waiting-input'
+  }
+
+  function awardMoodProgress(event: AgentStatusEvent, key: string, prevState?: AgentState) {
+    const eventAt = Number.isFinite(event.timestamp) ? event.timestamp : Date.now()
+    const explicitTaskStart = event.originalEvent === 'UserPromptSubmit'
+    const resumedFromTerminal = prevState === 'idle'
+      || prevState === 'success'
+      || prevState === 'error'
+      || prevState === 'offline'
+
+    if (
+      explicitTaskStart
+      || (isWorkingState(event.state) && (!moodTaskProgress.has(key) || resumedFromTerminal))
+    ) {
+      moodTaskProgress.set(key, {
+        startedAt: eventAt,
+        completedTools: 0,
+        toolPoints: 0,
+        timePoints: 0,
+      })
+    }
+
+    const progress = moodTaskProgress.get(key)
+    if (!progress) return
+
+    let reward = 0
+    if (prevState === 'tool-running' && event.state === 'thinking') {
+      progress.completedTools += 1
+      const earnedToolPoints = Math.min(
+        MOOD_TOOL_PROGRESS_CAP,
+        Math.floor(progress.completedTools / MOOD_TOOL_COMPLETIONS_PER_POINT),
+      )
+      reward += earnedToolPoints - progress.toolPoints
+      progress.toolPoints = earnedToolPoints
+    }
+
+    const elapsed = Math.max(0, eventAt - progress.startedAt)
+    const earnedTimePoints = Math.min(
+      MOOD_TIME_PROGRESS_CAP,
+      Math.floor(elapsed / MOOD_TIME_INTERVAL_MS),
+    )
+    reward += earnedTimePoints - progress.timePoints
+    progress.timePoints = earnedTimePoints
+
+    if (reward > 0) adjustMood(reward)
+
+    if (event.state === 'success' || event.state === 'error' || event.state === 'idle' || event.state === 'offline') {
+      moodTaskProgress.delete(key)
+    }
+  }
+
   // Returns which (if any) sound cue this event is worth playing, so the
   // caller (App.vue) can decide whether/where to actually play it — this
   // store instance is shared by both the pet and panel windows, and audio
@@ -220,9 +291,11 @@ export const useAgentStore = defineStore('agent', () => {
       }
     }
 
+    awardMoodProgress(event, key, prevState)
+
     if ((event.state === 'success' || event.state === 'error') && prevState !== event.state) {
       showToast(event.source, event.project, event.state)
-      adjustMood(event.state === 'success' ? 4 : -6)
+      adjustMood(event.state === 'success' ? MOOD_SUCCESS_REWARD : -MOOD_ERROR_PENALTY)
       return event.state
     }
 
@@ -242,6 +315,7 @@ export const useAgentStore = defineStore('agent', () => {
         // terminal event (Stop/SessionEnd) — treat it as gone rather than
         // letting a stuck thinking/tool-running state mask real sessions.
         session.state = 'offline'
+        moodTaskProgress.delete(key)
       }
     }
   }
@@ -260,12 +334,14 @@ export const useAgentStore = defineStore('agent', () => {
 
   function removeSession(key: string) {
     delete sessions.value[key]
+    moodTaskProgress.delete(key)
   }
 
   function clearOfflineSessions() {
     for (const key of Object.keys(sessions.value)) {
       if (sessions.value[key].state === 'offline') {
         delete sessions.value[key]
+        moodTaskProgress.delete(key)
       }
     }
   }

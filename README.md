@@ -83,7 +83,7 @@ The panel is split into **Settings** and **Pets** tabs.
 **Settings tab**
 
 - **Size** — S / M / L / XL / XXL to scale the pet.
-- **Mood** — Starts each day at a low baseline of 10, rises on task success, and falls on error. As it grows, an animated energy layer built from the current pet frame intensifies around the pet's own silhouette, reaching overdrive at 90+. Click **Reset** to return to 10; it never grants extra mood.
+- **Mood** — Starts each day at a low baseline of 10. A successful task gives +4 and an error gives -6. Long tasks also earn +1 for every 2 completed tools (up to +8 per task) and +1 for every 5 minutes of work (up to +4 per task), so progress rewards are capped at +12 before the completion bonus. As mood grows, an animated energy layer built from the current pet frame intensifies around the pet's own silhouette, reaching overdrive at 90+. Click **Reset** to return to 10; it never grants extra mood.
 - **Sound** — Short synthesized cues (Web Audio, no audio files) for success/error/waiting-permission. **Off by default.**
 - **Bounce & shake** — Click/state-change bounce, idle fidget sway, and waiting-permission shake. **Off by default.**
 - **Bubble** — The completion toast and "what's it doing" activity bubble above the pet. **Off by default.**

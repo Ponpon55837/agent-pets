@@ -21,7 +21,7 @@ export interface AgentStatusEvent {
   sessionId: string
   project?: string
   state: AgentState
-  originalEvent: string
+  originalEvent?: string
   timestamp: number
   toolName?: string
 }
