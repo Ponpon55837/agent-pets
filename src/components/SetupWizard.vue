@@ -6,6 +6,7 @@ const emit = defineEmits<{
 }>()
 
 type IntegrationTarget = 'opencode' | 'codex' | 'claude' | 'claudeCode'
+type IntegrationTestSource = 'opencode-cli' | 'opencode-desktop' | 'codex' | 'claude' | 'claude-desktop'
 
 interface ToolStatus {
   name: string
@@ -13,19 +14,23 @@ interface ToolStatus {
   connected: boolean
   description: string
   target: IntegrationTarget
+  source: IntegrationTestSource
+  verifiedAt?: number
+  testError?: string
 }
 
 const tools = ref<ToolStatus[]>([
-  { name: 'OpenCode CLI', detected: false, connected: false, description: 'Plugin at ~/.config/opencode/plugin/', target: 'opencode' },
-  { name: 'OpenCode Desktop', detected: false, connected: false, description: 'Plugin in AppData', target: 'opencode' },
-  { name: 'Codex CLI', detected: false, connected: false, description: 'Hooks at ~/.codex/hooks.json', target: 'codex' },
-  { name: 'Claude Code CLI', detected: false, connected: false, description: 'Hooks at ~/.claude/settings.json', target: 'claudeCode' },
-  { name: 'Claude Code Desktop', detected: false, connected: false, description: 'Hooks at ~/.claude/settings.json', target: 'claudeCode' },
+  { name: 'OpenCode CLI', detected: false, connected: false, description: 'Plugin at ~/.config/opencode/plugin/', target: 'opencode', source: 'opencode-cli' },
+  { name: 'OpenCode Desktop', detected: false, connected: false, description: 'Plugin in AppData', target: 'opencode', source: 'opencode-desktop' },
+  { name: 'Codex CLI', detected: false, connected: false, description: 'Hooks at ~/.codex/hooks.json', target: 'codex', source: 'codex' },
+  { name: 'Claude Code CLI', detected: false, connected: false, description: 'Hooks at ~/.claude/settings.json', target: 'claudeCode', source: 'claude' },
+  { name: 'Claude Code Desktop', detected: false, connected: false, description: 'Hooks at ~/.claude/settings.json', target: 'claudeCode', source: 'claude-desktop' },
 ])
 
 const loading = ref(true)
 const error = ref('')
 const installing = ref<IntegrationTarget | 'all' | null>(null)
+const testing = ref<IntegrationTestSource | null>(null)
 const installError = ref('')
 
 const elapsedMs = ref(0)
@@ -64,6 +69,9 @@ async function detectTools() {
       tools.value[3].connected = status.claudeCode.configured && status.claudeCode.hookScript
       tools.value[4].detected = status.claudeCode.settings
       tools.value[4].connected = status.claudeCode.configured && status.claudeCode.hookScript
+      for (const tool of tools.value) {
+        if (!tool.connected) tool.verifiedAt = undefined
+      }
     } else {
       error.value = 'Could not detect tools (timeout)'
     }
@@ -77,6 +85,12 @@ async function detectTools() {
 async function install(target?: IntegrationTarget) {
   installing.value = target ?? 'all'
   installError.value = ''
+  for (const tool of tools.value) {
+    if (!target || tool.target === target) {
+      tool.verifiedAt = undefined
+      tool.testError = undefined
+    }
+  }
   try {
     const result = await window.electronAPI?.installIntegrations(target)
     if (result && !result.ok) {
@@ -87,6 +101,22 @@ async function install(target?: IntegrationTarget) {
   }
   installing.value = null
   await detectTools()
+}
+
+async function testIntegration(tool: ToolStatus) {
+  testing.value = tool.source
+  tool.testError = undefined
+  try {
+    const result = await window.electronAPI?.testIntegration(tool.source)
+    if (result?.ok && result.verifiedAt) {
+      tool.verifiedAt = result.verifiedAt
+    } else {
+      tool.testError = result?.error || 'Live event test failed'
+    }
+  } catch {
+    tool.testError = 'Live event test failed'
+  }
+  testing.value = null
 }
 
 onMounted(() => {
@@ -129,23 +159,42 @@ onUnmounted(() => {
           <div class="tool-status">
             <span class="status-dot" :class="{ green: tool.connected, yellow: tool.detected && !tool.connected, red: !tool.detected }" />
             <span class="tool-name">{{ tool.name }}</span>
-            <button
-              class="install-btn"
-              :disabled="installing !== null"
-              @click="install(tool.target)"
-            >
-              {{ installing === tool.target ? '...' : tool.connected ? 'Reinstall' : 'Install' }}
-            </button>
+            <div class="tool-actions">
+              <button
+                class="test-btn"
+                :disabled="!tool.connected || installing !== null || testing !== null"
+                title="Send a live event through the local receiver"
+                @click="testIntegration(tool)"
+              >
+                {{ testing === tool.source ? 'Testing...' : 'Test' }}
+              </button>
+              <button
+                class="install-btn"
+                :disabled="installing !== null || testing !== null"
+                @click="install(tool.target)"
+              >
+                {{ installing === tool.target ? '...' : tool.connected ? 'Reinstall' : 'Install' }}
+              </button>
+            </div>
           </div>
           <div class="tool-desc">{{ tool.description }}</div>
+          <div v-if="tool.verifiedAt" class="test-result passed">
+            Receiver verified at {{ new Date(tool.verifiedAt).toLocaleTimeString() }}
+          </div>
+          <div v-else-if="tool.testError" class="test-result failed">{{ tool.testError }}</div>
         </div>
       </div>
 
-      <div class="wizard-note">
-        Codex Desktop currently has no separate hook API. The Codex entry above
-        installs the shared <code>~/.codex/hooks.json</code> integration for the
-        CLI; Desktop reports status only if its build runs the same hooks.
-      </div>
+      <details class="wizard-note">
+        <summary>About testing and Codex Desktop</summary>
+        <div class="wizard-note-content">
+          Green means the integration files are configured. <strong>Test</strong>
+          verifies this running Agent Pets instance can receive and display a live
+          local event; it does not launch the coding tool itself.
+          Codex Desktop currently has no separate hook API; the Codex entry installs
+          the shared CLI hook.
+        </div>
+      </details>
 
       <div v-if="installError" class="error-msg">{{ installError }}</div>
 
@@ -301,8 +350,14 @@ onUnmounted(() => {
   gap: 6px;
 }
 
-.install-btn {
+.tool-actions {
   margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.install-btn,
+.test-btn {
   padding: 2px 8px;
   border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -312,11 +367,13 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-.install-btn:hover:not(:disabled) {
+.install-btn:hover:not(:disabled),
+.test-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
 }
 
-.install-btn:disabled {
+.install-btn:disabled,
+.test-btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -349,14 +406,38 @@ onUnmounted(() => {
   margin-left: 12px;
 }
 
+.test-result {
+  margin-top: 3px;
+  margin-left: 12px;
+  font-size: 10px;
+}
+
+.test-result.passed {
+  color: #50c878;
+}
+
+.test-result.failed {
+  color: #ff6b6b;
+}
+
 .wizard-note {
   font-size: 10px;
   line-height: 1.4;
   color: #888;
-  padding: 7px 8px;
+  padding: 5px 8px;
   border-radius: 5px;
   background: rgba(255, 200, 100, 0.06);
   border: 1px solid rgba(255, 200, 100, 0.12);
+}
+
+.wizard-note summary {
+  cursor: pointer;
+  color: #aaa;
+  user-select: none;
+}
+
+.wizard-note-content {
+  margin-top: 5px;
 }
 
 .wizard-actions {

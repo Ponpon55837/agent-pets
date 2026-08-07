@@ -57,6 +57,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('integration-status')
   },
 
+  testIntegration: (source: 'opencode-cli' | 'opencode-desktop' | 'codex' | 'claude' | 'claude-desktop') => {
+    return ipcRenderer.invoke('test-integration', source)
+  },
+
   installIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => {
     return ipcRenderer.invoke('install-integrations', target)
   },

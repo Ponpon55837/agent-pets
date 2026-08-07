@@ -118,6 +118,8 @@ Each tool shows a status dot:
 
 Click **Install** next to a tool to (re)install just that integration, or **Install All** to do everything at once. Click **Refresh** if a tool's status seems stale.
 
+For a configured integration, click **Test** to send a short-lived event through the running app's local HTTP receiver. A passing result confirms that this Agent Pets instance received and displayed the event; it does not launch the coding tool or prove that tool's hook has fired on its own.
+
 > Note: there is no separate "Codex Desktop" hook install — only Codex CLI hooks are wired up today.
 
 ---

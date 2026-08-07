@@ -1,5 +1,6 @@
 import { app, BrowserWindow, screen, ipcMain, dialog } from 'electron'
 import { join, resolve } from 'path'
+import { request as httpRequest } from 'node:http'
 import * as fs from 'fs'
 import * as path from 'path'
 import { unzipSync } from 'fflate'
@@ -31,6 +32,7 @@ let panelWindow: BrowserWindow | null = null
 let anchorBottomCenter: { x: number; y: number } | null = null
 let resizeAnimHandle: ReturnType<typeof setInterval> | null = null
 let dialogOpen = false
+const pendingIntegrationTests = new Map<string, () => void>()
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -48,6 +50,73 @@ if (!hasSingleInstanceLock) {
 
 const PANEL_WIDTH = 320
 const PANEL_GAP = 6
+const INTEGRATION_TEST_SOURCES = [
+  'opencode-cli',
+  'opencode-desktop',
+  'codex',
+  'claude',
+  'claude-desktop',
+] as const
+
+type IntegrationTestSource = typeof INTEGRATION_TEST_SOURCES[number]
+
+function sendIntegrationTestEvent(
+  source: IntegrationTestSource,
+  sessionId: string,
+  state: 'thinking' | 'offline',
+): Promise<void> {
+  const body = JSON.stringify({
+    source,
+    sessionId,
+    project: 'Agent Pets Test',
+    state,
+    originalEvent: 'AgentPetsIntegrationTest',
+    timestamp: Date.now(),
+  })
+
+  return new Promise((resolvePromise, reject) => {
+    const request = httpRequest({
+      hostname: '127.0.0.1',
+      port: 17373,
+      path: '/v1/events',
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(body),
+      },
+    }, (response) => {
+      response.resume()
+      response.on('end', () => {
+        if (response.statusCode === 204) {
+          resolvePromise()
+        } else {
+          reject(new Error(`Event server returned ${response.statusCode ?? 'no status'}`))
+        }
+      })
+    })
+
+    request.setTimeout(1_500, () => {
+      request.destroy(new Error('Event server timed out'))
+    })
+    request.on('error', reject)
+    request.end(body)
+  })
+}
+
+function waitForIntegrationTestReceipt(sessionId: string): Promise<void> {
+  return new Promise((resolvePromise, reject) => {
+    const timeout = setTimeout(() => {
+      pendingIntegrationTests.delete(sessionId)
+      reject(new Error('Live event was not received by this Agent Pets instance'))
+    }, 1_500)
+
+    pendingIntegrationTests.set(sessionId, () => {
+      clearTimeout(timeout)
+      pendingIntegrationTests.delete(sessionId)
+      resolvePromise()
+    })
+  })
+}
 
 function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3)
@@ -307,7 +376,14 @@ app.whenReady().then(() => {
   createPetWindow()
   createPanelWindow()
 
-  createEventServer(() => [petWindow, panelWindow].filter((w): w is BrowserWindow => w !== null))
+  createEventServer(
+    () => [petWindow, panelWindow].filter((w): w is BrowserWindow => w !== null),
+    (event) => {
+      if (event.originalEvent === 'AgentPetsIntegrationTest') {
+        pendingIntegrationTests.get(event.sessionId)?.()
+      }
+    },
+  )
 
   ipcMain.on('pet-move', (_event, { dx, dy }) => {
     if (!petWindow) return
@@ -416,6 +492,27 @@ app.whenReady().then(() => {
         configured: isAgentPetsHookConfigured(claudeCodeSettingsPath(), 'claude'),
         hookScript: fileExists(hookScriptPath()),
       },
+    }
+  })
+
+  ipcMain.handle('test-integration', async (_event, source: IntegrationTestSource) => {
+    if (!INTEGRATION_TEST_SOURCES.includes(source)) {
+      return { ok: false, error: 'Unsupported integration source' }
+    }
+
+    const sessionId = `agent-pets-test-${source}-${Date.now()}`
+    try {
+      const receipt = waitForIntegrationTestReceipt(sessionId)
+      await Promise.all([
+        sendIntegrationTestEvent(source, sessionId, 'thinking'),
+        receipt,
+      ])
+      setTimeout(() => {
+        void sendIntegrationTestEvent(source, sessionId, 'offline').catch(() => {})
+      }, 2_500)
+      return { ok: true, verifiedAt: Date.now() }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
 

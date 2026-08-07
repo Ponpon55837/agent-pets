@@ -36,7 +36,10 @@ function normalizeState(state: string): string {
   return state
 }
 
-export function createEventServer(getWindows: () => BrowserWindow[]) {
+export function createEventServer(
+  getWindows: () => BrowserWindow[],
+  onEvent?: (event: AgentStatusEvent) => void,
+) {
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     if (request.method !== 'POST' || request.url !== '/v1/events') {
       response.writeHead(404)
@@ -100,6 +103,7 @@ export function createEventServer(getWindows: () => BrowserWindow[]) {
         for (const win of getWindows()) {
           win.webContents.send('agent-status-event', event)
         }
+        onEvent?.(event)
 
         response.writeHead(204)
         response.end()

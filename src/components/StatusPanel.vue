@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAgentStore } from '../stores/agentStore'
-import { STATE_LABELS, SOURCE_LABELS, STATE_COLORS, SOURCE_FAMILIES } from '../types/agent'
+import { STATE_LABELS, SOURCE_LABELS, STATE_COLORS, STATE_PRIORITY, SOURCE_FAMILIES } from '../types/agent'
 import { formatProject } from '../utils/format'
 
 const store = useAgentStore()
@@ -66,7 +66,15 @@ function cancelRename() {
 }
 
 const sessions = computed(() => {
-  return Object.values(store.sessions)
+  return Object.values(store.sessions).sort((a, b) => {
+    const priorityDelta = (STATE_PRIORITY[b.state] ?? 0) - (STATE_PRIORITY[a.state] ?? 0)
+    if (priorityDelta !== 0) return priorityDelta
+
+    const recencyDelta = b.lastSeenAt - a.lastSeenAt
+    if (recencyDelta !== 0) return recencyDelta
+
+    return SOURCE_LABELS[a.source].localeCompare(SOURCE_LABELS[b.source])
+  })
 })
 
 const hasOffline = computed(() => sessions.value.some((s) => s.state === 'offline'))

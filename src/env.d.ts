@@ -25,6 +25,11 @@ interface Window {
       claude: { config: boolean; hookScript: boolean }
       claudeCode: { settings: boolean; configured: boolean; hookScript: boolean }
     }>
+    testIntegration: (source: 'opencode-cli' | 'opencode-desktop' | 'codex' | 'claude' | 'claude-desktop') => Promise<{
+      ok: boolean
+      verifiedAt?: number
+      error?: string
+    }>
     installIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => Promise<{ ok: boolean; error?: string }>
     uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => Promise<{ ok: boolean; error?: string }>
     loadPets: () => Promise<Array<{ id: string; displayName: string; folder: string; builtIn: boolean }>>

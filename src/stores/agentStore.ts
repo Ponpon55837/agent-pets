@@ -274,6 +274,11 @@ export const useAgentStore = defineStore('agent', () => {
     const existing = sessions.value[key]
     const prevState = existing?.state
 
+    if (event.originalEvent === 'AgentPetsIntegrationTest' && event.state === 'offline') {
+      removeSession(key)
+      return null
+    }
+
     if (existing) {
       existing.state = event.state
       existing.lastSeenAt = event.timestamp
