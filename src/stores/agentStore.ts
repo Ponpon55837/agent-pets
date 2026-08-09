@@ -18,6 +18,7 @@ export interface PetEntry {
 
 const SUCCESS_DISPLAY_MS = 4_000
 const SESSION_STALE_MS = 15 * 60_000
+const MAX_SESSION_COUNT = 200
 const PET_BASE_W = 250 // wide enough for a status line like "OpenCode (CLI+Desktop)"
 const PET_BASE_H = 232 // canvas + 1 status line
 const STATUS_LINE_EXTRA_H = 22 // per additional status line beyond the first
@@ -285,6 +286,15 @@ export const useAgentStore = defineStore('agent', () => {
       existing.project = event.project
       existing.toolName = event.toolName
     } else {
+      const allSessions = Object.values(sessions.value)
+      if (allSessions.length >= MAX_SESSION_COUNT) {
+        const evictionCandidate = allSessions
+          .sort((a, b) => {
+            const offlineDelta = Number(a.state !== 'offline') - Number(b.state !== 'offline')
+            return offlineDelta || a.lastSeenAt - b.lastSeenAt
+          })[0]
+        if (evictionCandidate) removeSession(evictionCandidate.key)
+      }
       sessions.value[key] = {
         key,
         source: event.source,

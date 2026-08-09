@@ -58,7 +58,7 @@ Below the pet, a floating status bar shows up to **3 lines**, one per active too
 
 ### Control Panel
 
-Click the pet to open the control panel — a separate always-on-top window. It has two views:
+Click the pet to open the control panel — a separate always-on-top window. It has two views. The main view contains **Sessions** and **Usage** tabs:
 
 #### Sessions View (default)
 
@@ -73,6 +73,10 @@ Shows all sessions (including recently gone-offline ones) with their current sta
 - **Offline** — Session ended or went stale
 
 Live states (Thinking / Tool Running / Waiting) show an elapsed-time readout next to the status. If any sessions are offline, a **Clear offline** button appears below the list to remove them from view.
+
+#### Usage Tab
+
+Shows the remaining subscription quota reported by Codex and Claude Code, including session/weekly windows, countdowns, and reset dates in the user's local time. **Agent Pets has no account system and never asks for an agent username, password, or token.** It reuses the local subscription session already created by Codex CLI or Claude Code, requests the provider's quota endpoint from the Electron main process, and only sends normalized percentages to the UI. If that CLI session is missing or expired, re-authentication happens in the original CLI—not in Agent Pets. Results are cached for one minute; click **Refresh** for a fresh reading. API-key-only Codex sessions do not expose subscription quota.
 
 Click the **⚙** icon in the header to switch to Settings.
 
@@ -215,10 +219,14 @@ Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that r
 
 ## Security
 
-- **Local only** — Server listens on `127.0.0.1` only; no network access.
-- **Body limit** — Requests are limited to 64 KB.
-- **State whitelist** — Only valid states are accepted; unknown states are rejected.
-- **Path sanitization** — Project paths are truncated to basename only; no full paths leak into the UI.
+- **Renderer isolation** — Renderer processes run with Chromium sandboxing, context isolation, no Node.js integration, a restrictive CSP, blocked popups/navigation, denied permissions, and validated main-frame IPC senders.
+- **Local event server** — The event server listens on `127.0.0.1` only, rejects browser-originated and non-JSON requests, rate-limits events, and accepts only bounded, whitelisted fields.
+- **Quota requests** — The Usage tab connects only to the exact HTTPS Codex and Anthropic quota/auth endpoints. Redirects and oversized responses are rejected. OAuth credentials stay in the Electron main process and are never exposed to the renderer or command-line arguments.
+- **Credential refresh** — Expired OAuth tokens are refreshed and merged back into the original Codex auth file or Claude credential store so the CLIs keep working. Writes use account/change guards, restrictive file permissions, and atomic replacement where applicable.
+- **Pet imports** — ZIP entry count, compressed/uncompressed sizes, JSON size, and image size/type are validated before imported files are stored.
+- **Memory bounds** — Agent sessions are capped and stale/offline entries are evicted to prevent unbounded renderer memory growth.
+- **Path sanitization** — Project paths are reduced to their basename, and filesystem destinations are constrained to their expected root.
+- **Release signing** — Production macOS and Windows artifacts should be built with the platform signing credentials configured; unsigned local builds are for development only.
 
 ---
 
@@ -226,7 +234,7 @@ Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that r
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22.12+
 - pnpm 11+
 
 ### Setup
@@ -280,6 +288,7 @@ agent-pets/
 │   ├── main.ts              # Electron main process
 │   ├── preload.ts           # IPC bridge
 │   ├── event-server.ts      # HTTP event server
+│   ├── quota.ts             # Codex / Claude quota readers
 │   └── setup.ts             # Platform-aware paths & setup
 ├── integrations/
 │   ├── install.mjs          # Standalone CLI hook installer
@@ -312,4 +321,4 @@ The app's own install/uninstall logic (used by the Setup Wizard's buttons) lives
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The quota integration is based on the MIT-licensed [TokenBar](https://github.com/Nanako0129/TokenBar); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

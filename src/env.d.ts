@@ -25,6 +25,22 @@ interface Window {
       claude: { config: boolean; hookScript: boolean }
       claudeCode: { settings: boolean; configured: boolean; hookScript: boolean }
     }>
+    getQuotaUsage: (force?: boolean) => Promise<{
+      updatedAt: string
+      providers: Array<{
+        id: 'codex' | 'claude'
+        name: string
+        plan?: string
+        windows: Array<{
+          id: string
+          label: string
+          usedPercent: number
+          remainingPercent: number
+          resetsAt?: string
+        }>
+        error?: string
+      }>
+    }>
     testIntegration: (source: 'opencode-cli' | 'opencode-desktop' | 'codex' | 'claude' | 'claude-desktop') => Promise<{
       ok: boolean
       verifiedAt?: number

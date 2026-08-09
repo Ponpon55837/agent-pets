@@ -9,6 +9,11 @@ const importing = ref(false)
 const editingPetId = ref<string | null>(null)
 const editName = ref('')
 const settingsTab = ref<'general' | 'pets'>('general')
+const dashboardTab = ref<'sessions' | 'usage'>('sessions')
+type QuotaResult = Awaited<ReturnType<NonNullable<typeof window.electronAPI>['getQuotaUsage']>>
+const quotaUsage = ref<QuotaResult | null>(null)
+const quotaLoading = ref(false)
+const quotaError = ref('')
 const moodStage = computed(() => {
   if (store.mood >= 90) return 'Overdrive'
   if (store.mood >= 70) return 'Radiant'
@@ -30,6 +35,60 @@ onMounted(() => {
 onUnmounted(() => {
   if (tickTimer) clearInterval(tickTimer)
 })
+
+async function refreshQuota(force = false) {
+  if (!window.electronAPI?.getQuotaUsage || quotaLoading.value) return
+  quotaLoading.value = true
+  quotaError.value = ''
+  try {
+    quotaUsage.value = await window.electronAPI.getQuotaUsage(force)
+  } catch (error) {
+    quotaError.value = error instanceof Error ? error.message : 'Could not load usage.'
+  } finally {
+    quotaLoading.value = false
+  }
+}
+
+function selectDashboardTab(tab: 'sessions' | 'usage') {
+  dashboardTab.value = tab
+  if (tab === 'usage' && !quotaUsage.value) void refreshQuota()
+}
+
+function formatRemaining(value: number): string {
+  const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10
+  return `${rounded}% left`
+}
+
+function formatReset(timestamp?: string): string {
+  if (!timestamp) return 'Reset time unavailable'
+  const reset = new Date(timestamp).getTime()
+  if (!Number.isFinite(reset)) return 'Reset time unavailable'
+  const deltaMinutes = Math.max(0, Math.round((reset - nowTick.value) / 60_000))
+  if (deltaMinutes < 1) return 'Resets now'
+  if (deltaMinutes < 60) return `Resets in ${deltaMinutes}m`
+  const hours = Math.floor(deltaMinutes / 60)
+  const minutes = deltaMinutes % 60
+  if (hours < 24) return `Resets in ${hours}h${minutes ? ` ${minutes}m` : ''}`
+  const days = Math.floor(hours / 24)
+  return `Resets in ${days}d ${hours % 24}h`
+}
+
+function formatResetAt(timestamp?: string): string {
+  if (!timestamp) return ''
+  const reset = new Date(timestamp)
+  if (!Number.isFinite(reset.getTime())) return ''
+  return reset.toLocaleString([], {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function formatUpdated(timestamp: string): string {
+  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
 
 const LIVE_STATES = new Set(['thinking', 'tool-running', 'waiting-permission', 'waiting-input'])
 
@@ -163,42 +222,122 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
     </div>
 
     <template v-if="store.panelView === 'sessions'">
-      <div v-if="sessions.length === 0" class="panel-empty">
-        No active sessions
+      <div class="dashboard-tabs" role="tablist" aria-label="Dashboard sections">
+        <button
+          class="dashboard-tab"
+          :class="{ active: dashboardTab === 'sessions' }"
+          role="tab"
+          :aria-selected="dashboardTab === 'sessions'"
+          @click="selectDashboardTab('sessions')"
+        >
+          Sessions
+        </button>
+        <button
+          class="dashboard-tab"
+          :class="{ active: dashboardTab === 'usage' }"
+          role="tab"
+          :aria-selected="dashboardTab === 'usage'"
+          @click="selectDashboardTab('usage')"
+        >
+          Usage
+        </button>
       </div>
-      <template v-else>
-        <div class="session-list">
-          <div
-            v-for="session in sessions"
-            :key="session.key"
-            class="session-item"
-          >
-            <div class="session-source">
-              {{ SOURCE_LABELS[session.source] }}
-            </div>
-            <div class="session-info">
-              <span
-                class="state-chip"
-                :class="{ live: LIVE_STATES.has(session.state) }"
-                :style="{ color: STATE_COLORS[session.state], borderColor: STATE_COLORS[session.state] + '40', background: STATE_COLORS[session.state] + '1a' }"
-              >
-                <span class="state-dot" :style="{ background: STATE_COLORS[session.state] }" />
-                {{ STATE_LABELS[session.state] }}
-                <span v-if="elapsedLabel(session)" class="state-elapsed">{{ elapsedLabel(session) }}</span>
-              </span>
-              <span v-if="session.project" class="session-project">
-                {{ formatProject(session.project) }}
-              </span>
-            </div>
-            <div class="session-time">
-              {{ formatTime(session.lastSeenAt) }}
+
+      <template v-if="dashboardTab === 'sessions'">
+        <div v-if="sessions.length === 0" class="panel-empty">
+          No active sessions
+        </div>
+        <template v-else>
+          <div class="session-list">
+            <div
+              v-for="session in sessions"
+              :key="session.key"
+              class="session-item"
+            >
+              <div class="session-source">
+                {{ SOURCE_LABELS[session.source] }}
+              </div>
+              <div class="session-info">
+                <span
+                  class="state-chip"
+                  :class="{ live: LIVE_STATES.has(session.state) }"
+                  :style="{ color: STATE_COLORS[session.state], borderColor: STATE_COLORS[session.state] + '40', background: STATE_COLORS[session.state] + '1a' }"
+                >
+                  <span class="state-dot" :style="{ background: STATE_COLORS[session.state] }" />
+                  {{ STATE_LABELS[session.state] }}
+                  <span v-if="elapsedLabel(session)" class="state-elapsed">{{ elapsedLabel(session) }}</span>
+                </span>
+                <span v-if="session.project" class="session-project">
+                  {{ formatProject(session.project) }}
+                </span>
+              </div>
+              <div class="session-time">
+                {{ formatTime(session.lastSeenAt) }}
+              </div>
             </div>
           </div>
-        </div>
-        <div v-if="hasOffline" class="session-footer">
-          <button class="clear-offline-btn" @click="store.clearOfflineSessions()">
-            Clear offline
-          </button>
+          <div v-if="hasOffline" class="session-footer">
+            <button class="clear-offline-btn" @click="store.clearOfflineSessions()">
+              Clear offline
+            </button>
+          </div>
+        </template>
+      </template>
+
+      <template v-else>
+        <div class="usage-view">
+          <div v-if="quotaLoading && !quotaUsage" class="panel-empty usage-loading">
+            Loading quota…
+          </div>
+          <div v-else-if="quotaError && !quotaUsage" class="panel-empty usage-error">
+            {{ quotaError }}
+          </div>
+          <template v-else-if="quotaUsage">
+            <div
+              v-for="provider in quotaUsage.providers"
+              :key="provider.id"
+              class="usage-provider"
+              :class="`provider-${provider.id}`"
+            >
+              <div class="usage-provider-header">
+                <span class="usage-provider-name">{{ provider.name }}</span>
+                <span v-if="provider.plan" class="usage-plan">{{ provider.plan }}</span>
+              </div>
+              <div v-if="provider.error" class="usage-provider-error">
+                {{ provider.error }}
+              </div>
+              <div v-else class="quota-window-list">
+                <div v-for="quota in provider.windows" :key="quota.id" class="quota-window">
+                  <div class="quota-copy">
+                    <span class="quota-label">{{ quota.label }}</span>
+                    <span class="quota-value">{{ formatRemaining(quota.remainingPercent) }}</span>
+                  </div>
+                  <div
+                    class="quota-track"
+                    role="progressbar"
+                    :aria-label="`${provider.name} ${quota.label} remaining`"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    :aria-valuenow="quota.remainingPercent"
+                  >
+                    <div class="quota-fill" :style="{ width: quota.remainingPercent + '%' }" />
+                  </div>
+                  <div class="quota-reset">
+                    <span>{{ formatReset(quota.resetsAt) }}</span>
+                    <span v-if="formatResetAt(quota.resetsAt)" class="quota-reset-at">
+                      {{ formatResetAt(quota.resetsAt) }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="usage-footer">
+              <span>Updated {{ formatUpdated(quotaUsage.updatedAt) }}</span>
+              <button class="usage-refresh" :disabled="quotaLoading" @click="refreshQuota(true)">
+                {{ quotaLoading ? 'Refreshing…' : 'Refresh' }}
+              </button>
+            </div>
+          </template>
         </div>
       </template>
     </template>
@@ -464,6 +603,178 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   text-align: center;
   color: #a3a7b4;
   font-size: 12px;
+}
+
+.dashboard-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 8px 12px 4px;
+}
+
+.dashboard-tab {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #9298aa;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.dashboard-tab:hover {
+  color: #d0d3df;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dashboard-tab.active {
+  color: #e5e7ff;
+  background: rgba(139, 156, 247, 0.17);
+}
+
+.usage-view {
+  min-height: 0;
+  padding: 4px 10px 10px;
+  overflow-y: auto;
+}
+
+.usage-loading {
+  animation: usage-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes usage-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.usage-error,
+.usage-provider-error {
+  color: #ff9a9a;
+}
+
+.usage-provider {
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid rgba(139, 156, 247, 0.13);
+  border-radius: 10px;
+  background: rgba(139, 156, 247, 0.045);
+}
+
+.usage-provider.provider-claude {
+  border-color: rgba(213, 155, 255, 0.13);
+  background: rgba(213, 155, 255, 0.04);
+}
+
+.usage-provider-header,
+.quota-copy,
+.usage-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.usage-provider-name {
+  color: #e0e3ef;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.usage-plan {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #aeb4c5;
+  font-size: 9px;
+}
+
+.usage-provider-error {
+  padding-top: 8px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.quota-window-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.quota-label {
+  color: #b7bccb;
+  font-size: 10px;
+}
+
+.quota-value {
+  color: #f1f3ff;
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.quota-track {
+  height: 6px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.quota-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #667eea, #8b9cf7);
+  transition: width 0.35s ease;
+}
+
+.provider-claude .quota-fill {
+  background: linear-gradient(90deg, #b56ee2, #d59bff);
+}
+
+.quota-reset {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 3px;
+  color: #858b9b;
+  font-size: 9px;
+}
+
+.quota-reset-at {
+  color: #a3a8b7;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.usage-footer {
+  padding: 9px 2px 0;
+  color: #858b9b;
+  font-size: 9px;
+}
+
+.usage-refresh {
+  padding: 4px 9px;
+  border: 1px solid rgba(139, 156, 247, 0.23);
+  border-radius: 6px;
+  background: rgba(139, 156, 247, 0.08);
+  color: #adb8ff;
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.usage-refresh:hover:not(:disabled) {
+  background: rgba(139, 156, 247, 0.15);
+}
+
+.usage-refresh:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .session-list {

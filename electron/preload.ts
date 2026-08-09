@@ -57,6 +57,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('integration-status')
   },
 
+  getQuotaUsage: (force = false) => {
+    return ipcRenderer.invoke('quota-usage', force)
+  },
+
   testIntegration: (source: 'opencode-cli' | 'opencode-desktop' | 'codex' | 'claude' | 'claude-desktop') => {
     return ipcRenderer.invoke('test-integration', source)
   },

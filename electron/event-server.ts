@@ -1,5 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http'
-import { BrowserWindow } from 'electron'
+import type { BrowserWindow } from 'electron'
+import { app } from 'electron'
 
 export interface AgentStatusEvent {
   source: string
@@ -12,6 +13,9 @@ export interface AgentStatusEvent {
 }
 
 const MAX_BODY_BYTES = 64 * 1024
+const MAX_EVENTS_PER_WINDOW = 500
+const RATE_WINDOW_MS = 10_000
+const MAX_TEXT_FIELD_LENGTH = 512
 
 const VALID_SOURCES = [
   'opencode-cli', 'opencode-desktop',
@@ -40,6 +44,9 @@ export function createEventServer(
   getWindows: () => BrowserWindow[],
   onEvent?: (event: AgentStatusEvent) => void,
 ) {
+  let rateWindowStartedAt = Date.now()
+  let eventsInWindow = 0
+
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     if (request.method !== 'POST' || request.url !== '/v1/events') {
       response.writeHead(404)
@@ -47,13 +54,43 @@ export function createEventServer(
       return
     }
 
+    // CLI hooks do not send Origin. Reject browser-originated requests so an
+    // arbitrary website cannot spoof agent state through the loopback server.
+    if (request.headers.origin) {
+      response.writeHead(403)
+      response.end(JSON.stringify({ error: 'browser origins are not allowed' }))
+      return
+    }
+
+    const contentType = request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase()
+    if (contentType !== 'application/json') {
+      response.writeHead(415)
+      response.end(JSON.stringify({ error: 'application/json required' }))
+      return
+    }
+
+    const now = Date.now()
+    if (now - rateWindowStartedAt >= RATE_WINDOW_MS) {
+      rateWindowStartedAt = now
+      eventsInWindow = 0
+    }
+    eventsInWindow += 1
+    if (eventsInWindow > MAX_EVENTS_PER_WINDOW) {
+      response.writeHead(429, { 'retry-after': '10' })
+      response.end(JSON.stringify({ error: 'too many events' }))
+      request.resume()
+      return
+    }
+
     const chunks: Buffer[] = []
     let totalBytes = 0
+    let bodyRejected = false
 
     request.on('data', (chunk: Buffer) => {
+      if (bodyRejected) return
       totalBytes += chunk.length
       if (totalBytes > MAX_BODY_BYTES) {
-        request.destroy()
+        bodyRejected = true
         response.writeHead(413)
         response.end(JSON.stringify({ error: 'request too large' }))
         return
@@ -62,14 +99,26 @@ export function createEventServer(
     })
 
     request.on('end', () => {
-      if (totalBytes > MAX_BODY_BYTES) return
+      if (bodyRejected) return
 
       try {
-        const event: AgentStatusEvent = JSON.parse(
+        const parsed: unknown = JSON.parse(
           Buffer.concat(chunks).toString('utf8')
         )
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          response.writeHead(400)
+          response.end(JSON.stringify({ error: 'event must be an object' }))
+          return
+        }
+        const event = parsed as AgentStatusEvent
 
-        if (!event.source || !event.sessionId || !event.state || !event.timestamp) {
+        if (
+          typeof event.source !== 'string'
+          || typeof event.sessionId !== 'string'
+          || typeof event.state !== 'string'
+          || typeof event.timestamp !== 'number'
+          || !Number.isFinite(event.timestamp)
+        ) {
           response.writeHead(400)
           response.end(JSON.stringify({ error: 'missing required fields' }))
           return
@@ -87,7 +136,7 @@ export function createEventServer(
           return
         }
 
-        if (typeof event.sessionId !== 'string' || event.sessionId.length > 256) {
+        if (event.sessionId.length === 0 || event.sessionId.length > 256) {
           response.writeHead(400)
           response.end(JSON.stringify({ error: 'invalid sessionId' }))
           return
@@ -95,10 +144,19 @@ export function createEventServer(
 
         event.source = normalizeSource(event.source)
         event.state = normalizeState(event.state)
+        // Status ordering and mood calculations use receipt time, not an
+        // attacker-controlled or badly skewed client clock.
+        event.timestamp = Date.now()
 
-        if (event.project && typeof event.project === 'string') {
-          event.project = event.project.split(/[/\\]/).pop() || event.project
-        }
+        event.project = typeof event.project === 'string'
+          ? (event.project.split(/[/\\]/).pop() || event.project).slice(0, MAX_TEXT_FIELD_LENGTH)
+          : undefined
+        event.toolName = typeof event.toolName === 'string'
+          ? event.toolName.slice(0, MAX_TEXT_FIELD_LENGTH)
+          : undefined
+        event.originalEvent = typeof event.originalEvent === 'string'
+          ? event.originalEvent.slice(0, MAX_TEXT_FIELD_LENGTH)
+          : undefined
 
         for (const win of getWindows()) {
           win.webContents.send('agent-status-event', event)
@@ -126,7 +184,7 @@ export function createEventServer(
   })
 
   server.listen(17373, '127.0.0.1', () => {
-    if (!require('electron').app.isPackaged) {
+    if (!app.isPackaged) {
       console.log('Event server listening on http://127.0.0.1:17373/v1/events')
     }
   })

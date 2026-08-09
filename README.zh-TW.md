@@ -58,7 +58,7 @@
 
 ### 控制面板
 
-點擊寵物打開控制面板——一個獨立的、永遠置頂的視窗，有兩個畫面：
+點擊寵物打開控制面板——一個獨立的、永遠置頂的視窗，有兩個畫面；主畫面包含 **Sessions** 與 **Usage** 分頁：
 
 #### Sessions 畫面（預設）
 
@@ -73,6 +73,10 @@
 - **Offline** — Session 已結束或逾時失聯
 
 進行中的狀態（Thinking / Tool Running / Waiting）旁邊會顯示已耗時秒數。如果有離線的 session，列表下方會出現 **Clear offline** 按鈕，一鍵清除。
+
+#### Usage 分頁
+
+顯示 Codex 與 Claude Code 回報的訂閱剩餘用量，包含 session／weekly 額度、重置倒數，以及依使用者本地時區顯示的重置日期時間。**Agent Pets 沒有帳號系統，也永遠不會要求輸入 Agent 帳號、密碼或 token。** 它只沿用 Codex CLI／Claude Code 原本已建立的本機訂閱 session，由 Electron 主行程向供應商的 quota API 查詢，UI 只會收到整理過的百分比。若該 CLI session 不存在或已失效，重新驗證會在原本的 CLI 內進行，不是在 Agent Pets。結果會快取一分鐘，也可以按 **Refresh** 強制更新。只使用 API key 的 Codex session 無法取得訂閱額度。
 
 點標題列的 **⚙** 圖示切換到 Settings。
 
@@ -215,10 +219,14 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 
 ## 安全性
 
-- **僅限本機** — 伺服器只監聽 `127.0.0.1`，不對外網開放。
-- **請求大小限制** — 單一請求限制 64 KB。
-- **狀態白名單** — 只接受合法的狀態值，未知狀態一律拒絕。
-- **路徑清理** — 專案路徑只會保留 basename，完整路徑不會外洩到 UI。
+- **Renderer 隔離** — Renderer 啟用 Chromium sandbox 與 context isolation、停用 Node.js integration，並以嚴格 CSP、禁止彈窗／外部導頁、拒絕權限請求及 IPC 主 frame 來源驗證縮小攻擊面。
+- **本機事件伺服器** — 只監聽 `127.0.0.1`，拒絕瀏覽器來源與非 JSON 請求，限制事件速率，且只接受長度受限的白名單欄位。
+- **用量查詢** — Usage 分頁只允許連線到指定的 Codex 與 Anthropic HTTPS quota／驗證端點，拒絕轉址與過大回應。OAuth 憑證只存在 Electron 主行程，不會傳給 renderer 或出現在命令列參數。
+- **憑證更新** — OAuth token 過期時會更新，並安全合併回原本的 Codex auth 檔或 Claude 憑證儲存區，避免 CLI 登入失效；檔案寫入會做帳號／變更檢查、限制檔案權限，並盡可能採原子替換。
+- **寵物匯入** — 寫入前會驗證 ZIP 項目數、壓縮／解壓縮大小、JSON 大小，以及圖片大小與實際格式。
+- **記憶體上限** — Agent session 數量有上限，會優先淘汰離線／最舊項目，避免 renderer 記憶體無限成長。
+- **路徑清理** — 專案路徑只保留 basename，檔案寫入目的地也會限制在預期根目錄內。
+- **發行簽章** — 正式發布 macOS／Windows 產物時必須配置平台簽章憑證；未簽章的本機建置只供開發測試。
 
 ---
 
@@ -226,7 +234,7 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 
 ### 前置需求
 
-- Node.js 18+
+- Node.js 22.12+
 - pnpm 11+
 
 ### 環境設置
@@ -280,6 +288,7 @@ agent-pets/
 │   ├── main.ts              # Electron 主行程
 │   ├── preload.ts           # IPC 橋接
 │   ├── event-server.ts      # HTTP 事件伺服器
+│   ├── quota.ts             # Codex／Claude 剩餘用量讀取
 │   └── setup.ts             # 跨平台路徑與安裝邏輯
 ├── integrations/
 │   ├── install.mjs          # 獨立的 CLI hook 安裝程式
@@ -312,4 +321,4 @@ App 本身的安裝/解除安裝邏輯（Setup Wizard 按鈕在用的那套）�
 
 ## 授權條款
 
-MIT — 詳見 [LICENSE](LICENSE)。
+MIT — 詳見 [LICENSE](LICENSE)。用量整合以 MIT 授權的 [TokenBar](https://github.com/Nanako0129/TokenBar) 為基礎，詳見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

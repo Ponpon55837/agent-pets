@@ -1,10 +1,13 @@
-import { app, BrowserWindow, screen, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, screen, ipcMain, dialog, session } from 'electron'
+import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { join, resolve } from 'path'
+import { fileURLToPath } from 'node:url'
 import { request as httpRequest } from 'node:http'
 import * as fs from 'fs'
 import * as path from 'path'
 import { unzipSync } from 'fflate'
 import { createEventServer } from './event-server'
+import { getQuotaUsage } from './quota'
 import {
   IS_MAC,
   hookScriptDeployPath,
@@ -34,6 +37,10 @@ let resizeAnimHandle: ReturnType<typeof setInterval> | null = null
 let dialogOpen = false
 const pendingIntegrationTests = new Map<string, () => void>()
 
+// Enforce Chromium's renderer sandbox even if a future BrowserWindow option
+// accidentally regresses. This must be called before app readiness.
+app.enableSandbox()
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
 if (!hasSingleInstanceLock) {
@@ -50,6 +57,11 @@ if (!hasSingleInstanceLock) {
 
 const PANEL_WIDTH = 320
 const PANEL_GAP = 6
+const MAX_PET_ZIP_BYTES = 10 * 1024 * 1024
+const MAX_PET_ZIP_ENTRIES = 64
+const MAX_PET_UNCOMPRESSED_BYTES = 25 * 1024 * 1024
+const MAX_PET_JSON_BYTES = 256 * 1024
+const MAX_PET_IMAGE_BYTES = 20 * 1024 * 1024
 const INTEGRATION_TEST_SOURCES = [
   'opencode-cli',
   'opencode-desktop',
@@ -165,6 +177,60 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max))
 }
 
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function isTrustedRendererUrl(rawUrl: string): boolean {
+  try {
+    const candidate = new URL(rawUrl)
+    if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) {
+      return candidate.origin === new URL(process.env.VITE_DEV_SERVER_URL).origin
+    }
+    if (candidate.protocol !== 'file:') return false
+    const expected = resolve(join(__dirname, '../dist/index.html'))
+    return resolve(fileURLToPath(candidate)) === expected
+  } catch {
+    return false
+  }
+}
+
+function secureRendererWindow(window: BrowserWindow): void {
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  window.webContents.on('will-navigate', (event, url) => {
+    if (!isTrustedRendererUrl(url)) event.preventDefault()
+  })
+  window.webContents.on('will-redirect', (event, url) => {
+    if (!isTrustedRendererUrl(url)) event.preventDefault()
+  })
+  window.webContents.on('will-attach-webview', (event) => {
+    event.preventDefault()
+  })
+}
+
+function isTrustedIpcSender(
+  event: IpcMainEvent | IpcMainInvokeEvent,
+  requiredWindow?: BrowserWindow | null,
+): boolean {
+  const frame = event.senderFrame
+  if (!frame || frame !== event.sender.mainFrame || !isTrustedRendererUrl(frame.url)) return false
+  if (requiredWindow) return event.sender === requiredWindow.webContents
+  return [petWindow, panelWindow].some((window) => window?.webContents === event.sender)
+}
+
+function assertTrustedIpcSender(
+  event: IpcMainEvent | IpcMainInvokeEvent,
+  requiredWindow?: BrowserWindow | null,
+): void {
+  if (!isTrustedIpcSender(event, requiredWindow)) {
+    throw new Error('Unauthorized IPC sender')
+  }
+}
+
+function isIntegrationTarget(value: unknown): value is IntegrationTarget {
+  return value === 'opencode' || value === 'codex' || value === 'claude' || value === 'claudeCode'
+}
+
 function sanitizePetId(id: string): string | null {
   if (typeof id !== 'string') return null
   const cleaned = id.replace(/[^a-zA-Z0-9_\-.]/g, '')
@@ -174,9 +240,22 @@ function sanitizePetId(id: string): string | null {
 }
 
 function safeJoin(base: string, ...parts: string[]): string | null {
-  const resolved = resolve(base, ...parts)
-  if (!resolved.startsWith(resolve(base))) return null
-  return resolved
+  const root = resolve(base)
+  const resolvedPath = resolve(root, ...parts)
+  const relative = path.relative(root, resolvedPath)
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null
+  return resolvedPath
+}
+
+function isSupportedRasterImage(data: Uint8Array): boolean {
+  const png = data.length >= 8
+    && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47
+    && data[4] === 0x0d && data[5] === 0x0a && data[6] === 0x1a && data[7] === 0x0a
+  const jpeg = data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff
+  const webp = data.length >= 12
+    && Buffer.from(data.subarray(0, 4)).toString('ascii') === 'RIFF'
+    && Buffer.from(data.subarray(8, 12)).toString('ascii') === 'WEBP'
+  return png || jpeg || webp
 }
 
 function createPetWindow() {
@@ -213,8 +292,13 @@ function createPetWindow() {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false,
+      devTools: !app.isPackaged,
     },
   })
+
+  secureRendererWindow(petWindow)
 
   petWindow.setIgnoreMouseEvents(false)
 
@@ -261,8 +345,13 @@ function createPanelWindow() {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false,
+      devTools: !app.isPackaged,
     },
   })
+
+  secureRendererWindow(panelWindow)
 
   if (IS_MAC) {
     panelWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
@@ -372,6 +461,11 @@ function isAgentPetsHookConfigured(settingsPath: string, expectedArg: string): b
 app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return
 
+  session.defaultSession.setPermissionCheckHandler(() => false)
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false)
+  })
+
   repairWindowsInstalledHooks()
   createPetWindow()
   createPanelWindow()
@@ -385,8 +479,14 @@ app.whenReady().then(() => {
     },
   )
 
-  ipcMain.on('pet-move', (_event, { dx, dy }) => {
-    if (!petWindow) return
+  ipcMain.on('pet-move', (event, payload: unknown) => {
+    if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
+    const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    const rawDx = finiteNumber(data.dx)
+    const rawDy = finiteNumber(data.dy)
+    if (rawDx === null || rawDy === null) return
+    const dx = clamp(rawDx, -2_000, 2_000)
+    const dy = clamp(rawDy, -2_000, 2_000)
     const [x, y] = petWindow.getPosition()
     petWindow.setPosition(x + dx, y + dy)
     anchorBottomCenter = null
@@ -395,14 +495,17 @@ app.whenReady().then(() => {
 
   // Fired once when a drag ends (not per mousemove) so we're not hitting
   // disk on every pixel of movement.
-  ipcMain.on('pet-drag-end', () => {
-    if (!petWindow) return
+  ipcMain.on('pet-drag-end', (event) => {
+    if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
     const [x, y] = petWindow.getPosition()
     writeWindowState(x, y)
   })
 
-  ipcMain.on('pet-mouse-passthrough', (event, { ignore }) => {
-    if (!petWindow || event.sender !== petWindow.webContents || typeof ignore !== 'boolean') return
+  ipcMain.on('pet-mouse-passthrough', (event, payload: unknown) => {
+    if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
+    const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    const ignore = data.ignore
+    if (typeof ignore !== 'boolean') return
     if (ignore) {
       // Forward mousemove events while click-through is active so the
       // renderer can make the visible pet interactive again on hover.
@@ -412,8 +515,8 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.on('panel-toggle', () => {
-    if (!panelWindow) return
+  ipcMain.on('panel-toggle', (event) => {
+    if (!panelWindow || !isTrustedIpcSender(event, petWindow)) return
     if (panelWindow.isVisible()) {
       panelWindow.hide()
       return
@@ -423,17 +526,27 @@ app.whenReady().then(() => {
     panelWindow.webContents.send('panel-opened')
   })
 
-  ipcMain.on('panel-resize', (_event, { height }) => {
-    if (!panelWindow) return
-    panelWindow.setBounds(computePanelBounds(height))
+  ipcMain.on('panel-resize', (event, payload: unknown) => {
+    if (!panelWindow || !isTrustedIpcSender(event, panelWindow)) return
+    const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    const height = finiteNumber(data.height)
+    if (height === null) return
+    panelWindow.setBounds(computePanelBounds(Math.round(clamp(height, 160, 900))))
   })
 
-  ipcMain.on('panel-hide', () => {
+  ipcMain.on('panel-hide', (event) => {
+    if (!isTrustedIpcSender(event, panelWindow)) return
     panelWindow?.hide()
   })
 
-  ipcMain.on('pet-resize', (_event, { width, height }) => {
-    if (!petWindow) return
+  ipcMain.on('pet-resize', (event, payload: unknown) => {
+    if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
+    const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    const rawWidth = finiteNumber(data.width)
+    const rawHeight = finiteNumber(data.height)
+    if (rawWidth === null || rawHeight === null) return
+    const width = Math.round(clamp(rawWidth, 80, 1_600))
+    const height = Math.round(clamp(rawHeight, 80, 1_600))
     const { workArea } = screen.getDisplayMatching(petWindow.getBounds())
 
     if (!anchorBottomCenter) {
@@ -461,16 +574,19 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.on('pet-quit', () => {
+  ipcMain.on('pet-quit', (event) => {
+    if (!isTrustedIpcSender(event)) return
     app.quit()
   })
 
-  ipcMain.on('pet-restart', () => {
+  ipcMain.on('pet-restart', (event) => {
+    if (!isTrustedIpcSender(event)) return
     app.relaunch()
     app.exit(0)
   })
 
-  ipcMain.handle('integration-status', () => {
+  ipcMain.handle('integration-status', (event) => {
+    assertTrustedIpcSender(event, panelWindow)
     const codexConfig = readFile(codexConfigPath())
     return {
       opencode: {
@@ -495,7 +611,13 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('test-integration', async (_event, source: IntegrationTestSource) => {
+  ipcMain.handle('quota-usage', (event, force?: unknown) => {
+    assertTrustedIpcSender(event, panelWindow)
+    return getQuotaUsage(force === true)
+  })
+
+  ipcMain.handle('test-integration', async (event, source: IntegrationTestSource) => {
+    assertTrustedIpcSender(event, panelWindow)
     if (!INTEGRATION_TEST_SOURCES.includes(source)) {
       return { ok: false, error: 'Unsupported integration source' }
     }
@@ -516,25 +638,36 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('install-integrations', (_event, target?: IntegrationTarget) => {
+  ipcMain.handle('install-integrations', (event, target?: unknown) => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (target !== undefined && !isIntegrationTarget(target)) {
+      return { ok: false, error: 'Unsupported integration target' }
+    }
+    const safeTarget = target as IntegrationTarget | undefined
     try {
-      installIntegration(target)
+      installIntegration(safeTarget)
       return { ok: true }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
 
-  ipcMain.handle('uninstall-integrations', (_event, target?: IntegrationTarget) => {
+  ipcMain.handle('uninstall-integrations', (event, target?: unknown) => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (target !== undefined && !isIntegrationTarget(target)) {
+      return { ok: false, error: 'Unsupported integration target' }
+    }
+    const safeTarget = target as IntegrationTarget | undefined
     try {
-      uninstallIntegration(target)
+      uninstallIntegration(safeTarget)
       return { ok: true }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
 
-  ipcMain.handle('load-pets', () => {
+  ipcMain.handle('load-pets', (event) => {
+    assertTrustedIpcSender(event)
     const builtinPath = getPetsJsonPath()
     let builtin: Array<{ id: string; displayName: string; folder: string; builtIn: boolean }> = []
     try {
@@ -572,8 +705,11 @@ app.whenReady().then(() => {
     return [...builtin, ...custom]
   })
 
-  ipcMain.handle('add-custom-pet', (_event, petData: { id: string; displayName: string }) => {
-    const safeId = sanitizePetId(petData.id)
+  ipcMain.handle('add-custom-pet', (event, petData: unknown) => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (!petData || typeof petData !== 'object') return false
+    const data = petData as Record<string, unknown>
+    const safeId = sanitizePetId(typeof data.id === 'string' ? data.id : '')
     if (!safeId) return false
     const customDir = safeJoin(hookScriptDeployPath(), 'custom', safeId)
     if (!customDir) return false
@@ -581,7 +717,7 @@ app.whenReady().then(() => {
     ensureDir(customDir)
     const petJson = {
       id: safeId,
-      displayName: String(petData.displayName || safeId).slice(0, 64),
+      displayName: String(data.displayName || safeId).slice(0, 64),
       description: 'Custom pet',
       spritesheetPath: 'spritesheet.webp',
       spriteVersionNumber: 2,
@@ -591,7 +727,8 @@ app.whenReady().then(() => {
     return true
   })
 
-  ipcMain.handle('rename-custom-pet', (_event, petId: string, newName: string) => {
+  ipcMain.handle('rename-custom-pet', (event, petId: string, newName: string) => {
+    assertTrustedIpcSender(event, panelWindow)
     const safeId = sanitizePetId(petId)
     if (!safeId) return false
     if (typeof newName !== 'string' || newName.trim().length === 0) return false
@@ -609,7 +746,8 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('remove-custom-pet', (_event, petId: string) => {
+  ipcMain.handle('remove-custom-pet', (event, petId: string) => {
+    assertTrustedIpcSender(event, panelWindow)
     const safeId = sanitizePetId(petId)
     if (!safeId) return false
     const customDir = safeJoin(hookScriptDeployPath(), 'custom', safeId)
@@ -621,7 +759,8 @@ app.whenReady().then(() => {
     return false
   })
 
-  ipcMain.handle('get-custom-pet-sprite', (_event, petId: string) => {
+  ipcMain.handle('get-custom-pet-sprite', (event, petId: string) => {
+    assertTrustedIpcSender(event)
     const safeId = sanitizePetId(petId)
     if (!safeId) return null
     const spritePath = safeJoin(hookScriptDeployPath(), 'custom', safeId, 'spritesheet.webp')
@@ -635,7 +774,8 @@ app.whenReady().then(() => {
   // Accepts sprite kits from community sites like codex-pets.net: a .zip
   // containing pet.json + a spritesheet image, laid out on the same
   // 192x208-per-frame grid our own built-in pets use (see PetAnimation.vue).
-  ipcMain.handle('import-pet-zip', async () => {
+  ipcMain.handle('import-pet-zip', async (event) => {
+    assertTrustedIpcSender(event, panelWindow)
     const owner = panelWindow ?? petWindow
     if (!owner) return { ok: false, error: 'No window available' }
 
@@ -649,11 +789,41 @@ app.whenReady().then(() => {
     if (result.canceled || result.filePaths.length === 0) return { ok: false, error: 'cancelled' }
 
     try {
-      const zipBuf = fs.readFileSync(result.filePaths[0])
-      const entries = unzipSync(new Uint8Array(zipBuf))
+      const zipPath = result.filePaths[0]
+      const zipStat = fs.statSync(zipPath)
+      if (!zipStat.isFile() || zipStat.size > MAX_PET_ZIP_BYTES) {
+        return { ok: false, error: 'Zip must be a regular file no larger than 10 MB' }
+      }
+      const zipBuf = fs.readFileSync(zipPath)
+      if (zipBuf.length > MAX_PET_ZIP_BYTES) {
+        return { ok: false, error: 'Zip must be no larger than 10 MB' }
+      }
+
+      let entryCount = 0
+      let uncompressedBytes = 0
+      const entries = unzipSync(new Uint8Array(zipBuf), {
+        filter: (entry) => {
+          entryCount += 1
+          if (entryCount > MAX_PET_ZIP_ENTRIES) {
+            throw new Error('Zip contains too many entries')
+          }
+          if (!Number.isFinite(entry.originalSize) || entry.originalSize < 0) {
+            throw new Error('Zip contains an invalid entry size')
+          }
+          uncompressedBytes += entry.originalSize
+          if (uncompressedBytes > MAX_PET_UNCOMPRESSED_BYTES) {
+            throw new Error('Zip expands beyond the 25 MB safety limit')
+          }
+          const baseName = path.basename(entry.name)
+          return /^pet\.json$/i.test(baseName) || /\.(webp|png|jpe?g)$/i.test(baseName)
+        },
+      })
 
       const petJsonName = Object.keys(entries).find((name) => /(^|\/)pet\.json$/i.test(name))
       if (!petJsonName) return { ok: false, error: 'No pet.json found in this zip' }
+      if (entries[petJsonName].byteLength > MAX_PET_JSON_BYTES) {
+        return { ok: false, error: 'pet.json exceeds the 256 KB safety limit' }
+      }
 
       const petData = JSON.parse(Buffer.from(entries[petJsonName]).toString('utf-8'))
       const rawId = String(petData.id || petData.displayName || `imported-${Date.now()}`)
@@ -668,6 +838,13 @@ app.whenReady().then(() => {
         Object.keys(entries).find((name) => path.basename(name).toLowerCase() === wantedBase) ??
         Object.keys(entries).find((name) => imageExt.test(name))
       if (!spriteName) return { ok: false, error: 'No spritesheet image found in this zip' }
+      const spriteData = entries[spriteName]
+      if (spriteData.byteLength > MAX_PET_IMAGE_BYTES) {
+        return { ok: false, error: 'Spritesheet exceeds the 20 MB safety limit' }
+      }
+      if (!isSupportedRasterImage(spriteData)) {
+        return { ok: false, error: 'Spritesheet content is not a valid PNG, JPEG, or WebP image' }
+      }
 
       const customDir = safeJoin(hookScriptDeployPath(), 'custom', safeId)
       if (!customDir) return { ok: false, error: 'Invalid destination path' }
@@ -676,7 +853,7 @@ app.whenReady().then(() => {
       // Renderer sniffs the actual image bytes rather than trusting the
       // extension (see importPetSprite below), so normalizing to
       // spritesheet.webp here is safe even for a source .png/.jpg.
-      fs.writeFileSync(join(customDir, 'spritesheet.webp'), Buffer.from(entries[spriteName]))
+      fs.writeFileSync(join(customDir, 'spritesheet.webp'), Buffer.from(spriteData))
 
       const petJson = {
         id: safeId,
@@ -694,7 +871,8 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('import-pet-sprite', async (_event, petId: string, displayName: string) => {
+  ipcMain.handle('import-pet-sprite', async (event, petId: string, displayName: string) => {
+    assertTrustedIpcSender(event, panelWindow)
     const safeId = sanitizePetId(petId)
     const owner = panelWindow ?? petWindow
     if (!safeId || !owner) return null
@@ -707,11 +885,15 @@ app.whenReady().then(() => {
     dialogOpen = false
     if (result.canceled || result.filePaths.length === 0) return null
     const src = result.filePaths[0]
+    const sourceStat = fs.statSync(src)
+    if (!sourceStat.isFile() || sourceStat.size > MAX_PET_IMAGE_BYTES) return null
+    const sourceData = fs.readFileSync(src)
+    if (sourceData.length > MAX_PET_IMAGE_BYTES || !isSupportedRasterImage(sourceData)) return null
     const customDir = safeJoin(hookScriptDeployPath(), 'custom', safeId)
     if (!customDir) return null
     ensureDir(customDir)
     const dest = join(customDir, 'spritesheet.webp')
-    fs.copyFileSync(src, dest)
+    fs.writeFileSync(dest, sourceData)
     const petJson = {
       id: safeId,
       displayName: String(displayName || safeId).slice(0, 64),
