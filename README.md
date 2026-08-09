@@ -76,7 +76,7 @@ Live states (Thinking / Tool Running / Waiting) show an elapsed-time readout nex
 
 #### Usage Tab
 
-Shows the remaining subscription quota reported by Codex and Claude Code, including session/weekly windows, countdowns, and reset dates in the user's local time. **Agent Pets has no account system and never asks for an agent username, password, or token.** It reuses the local subscription session already created by Codex CLI or Claude Code, requests the provider's quota endpoint from the Electron main process, and only sends normalized percentages to the UI. If that CLI session is missing or expired, re-authentication happens in the original CLI—not in Agent Pets. Results are cached for one minute; click **Refresh** for a fresh reading. API-key-only Codex sessions do not expose subscription quota.
+Shows the remaining subscription quota reported by Codex and Claude Code, including session/weekly windows, countdowns, and reset dates in the user's local time. While either family is active, a 3px quota meter is embedded inside its existing pet status pill without changing the window height; it prefers the short session window and falls back to weekly when that is the only quota returned. Hover the pill for the percentage and full reset time. **Agent Pets has no account system and never asks for an agent username, password, or token.** It reuses the local subscription session already created by Codex CLI or Claude Code, requests the provider's quota endpoint from the Electron main process, and only sends normalized percentages to the UI. If that CLI session is missing or expired, re-authentication happens in the original CLI—not in Agent Pets. Results are cached for one minute; the compact meter refreshes every five minutes while relevant agents are active, and **Refresh** requests a fresh reading for both windows. API-key-only Codex sessions do not expose subscription quota.
 
 Click the **⚙** icon in the header to switch to Settings.
 
@@ -185,7 +185,7 @@ Click the **×** next to any pet in the list to remove it (you'll get a confirma
 
 ## Event Server
 
-Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that receives status updates from hooks.
+Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that receives status updates from hooks. Requests must include the per-install `X-Agent-Pets-Token` header; the managed hooks read it from the current user's permission-restricted `~/.desktop-pet/event-token` file automatically.
 
 ### POST /v1/events
 
@@ -201,7 +201,7 @@ Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that r
 }
 ```
 
-`source`, `sessionId`, `state`, and `timestamp` are required — a request missing any of them gets rejected with `400`.
+`source`, `sessionId`, `state`, and `timestamp` are required — a request missing any of them gets rejected with `400`. Missing or incorrect hook authentication is rejected with `401`.
 
 **Fields:**
 
@@ -219,13 +219,14 @@ Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that r
 
 ## Security
 
-- **Renderer isolation** — Renderer processes run with Chromium sandboxing, context isolation, no Node.js integration, a restrictive CSP, blocked popups/navigation, denied permissions, and validated main-frame IPC senders.
-- **Local event server** — The event server listens on `127.0.0.1` only, rejects browser-originated and non-JSON requests, rate-limits events, and accepts only bounded, whitelisted fields.
-- **Quota requests** — The Usage tab connects only to the exact HTTPS Codex and Anthropic quota/auth endpoints. Redirects and oversized responses are rejected. OAuth credentials stay in the Electron main process and are never exposed to the renderer or command-line arguments.
+- **Renderer isolation** — Renderer processes run with Chromium sandboxing, context isolation, no Node.js integration, a restrictive CSP, a secure custom `agent-pets://` protocol instead of privileged `file://` pages, blocked popups/navigation, denied permissions, and validated main-frame IPC senders.
+- **Local event server** — The event server listens on `127.0.0.1` only, authenticates every hook request with a per-install secret, rejects browser-originated and non-JSON requests, rate-limits events, and accepts only bounded, whitelisted fields.
+- **Quota requests** — The quota feature connects only to the exact HTTPS Codex and Anthropic quota/auth endpoints. Redirects, oversized responses, excessive window counts, and malformed renderer IPC payloads are rejected. OAuth credentials stay in the Electron main process and are never exposed to the renderer or command-line arguments.
 - **Credential refresh** — Expired OAuth tokens are refreshed and merged back into the original Codex auth file or Claude credential store so the CLIs keep working. Writes use account/change guards, restrictive file permissions, and atomic replacement where applicable.
 - **Pet imports** — ZIP entry count, compressed/uncompressed sizes, JSON size, and image size/type are validated before imported files are stored.
 - **Memory bounds** — Agent sessions are capped and stale/offline entries are evicted to prevent unbounded renderer memory growth.
 - **Path sanitization** — Project paths are reduced to their basename, and filesystem destinations are constrained to their expected root.
+- **Packaged runtime** — Electron fuses disable RunAsNode, Node options/inspect arguments, and privileged `file://` behavior while enforcing ASAR-only loading and embedded ASAR integrity validation.
 - **Release signing** — Production macOS and Windows artifacts should be built with the platform signing credentials configured; unsigned local builds are for development only.
 
 ---
@@ -270,6 +271,9 @@ This installs hooks for all detected tools. Hooks are installed to:
 - `~/.codex/hooks.json` (Codex)
 - `~/.claude/settings.json` (Claude Code CLI & Desktop)
 - `~/.desktop-pet/agent-hook.mjs` + `agent-hook.cmd` (shared hook script all of the above call into)
+- `~/.desktop-pet/event-token` (per-install event authentication secret; mode `0600` on macOS/Linux)
+
+After upgrading an existing installation, Agent Pets refreshes managed hooks automatically. Restart a currently running OpenCode process once so its already-loaded plugin picks up event authentication.
 
 Use `--claude-code` to install/uninstall the Claude Code hook only:
 

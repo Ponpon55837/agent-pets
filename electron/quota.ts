@@ -17,6 +17,8 @@ const REQUEST_TIMEOUT_MS = 15_000
 const MAX_RESPONSE_BYTES = 1024 * 1024
 const CACHE_TTL_MS = 60_000
 const FORCE_REFRESH_COOLDOWN_MS = 10_000
+const MAX_WINDOWS_PER_PROVIDER = 32
+const MAX_DISPLAY_TEXT_LENGTH = 96
 const ALLOWED_ENDPOINTS = new Set([
   CODEX_USAGE_URL,
   CODEX_REFRESH_URL,
@@ -85,6 +87,11 @@ function cleanPlan(value: unknown): string | undefined {
     .replace(/^chatgpt[_-]?/i, '')
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .slice(0, MAX_DISPLAY_TEXT_LENGTH)
+}
+
+function displayString(value: unknown, fallback: string): string {
+  return (nonEmptyString(value) || fallback).slice(0, MAX_DISPLAY_TEXT_LENGTH)
 }
 
 function safeError(error: unknown, fallback: string): string {
@@ -261,7 +268,10 @@ function mapCodexWindow(id: string, raw: unknown, fallbackLabel?: string): Quota
   const used = finitePercent(window?.used_percent)
   if (!window || used === null) return null
   const duration = Number(window.limit_window_seconds)
-  const label = fallbackLabel || (duration === 18_000 ? 'Session' : duration === 604_800 ? 'Weekly' : 'Usage')
+  const label = displayString(
+    fallbackLabel,
+    duration === 18_000 ? 'Session' : duration === 604_800 ? 'Weekly' : 'Usage',
+  )
   const resetSeconds = Number(window.reset_at)
   return {
     id,
@@ -284,20 +294,23 @@ export function parseCodexUsage(body: Record<string, any>): Pick<QuotaProvider, 
   windows.push(...mainWindows)
 
   if (Array.isArray(body.additional_rate_limits)) {
-    body.additional_rate_limits.forEach((entry: unknown, entryIndex: number) => {
+    for (let entryIndex = 0; entryIndex < body.additional_rate_limits.length; entryIndex += 1) {
+      if (windows.length >= MAX_WINDOWS_PER_PROVIDER) break
+      const entry: unknown = body.additional_rate_limits[entryIndex]
       const additional = asObject(entry)
       const additionalRate = asObject(additional?.rate_limit)
-      const label = nonEmptyString(additional?.limit_name ?? additional?.metered_feature) || 'Additional'
+      const label = displayString(additional?.limit_name ?? additional?.metered_feature, 'Additional')
       for (const [slot, raw] of [
         ['primary', additionalRate?.primary_window],
         ['secondary', additionalRate?.secondary_window],
       ] as const) {
+        if (windows.length >= MAX_WINDOWS_PER_PROVIDER) break
         const mapped = mapCodexWindow(`additional-${entryIndex}-${slot}`, raw, label)
         if (mapped) windows.push(mapped)
       }
-    })
+    }
   }
-  return { plan: cleanPlan(body.plan_type), windows }
+  return { plan: cleanPlan(body.plan_type), windows: windows.slice(0, MAX_WINDOWS_PER_PROVIDER) }
 }
 
 async function fetchCodexQuota(): Promise<QuotaProvider> {
@@ -542,25 +555,27 @@ export function parseClaudeUsage(body: Record<string, any>): QuotaWindow[] {
   }
   if (Array.isArray(body.limits)) {
     const existingLabels = new Set(windows.map((window) => window.label.toLowerCase()))
-    body.limits.forEach((raw: unknown, index: number) => {
+    for (let index = 0; index < body.limits.length; index += 1) {
+      if (windows.length >= MAX_WINDOWS_PER_PROVIDER) break
+      const raw: unknown = body.limits[index]
       const limit = asObject(raw)
-      if (limit?.group !== 'weekly' || limit?.kind !== 'weekly_scoped') return
+      if (limit?.group !== 'weekly' || limit?.kind !== 'weekly_scoped') continue
       const scope = asObject(limit?.scope)
       const model = asObject(scope?.model)
-      const displayName = nonEmptyString(model?.display_name)
-      if (!displayName || /(^|[-_ ])all[-_ ]models$/i.test(displayName)) return
+      const displayName = nonEmptyString(model?.display_name)?.slice(0, MAX_DISPLAY_TEXT_LENGTH)
+      if (!displayName || /(^|[-_ ])all[-_ ]models$/i.test(displayName)) continue
       const label = ['sonnet', 'opus', 'designs', 'daily routines'].includes(displayName.toLowerCase())
         ? displayName
         : `${displayName} only`
-      if (existingLabels.has(displayName.toLowerCase()) || existingLabels.has(label.toLowerCase())) return
+      if (existingLabels.has(displayName.toLowerCase()) || existingLabels.has(label.toLowerCase())) continue
       const mapped = mapClaudeWindow(`limit-${index}`, label, limit)
       if (mapped) {
         windows.push(mapped)
         existingLabels.add(label.toLowerCase())
       }
-    })
+    }
   }
-  return windows
+  return windows.slice(0, MAX_WINDOWS_PER_PROVIDER)
 }
 
 async function claudeUserAgent(): Promise<string> {

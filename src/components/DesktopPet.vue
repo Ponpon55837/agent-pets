@@ -24,6 +24,81 @@ const displayLines = computed(() => {
 // show one small pet per family, side by side.
 const isMultiPet = computed(() => store.isMultiPet)
 
+function quotaColor(familyKey: string): string {
+  const quota = store.quotaByFamily[familyKey]
+  if (!quota) return 'transparent'
+  return quota.remainingPercent < 20
+    ? '#ff6b6b'
+    : quota.remainingPercent < 50
+      ? '#e3b64f'
+      : familyKey === 'claude' ? '#d97757' : '#65c89b'
+}
+
+function quotaLineStyle(familyKey: string): Record<string, string> {
+  return { '--quota-color': quotaColor(familyKey) }
+}
+
+function quotaFillStyle(familyKey: string): Record<string, string> {
+  const quota = store.quotaByFamily[familyKey]
+  if (!quota) return {}
+  return {
+    width: `${quota.remainingPercent}%`,
+  }
+}
+
+function quotaPercent(familyKey: string): string {
+  const remaining = store.quotaByFamily[familyKey]?.remainingPercent
+  if (remaining === undefined) return ''
+  return String(remaining >= 10 ? Math.round(remaining) : Math.round(remaining * 10) / 10)
+}
+
+function quotaDetails(familyKey: string) {
+  const provider = store.quotaUsage?.providers.find((candidate) => candidate.id === familyKey)
+  if (!provider) return []
+  const primaryWindows = provider.windows.filter((window) => {
+    const identity = `${window.id} ${window.label}`.toLowerCase()
+    return identity.includes('session')
+      || identity.includes('weekly')
+      || identity.includes('five_hour')
+      || identity.includes('seven_day')
+  })
+  return (primaryWindows.length > 0 ? primaryWindows : provider.windows).slice(0, 4)
+}
+
+function quotaDetailLabel(id: string, label: string): string {
+  const identity = `${id} ${label}`.toLowerCase()
+  if (identity.includes('session') || identity.includes('five_hour')) return '5-hour limit'
+  if (identity.includes('weekly') || identity.includes('seven_day')) return 'Weekly limit'
+  return label
+}
+
+function quotaDetailPercent(remainingPercent: number): string {
+  return String(remainingPercent >= 10
+    ? Math.round(remainingPercent)
+    : Math.round(remainingPercent * 10) / 10)
+}
+
+function quotaResetLabel(resetsAt?: string): string {
+  if (!resetsAt) return 'Reset time unavailable'
+  const reset = new Date(resetsAt)
+  if (!Number.isFinite(reset.getTime())) return 'Reset time unavailable'
+  return `Resets ${reset.toLocaleString([], {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })}`
+}
+
+function quotaTitle(familyKey: string): string | undefined {
+  const details = quotaDetails(familyKey)
+  if (details.length === 0) return undefined
+  return details.map((quota) => (
+    `${quotaDetailLabel(quota.id, quota.label)}: ${quotaDetailPercent(quota.remainingPercent)}% remaining · ${quotaResetLabel(quota.resetsAt)}`
+  )).join('\n')
+}
+
 onMounted(() => {
   store.loadPets()
 })
@@ -100,11 +175,49 @@ function onClick(e: MouseEvent) {
               :since="line.since"
               :mood="store.mood"
             />
-            <div class="status-line multi-pet-status-line" data-pet-hit-target="solid">
+            <div
+              class="status-line multi-pet-status-line"
+              :class="{
+                'has-quota': store.quotaByFamily[line.key],
+                'quota-motion': store.reactionsEnabled,
+                'quota-critical': store.reactionsEnabled && (store.quotaByFamily[line.key]?.remainingPercent ?? 100) < 10,
+              }"
+              :style="quotaLineStyle(line.key)"
+              :aria-label="quotaTitle(line.key)"
+              :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
+              data-pet-hit-target="solid"
+            >
               <span class="line-dot" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
               <span class="line-text">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
                 <span class="line-sep">·</span>{{ STATE_LABELS_SHORT[line.state] }}
+              </span>
+              <span v-if="store.quotaByFamily[line.key]" class="quota-readout">
+                {{ quotaPercent(line.key) }}%
+              </span>
+              <span v-if="store.quotaByFamily[line.key]" class="quota-tooltip" role="tooltip">
+                <span
+                  v-for="quota in quotaDetails(line.key)"
+                  :key="quota.id"
+                  class="quota-tooltip-row"
+                >
+                  <span class="quota-tooltip-summary">
+                    <strong>{{ quotaDetailLabel(quota.id, quota.label) }}</strong>
+                    <strong class="quota-tooltip-percent">{{ quotaDetailPercent(quota.remainingPercent) }}% remaining</strong>
+                  </span>
+                  <span class="quota-tooltip-reset">{{ quotaResetLabel(quota.resetsAt) }}</span>
+                </span>
+              </span>
+              <span
+                v-if="store.quotaByFamily[line.key]"
+                class="quota-meter"
+                role="progressbar"
+                :aria-label="`${line.label} ${store.quotaByFamily[line.key].label} quota remaining`"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                :aria-valuenow="store.quotaByFamily[line.key].remainingPercent"
+              >
+                <span class="quota-meter-fill" :style="quotaFillStyle(line.key)" />
               </span>
             </div>
           </div>
@@ -120,13 +233,53 @@ function onClick(e: MouseEvent) {
           :mood="store.mood"
         />
         <TransitionGroup tag="div" name="status-line" class="status-lines">
-          <div v-for="line in displayLines" :key="line.key" class="status-line" data-pet-hit-target="solid">
+          <div
+            v-for="line in displayLines"
+            :key="line.key"
+            class="status-line"
+            :class="{
+              'has-quota': store.quotaByFamily[line.key],
+              'quota-motion': store.reactionsEnabled,
+              'quota-critical': store.reactionsEnabled && (store.quotaByFamily[line.key]?.remainingPercent ?? 100) < 10,
+            }"
+            :style="quotaLineStyle(line.key)"
+            :aria-label="quotaTitle(line.key)"
+            :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
+            data-pet-hit-target="solid"
+          >
             <span class="line-dot" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
             <span class="line-text">
               <template v-if="line.label">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
                 <span class="line-sep">·</span>
               </template>{{ STATE_LABELS_SHORT[line.state] }}
+            </span>
+            <span v-if="store.quotaByFamily[line.key]" class="quota-readout">
+              {{ quotaPercent(line.key) }}%
+            </span>
+            <span v-if="store.quotaByFamily[line.key]" class="quota-tooltip" role="tooltip">
+              <span
+                v-for="quota in quotaDetails(line.key)"
+                :key="quota.id"
+                class="quota-tooltip-row"
+              >
+                <span class="quota-tooltip-summary">
+                  <strong>{{ quotaDetailLabel(quota.id, quota.label) }}</strong>
+                  <strong class="quota-tooltip-percent">{{ quotaDetailPercent(quota.remainingPercent) }}% remaining</strong>
+                </span>
+                <span class="quota-tooltip-reset">{{ quotaResetLabel(quota.resetsAt) }}</span>
+              </span>
+            </span>
+            <span
+              v-if="store.quotaByFamily[line.key]"
+              class="quota-meter"
+              role="progressbar"
+              :aria-label="`${line.label} ${store.quotaByFamily[line.key].label} quota remaining`"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="store.quotaByFamily[line.key].remainingPercent"
+            >
+              <span class="quota-meter-fill" :style="quotaFillStyle(line.key)" />
             </span>
           </div>
         </TransitionGroup>
@@ -199,6 +352,9 @@ function onClick(e: MouseEvent) {
 }
 
 .status-line {
+  position: relative;
+  z-index: 1;
+  overflow: visible;
   display: flex;
   align-items: center;
   gap: max(5px, calc(5px * var(--pet-scale, 1)));
@@ -212,6 +368,197 @@ function onClick(e: MouseEvent) {
   line-height: 1.3;
   padding: max(3px, calc(3px * var(--pet-scale, 1))) max(9px, calc(9px * var(--pet-scale, 1)));
   border-radius: max(10px, calc(11px * var(--pet-scale, 1)));
+}
+
+.status-line:hover,
+.status-line:focus-visible {
+  z-index: 20;
+  outline: none;
+}
+
+.status-line.has-quota {
+  border-color: color-mix(in srgb, var(--quota-color) 25%, rgba(255, 255, 255, 0.1));
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.25),
+    inset 0 -3px 7px color-mix(in srgb, var(--quota-color) 9%, transparent);
+}
+
+.quota-readout {
+  flex-shrink: 0;
+  min-width: 25px;
+  color: color-mix(in srgb, var(--quota-color) 82%, white);
+  font-size: max(8px, calc(8.5px * var(--pet-scale, 1)));
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: right;
+  text-shadow: 0 0 6px color-mix(in srgb, var(--quota-color) 55%, transparent);
+}
+
+.quota-tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  z-index: 30;
+  width: max-content;
+  min-width: min(218px, calc(var(--pet-w, 250px) - 20px));
+  max-width: min(286px, calc(var(--pet-w, 250px) - 12px));
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--quota-color) 34%, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  background: rgba(20, 21, 28, 0.96);
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.38), 0 0 9px color-mix(in srgb, var(--quota-color) 13%, transparent);
+  color: #f3f4f7;
+  font-size: max(11px, calc(11.5px * var(--pet-scale, 1)));
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(-50%, 3px) scale(0.97);
+  transform-origin: 50% 100%;
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+}
+
+.quota-tooltip-row {
+  display: block;
+}
+
+.quota-tooltip-row + .quota-tooltip-row {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.quota-tooltip-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quota-tooltip-percent {
+  color: color-mix(in srgb, var(--quota-color) 82%, white);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.quota-tooltip-reset {
+  display: block;
+  margin-top: 2px;
+  color: rgba(232, 234, 240, 0.8);
+  font-size: 0.91em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.quota-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid color-mix(in srgb, var(--quota-color) 34%, rgba(255, 255, 255, 0.12));
+  border-bottom: 1px solid color-mix(in srgb, var(--quota-color) 34%, rgba(255, 255, 255, 0.12));
+  background: inherit;
+  transform: translate(-50%, -3px) rotate(45deg);
+}
+
+.status-line.has-quota:hover .quota-tooltip,
+.status-line.has-quota:focus-visible .quota-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0) scale(1);
+}
+
+.quota-meter {
+  position: absolute;
+  right: 1px;
+  bottom: 0;
+  left: 1px;
+  height: max(3px, calc(3px * var(--pet-scale, 1)));
+  overflow: hidden;
+  border-radius: 0 0 max(9px, calc(10px * var(--pet-scale, 1))) max(9px, calc(10px * var(--pet-scale, 1)));
+  background: rgba(0, 0, 0, 0.38);
+  pointer-events: none;
+}
+
+.quota-meter::after {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    transparent calc(10% - 1px),
+    rgba(7, 10, 12, 0.42) calc(10% - 1px),
+    rgba(7, 10, 12, 0.42) 10%
+  );
+}
+
+.quota-meter-fill {
+  position: relative;
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--quota-color) 72%, #15201d),
+      var(--quota-color) 72%,
+      color-mix(in srgb, var(--quota-color) 72%, white) 100%
+    );
+  box-shadow:
+    0 0 6px var(--quota-color),
+    0 -1px 6px color-mix(in srgb, var(--quota-color) 45%, transparent);
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.25s ease;
+}
+
+.quota-meter-fill::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 7px 2px var(--quota-color);
+  opacity: 0.9;
+  transform: translate(35%, -50%);
+}
+
+.quota-motion:not(.quota-critical) .quota-meter-fill::after {
+  animation: quota-spark 2.4s ease-in-out infinite;
+}
+
+.quota-critical .quota-meter-fill {
+  animation: quota-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes quota-pulse {
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 1; filter: brightness(1.28); }
+}
+
+@keyframes quota-spark {
+  0%, 68%, 100% { opacity: 0.55; transform: translate(35%, -50%) scale(0.75); }
+  78% { opacity: 1; transform: translate(35%, -50%) scale(1.18); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quota-meter-fill {
+    transition: none;
+    animation: none !important;
+  }
+
+  .quota-meter-fill::after {
+    animation: none !important;
+  }
 }
 
 .line-dot {

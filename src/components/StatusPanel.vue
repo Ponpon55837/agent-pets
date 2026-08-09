@@ -10,10 +10,9 @@ const editingPetId = ref<string | null>(null)
 const editName = ref('')
 const settingsTab = ref<'general' | 'pets'>('general')
 const dashboardTab = ref<'sessions' | 'usage'>('sessions')
-type QuotaResult = Awaited<ReturnType<NonNullable<typeof window.electronAPI>['getQuotaUsage']>>
-const quotaUsage = ref<QuotaResult | null>(null)
-const quotaLoading = ref(false)
-const quotaError = ref('')
+const quotaUsage = computed(() => store.quotaUsage)
+const quotaLoading = computed(() => store.quotaLoading)
+const quotaError = computed(() => store.quotaError)
 const moodStage = computed(() => {
   if (store.mood >= 90) return 'Overdrive'
   if (store.mood >= 70) return 'Radiant'
@@ -37,16 +36,7 @@ onUnmounted(() => {
 })
 
 async function refreshQuota(force = false) {
-  if (!window.electronAPI?.getQuotaUsage || quotaLoading.value) return
-  quotaLoading.value = true
-  quotaError.value = ''
-  try {
-    quotaUsage.value = await window.electronAPI.getQuotaUsage(force)
-  } catch (error) {
-    quotaError.value = error instanceof Error ? error.message : 'Could not load usage.'
-  } finally {
-    quotaLoading.value = false
-  }
+  await store.refreshQuota(force)
 }
 
 function selectDashboardTab(tab: 'sessions' | 'usage') {

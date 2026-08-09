@@ -1,6 +1,6 @@
 {
   "name": "agent-pets",
-  "version": "0.4.1",
+  "version": "0.5.1",
   "description": "Desktop pet that shows the status of AI coding agents",
   "author": "Upfloor5",
   "license": "MIT",
@@ -34,6 +34,16 @@
   "build": {
     "appId": "com.agent-pets.app",
     "productName": "Agent Pets",
+    "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "grantFileProtocolExtraPrivileges": false
+    },
     "directories": {
       "output": "release"
     },

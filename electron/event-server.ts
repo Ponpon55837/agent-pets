@@ -1,6 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http'
 import type { BrowserWindow } from 'electron'
 import { app } from 'electron'
+import { timingSafeEqual } from 'node:crypto'
 
 export interface AgentStatusEvent {
   source: string
@@ -42,6 +43,7 @@ function normalizeState(state: string): string {
 
 export function createEventServer(
   getWindows: () => BrowserWindow[],
+  eventToken: string,
   onEvent?: (event: AgentStatusEvent) => void,
 ) {
   let rateWindowStartedAt = Date.now()
@@ -59,6 +61,16 @@ export function createEventServer(
     if (request.headers.origin) {
       response.writeHead(403)
       response.end(JSON.stringify({ error: 'browser origins are not allowed' }))
+      return
+    }
+
+    const suppliedToken = request.headers['x-agent-pets-token']
+    const supplied = typeof suppliedToken === 'string' ? Buffer.from(suppliedToken) : Buffer.alloc(0)
+    const expected = Buffer.from(eventToken)
+    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+      response.writeHead(401)
+      response.end(JSON.stringify({ error: 'unauthorized' }))
+      request.resume()
       return
     }
 

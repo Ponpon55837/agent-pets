@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+
 const PET_URL = 'http://127.0.0.1:17373/v1/events'
+const EVENT_TOKEN_PATH = path.join(os.homedir(), '.desktop-pet', 'event-token')
 
 const validSources = ['codex', 'codex-desktop', 'claude', 'claude-desktop']
 let source = validSources.includes(process.argv[2]) ? process.argv[2] : 'codex'
@@ -81,6 +86,14 @@ function readStdin() {
 }
 
 async function main() {
+  let eventToken
+  try {
+    eventToken = fs.readFileSync(EVENT_TOKEN_PATH, 'utf8').trim()
+  } catch {
+    process.exit(0)
+  }
+  if (!/^[a-f0-9]{64}$/i.test(eventToken)) process.exit(0)
+
   const raw = await readStdin()
   let payload
   try {
@@ -119,7 +132,10 @@ async function main() {
   try {
     await fetch(PET_URL, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        'x-agent-pets-token': eventToken,
+      },
       body: JSON.stringify(event),
       signal: AbortSignal.timeout(300),
     })

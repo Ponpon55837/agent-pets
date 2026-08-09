@@ -11,8 +11,10 @@ const isPanelWindow = window.location.hash === '#panel'
 
 let cleanupListener: (() => void) | null = null
 let cleanupPanelOpened: (() => void) | null = null
+let cleanupQuotaUpdated: (() => void) | null = null
 let staleTimer: ReturnType<typeof setInterval> | null = null
 let successTimer: ReturnType<typeof setInterval> | null = null
+let quotaTimer: ReturnType<typeof setInterval> | null = null
 let petMousePassthrough = false
 
 function isOpaqueCanvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number): boolean {
@@ -101,6 +103,11 @@ onMounted(() => {
       store.handlePanelOpened()
     })
   }
+  if (electronAPI?.onQuotaUsageUpdated) {
+    cleanupQuotaUpdated = electronAPI.onQuotaUsageUpdated((usage: unknown) => {
+      store.setQuotaUsage(usage)
+    })
+  }
   if (!isPanelWindow && electronAPI?.setMousePassthrough) {
     window.addEventListener('mousemove', handlePetMouseMove, true)
   }
@@ -115,6 +122,21 @@ onMounted(() => {
 watch(() => store.petScale, (v) => {
   document.documentElement.style.setProperty('--pet-scale', String(v))
 })
+
+// The compact meter only needs quota while a Codex/Claude family is active.
+// Poll slowly, and let the main-process cache coalesce requests from the pet
+// and panel renderer. Manual refreshes are broadcast back to both windows.
+watch(() => store.hasQuotaCapableSessions, (active) => {
+  if (quotaTimer) {
+    clearInterval(quotaTimer)
+    quotaTimer = null
+  }
+  if (!active || isPanelWindow) return
+  void store.refreshQuota()
+  quotaTimer = setInterval(() => {
+    void store.refreshQuota()
+  }, 5 * 60_000)
+}, { immediate: true })
 
 watch(() => store.scaledW, (w) => {
   document.documentElement.style.setProperty('--pet-w', w + 'px')
@@ -136,10 +158,12 @@ watch(() => store.hasSuccessSessions, (active) => {
 onUnmounted(() => {
   cleanupListener?.()
   cleanupPanelOpened?.()
+  cleanupQuotaUpdated?.()
   window.removeEventListener('mousemove', handlePetMouseMove, true)
   window.removeEventListener('storage', handleStorage)
   if (staleTimer) clearInterval(staleTimer)
   if (successTimer) clearInterval(successTimer)
+  if (quotaTimer) clearInterval(quotaTimer)
 })
 </script>
 

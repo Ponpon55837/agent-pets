@@ -61,6 +61,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('quota-usage', force)
   },
 
+  onQuotaUsageUpdated: (callback: (usage: unknown) => void) => {
+    const handler = (_event: unknown, usage: unknown) => callback(usage)
+    ipcRenderer.on('quota-usage-updated', handler)
+    return () => {
+      ipcRenderer.removeListener('quota-usage-updated', handler)
+    }
+  },
+
   testIntegration: (source: 'opencode-cli' | 'opencode-desktop' | 'codex' | 'claude' | 'claude-desktop') => {
     return ipcRenderer.invoke('test-integration', source)
   },

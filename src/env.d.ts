@@ -41,6 +41,7 @@ interface Window {
         error?: string
       }>
     }>
+    onQuotaUsageUpdated: (callback: (usage: unknown) => void) => () => void
     testIntegration: (source: 'opencode-cli' | 'opencode-desktop' | 'codex' | 'claude' | 'claude-desktop') => Promise<{
       ok: boolean
       verifiedAt?: number

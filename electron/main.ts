@@ -1,7 +1,6 @@
-import { app, BrowserWindow, screen, ipcMain, dialog, session } from 'electron'
+import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { join, resolve } from 'path'
-import { fileURLToPath } from 'node:url'
 import { request as httpRequest } from 'node:http'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -24,7 +23,7 @@ import {
   hookScriptPath,
   installIntegration,
   uninstallIntegration,
-  repairWindowsInstalledHooks,
+  refreshInstalledIntegrationScripts,
   readWindowState,
   writeWindowState,
   type IntegrationTarget,
@@ -35,11 +34,18 @@ let panelWindow: BrowserWindow | null = null
 let anchorBottomCenter: { x: number; y: number } | null = null
 let resizeAnimHandle: ReturnType<typeof setInterval> | null = null
 let dialogOpen = false
+let eventToken = ''
 const pendingIntegrationTests = new Map<string, () => void>()
 
 // Enforce Chromium's renderer sandbox even if a future BrowserWindow option
 // accidentally regresses. This must be called before app readiness.
 app.enableSandbox()
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'agent-pets',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  },
+])
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -95,6 +101,7 @@ function sendIntegrationTestEvent(
       headers: {
         'content-type': 'application/json',
         'content-length': Buffer.byteLength(body),
+        'x-agent-pets-token': eventToken,
       },
     }, (response) => {
       response.resume()
@@ -187,9 +194,9 @@ function isTrustedRendererUrl(rawUrl: string): boolean {
     if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) {
       return candidate.origin === new URL(process.env.VITE_DEV_SERVER_URL).origin
     }
-    if (candidate.protocol !== 'file:') return false
-    const expected = resolve(join(__dirname, '../dist/index.html'))
-    return resolve(fileURLToPath(candidate)) === expected
+    return candidate.protocol === 'agent-pets:'
+      && candidate.hostname === 'app'
+      && candidate.pathname === '/index.html'
   } catch {
     return false
   }
@@ -258,6 +265,85 @@ function isSupportedRasterImage(data: Uint8Array): boolean {
   return png || jpeg || webp
 }
 
+function contentTypeFor(filePath: string): string {
+  switch (path.extname(filePath).toLowerCase()) {
+    case '.html': return 'text/html; charset=utf-8'
+    case '.js': return 'text/javascript; charset=utf-8'
+    case '.css': return 'text/css; charset=utf-8'
+    case '.json': return 'application/json; charset=utf-8'
+    case '.png': return 'image/png'
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg'
+    case '.webp': return 'image/webp'
+    case '.woff2': return 'font/woff2'
+    default: return 'application/octet-stream'
+  }
+}
+
+function rasterContentType(data: Uint8Array): string | null {
+  if (data.length >= 8
+    && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47
+    && data[4] === 0x0d && data[5] === 0x0a && data[6] === 0x1a && data[7] === 0x0a) return 'image/png'
+  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'image/jpeg'
+  if (data.length >= 12
+    && Buffer.from(data.subarray(0, 4)).toString('ascii') === 'RIFF'
+    && Buffer.from(data.subarray(8, 12)).toString('ascii') === 'WEBP') return 'image/webp'
+  return null
+}
+
+function readRegularFileWithin(root: string, relativePath: string, maxBytes: number): Buffer | null {
+  const candidate = safeJoin(root, relativePath)
+  if (!candidate) return null
+  try {
+    const rootReal = fs.realpathSync(root)
+    const candidateStat = fs.lstatSync(candidate)
+    if (!candidateStat.isFile() || candidateStat.isSymbolicLink() || candidateStat.size > maxBytes) return null
+    const candidateReal = fs.realpathSync(candidate)
+    const relative = path.relative(rootReal, candidateReal)
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null
+    const data = fs.readFileSync(candidateReal)
+    return data.length <= maxBytes ? data : null
+  } catch {
+    return null
+  }
+}
+
+function configureSecureProtocol(): void {
+  protocol.handle('agent-pets', (request) => {
+    if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 })
+    try {
+      const url = new URL(request.url)
+      const pathname = decodeURIComponent(url.pathname)
+      if (url.hostname === 'app') {
+        const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
+        const data = readRegularFileWithin(resolve(join(__dirname, '../dist')), relativePath, 25 * 1024 * 1024)
+        if (!data) return new Response('Not found', { status: 404 })
+        return new Response(Uint8Array.from(data), {
+          status: 200,
+          headers: {
+            'content-type': contentTypeFor(relativePath),
+            'x-content-type-options': 'nosniff',
+          },
+        })
+      }
+      if (url.hostname === 'custom') {
+        const match = pathname.match(/^\/([a-zA-Z0-9_.-]{1,64})\/spritesheet\.webp$/)
+        const safeId = match ? sanitizePetId(match[1]) : null
+        if (!safeId) return new Response('Not found', { status: 404 })
+        const customRoot = resolve(hookScriptDeployPath(), 'custom')
+        const data = readRegularFileWithin(customRoot, join(safeId, 'spritesheet.webp'), MAX_PET_IMAGE_BYTES)
+        const contentType = data ? rasterContentType(data) : null
+        if (!data || !contentType) return new Response('Not found', { status: 404 })
+        return new Response(Uint8Array.from(data), {
+          status: 200,
+          headers: { 'content-type': contentType, 'x-content-type-options': 'nosniff' },
+        })
+      }
+    } catch {}
+    return new Response('Not found', { status: 404 })
+  })
+}
+
 function createPetWindow() {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize
   const rawScale = parseFloat(process.env.PET_SCALE || '1')
@@ -313,7 +399,7 @@ function createPetWindow() {
   if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) {
     petWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
   } else {
-    petWindow.loadFile(join(__dirname, '../dist/index.html'))
+    petWindow.loadURL('agent-pets://app/index.html')
   }
 
   petWindow.on('closed', () => {
@@ -360,7 +446,7 @@ function createPanelWindow() {
   if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) {
     panelWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#panel`)
   } else {
-    panelWindow.loadFile(join(__dirname, '../dist/index.html'), { hash: 'panel' })
+    panelWindow.loadURL('agent-pets://app/index.html#panel')
   }
 
   panelWindow.on('blur', () => {
@@ -466,12 +552,14 @@ app.whenReady().then(() => {
     callback(false)
   })
 
-  repairWindowsInstalledHooks()
+  eventToken = refreshInstalledIntegrationScripts()
+  configureSecureProtocol()
   createPetWindow()
   createPanelWindow()
 
   createEventServer(
     () => [petWindow, panelWindow].filter((w): w is BrowserWindow => w !== null),
+    eventToken,
     (event) => {
       if (event.originalEvent === 'AgentPetsIntegrationTest') {
         pendingIntegrationTests.get(event.sessionId)?.()
@@ -611,9 +699,13 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('quota-usage', (event, force?: unknown) => {
-    assertTrustedIpcSender(event, panelWindow)
-    return getQuotaUsage(force === true)
+  ipcMain.handle('quota-usage', async (event, force?: unknown) => {
+    assertTrustedIpcSender(event)
+    const usage = await getQuotaUsage(force === true)
+    for (const win of [petWindow, panelWindow]) {
+      if (win && !win.isDestroyed()) win.webContents.send('quota-usage-updated', usage)
+    }
+    return usage
   })
 
   ipcMain.handle('test-integration', async (event, source: IntegrationTestSource) => {
@@ -766,7 +858,7 @@ app.whenReady().then(() => {
     const spritePath = safeJoin(hookScriptDeployPath(), 'custom', safeId, 'spritesheet.webp')
     if (!spritePath) return null
     if (fs.existsSync(spritePath)) {
-      return `file:///${spritePath.replace(/\\/g, '/')}`
+      return `agent-pets://custom/${encodeURIComponent(safeId)}/spritesheet.webp`
     }
     return null
   })
@@ -903,7 +995,7 @@ app.whenReady().then(() => {
       kind: 'person',
     }
     writeFileEnsured(join(customDir, 'pet.json'), JSON.stringify(petJson, null, 2))
-    return `file:///${dest.replace(/\\/g, '/')}`
+    return `agent-pets://custom/${encodeURIComponent(safeId)}/spritesheet.webp`
   })
 
   app.on('activate', () => {

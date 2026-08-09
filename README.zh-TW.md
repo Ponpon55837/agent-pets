@@ -76,7 +76,7 @@
 
 #### Usage 分頁
 
-顯示 Codex 與 Claude Code 回報的訂閱剩餘用量，包含 session／weekly 額度、重置倒數，以及依使用者本地時區顯示的重置日期時間。**Agent Pets 沒有帳號系統，也永遠不會要求輸入 Agent 帳號、密碼或 token。** 它只沿用 Codex CLI／Claude Code 原本已建立的本機訂閱 session，由 Electron 主行程向供應商的 quota API 查詢，UI 只會收到整理過的百分比。若該 CLI session 不存在或已失效，重新驗證會在原本的 CLI 內進行，不是在 Agent Pets。結果會快取一分鐘，也可以按 **Refresh** 強制更新。只使用 API key 的 Codex session 無法取得訂閱額度。
+顯示 Codex 與 Claude Code 回報的訂閱剩餘用量，包含 session／weekly 額度、重置倒數，以及依使用者本地時區顯示的重置日期時間。Codex／Claude family 活動時，既有寵物狀態 pill 底部會內嵌一條 3px 額度條，不改變視窗高度；它會優先顯示短期 session，若供應商只回傳 weekly 則自動改用 weekly。將滑鼠移到狀態列即可查看百分比與完整重置時間。**Agent Pets 沒有帳號系統，也永遠不會要求輸入 Agent 帳號、密碼或 token。** 它只沿用 Codex CLI／Claude Code 原本已建立的本機訂閱 session，由 Electron 主行程向供應商的 quota API 查詢，UI 只會收到整理過的百分比。若該 CLI session 不存在或已失效，重新驗證會在原本的 CLI 內進行，不是在 Agent Pets。結果會快取一分鐘；相關 Agent 活動期間，細條每五分鐘更新一次，按 **Refresh** 則會立即為兩個視窗取得新資料。只使用 API key 的 Codex session 無法取得訂閱額度。
 
 點標題列的 **⚙** 圖示切換到 Settings。
 
@@ -185,7 +185,7 @@ Setup Wizard 會偵測每個工具的設定狀態，並在你點擊按鈕時才�
 
 ## 事件伺服器
 
-Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/events`，接收來自各 hooks 的狀態更新。
+Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/events`，接收來自各 hooks 的狀態更新。請求必須包含每次安裝專用的 `X-Agent-Pets-Token` header；受管理的 hooks 會自動從目前使用者專用、權限受限的 `~/.desktop-pet/event-token` 讀取。
 
 ### POST /v1/events
 
@@ -201,7 +201,7 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 }
 ```
 
-`source`、`sessionId`、`state`、`timestamp` 這四個欄位是必填的——缺任何一個都會被伺服器回 `400` 拒絕。
+`source`、`sessionId`、`state`、`timestamp` 這四個欄位是必填的——缺任何一個都會被伺服器回 `400` 拒絕；缺少或使用錯誤的 hook 驗證資訊則回 `401`。
 
 **欄位說明：**
 
@@ -219,13 +219,14 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 
 ## 安全性
 
-- **Renderer 隔離** — Renderer 啟用 Chromium sandbox 與 context isolation、停用 Node.js integration，並以嚴格 CSP、禁止彈窗／外部導頁、拒絕權限請求及 IPC 主 frame 來源驗證縮小攻擊面。
-- **本機事件伺服器** — 只監聽 `127.0.0.1`，拒絕瀏覽器來源與非 JSON 請求，限制事件速率，且只接受長度受限的白名單欄位。
-- **用量查詢** — Usage 分頁只允許連線到指定的 Codex 與 Anthropic HTTPS quota／驗證端點，拒絕轉址與過大回應。OAuth 憑證只存在 Electron 主行程，不會傳給 renderer 或出現在命令列參數。
+- **Renderer 隔離** — Renderer 啟用 Chromium sandbox 與 context isolation、停用 Node.js integration，使用安全的自訂 `agent-pets://` protocol 取代高權限 `file://` 頁面，並以嚴格 CSP、禁止彈窗／外部導頁、拒絕權限請求及 IPC 主 frame 來源驗證縮小攻擊面。
+- **本機事件伺服器** — 只監聽 `127.0.0.1`，每個 hook 請求都必須通過每次安裝專用 secret 驗證；同時拒絕瀏覽器來源與非 JSON 請求、限制事件速率，且只接受長度受限的白名單欄位。
+- **用量查詢** — Quota 功能只允許連線到指定的 Codex 與 Anthropic HTTPS quota／驗證端點，拒絕轉址、過大回應、過多 window 與格式錯誤的 renderer IPC payload。OAuth 憑證只存在 Electron 主行程，不會傳給 renderer 或出現在命令列參數。
 - **憑證更新** — OAuth token 過期時會更新，並安全合併回原本的 Codex auth 檔或 Claude 憑證儲存區，避免 CLI 登入失效；檔案寫入會做帳號／變更檢查、限制檔案權限，並盡可能採原子替換。
 - **寵物匯入** — 寫入前會驗證 ZIP 項目數、壓縮／解壓縮大小、JSON 大小，以及圖片大小與實際格式。
 - **記憶體上限** — Agent session 數量有上限，會優先淘汰離線／最舊項目，避免 renderer 記憶體無限成長。
 - **路徑清理** — 專案路徑只保留 basename，檔案寫入目的地也會限制在預期根目錄內。
+- **打包執行環境** — Electron fuses 會停用 RunAsNode、Node options／inspect 參數與 `file://` 額外權限，並強制只從 ASAR 載入及驗證內嵌 ASAR 完整性。
 - **發行簽章** — 正式發布 macOS／Windows 產物時必須配置平台簽章憑證；未簽章的本機建置只供開發測試。
 
 ---
@@ -270,6 +271,9 @@ node integrations/install.mjs
 - `~/.codex/hooks.json`（Codex）
 - `~/.claude/settings.json`（Claude Code CLI & Desktop）
 - `~/.desktop-pet/agent-hook.mjs` + `agent-hook.cmd`（上述所有工具共用的 hook script）
+- `~/.desktop-pet/event-token`（每次安裝專用的事件驗證 secret；macOS／Linux 權限為 `0600`）
+
+既有安裝升級後，Agent Pets 會自動更新受管理的 hooks。已經在執行中的 OpenCode 需要重新啟動一次，讓已載入的 plugin 套用事件驗證。
 
 用 `--claude-code` 可以只安裝/移除 Claude Code 的 hook：
 

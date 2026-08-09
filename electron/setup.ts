@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { execFileSync } from 'child_process'
+import { randomBytes } from 'crypto'
 
 const IS_WIN = process.platform === 'win32'
 const IS_MAC = process.platform === 'darwin'
@@ -161,6 +162,49 @@ function hookScriptDeployPath(): string {
   return path.join(homeDir(), '.desktop-pet')
 }
 
+function eventTokenPath(): string {
+  return path.join(hookScriptDeployPath(), 'event-token')
+}
+
+function ensureEventToken(): string {
+  const dir = hookScriptDeployPath()
+  ensureDir(dir)
+  if (!IS_WIN) {
+    try { fs.chmodSync(dir, 0o700) } catch {}
+  }
+
+  const tokenPath = eventTokenPath()
+  try {
+    const stat = fs.lstatSync(tokenPath)
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error('Agent Pets event token path is not a regular file')
+    }
+    const existing = fs.readFileSync(tokenPath, 'utf8').trim()
+    if (/^[a-f0-9]{64}$/i.test(existing)) {
+      if (!IS_WIN) {
+        try { fs.chmodSync(tokenPath, 0o600) } catch {}
+      }
+      return existing
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code && code !== 'ENOENT') throw error
+  }
+
+  const token = randomBytes(32).toString('hex')
+  const descriptor = fs.openSync(tokenPath, 'w', 0o600)
+  try {
+    fs.writeFileSync(descriptor, `${token}\n`, 'utf8')
+    fs.fsyncSync(descriptor)
+  } finally {
+    fs.closeSync(descriptor)
+  }
+  if (!IS_WIN) {
+    try { fs.chmodSync(tokenPath, 0o600) } catch {}
+  }
+  return token
+}
+
 // --- Bundled integrations/ source (agent-hook.mjs, agent-hook.cmd) ---
 // electron-builder copies integrations/ to Resources/integrations via
 // extraResources; in dev __dirname is <project>/dist-electron so '..' lands
@@ -279,6 +323,7 @@ function hookWrapperContent(): string {
 }
 
 function installHookScript(): void {
+  ensureEventToken()
   const dir = hookScriptDeployPath()
   ensureDir(dir)
   writeFileEnsured(hookScriptPath(), hookScriptContent())
@@ -298,12 +343,22 @@ function installHookScript(): void {
 // show "thinking" until the first tool call — a known gap, not a bug.
 function openCodePluginContent(source: 'opencode-desktop' | 'opencode-cli'): string {
   return `import http from 'http';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 const sessionId = 'opencode-' + process.pid + '-' + Date.now();
+const eventTokenPath = path.join(os.homedir(), '.desktop-pet', 'event-token');
 let currentState = null;
 let stateTimer = null;
 
+function readEventToken() {
+  try { return fs.readFileSync(eventTokenPath, 'utf8').trim(); } catch { return ''; }
+}
+
 function sendEvent(state, toolName) {
+  const eventToken = readEventToken();
+  if (!eventToken) return;
   const payload = JSON.stringify({
     source: '${source}',
     sessionId,
@@ -316,7 +371,11 @@ function sendEvent(state, toolName) {
     port: 17373,
     path: '/v1/events',
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload),
+      'X-Agent-Pets-Token': eventToken,
+    }
   });
   req.on('error', () => {});
   req.write(payload);
@@ -357,6 +416,7 @@ export { DesktopPetPlugin };
 }
 
 function installOpenCode(): void {
+  ensureEventToken()
   writeFileEnsured(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop'))
   writeFileEnsured(openCodeCliPluginPath(), openCodePluginContent('opencode-cli'))
 }
@@ -622,6 +682,19 @@ function repairWindowsInstalledHooks(): void {
   if (codexChanged || claudeChanged) installHookScript()
 }
 
+function refreshInstalledIntegrationScripts(): string {
+  const token = ensureEventToken()
+  if (fileExists(hookScriptPath())) installHookScript()
+  if (fileExists(openCodeDesktopPluginPath())) {
+    writeFileEnsured(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop'))
+  }
+  if (fileExists(openCodeCliPluginPath())) {
+    writeFileEnsured(openCodeCliPluginPath(), openCodePluginContent('opencode-cli'))
+  }
+  repairWindowsInstalledHooks()
+  return token
+}
+
 export type IntegrationTarget = 'opencode' | 'codex' | 'claude' | 'claudeCode'
 
 function installIntegration(target?: IntegrationTarget): void {
@@ -664,6 +737,8 @@ export {
   claudeCodeSettingsPath,
   hookScriptPath,
   hookScriptDeployPath,
+  eventTokenPath,
+  ensureEventToken,
   ensureDir,
   writeFileEnsured,
   fileExists,
@@ -673,6 +748,7 @@ export {
   installIntegration,
   uninstallIntegration,
   repairWindowsInstalledHooks,
+  refreshInstalledIntegrationScripts,
   readWindowState,
   writeWindowState,
 }

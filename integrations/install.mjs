@@ -20,6 +20,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { execFileSync } from 'child_process'
+import { randomBytes } from 'crypto'
 
 const IS_WIN = process.platform === 'win32'
 const IS_MAC = process.platform === 'darwin'
@@ -142,6 +143,38 @@ function hookScriptPath() {
 
 function hookWrapperPath() {
   return path.join(hookDeployDir(), 'agent-hook.cmd')
+}
+
+function eventTokenPath() {
+  return path.join(hookDeployDir(), 'event-token')
+}
+
+function ensureEventToken() {
+  const dir = hookDeployDir()
+  ensureDir(dir)
+  if (!IS_WIN) {
+    try { fs.chmodSync(dir, 0o700) } catch {}
+  }
+  const tokenPath = eventTokenPath()
+  if (fs.existsSync(tokenPath)) {
+    const stat = fs.lstatSync(tokenPath)
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error('Agent Pets event token path is not a regular file')
+    }
+    const existing = fs.readFileSync(tokenPath, 'utf8').trim()
+    if (/^[a-f0-9]{64}$/i.test(existing)) {
+      if (!IS_WIN) {
+        try { fs.chmodSync(tokenPath, 0o600) } catch {}
+      }
+      return existing
+    }
+  }
+  const token = randomBytes(32).toString('hex')
+  fs.writeFileSync(tokenPath, `${token}\n`, { encoding: 'utf8', mode: 0o600 })
+  if (!IS_WIN) {
+    try { fs.chmodSync(tokenPath, 0o600) } catch {}
+  }
+  return token
 }
 
 function hookScriptContent() {
@@ -321,6 +354,7 @@ function removeAgentPetsHooks(groups) {
 // ── Install functions ──
 function installHookScript() {
   console.log('\n📦 Installing hook script...')
+  ensureEventToken()
   const dir = hookDeployDir()
   ensureDir(dir)
   writeFileEnsured(hookScriptPath(), hookScriptContent())
@@ -334,6 +368,7 @@ function installHookScript() {
 
 function installOpenCode() {
   console.log('\n📦 Installing OpenCode Desktop plugin...')
+  ensureEventToken()
 
   // Desktop
   const desktopDir = openCodeDesktopPluginDir()
@@ -345,12 +380,22 @@ function installOpenCode() {
   // There's no direct "user prompt submitted" hook, so the pet won't show
   // "thinking" until the first tool call — a known gap, not a bug.
   const pluginContent = `import http from 'http';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 const sessionId = 'opencode-' + process.pid + '-' + Date.now();
+const eventTokenPath = path.join(os.homedir(), '.desktop-pet', 'event-token');
 let currentState = null;
 let stateTimer = null;
 
+function readEventToken() {
+  try { return fs.readFileSync(eventTokenPath, 'utf8').trim(); } catch { return ''; }
+}
+
 function sendEvent(state, toolName) {
+  const eventToken = readEventToken();
+  if (!eventToken) return;
   const payload = JSON.stringify({
     source: 'opencode-desktop',
     sessionId,
@@ -363,7 +408,11 @@ function sendEvent(state, toolName) {
     port: 17373,
     path: '/v1/events',
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload),
+      'X-Agent-Pets-Token': eventToken,
+    }
   });
   req.on('error', () => {});
   req.write(payload);

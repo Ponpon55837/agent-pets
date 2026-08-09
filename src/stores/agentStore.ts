@@ -19,6 +19,7 @@ export interface PetEntry {
 const SUCCESS_DISPLAY_MS = 4_000
 const SESSION_STALE_MS = 15 * 60_000
 const MAX_SESSION_COUNT = 200
+const QUOTA_REFRESH_MS = 5 * 60_000
 const PET_BASE_W = 250 // wide enough for a status line like "OpenCode (CLI+Desktop)"
 const PET_BASE_H = 232 // canvas + 1 status line
 const STATUS_LINE_EXTRA_H = 22 // per additional status line beyond the first
@@ -35,6 +36,54 @@ const MOOD_TIME_PROGRESS_CAP = 4
 // loadImage and the various "|| 'aang-airbender'" defaults below) — so it's
 // the one pet that can't be removed/hidden from the list.
 const DEFAULT_PET_ID = 'aang-airbender'
+const MAX_QUOTA_WINDOWS = 32
+const MAX_QUOTA_TEXT_LENGTH = 96
+
+type QuotaUsage = Awaited<ReturnType<NonNullable<Window['electronAPI']>['getQuotaUsage']>>
+
+function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  if (typeof raw.updatedAt !== 'string' || !Number.isFinite(Date.parse(raw.updatedAt))) return null
+  if (!Array.isArray(raw.providers)) return null
+
+  const providers: QuotaUsage['providers'] = []
+  const seen = new Set<string>()
+  for (const candidate of raw.providers.slice(0, 2)) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue
+    const provider = candidate as Record<string, unknown>
+    if ((provider.id !== 'codex' && provider.id !== 'claude') || seen.has(provider.id)) continue
+    if (typeof provider.name !== 'string' || !Array.isArray(provider.windows)) continue
+    const windows: QuotaUsage['providers'][number]['windows'] = []
+    for (const candidateWindow of provider.windows.slice(0, MAX_QUOTA_WINDOWS)) {
+      if (!candidateWindow || typeof candidateWindow !== 'object' || Array.isArray(candidateWindow)) continue
+      const window = candidateWindow as Record<string, unknown>
+      if (typeof window.id !== 'string' || typeof window.label !== 'string') continue
+      if (typeof window.usedPercent !== 'number' || !Number.isFinite(window.usedPercent)) continue
+      if (typeof window.remainingPercent !== 'number' || !Number.isFinite(window.remainingPercent)) continue
+      if (window.usedPercent < 0 || window.usedPercent > 100 || window.remainingPercent < 0 || window.remainingPercent > 100) continue
+      const resetsAt = typeof window.resetsAt === 'string' && Number.isFinite(Date.parse(window.resetsAt))
+        ? new Date(window.resetsAt).toISOString()
+        : undefined
+      windows.push({
+        id: window.id.slice(0, MAX_QUOTA_TEXT_LENGTH),
+        label: window.label.slice(0, MAX_QUOTA_TEXT_LENGTH),
+        usedPercent: window.usedPercent,
+        remainingPercent: window.remainingPercent,
+        ...(resetsAt ? { resetsAt } : {}),
+      })
+    }
+    seen.add(provider.id)
+    providers.push({
+      id: provider.id,
+      name: provider.name.slice(0, MAX_QUOTA_TEXT_LENGTH),
+      ...(typeof provider.plan === 'string' ? { plan: provider.plan.slice(0, MAX_QUOTA_TEXT_LENGTH) } : {}),
+      windows,
+      ...(typeof provider.error === 'string' ? { error: provider.error.slice(0, 240) } : {}),
+    })
+  }
+  return { updatedAt: new Date(raw.updatedAt).toISOString(), providers }
+}
 
 interface MoodTaskProgress {
   startedAt: number
@@ -51,6 +100,10 @@ export const useAgentStore = defineStore('agent', () => {
   const petScale = ref(parseFloat(localStorage.getItem('agent-pet-scale') || '1'))
   const pets = ref<PetEntry[]>([])
   const petsLoaded = ref(false)
+  const quotaUsage = ref<QuotaUsage | null>(null)
+  const quotaLoading = ref(false)
+  const quotaError = ref('')
+  let quotaRequestedAt = 0
 
   // Built-in pets ship as bundled assets, so "removing" one just hides it
   // from your own picker rather than deleting a file — persisted the same
@@ -367,6 +420,63 @@ export const useAgentStore = defineStore('agent', () => {
     )
   })
 
+  const hasQuotaCapableSessions = computed(() => activeSessions.value.some(
+    (session) => session.source === 'codex'
+      || session.source === 'codex-desktop'
+      || session.source === 'claude'
+      || session.source === 'claude-desktop',
+  ))
+
+  const quotaByFamily = computed<Record<string, { label: string; remainingPercent: number; resetsAt?: string }>>(() => {
+    const result: Record<string, { label: string; remainingPercent: number; resetsAt?: string }> = {}
+    for (const provider of quotaUsage.value?.providers ?? []) {
+      if (provider.error || (provider.id !== 'codex' && provider.id !== 'claude')) continue
+      // Prefer the short session window. Some Codex accounts currently only
+      // receive a weekly window, so fall back instead of hiding the meter.
+      const quotaWindow = provider.windows.find(
+        (window) => window.id === 'session' || window.label.toLowerCase() === 'session',
+      ) ?? provider.windows.find(
+        (window) => window.id === 'weekly' || window.label.toLowerCase() === 'weekly',
+      ) ?? provider.windows[0]
+      if (!quotaWindow || !Number.isFinite(quotaWindow.remainingPercent)) continue
+      result[provider.id] = {
+        label: quotaWindow.label,
+        remainingPercent: Math.max(0, Math.min(100, quotaWindow.remainingPercent)),
+        ...(quotaWindow.resetsAt ? { resetsAt: quotaWindow.resetsAt } : {}),
+      }
+    }
+    return result
+  })
+
+  function setQuotaUsage(usage: unknown): boolean {
+    const normalized = normalizeQuotaUsage(usage)
+    if (!normalized) return false
+    quotaUsage.value = normalized
+    quotaError.value = ''
+    return true
+  }
+
+  async function refreshQuota(force = false) {
+    if (!window.electronAPI?.getQuotaUsage || quotaLoading.value) return quotaUsage.value
+    const now = Date.now()
+    if (!force && quotaUsage.value && now - quotaRequestedAt < QUOTA_REFRESH_MS) return quotaUsage.value
+    quotaLoading.value = true
+    quotaError.value = ''
+    quotaRequestedAt = now
+    try {
+      const usage = await window.electronAPI.getQuotaUsage(force)
+      if (!setQuotaUsage(usage)) {
+        quotaError.value = 'Quota service returned invalid data.'
+      }
+      return quotaUsage.value
+    } catch (error) {
+      quotaError.value = error instanceof Error ? error.message : 'Could not load usage.'
+      return quotaUsage.value
+    } finally {
+      quotaLoading.value = false
+    }
+  }
+
   const hasSuccessSessions = computed(() => {
     return activeSessions.value.some((s) => s.state === 'success')
   })
@@ -564,6 +674,11 @@ export const useAgentStore = defineStore('agent', () => {
     visiblePets,
     familyPetIds,
     petsLoaded,
+    quotaUsage,
+    quotaLoading,
+    quotaError,
+    quotaByFamily,
+    hasQuotaCapableSessions,
     defaultPetId: DEFAULT_PET_ID,
     showWizard,
     toast,
@@ -603,6 +718,8 @@ export const useAgentStore = defineStore('agent', () => {
     resetMood,
     resizePetWindow,
     loadPets,
+    setQuotaUsage,
+    refreshQuota,
     renamePet,
     removePet,
   }
