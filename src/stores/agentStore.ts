@@ -23,6 +23,15 @@ const QUOTA_REFRESH_MS = 5 * 60_000
 const PET_BASE_W = 250 // wide enough for a status line like "OpenCode (CLI+Desktop)"
 const PET_BASE_H = 232 // canvas + 1 status line
 const STATUS_LINE_EXTRA_H = 22 // per additional status line beyond the first
+// The quota tooltip pops open above the status line and is rendered at a
+// fixed (unscaled) size regardless of pet size (see DesktopPet.vue), so this
+// headroom must stay fixed too rather than scaling with petScale. Without
+// it the pet window's transparent canvas is sized exactly to the visible
+// sprite + status line with no slack above — fine on macOS, where the
+// compositor tolerates content painted slightly outside a layer-backed
+// window's bounds, but Windows' layered-window transparency hard-clips to
+// the window rectangle, so the tooltip got cut off / visibly broken there.
+const QUOTA_TOOLTIP_HEADROOM_H = 190
 const TOAST_DISPLAY_MS = 3_500
 const MOOD_BASELINE = 10
 const MOOD_SYSTEM_VERSION = '2'
@@ -519,12 +528,18 @@ export const useAgentStore = defineStore('agent', () => {
   const isMultiPet = computed(() => multiPetEnabled.value && familyLines.value.length > 1)
 
   const MULTI_PET_CELL_W = 204 // sprite cell (192) + a small gap
+  // The quota tooltip (DesktopPet.vue) is a fixed 268px wide regardless of
+  // pet size, same reasoning as QUOTA_TOOLTIP_HEADROOM_H below — the pet
+  // window must stay at least this wide (plus a little slack either side of
+  // the centered tooltip) or a small pet size clips the tooltip at the
+  // window edge.
+  const QUOTA_TOOLTIP_MIN_W = 284
   const scaledW = computed(() => {
     if (isMultiPet.value) {
       const count = familyLines.value.length
       return Math.round((count * MULTI_PET_CELL_W + 16) * petScale.value)
     }
-    return Math.round(PET_BASE_W * petScale.value)
+    return Math.max(Math.round(PET_BASE_W * petScale.value), QUOTA_TOOLTIP_MIN_W)
   })
   const scaledH = computed(() => {
     const lineCount = Math.max(1, familyLines.value.length)
@@ -535,7 +550,11 @@ export const useAgentStore = defineStore('agent', () => {
     // The toast/activity bubble deliberately does NOT grow the window here
     // (see DesktopPet.vue) — it overlays the existing canvas instead, so
     // showing/hiding it never triggers a resize+reposition of the window.
-    return Math.round((PET_BASE_H + extra) * petScale.value)
+    // The tooltip headroom below is unscaled and always reserved (rather
+    // than added only while a tooltip is open) for the same reason: growing
+    // the window on hover would reposition/animate it, which is distracting
+    // for a "just glance at it" hover interaction.
+    return Math.round((PET_BASE_H + extra) * petScale.value) + QUOTA_TOOLTIP_HEADROOM_H
   })
 
   const highestPrioritySession = computed<AgentSession | null>(() => {

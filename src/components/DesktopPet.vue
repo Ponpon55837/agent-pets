@@ -110,25 +110,40 @@ function onMouseDown(e: MouseEvent) {
   store.isDragging = true
   dragOffset.value = { x: e.screenX, y: e.screenY }
 
+  // Actual window movement is driven entirely by the main process polling
+  // screen.getCursorScreenPoint() (see electron/main.ts's 'pet-drag-start'
+  // handler) rather than by accumulating deltas between renderer mousemove
+  // events. On Windows, moving a frameless window under the cursor makes
+  // the OS resend a synthetic mousemove for the new window position; a
+  // delta-from-previous-event approach picks that up as extra "movement"
+  // and re-moves the window again, which re-triggers another synthetic
+  // event — a feedback loop that reads as the pet continuously drifting
+  // down for as long as the button is held, even with the mouse stationary.
+  // Polling the OS cursor position directly sidesteps that loop entirely.
+  window.electronAPI?.startDrag()
+
   const onMove = (moveEvent: MouseEvent) => {
     const dx = moveEvent.screenX - dragOffset.value.x
     const dy = moveEvent.screenY - dragOffset.value.y
-    dragOffset.value = { x: moveEvent.screenX, y: moveEvent.screenY }
 
     if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
       hasMoved.value = true
     }
-
-    window.electronAPI?.moveWindow(dx, dy)
   }
 
   const onUp = () => {
     store.isDragging = false
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
-    if (hasMoved.value) {
-      window.electronAPI?.notifyDragEnd()
-    }
+    // Must fire unconditionally, even on a plain click with no movement:
+    // 'pet-drag-start' unconditionally started a cursor-poll loop in the
+    // main process (see electron/main.ts), and this is the only signal
+    // that tells it to stop. Gating it on hasMoved (as the old "did we
+    // actually move, so is there anything worth writing to disk" check
+    // did) left that poll loop running after a plain click, so the pet
+    // kept chasing the cursor around indefinitely after the button was
+    // released, right up until the next mousedown replaced it.
+    window.electronAPI?.notifyDragEnd()
   }
 
   window.addEventListener('mousemove', onMove)
@@ -336,9 +351,9 @@ function onClick(e: MouseEvent) {
 .multi-pet-status-line {
   /* Keep the same status-pill treatment as single-pet mode, but constrain
      each pill to its own sprite column instead of the full pet window. */
-  width: calc(192px * var(--pet-scale, 1) - 12px);
-  max-width: calc(192px * var(--pet-scale, 1) - 12px);
-  margin-top: max(-8px, calc(-8px * var(--pet-scale, 1)));
+  width: calc(192px - 12px);
+  max-width: calc(192px - 12px);
+  margin-top: -8px;
 }
 
 .status-lines {
@@ -346,28 +361,31 @@ function onClick(e: MouseEvent) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: max(3px, calc(3px * var(--pet-scale, 1)));
-  margin-top: max(-8px, calc(-8px * var(--pet-scale, 1)));
+  gap: 3px;
+  margin-top: -8px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 .status-line {
+  /* Always rendered at the "L" pet-scale (1x) regardless of the chosen pet
+     size — the status bar's dimensions and text size stay constant so it
+     doesn't shrink/grow with the pet sprite. */
   position: relative;
   z-index: 1;
   overflow: visible;
   display: flex;
   align-items: center;
-  gap: max(5px, calc(5px * var(--pet-scale, 1)));
+  gap: 5px;
   max-width: calc(var(--pet-w, 250px) - 14px);
   background: rgba(24, 24, 32, 0.82);
   border: 1px solid rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(6px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   color: #f2f2f2;
-  font-size: max(10px, calc(10.5px * var(--pet-scale, 1)));
+  font-size: 10.5px;
   line-height: 1.3;
-  padding: max(3px, calc(3px * var(--pet-scale, 1))) max(9px, calc(9px * var(--pet-scale, 1)));
-  border-radius: max(10px, calc(11px * var(--pet-scale, 1)));
+  padding: 3px 9px;
+  border-radius: 11px;
 }
 
 .status-line:hover,
@@ -387,7 +405,7 @@ function onClick(e: MouseEvent) {
   flex-shrink: 0;
   min-width: 25px;
   color: color-mix(in srgb, var(--quota-color) 82%, white);
-  font-size: max(8px, calc(8.5px * var(--pet-scale, 1)));
+  font-size: 8.5px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -400,16 +418,23 @@ function onClick(e: MouseEvent) {
   bottom: calc(100% + 6px);
   left: 50%;
   z-index: 30;
+  /* Fixed regardless of --pet-w (pet window width scales with pet size) —
+     the row inside (label · "NN% remaining", the latter forced to
+     white-space: nowrap) needs a guaranteed minimum of real estate or the
+     flex layout dumps all the squeeze onto the label, wrapping it down to
+     one word per line. See QUOTA_TOOLTIP_MIN_W in agentStore.ts, which
+     keeps the pet window itself wide enough that this never gets clipped
+     at the window edge either. */
   width: max-content;
-  min-width: min(218px, calc(var(--pet-w, 250px) - 20px));
-  max-width: min(286px, calc(var(--pet-w, 250px) - 12px));
+  min-width: 236px;
+  max-width: 268px;
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--quota-color) 34%, rgba(255, 255, 255, 0.12));
   border-radius: 8px;
   background: rgba(20, 21, 28, 0.96);
   box-shadow: 0 5px 16px rgba(0, 0, 0, 0.38), 0 0 9px color-mix(in srgb, var(--quota-color) 13%, transparent);
   color: #f3f4f7;
-  font-size: max(11px, calc(11.5px * var(--pet-scale, 1)));
+  font-size: 11.5px;
   font-weight: 500;
   line-height: 1.4;
   text-align: left;
@@ -479,9 +504,9 @@ function onClick(e: MouseEvent) {
   right: 1px;
   bottom: 0;
   left: 1px;
-  height: max(3px, calc(3px * var(--pet-scale, 1)));
+  height: 3px;
   overflow: hidden;
-  border-radius: 0 0 max(9px, calc(10px * var(--pet-scale, 1))) max(9px, calc(10px * var(--pet-scale, 1)));
+  border-radius: 0 0 10px 10px;
   background: rgba(0, 0, 0, 0.38);
   pointer-events: none;
 }
@@ -562,8 +587,8 @@ function onClick(e: MouseEvent) {
 }
 
 .line-dot {
-  width: max(5px, calc(5px * var(--pet-scale, 1)));
-  height: max(5px, calc(5px * var(--pet-scale, 1)));
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   flex-shrink: 0;
   box-shadow: 0 0 4px currentColor;
@@ -588,7 +613,7 @@ function onClick(e: MouseEvent) {
 
 .line-sep {
   opacity: 0.45;
-  margin: 0 max(3px, calc(3px * var(--pet-scale, 1)));
+  margin: 0 3px;
 }
 
 .status-line-enter-active,

@@ -9,8 +9,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
-  moveWindow: (dx: number, dy: number) => {
-    ipcRenderer.send('pet-move', { dx, dy })
+  startDrag: () => {
+    ipcRenderer.send('pet-drag-start')
   },
 
   notifyDragEnd: () => {

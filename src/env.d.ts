@@ -9,7 +9,7 @@ declare module '*.vue' {
 interface Window {
   electronAPI?: {
     onAgentStatusEvent: (callback: (event: any) => void) => () => void
-    moveWindow: (dx: number, dy: number) => void
+    startDrag: () => void
     notifyDragEnd: () => void
     resizeWindow: (width: number, height: number) => void
     setMousePassthrough: (ignore: boolean) => void

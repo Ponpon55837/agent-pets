@@ -33,6 +33,7 @@ let petWindow: BrowserWindow | null = null
 let panelWindow: BrowserWindow | null = null
 let anchorBottomCenter: { x: number; y: number } | null = null
 let resizeAnimHandle: ReturnType<typeof setInterval> | null = null
+let dragPollHandle: ReturnType<typeof setInterval> | null = null
 let dialogOpen = false
 let eventToken = ''
 const pendingIntegrationTests = new Map<string, () => void>()
@@ -63,6 +64,14 @@ if (!hasSingleInstanceLock) {
 
 const PANEL_WIDTH = 320
 const PANEL_GAP = 6
+// petWindow's actual bounds include a fixed, unscaled band of transparent
+// space reserved above the visible sprite for the quota tooltip to pop
+// into (see QUOTA_TOOLTIP_HEADROOM_H in agentStore.ts — keep in sync).
+// computePanelBounds must anchor off the visible pet, not the raw window
+// bounds, or the panel opens with a big gap floating above the pet — worst
+// at small pet sizes, where that fixed band is a large fraction of the
+// window's total (scaled) height.
+const PET_WINDOW_TOP_HEADROOM = 190
 const MAX_PET_ZIP_BYTES = 10 * 1024 * 1024
 const MAX_PET_ZIP_ENTRIES = 64
 const MAX_PET_UNCOMPRESSED_BYTES = 25 * 1024 * 1024
@@ -349,9 +358,10 @@ function createPetWindow() {
   const rawScale = parseFloat(process.env.PET_SCALE || '1')
   const scale = clamp(isNaN(rawScale) ? 1 : rawScale, 0.3, 5)
   // Rough initial guess before the renderer's store hydrates and corrects it
-  // via resizeWindow — keep these in sync with PET_BASE_W/H in agentStore.ts.
-  const w = Math.round(250 * scale)
-  const h = Math.round(232 * scale)
+  // via resizeWindow — keep these in sync with PET_BASE_W/H,
+  // QUOTA_TOOLTIP_MIN_W and QUOTA_TOOLTIP_HEADROOM_H in agentStore.ts.
+  const w = Math.max(Math.round(250 * scale), 284)
+  const h = Math.round(232 * scale) + 190
 
   // Restore wherever the user last dragged it to, rather than always
   // snapping back to the bottom-right default on every relaunch. Re-clamped
@@ -374,6 +384,12 @@ function createPetWindow() {
     resizable: false,
     skipTaskbar: true,
     hasShadow: false,
+    // Windows only: a frameless window still gets the WS_THICKFRAME resize
+    // border by default, which makes DWM apply its normal non-client move
+    // animation the instant the window is grabbed — visible as the whole
+    // pet sliding down a few pixels before drag tracking kicks in. Disabling
+    // it removes that OS-level animation so drag tracks the cursor exactly.
+    thickFrame: false,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -472,12 +488,17 @@ function computePanelBounds(height: number) {
   }
 
   const petBounds = petWindow.getBounds()
+  // The window's horizontal center still matches the visible sprite's (the
+  // headroom band is only added above, not to the sides), so x needs no
+  // adjustment — only the vertical anchor does.
+  const visibleTop = petBounds.y + PET_WINDOW_TOP_HEADROOM
+  const visibleHeight = petBounds.height - PET_WINDOW_TOP_HEADROOM
   const { workArea } = screen.getDisplayMatching(petBounds)
   const maxX = Math.max(workArea.x, workArea.x + workArea.width - PANEL_WIDTH)
   const maxY = Math.max(workArea.y, workArea.y + workArea.height - height)
   let x = petBounds.x + Math.round(petBounds.width / 2) - Math.round(PANEL_WIDTH / 2)
-  const aboveY = petBounds.y - height - PANEL_GAP
-  const belowY = petBounds.y + petBounds.height + PANEL_GAP
+  const aboveY = visibleTop - height - PANEL_GAP
+  const belowY = visibleTop + visibleHeight + PANEL_GAP
   let y = aboveY
 
   // Keep the panel touching the pet even near a work-area edge. Prefer above,
@@ -567,24 +588,61 @@ app.whenReady().then(() => {
     },
   )
 
-  ipcMain.on('pet-move', (event, payload: unknown) => {
+  // Dragging is driven from here by polling the OS cursor position, rather
+  // than by accumulating deltas between renderer mousemove events. On
+  // Windows, moving a frameless window while the cursor stays put makes the
+  // OS resend a synthetic mousemove for the window's new position; treating
+  // that as further user movement (as a delta-from-previous-event scheme
+  // would) re-moves the window again, which resends another synthetic
+  // event — a feedback loop that shows up as the pet continuously sliding
+  // (typically downward) for as long as the button is held, even with the
+  // physical mouse stationary. screen.getCursorScreenPoint() reads the true
+  // OS cursor position and is unaffected by window-move-induced events, so
+  // it can't feed back on itself this way.
+  ipcMain.on('pet-drag-start', (event) => {
     if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
-    const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
-    const rawDx = finiteNumber(data.dx)
-    const rawDy = finiteNumber(data.dy)
-    if (rawDx === null || rawDy === null) return
-    const dx = clamp(rawDx, -2_000, 2_000)
-    const dy = clamp(rawDy, -2_000, 2_000)
-    const [x, y] = petWindow.getPosition()
-    petWindow.setPosition(x + dx, y + dy)
+    if (dragPollHandle) {
+      clearInterval(dragPollHandle)
+      dragPollHandle = null
+    }
+    const startCursor = screen.getCursorScreenPoint()
+    const [startX, startY] = petWindow.getPosition()
+    let lastAppliedX = startX
+    let lastAppliedY = startY
     anchorBottomCenter = null
     panelWindow?.hide()
+
+    dragPollHandle = setInterval(() => {
+      if (!petWindow) {
+        if (dragPollHandle) clearInterval(dragPollHandle)
+        dragPollHandle = null
+        return
+      }
+      const cursor = screen.getCursorScreenPoint()
+      const targetX = startX + (cursor.x - startCursor.x)
+      const targetY = startY + (cursor.y - startCursor.y)
+      // Skip the call entirely when the cursor hasn't actually moved since
+      // the last tick. Calling setPosition() on an always-on-top window
+      // re-asserts its z-order every time even when the coordinates are
+      // unchanged, and on Windows that repeated no-op churn (125x/sec here)
+      // is what was seen as the pet slowly sliding down while held with a
+      // perfectly still mouse — a still cursor doesn't mean zero setPosition
+      // calls unless we explicitly guard for it.
+      if (targetX === lastAppliedX && targetY === lastAppliedY) return
+      lastAppliedX = targetX
+      lastAppliedY = targetY
+      petWindow.setPosition(targetX, targetY)
+    }, 8)
   })
 
   // Fired once when a drag ends (not per mousemove) so we're not hitting
   // disk on every pixel of movement.
   ipcMain.on('pet-drag-end', (event) => {
     if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
+    if (dragPollHandle) {
+      clearInterval(dragPollHandle)
+      dragPollHandle = null
+    }
     const [x, y] = petWindow.getPosition()
     writeWindowState(x, y)
   })
