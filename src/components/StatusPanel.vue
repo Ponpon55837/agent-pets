@@ -539,27 +539,54 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 
 <style scoped>
 .status-panel {
+  position: relative;
   width: 100%;
   height: 100%;
-  background: rgba(20, 20, 30, 0.95);
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  /* A dark solid layer sits underneath the sheen/tint so text stays legible
+     no matter what's behind the window (bright desktop wallpaper, video,
+     etc.) — the glass look comes from the blur + highlight, not from
+     letting the backdrop show through at full strength. */
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.015) 22%, rgba(255, 255, 255, 0) 45%),
+    rgba(18, 18, 26, 0.86);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   color: #e0e0e0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 13px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
   overflow: hidden;
-  backdrop-filter: blur(12px);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(24px) saturate(165%);
+  -webkit-backdrop-filter: blur(24px) saturate(165%);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.4),
+    0 2px 6px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    inset 0 -18px 30px -20px rgba(0, 0, 0, 0.35);
   z-index: 9999;
   display: flex;
   flex-direction: column;
 }
 
+.status-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 8%;
+  right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  pointer-events: none;
+}
+
 .panel-header {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 10px 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0));
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -575,17 +602,26 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 }
 
 .header-btn {
-  background: none;
-  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
   color: #a8adbd;
-  font-size: 18px;
+  font-size: 16px;
   cursor: pointer;
-  padding: 0 6px;
+  padding: 0;
   line-height: 1;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
 
 .header-btn:hover {
   color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .panel-empty {
@@ -603,26 +639,29 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 }
 
 .dashboard-tab {
-  padding: 5px 10px;
-  border: 0;
+  padding: 5px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 999px;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.03);
   color: #9298aa;
   font: inherit;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 
 .dashboard-tab:hover {
   color: #d0d3df;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .dashboard-tab.active {
   color: #e5e7ff;
-  background: rgba(139, 156, 247, 0.17);
+  background: rgba(139, 156, 247, 0.22);
+  border-color: rgba(139, 156, 247, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 10px rgba(139, 156, 247, 0.18);
 }
 
 .usage-view {
@@ -650,7 +689,9 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   padding: 10px;
   border: 1px solid rgba(139, 156, 247, 0.13);
   border-radius: 10px;
-  background: rgba(139, 156, 247, 0.045);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.05), rgba(139, 156, 247, 0.045));
+  backdrop-filter: blur(6px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .usage-provider.provider-claude {
@@ -870,37 +911,34 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 .settings-tabs {
   display: flex;
   flex-shrink: 0;
-  gap: 3px;
-  margin: 8px 12px 0;
-  padding: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.035);
+  gap: 4px;
+  padding: 8px 12px 4px;
 }
 
 .settings-tab {
-  flex: 1;
-  padding: 6px 10px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #a3a8ba;
+  padding: 5px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #9298aa;
   font: inherit;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s, box-shadow 0.15s;
+  transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 
 .settings-tab:hover {
-  color: #c8c8d2;
-  background: rgba(255, 255, 255, 0.045);
+  color: #d0d3df;
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .settings-tab.active {
   color: #e5e7ff;
-  background: rgba(139, 156, 247, 0.18);
-  box-shadow: inset 0 0 0 1px rgba(139, 156, 247, 0.2);
+  background: rgba(139, 156, 247, 0.22);
+  border-color: rgba(139, 156, 247, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 10px rgba(139, 156, 247, 0.18);
 }
 
 .settings-content {
@@ -936,6 +974,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.025);
+  backdrop-filter: blur(4px);
   transition: border-color 0.15s, background 0.15s;
 }
 
@@ -1240,8 +1279,16 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 }
 
 .scale-option.active {
-  background: rgba(139, 156, 247, 0.15);
+  background: rgba(139, 156, 247, 0.18);
   color: #8b9cf7;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 0 8px rgba(139, 156, 247, 0.15);
+}
+
+.setup-btn,
+.restart-btn,
+.quit-btn,
+.import-btn {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .setup-btn {

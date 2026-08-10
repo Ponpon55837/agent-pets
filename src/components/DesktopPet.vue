@@ -377,11 +377,20 @@ function onClick(e: MouseEvent) {
   align-items: center;
   gap: 5px;
   max-width: calc(var(--pet-w, 250px) - 14px);
-  background: rgba(24, 24, 32, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(6px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  /* A solid dark layer under the sheen keeps text legible over any
+     wallpaper/video behind the transparent pet window — the glass read
+     comes from the blur + highlight line, not from true see-through. */
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 55%),
+    rgba(20, 20, 28, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
   color: #f2f2f2;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
   font-size: 10.5px;
   line-height: 1.3;
   padding: 3px 9px;
@@ -398,6 +407,7 @@ function onClick(e: MouseEvent) {
   border-color: color-mix(in srgb, var(--quota-color) 25%, rgba(255, 255, 255, 0.1));
   box-shadow:
     0 2px 8px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
     inset 0 -3px 7px color-mix(in srgb, var(--quota-color) 9%, transparent);
 }
 
@@ -431,9 +441,20 @@ function onClick(e: MouseEvent) {
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--quota-color) 34%, rgba(255, 255, 255, 0.12));
   border-radius: 8px;
-  background: rgba(20, 21, 28, 0.96);
-  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.38), 0 0 9px color-mix(in srgb, var(--quota-color) 13%, transparent);
+  /* Solid dark base under the sheen, same rationale as .status-line — the
+     tooltip floats over an unpredictable backdrop, so legibility takes
+     priority over true see-through transparency. */
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0) 50%),
+    rgba(17, 18, 25, 0.94);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  box-shadow:
+    0 5px 16px rgba(0, 0, 0, 0.38),
+    0 0 9px color-mix(in srgb, var(--quota-color) 13%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
   color: #f3f4f7;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   font-size: 11.5px;
   font-weight: 500;
   line-height: 1.4;
