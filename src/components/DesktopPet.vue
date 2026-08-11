@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useAgentStore } from '../stores/agentStore'
 import { STATE_LABELS_SHORT, STATE_COLORS } from '../types/agent'
 import PetAnimation from './PetAnimation.vue'
@@ -82,14 +82,50 @@ function quotaResetLabel(resetsAt?: string): string {
   if (!resetsAt) return 'Reset time unavailable'
   const reset = new Date(resetsAt)
   if (!Number.isFinite(reset.getTime())) return 'Reset time unavailable'
+  // No year: the longest quota window is 7 days out, so it carries no
+  // information and is the single widest chunk of the tooltip.
   return `Resets ${reset.toLocaleString([], {
-    year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
   })}`
 }
+
+// A quota drop is the pet "taking damage" — flash the meter for a moment so
+// a change that happened while you weren't looking still registers. Driven
+// by a class toggle (not a CSS transition) so consecutive drops re-run the
+// animation from the start instead of being swallowed mid-flight.
+const draining = ref<Record<string, boolean>>({})
+const drainTimers: Record<string, number> = {}
+const lastRemaining: Record<string, number> = {}
+
+function flashDrain(familyKey: string) {
+  window.clearTimeout(drainTimers[familyKey])
+  draining.value = { ...draining.value, [familyKey]: false }
+  requestAnimationFrame(() => {
+    draining.value = { ...draining.value, [familyKey]: true }
+    drainTimers[familyKey] = window.setTimeout(() => {
+      draining.value = { ...draining.value, [familyKey]: false }
+    }, 700)
+  })
+}
+
+watch(() => store.quotaByFamily, (quotas) => {
+  for (const [familyKey, quota] of Object.entries(quotas)) {
+    const previous = lastRemaining[familyKey]
+    lastRemaining[familyKey] = quota.remainingPercent
+    // Only a meaningful drop counts: refreshes that report the same number
+    // (or a reset that refills the bar) shouldn't strobe the meter.
+    if (previous !== undefined && quota.remainingPercent < previous - 0.05) {
+      flashDrain(familyKey)
+    }
+  }
+}, { deep: true })
+
+onBeforeUnmount(() => {
+  Object.values(drainTimers).forEach((timer) => window.clearTimeout(timer))
+})
 
 function quotaTitle(familyKey: string): string | undefined {
   const details = quotaDetails(familyKey)
@@ -99,8 +135,27 @@ function quotaTitle(familyKey: string): string | undefined {
   )).join('\n')
 }
 
+// The sprite is bottom-anchored inside a window that reserves fixed
+// transparent headroom above it for the quota tooltip, so how much of the
+// window is actually painted varies with pet size and status-line count.
+// Main can't derive that, and it's what the status panel anchors to, so
+// measure it here and report every change.
+const clickAreaRef = ref<HTMLElement | null>(null)
+let contentObserver: ResizeObserver | null = null
+
 onMounted(() => {
   store.loadPets()
+
+  if (!clickAreaRef.value || !window.electronAPI?.reportContentHeight) return
+  contentObserver = new ResizeObserver(([entry]) => {
+    window.electronAPI?.reportContentHeight(Math.ceil(entry.contentRect.height))
+  })
+  contentObserver.observe(clickAreaRef.value)
+})
+
+onBeforeUnmount(() => {
+  contentObserver?.disconnect()
+  contentObserver = null
 })
 
 function onMouseDown(e: MouseEvent) {
@@ -165,6 +220,7 @@ function onClick(e: MouseEvent) {
 <template>
   <div class="desktop-pet">
     <div
+      ref="clickAreaRef"
       class="pet-click-area"
       :class="{ dragging: store.isDragging }"
       @mousedown="onMouseDown"
@@ -196,6 +252,7 @@ function onClick(e: MouseEvent) {
                 'has-quota': store.quotaByFamily[line.key],
                 'quota-motion': store.reactionsEnabled,
                 'quota-critical': store.reactionsEnabled && (store.quotaByFamily[line.key]?.remainingPercent ?? 100) < 10,
+                'quota-drain': store.reactionsEnabled && draining[line.key],
               }"
               :style="quotaLineStyle(line.key)"
               :aria-label="quotaTitle(line.key)"
@@ -256,6 +313,7 @@ function onClick(e: MouseEvent) {
               'has-quota': store.quotaByFamily[line.key],
               'quota-motion': store.reactionsEnabled,
               'quota-critical': store.reactionsEnabled && (store.quotaByFamily[line.key]?.remainingPercent ?? 100) < 10,
+              'quota-drain': store.reactionsEnabled && draining[line.key],
             }"
             :style="quotaLineStyle(line.key)"
             :aria-label="quotaTitle(line.key)"
@@ -421,6 +479,9 @@ function onClick(e: MouseEvent) {
   line-height: 1;
   text-align: right;
   text-shadow: 0 0 6px color-mix(in srgb, var(--quota-color) 55%, transparent);
+  /* Scaling from the right keeps the number visually anchored to the pill's
+     edge while the critical-state heartbeat runs. */
+  transform-origin: 100% 50%;
 }
 
 .quota-tooltip {
@@ -428,17 +489,16 @@ function onClick(e: MouseEvent) {
   bottom: calc(100% + 6px);
   left: 50%;
   z-index: 30;
-  /* Fixed regardless of --pet-w (pet window width scales with pet size) —
-     the row inside (label · "NN% remaining", the latter forced to
-     white-space: nowrap) needs a guaranteed minimum of real estate or the
-     flex layout dumps all the squeeze onto the label, wrapping it down to
-     one word per line. See QUOTA_TOOLTIP_MIN_W in agentStore.ts, which
-     keeps the pet window itself wide enough that this never gets clipped
-     at the window edge either. */
+  /* Shrink-to-fit: max-content sizes the box to the widest single-line row
+     (both rows are nowrap), so there is no dead space to the right of the
+     text. The max-width is only a runaway guard for unusually long window
+     labels — hitting it is what would let the label wrap, so it must stay
+     comfortably above the normal "5-hour limit / NN% remaining" width.
+     See QUOTA_TOOLTIP_MIN_W in agentStore.ts, which keeps the pet window
+     itself wide enough that this never gets clipped at the window edge. */
   width: max-content;
-  min-width: 236px;
-  max-width: 268px;
-  padding: 8px 10px;
+  max-width: 244px;
+  padding: 7px 9px;
   border: 1px solid color-mix(in srgb, var(--quota-color) 34%, rgba(255, 255, 255, 0.12));
   border-radius: 8px;
   /* Solid dark base under the sheen, same rationale as .status-line — the
@@ -482,7 +542,17 @@ function onClick(e: MouseEvent) {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  /* nowrap is what lets max-content size the tooltip to one tidy line per
+     row; the label truncates rather than wraps if an unknown window label
+     ever runs past the max-width guard. */
+  white-space: nowrap;
+}
+
+.quota-tooltip-summary > strong:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .quota-tooltip-percent {
@@ -525,11 +595,27 @@ function onClick(e: MouseEvent) {
   right: 1px;
   bottom: 0;
   left: 1px;
-  height: 3px;
+  height: 4px;
   overflow: hidden;
   border-radius: 0 0 10px 10px;
   background: rgba(0, 0, 0, 0.38);
   pointer-events: none;
+}
+
+/* Full-width white flash layered over the bar, played once per quota drop
+   (see the .quota-drain class). Lives on the track rather than the fill so
+   it never has to share the fill's `animation` slot with quota-pulse. */
+.quota-meter::before {
+  content: '';
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.92);
+  opacity: 0;
+}
+
+.quota-drain .quota-meter::before {
+  animation: quota-drain-flash 0.7s ease-out;
 }
 
 .quota-meter::after {
@@ -564,6 +650,30 @@ function onClick(e: MouseEvent) {
   transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.25s ease;
 }
 
+/* Sheen that travels along the filled portion. Positioned via
+   background-position (not transform) so the highlight stays inside the
+   fill's own box — the fill can't clip its children, since the glowing head
+   below deliberately overhangs its right edge. */
+.quota-meter-fill::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    100deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.72) 50%,
+    transparent 62%
+  );
+  background-repeat: no-repeat;
+  background-size: 260% 100%;
+  background-position: 150% 0;
+}
+
+.quota-motion .quota-meter-fill::before {
+  animation: quota-sheen 3.4s ease-in-out infinite;
+}
+
 .quota-meter-fill::after {
   content: '';
   position: absolute;
@@ -586,6 +696,17 @@ function onClick(e: MouseEvent) {
   animation: quota-pulse 1.8s ease-in-out infinite;
 }
 
+/* Below 10% the whole readout joins in: the bar throws an alarm glow and
+   the percentage beats, so a nearly-empty quota is noticeable from across
+   the desk rather than only on a close look. */
+.quota-critical .quota-meter {
+  animation: quota-alarm 1.8s ease-in-out infinite;
+}
+
+.quota-critical .quota-readout {
+  animation: quota-heartbeat 1.8s ease-in-out infinite;
+}
+
 @keyframes quota-pulse {
   0%, 100% { opacity: 0.72; }
   50% { opacity: 1; filter: brightness(1.28); }
@@ -596,12 +717,36 @@ function onClick(e: MouseEvent) {
   78% { opacity: 1; transform: translate(35%, -50%) scale(1.18); }
 }
 
+@keyframes quota-sheen {
+  0% { background-position: 150% 0; }
+  60%, 100% { background-position: -60% 0; }
+}
+
+@keyframes quota-drain-flash {
+  0% { opacity: 0.6; }
+  100% { opacity: 0; }
+}
+
+@keyframes quota-alarm {
+  0%, 100% { box-shadow: 0 0 0 color-mix(in srgb, var(--quota-color) 0%, transparent); }
+  50% { box-shadow: 0 0 9px color-mix(in srgb, var(--quota-color) 65%, transparent); }
+}
+
+@keyframes quota-heartbeat {
+  0%, 100% { transform: scale(1); opacity: 0.82; }
+  50% { transform: scale(1.14); opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .quota-meter-fill {
     transition: none;
     animation: none !important;
   }
 
+  .quota-meter,
+  .quota-meter::before,
+  .quota-readout,
+  .quota-meter-fill::before,
   .quota-meter-fill::after {
     animation: none !important;
   }

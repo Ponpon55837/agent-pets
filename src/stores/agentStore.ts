@@ -528,12 +528,12 @@ export const useAgentStore = defineStore('agent', () => {
   const isMultiPet = computed(() => multiPetEnabled.value && familyLines.value.length > 1)
 
   const MULTI_PET_CELL_W = 204 // sprite cell (192) + a small gap
-  // The quota tooltip (DesktopPet.vue) is a fixed 268px wide regardless of
-  // pet size, same reasoning as QUOTA_TOOLTIP_HEADROOM_H below — the pet
-  // window must stay at least this wide (plus a little slack either side of
-  // the centered tooltip) or a small pet size clips the tooltip at the
-  // window edge.
-  const QUOTA_TOOLTIP_MIN_W = 284
+  // The quota tooltip (DesktopPet.vue) shrinks to its content but is capped
+  // at 244px regardless of pet size, same reasoning as
+  // QUOTA_TOOLTIP_HEADROOM_H below — the pet window must stay at least that
+  // wide (plus a little slack either side of the centered tooltip) or a
+  // small pet size clips the tooltip at the window edge.
+  const QUOTA_TOOLTIP_MIN_W = 260
   const scaledW = computed(() => {
     if (isMultiPet.value) {
       const count = familyLines.value.length

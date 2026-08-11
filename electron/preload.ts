@@ -21,6 +21,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('pet-resize', { width, height })
   },
 
+  reportContentHeight: (height: number) => {
+    ipcRenderer.send('pet-content-height', { height })
+  },
+
   setMousePassthrough: (ignore: boolean) => {
     ipcRenderer.send('pet-mouse-passthrough', { ignore })
   },

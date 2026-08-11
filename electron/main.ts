@@ -32,6 +32,9 @@ import {
 let petWindow: BrowserWindow | null = null
 let panelWindow: BrowserWindow | null = null
 let anchorBottomCenter: { x: number; y: number } | null = null
+// Height in CSS px of the pet window's actually-painted content, reported by
+// the pet renderer. The rest of the window is transparent tooltip headroom.
+let petContentHeight: number | null = null
 let resizeAnimHandle: ReturnType<typeof setInterval> | null = null
 let dragPollHandle: ReturnType<typeof setInterval> | null = null
 let dialogOpen = false
@@ -70,7 +73,9 @@ const PANEL_GAP = 6
 // computePanelBounds must anchor off the visible pet, not the raw window
 // bounds, or the panel opens with a big gap floating above the pet — worst
 // at small pet sizes, where that fixed band is a large fraction of the
-// window's total (scaled) height.
+// window's total (scaled) height. Only a fallback now: the renderer reports
+// its measured content height (see petContentHeight), which also accounts
+// for the status lines, whose size does not scale with the pet.
 const PET_WINDOW_TOP_HEADROOM = 190
 const MAX_PET_ZIP_BYTES = 10 * 1024 * 1024
 const MAX_PET_ZIP_ENTRIES = 64
@@ -357,17 +362,28 @@ function createPetWindow() {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize
   const rawScale = parseFloat(process.env.PET_SCALE || '1')
   const scale = clamp(isNaN(rawScale) ? 1 : rawScale, 0.3, 5)
-  // Rough initial guess before the renderer's store hydrates and corrects it
-  // via resizeWindow — keep these in sync with PET_BASE_W/H,
-  // QUOTA_TOOLTIP_MIN_W and QUOTA_TOOLTIP_HEADROOM_H in agentStore.ts.
-  const w = Math.max(Math.round(250 * scale), 284)
-  const h = Math.round(232 * scale) + 190
 
   // Restore wherever the user last dragged it to, rather than always
   // snapping back to the bottom-right default on every relaunch. Re-clamped
   // to the current work area in case it was saved on a monitor that's no
   // longer connected.
   const saved = readWindowState()
+
+  // The pet size lives in the renderer's localStorage, which the main process
+  // can't read, so the last size the renderer asked for is persisted with the
+  // position and reused here. Without it the window would always be born at
+  // the 1x (L) size and only shrink once the store hydrates — long enough for
+  // the panel to open against L-sized bounds, and, because the window is
+  // bottom-anchored, enough to walk the pet down the screen every launch.
+  // The fallback is a rough guess; keep it in sync with PET_BASE_W/H,
+  // QUOTA_TOOLTIP_MIN_W and QUOTA_TOOLTIP_HEADROOM_H in agentStore.ts.
+  const w = saved?.width !== undefined
+    ? Math.round(clamp(saved.width, 80, 1_600))
+    : Math.max(Math.round(250 * scale), 260)
+  const h = saved?.height !== undefined
+    ? Math.round(clamp(saved.height, 80, 1_600))
+    : Math.round(232 * scale) + 190
+
   const defaultX = screenWidth - w - 30
   const defaultY = screenHeight - h - 30
   const x = saved ? clamp(saved.x, 0, Math.max(0, screenWidth - w)) : defaultX
@@ -491,8 +507,16 @@ function computePanelBounds(height: number) {
   // The window's horizontal center still matches the visible sprite's (the
   // headroom band is only added above, not to the sides), so x needs no
   // adjustment — only the vertical anchor does.
-  const visibleTop = petBounds.y + PET_WINDOW_TOP_HEADROOM
-  const visibleHeight = petBounds.height - PET_WINDOW_TOP_HEADROOM
+  //
+  // Prefer the height the pet renderer measured for its own content: the
+  // sprite is bottom-anchored in the window, and how much of the window it
+  // actually fills depends on pet size AND status-line count, neither of
+  // which the constant below can express. It is only the fallback for the
+  // brief window before the first measurement arrives.
+  const visibleHeight = petContentHeight !== null
+    ? clamp(petContentHeight, 40, petBounds.height)
+    : petBounds.height - PET_WINDOW_TOP_HEADROOM
+  const visibleTop = petBounds.y + petBounds.height - visibleHeight
   const { workArea } = screen.getDisplayMatching(petBounds)
   const maxX = Math.max(workArea.x, workArea.x + workArea.width - PANEL_WIDTH)
   const maxY = Math.max(workArea.y, workArea.y + workArea.height - height)
@@ -511,6 +535,18 @@ function computePanelBounds(height: number) {
   y = clamp(y, workArea.y, maxY)
 
   return { x, y, width: PANEL_WIDTH, height }
+}
+
+// Status-line count can flap as agents come and go, so coalesce the writes
+// instead of hitting disk on every resize.
+let persistBoundsHandle: ReturnType<typeof setTimeout> | null = null
+
+function persistPetBounds(x: number, y: number, width: number, height: number) {
+  if (persistBoundsHandle) clearTimeout(persistBoundsHandle)
+  persistBoundsHandle = setTimeout(() => {
+    persistBoundsHandle = null
+    writeWindowState({ x, y, width, height })
+  }, 1_000)
 }
 
 function repositionVisiblePanel() {
@@ -644,7 +680,8 @@ app.whenReady().then(() => {
       dragPollHandle = null
     }
     const [x, y] = petWindow.getPosition()
-    writeWindowState(x, y)
+    const [width, height] = petWindow.getSize()
+    writeWindowState({ x, y, width, height })
   })
 
   ipcMain.on('pet-mouse-passthrough', (event, payload: unknown) => {
@@ -718,6 +755,22 @@ app.whenReady().then(() => {
       x: newX + Math.round(width / 2),
       y: newY + height,
     }
+
+    persistPetBounds(newX, newY, width, height)
+  })
+
+  // The renderer measures its own painted content (sprite + status lines) and
+  // reports it here so the panel can sit right against the pet instead of
+  // against the transparent tooltip headroom above it.
+  ipcMain.on('pet-content-height', (event, payload: unknown) => {
+    if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
+    const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    const rawHeight = finiteNumber(data.height)
+    if (rawHeight === null) return
+    const next = Math.round(clamp(rawHeight, 40, 1_600))
+    if (next === petContentHeight) return
+    petContentHeight = next
+    repositionVisiblePanel()
   })
 
   ipcMain.on('pet-quit', (event) => {

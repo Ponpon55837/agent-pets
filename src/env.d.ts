@@ -12,6 +12,7 @@ interface Window {
     startDrag: () => void
     notifyDragEnd: () => void
     resizeWindow: (width: number, height: number) => void
+    reportContentHeight: (height: number) => void
     setMousePassthrough: (ignore: boolean) => void
     togglePanel: () => void
     resizePanel: (height: number) => void

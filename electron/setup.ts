@@ -133,20 +133,34 @@ function windowStatePath(): string {
   return path.join(appDataDir(), 'window-state.json')
 }
 
-function readWindowState(): { x: number; y: number } | null {
+type PetWindowState = { x: number; y: number; width?: number; height?: number }
+
+function readWindowState(): PetWindowState | null {
   const raw = readFile(windowStatePath())
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw)
     if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-      return { x: parsed.x, y: parsed.y }
+      return {
+        x: parsed.x,
+        y: parsed.y,
+        width: typeof parsed.width === 'number' ? parsed.width : undefined,
+        height: typeof parsed.height === 'number' ? parsed.height : undefined,
+      }
     }
   } catch {}
   return null
 }
 
-function writeWindowState(x: number, y: number): void {
-  writeFileEnsured(windowStatePath(), JSON.stringify({ x, y }))
+// Merges rather than overwrites: position is saved when a drag ends and size
+// when the renderer resizes the pet, so each writer must leave the other's
+// field alone. Position and size are only coherent together — the pet window
+// is bottom-anchored, so a y saved at one size means a different visible spot
+// at another.
+function writeWindowState(state: Partial<PetWindowState>): void {
+  const merged = { ...(readWindowState() ?? {}), ...state }
+  if (typeof merged.x !== 'number' || typeof merged.y !== 'number') return
+  writeFileEnsured(windowStatePath(), JSON.stringify(merged))
 }
 
 // --- Hook script path ---
