@@ -15,7 +15,11 @@ const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 const CLAUDE_KEYCHAIN_SERVICE = 'Claude Code-credentials'
 const REQUEST_TIMEOUT_MS = 15_000
 const MAX_RESPONSE_BYTES = 1024 * 1024
-const CACHE_TTL_MS = 60_000
+// Deliberately shorter than the renderer's poll interval: at equal values a
+// scheduled poll lands on a cache entry that is only just about to expire and
+// gets served a stale reading, doubling the effective lag. This still
+// coalesces the pet and panel windows asking at roughly the same moment.
+const CACHE_TTL_MS = 90_000
 const FORCE_REFRESH_COOLDOWN_MS = 10_000
 const MAX_WINDOWS_PER_PROVIDER = 32
 const MAX_DISPLAY_TEXT_LENGTH = 96

@@ -15,6 +15,8 @@ let cleanupQuotaUpdated: (() => void) | null = null
 let staleTimer: ReturnType<typeof setInterval> | null = null
 let successTimer: ReturnType<typeof setInterval> | null = null
 let quotaTimer: ReturnType<typeof setInterval> | null = null
+let quotaSettleTimer: ReturnType<typeof setTimeout> | null = null
+let lastSettleRefreshAt = 0
 let petMousePassthrough = false
 
 function isOpaqueCanvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number): boolean {
@@ -124,8 +126,8 @@ watch(() => store.petScale, (v) => {
 })
 
 // The compact meter only needs quota while a Codex/Claude family is active.
-// Poll slowly, and let the main-process cache coalesce requests from the pet
-// and panel renderer. Manual refreshes are broadcast back to both windows.
+// The main-process cache coalesces requests from the pet and panel renderer,
+// and every result — polled or manual — is broadcast back to both windows.
 watch(() => store.hasQuotaCapableSessions, (active) => {
   if (quotaTimer) {
     clearInterval(quotaTimer)
@@ -135,8 +137,27 @@ watch(() => store.hasQuotaCapableSessions, (active) => {
   void store.refreshQuota()
   quotaTimer = setInterval(() => {
     void store.refreshQuota()
-  }, 5 * 60_000)
+  }, store.quotaRefreshMs)
 }, { immediate: true })
+
+// A finished session is the moment quota actually moved, so refresh off that
+// instead of waiting out the poll interval. Forced, because the whole point
+// is to bypass the renderer throttle — the main process' own force cooldown
+// still collapses a burst of sessions finishing together into one request.
+watch(() => store.quotaStaleSignal, () => {
+  if (isPanelWindow || quotaSettleTimer) return
+  const sinceLast = Date.now() - lastSettleRefreshAt
+  const delay = Math.max(
+    store.quotaSettleDelayMs,
+    store.quotaSettleMinIntervalMs - sinceLast,
+  )
+  quotaSettleTimer = setTimeout(() => {
+    quotaSettleTimer = null
+    if (!store.hasQuotaCapableSessions) return
+    lastSettleRefreshAt = Date.now()
+    void store.refreshQuota(true)
+  }, delay)
+})
 
 watch(() => store.scaledW, (w) => {
   document.documentElement.style.setProperty('--pet-w', w + 'px')
@@ -164,6 +185,7 @@ onUnmounted(() => {
   if (staleTimer) clearInterval(staleTimer)
   if (successTimer) clearInterval(successTimer)
   if (quotaTimer) clearInterval(quotaTimer)
+  if (quotaSettleTimer) clearTimeout(quotaSettleTimer)
 })
 </script>
 

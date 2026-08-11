@@ -19,7 +19,19 @@ export interface PetEntry {
 const SUCCESS_DISPLAY_MS = 4_000
 const SESSION_STALE_MS = 15 * 60_000
 const MAX_SESSION_COUNT = 200
-const QUOTA_REFRESH_MS = 5 * 60_000
+// Kept at/below the main process' quota cache TTL so a poll that arrives on
+// schedule actually reaches the usage API instead of being answered from a
+// still-warm cache — otherwise the two throttles stack and the meter lags by
+// up to twice this interval.
+const QUOTA_REFRESH_MS = 2 * 60_000
+// A session that just finished has spent quota the usage API needs a moment
+// to account for, so settle before asking rather than re-reading a stale
+// number and then waiting a full poll interval for the real one. This is what
+// actually keeps the meter current; the interval above is only a backstop.
+const QUOTA_SETTLE_DELAY_MS = 8_000
+// Floor between two session-driven refreshes, so a batch of agents finishing
+// one after another can't turn the settle hook into a tight polling loop.
+const QUOTA_SETTLE_MIN_INTERVAL_MS = 45_000
 const PET_BASE_W = 250 // wide enough for a status line like "OpenCode (CLI+Desktop)"
 const PET_BASE_H = 232 // canvas + 1 status line
 const STATUS_LINE_EXTRA_H = 22 // per additional status line beyond the first
@@ -94,6 +106,15 @@ function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
   return { updatedAt: new Date(raw.updatedAt).toISOString(), providers }
 }
 
+// Only Codex and Claude expose a subscription quota, so only their sessions
+// are worth polling — or refreshing after — for the usage meter.
+function isQuotaCapableSource(source: AgentSource): boolean {
+  return source === 'codex'
+    || source === 'codex-desktop'
+    || source === 'claude'
+    || source === 'claude-desktop'
+}
+
 interface MoodTaskProgress {
   startedAt: number
   completedTools: number
@@ -112,6 +133,11 @@ export const useAgentStore = defineStore('agent', () => {
   const quotaUsage = ref<QuotaUsage | null>(null)
   const quotaLoading = ref(false)
   const quotaError = ref('')
+  // Bumped whenever a Codex/Claude session reaches a terminal state, i.e.
+  // right after quota was actually spent. App.vue watches this and schedules
+  // one settled refresh, so the meter tracks real usage instead of only the
+  // fixed poll interval.
+  const quotaStaleSignal = ref(0)
   let quotaRequestedAt = 0
 
   // Built-in pets ship as bundled assets, so "removing" one just hides it
@@ -371,6 +397,7 @@ export const useAgentStore = defineStore('agent', () => {
     awardMoodProgress(event, key, prevState)
 
     if ((event.state === 'success' || event.state === 'error') && prevState !== event.state) {
+      if (isQuotaCapableSource(event.source)) quotaStaleSignal.value += 1
       showToast(event.source, event.project, event.state)
       adjustMood(event.state === 'success' ? MOOD_SUCCESS_REWARD : -MOOD_ERROR_PENALTY)
       return event.state
@@ -429,12 +456,9 @@ export const useAgentStore = defineStore('agent', () => {
     )
   })
 
-  const hasQuotaCapableSessions = computed(() => activeSessions.value.some(
-    (session) => session.source === 'codex'
-      || session.source === 'codex-desktop'
-      || session.source === 'claude'
-      || session.source === 'claude-desktop',
-  ))
+  const hasQuotaCapableSessions = computed(
+    () => activeSessions.value.some((session) => isQuotaCapableSource(session.source)),
+  )
 
   const quotaByFamily = computed<Record<string, { label: string; remainingPercent: number; resetsAt?: string }>>(() => {
     const result: Record<string, { label: string; remainingPercent: number; resetsAt?: string }> = {}
@@ -697,7 +721,11 @@ export const useAgentStore = defineStore('agent', () => {
     quotaLoading,
     quotaError,
     quotaByFamily,
+    quotaStaleSignal,
     hasQuotaCapableSessions,
+    quotaRefreshMs: QUOTA_REFRESH_MS,
+    quotaSettleDelayMs: QUOTA_SETTLE_DELAY_MS,
+    quotaSettleMinIntervalMs: QUOTA_SETTLE_MIN_INTERVAL_MS,
     defaultPetId: DEFAULT_PET_ID,
     showWizard,
     toast,
