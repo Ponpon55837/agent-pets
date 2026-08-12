@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
 import type { PermissionDecisionValue, PermissionRequestView } from '../src/types/permission'
+import type { ProgressionSnapshot } from '../src/types/progression'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   onAgentStatusEvent: (callback: (event: unknown) => void) => {
@@ -65,6 +66,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   setDesktopPreferences: (patch: DesktopPreferencesPatch): Promise<DesktopPreferences> => {
     return ipcRenderer.invoke('desktop-preferences-set', patch)
+  },
+
+  initializeProgression: (petId?: string): Promise<ProgressionSnapshot | null> => {
+    return ipcRenderer.invoke('progression-init', petId)
+  },
+
+  setProgressionPet: (petId: string): Promise<ProgressionSnapshot | null> => {
+    return ipcRenderer.invoke('progression-set-pet', petId)
+  },
+
+  onProgressionUpdated: (callback: (snapshot: ProgressionSnapshot) => void) => {
+    const handler = (_event: unknown, snapshot: ProgressionSnapshot) => callback(snapshot)
+    ipcRenderer.on('progression-updated', handler)
+    return () => {
+      ipcRenderer.removeListener('progression-updated', handler)
+    }
   },
 
   onDesktopPreferencesUpdated: (callback: (preferences: DesktopPreferences) => void) => {

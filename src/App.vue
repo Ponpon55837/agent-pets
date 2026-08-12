@@ -14,6 +14,7 @@ let cleanupListener: (() => void) | null = null
 let cleanupPanelOpened: (() => void) | null = null
 let cleanupPanelOpenSettings: (() => void) | null = null
 let cleanupDesktopPreferences: (() => void) | null = null
+let cleanupProgression: (() => void) | null = null
 let cleanupQuotaUpdated: (() => void) | null = null
 let cleanupPermissionRequests: (() => void) | null = null
 let staleTimer: ReturnType<typeof setInterval> | null = null
@@ -68,6 +69,7 @@ function handleStorage(e: StorageEvent) {
   } else if (e.key === 'agent-pet-id' && e.newValue) {
     store.loadPets().then(() => {
       store.selectedPet = e.newValue as string
+      void store.setProgressionPet(e.newValue as string)
     })
   } else if (e.key === 'agent-pet-family-map') {
     try {
@@ -125,6 +127,11 @@ onMounted(() => {
       store.applyDesktopPreferences(preferences)
     })
   }
+  if (electronAPI?.onProgressionUpdated) {
+    cleanupProgression = electronAPI.onProgressionUpdated((snapshot: unknown) => {
+      store.setProgressionSnapshot(snapshot)
+    })
+  }
   if (electronAPI?.onPermissionRequestsUpdated) {
     cleanupPermissionRequests = electronAPI.onPermissionRequestsUpdated((requests: unknown) => {
       store.setPermissionRequests(requests)
@@ -132,6 +139,7 @@ onMounted(() => {
   }
   void store.initializePermissionRequests()
   void store.initializeDesktopPreferences()
+  void store.initializeProgression()
   if (electronAPI?.onQuotaUsageUpdated) {
     cleanupQuotaUpdated = electronAPI.onQuotaUsageUpdated((usage: unknown) => {
       store.setQuotaUsage(usage)
@@ -208,6 +216,7 @@ onUnmounted(() => {
   cleanupPanelOpened?.()
   cleanupPanelOpenSettings?.()
   cleanupDesktopPreferences?.()
+  cleanupProgression?.()
   cleanupQuotaUpdated?.()
   cleanupPermissionRequests?.()
   window.removeEventListener('mousemove', handlePetMouseMove, true)

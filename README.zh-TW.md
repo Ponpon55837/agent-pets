@@ -14,6 +14,7 @@
 - **自訂寵物** — 匯入自己的精靈圖，或是像 [codex-pets.net](https://codex-pets.net) 這類網站的 `.codex-pet.zip` 素材包。
 - **桌面控制** — 系統匣選單、原生等待／完成通知、勿擾模式、音效控制，以及可選的登入時啟動。
 - **權限控制** — OpenCode 的 permission request 可直接在 Liquid Glass 寵物氣泡選擇只允許一次或拒絕；只有符合條件且顯示中的請求才會註冊全域快捷鍵。
+- **寵物成長** — 完成 session、受上限保護的觀察到的工作時間、每日首次完成與連續天數會產生持久 XP；Level 與 Evolution 由主行程 SQLite ledger 保存，重開後仍會恢復。
 
 ---
 
@@ -86,12 +87,11 @@
 
 #### Settings 畫面
 
-面板分成 **Settings** 與 **Pets** 兩個分頁。
+面板分成 **Settings**、**Growth** 與 **Pets** 三個分頁。
 
 **Settings 分頁**
 
 - **Size** — S / M / L / XL / XXL 調整寵物大小。
-- **Mood** — 每天從低基準 10 開始；任務成功 +4、失敗 -6。長任務每完成 2 個工具會再 +1（每個任務最多 +8），每持續工作 5 分鐘也會 +1（每個任務最多 +4），因此完成獎勵之前的進度分數最多 +12。心情成長時，會以目前寵物影格生成貼合自身輪廓的動態能量層，並在 90 以上進入完整爆氣效果。點 **Reset** 只會回到 10，不會額外加分。
 - **Do Not Disturb** — 勿擾模式會抑制原生通知、寵物音效、額外動態效果與非必要氣泡，但不會停止事件接收。**預設關閉。**
 - **Notifications** — 等待核准、等待輸入、完成與錯誤的原生通知；同 session 的重複事件有冷卻時間，結束事件會批次合併。**預設開啟。**
 - **Sound** — 成功/失敗/等待核准時的短音效（用 Web Audio 即時合成，不需要音檔）。**預設關閉。**
@@ -102,6 +102,11 @@
 - **Setup Wizard** — 重新偵測工具，或安裝/重新安裝 hooks。
 - **Restart Pet** — 寵物或動畫卡住時，完整重新啟動 Agent Pets。
 - **Quit** — 結束 Agent Pets。
+
+**Growth 分頁**
+
+- **Mood** — 每天從低基準 10 開始；任務成功 +4、失敗 -6。長任務每完成 2 個工具會再 +1（每個任務最多 +8），每持續工作 5 分鐘也會 +1（每個任務最多 +4），因此完成獎勵之前的進度分數最多 +12。心情成長時，會以目前寵物影格生成貼合自身輪廓的動態能量層，並在 90 以上進入完整爆氣效果。點 **Reset** 只會回到 10，不會額外加分。
+- **XP／Level** — Growth chip 會顯示目前選取寵物的持久 XP、Level、Evolution 階段與目前 streak。XP 使用有版本的去重 ledger：每個 canonical session 完成 +20、每日首次完成 +10、每觀察到 30 分鐘 active coding +2（每個 session 最多 +10），延續前一天 streak +5。失敗或取消不會扣永久 XP；token milestone 等待精確 token event contract。
 
 **Pets 分頁**
 
@@ -237,6 +242,7 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 - **桌面通知** — 通知只會使用正規化後的 Agent 名稱與長度受限的專案 basename，不會顯示或記錄 prompt、工具參數、session identifier 或憑證；診斷紀錄有固定上限，而且只保存事件類別與結果。
 - **桌面偏好 IPC** — 系統匣／勿擾／通知／權限泡泡／登入啟動偏好由 main process 擁有。Renderer 只能從已驗證的第一方 frame 傳送白名單 boolean 欄位，設定檔採長度受限讀取與原子替換。
 - **Permission Broker** — 權限回覆使用獨立 loopback port 與專用的每次安裝 token，不會經過一般事件端點。Main process 強制 TTL、一次性狀態轉換、anti-replay、資料上限、Adapter-owned opaque handle、限時快捷鍵、Agent 端解決對帳，以及內容去識別且有上限的本機 audit；只提供 `allow_once` 與 `deny`，刻意不提供永久允許。
+- **Progression 儲存** — XP 只在 Electron 主行程發放。SQLite migration、同一 transaction 的 `pet_progress`／`xp_ledger` 更新、唯一 idempotency key、受上限保護的 session active-time 與 sanitized snapshot，避免 renderer 或重送事件灌高 XP。資料庫只留在本機，不會上傳。
 - **打包執行環境** — Electron fuses 會停用 RunAsNode、Node options／inspect 參數與 `file://` 額外權限，並強制只從 ASAR 載入及驗證內嵌 ASAR 完整性。
 - **發行簽章** — 正式發布 macOS／Windows 產物時必須配置平台簽章憑證；未簽章的本機建置只供開發測試。
 
@@ -313,6 +319,7 @@ agent-pets/
 │   ├── permission-broker.ts # 權限狀態機與 anti-replay
 │   ├── permission-adapter-server.ts # 獨立的 OpenCode 回覆通道
 │   ├── permission-audit.ts  # 有上限且去敏感內容的本機 audit
+│   ├── progression.ts       # SQLite XP ledger 與 Level projection
 │   ├── desktop-preferences.ts # Main 擁有的桌面偏好
 │   ├── desktop-notifications.ts # 原生通知與有上限的診斷紀錄
 │   ├── desktop-tray.ts      # 系統匣生命週期與選單

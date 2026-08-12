@@ -626,6 +626,8 @@ xp_ledger(
 
 XP 寫入與 `pet_progress` 更新必須在同一 transaction。若 XP 規則日後調整，舊 ledger 不回算；以 versioned `rule_id` 區分。
 
+Phase 3 實作補充：目前由 `electron/progression.ts` 在主行程建立 `progression.sqlite`，啟用 foreign keys、WAL 與 bounded session activity。Renderer 只透過 typed IPC 取得目前選取寵物的 sanitized snapshot；它不能開啟資料庫或寫入 ledger。Generic `/v1/events` 的 normalized event 只會由 main process 投影一次，presentation MCP 不會進入 XP policy。由於現有 quota contract 沒有 exact token usage event，本階段不發放 token milestone，待後續 Event Core 提供可驗證欄位後再以新 rule version 加入。
+
 ---
 
 ## 9. Tray / Notification / DND

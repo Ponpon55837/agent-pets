@@ -9,6 +9,7 @@ import type {
 import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '../types/agent'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../types/desktop'
 import type { PermissionDecisionValue, PermissionRequestView } from '../types/permission'
+import type { ProgressionSnapshot } from '../types/progression'
 import { formatProject } from '../utils/format'
 import { isDesktopEffectActive } from '../utils/desktop-effects'
 import {
@@ -66,6 +67,7 @@ const MOOD_TIME_PROGRESS_CAP = 4
 const DEFAULT_PET_ID = 'aang-airbender'
 const MAX_QUOTA_WINDOWS = 32
 const MAX_QUOTA_TEXT_LENGTH = 96
+const EVOLUTION_STAGES = new Set(['egg', 'baby', 'teen', 'adult', 'master'])
 
 type QuotaUsage = Awaited<ReturnType<NonNullable<Window['electronAPI']>['getQuotaUsage']>>
 
@@ -111,6 +113,39 @@ function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
     })
   }
   return { updatedAt: new Date(raw.updatedAt).toISOString(), providers }
+}
+
+function normalizeProgressionSnapshot(value: unknown): ProgressionSnapshot | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  const integerFields = ['totalXp', 'level', 'xpIntoLevel', 'xpToNext', 'currentStreak', 'longestStreak', 'updatedAt']
+  if (
+    typeof raw.petId !== 'string'
+    || !EVOLUTION_STAGES.has(String(raw.evolutionStage))
+    || integerFields.some((field) => !Number.isSafeInteger(raw[field]))
+    || Number(raw.totalXp) < 0
+    || Number(raw.level) < 1
+    || Number(raw.xpIntoLevel) < 0
+    || Number(raw.xpToNext) <= 0
+    || Number(raw.currentStreak) < 0
+    || Number(raw.longestStreak) < 0
+  ) return null
+  const lastActiveLocalDate = typeof raw.lastActiveLocalDate === 'string'
+    && /^\d{4}-\d{2}-\d{2}$/.test(raw.lastActiveLocalDate)
+    ? raw.lastActiveLocalDate
+    : undefined
+  return {
+    petId: raw.petId,
+    totalXp: raw.totalXp as number,
+    level: raw.level as number,
+    xpIntoLevel: raw.xpIntoLevel as number,
+    xpToNext: raw.xpToNext as number,
+    evolutionStage: raw.evolutionStage as ProgressionSnapshot['evolutionStage'],
+    currentStreak: raw.currentStreak as number,
+    longestStreak: raw.longestStreak as number,
+    ...(lastActiveLocalDate ? { lastActiveLocalDate } : {}),
+    updatedAt: raw.updatedAt as number,
+  }
 }
 
 // Only Codex and Claude expose a subscription quota, so only their sessions
@@ -251,6 +286,7 @@ export const useAgentStore = defineStore('agent', () => {
   // Off by default — the completion toast / "what's it doing" bubble.
   const bubbleEnabled = ref(localStorage.getItem('agent-pet-bubble') === '1')
   const permissionRequests = ref<PermissionRequestView[]>([])
+  const progression = ref<ProgressionSnapshot | null>(null)
 
   // Desktop-wide preferences are owned by the Electron main process so the
   // Tray and both renderer windows always agree. Sound is initialized from
@@ -418,11 +454,38 @@ export const useAgentStore = defineStore('agent', () => {
   function setPet(petId: string) {
     selectedPet.value = petId
     localStorage.setItem('agent-pet-id', petId)
+    void setProgressionPet(petId)
   }
 
   function setScale(scale: number) {
     petScale.value = scale
     localStorage.setItem('agent-pet-scale', String(scale))
+  }
+
+  function setProgressionSnapshot(value: unknown): boolean {
+    const normalized = normalizeProgressionSnapshot(value)
+    if (!normalized) return false
+    progression.value = normalized
+    return true
+  }
+
+  async function initializeProgression(): Promise<void> {
+    try {
+      const snapshot = await window.electronAPI?.initializeProgression(selectedPet.value)
+      if (snapshot) setProgressionSnapshot(snapshot)
+    } catch {
+      progression.value = null
+    }
+  }
+
+  async function setProgressionPet(petId: string): Promise<void> {
+    if (!/^[A-Za-z0-9._-]{1,128}$/.test(petId)) return
+    try {
+      const snapshot = await window.electronAPI?.setProgressionPet(petId)
+      if (snapshot) setProgressionSnapshot(snapshot)
+    } catch {
+      // Main remains authoritative; a later broadcast restores the snapshot.
+    }
   }
 
   function getSessionKey(source: AgentSource, sessionId: string): string {
@@ -941,6 +1004,10 @@ export const useAgentStore = defineStore('agent', () => {
     permissionNotice,
     permissionRequests,
     permissionRequest,
+    progression,
+    setProgressionSnapshot,
+    initializeProgression,
+    setProgressionPet,
     setPermissionRequests,
     initializePermissionRequests,
     decidePermission,

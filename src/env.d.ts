@@ -2,6 +2,7 @@
 
 import type { DesktopPreferences, DesktopPreferencesPatch } from './types/desktop'
 import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView } from './types/permission'
+import type { ProgressionSnapshot } from './types/progression'
 
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
@@ -25,6 +26,9 @@ declare global {
       onPanelOpenSettings: (callback: () => void) => () => void
       initializeDesktopPreferences: (legacySoundEnabled: boolean) => Promise<DesktopPreferences>
       setDesktopPreferences: (patch: DesktopPreferencesPatch) => Promise<DesktopPreferences>
+      initializeProgression: (petId?: string) => Promise<ProgressionSnapshot | null>
+      setProgressionPet: (petId: string) => Promise<ProgressionSnapshot | null>
+      onProgressionUpdated: (callback: (snapshot: ProgressionSnapshot) => void) => () => void
       onDesktopPreferencesUpdated: (callback: (preferences: DesktopPreferences) => void) => () => void
       initializePermissionRequests: () => Promise<PermissionRequestView[]>
       onPermissionRequestsUpdated: (callback: (requests: PermissionRequestView[]) => void) => () => void

@@ -11,6 +11,7 @@
 - Event ingress: `electron/event-server.ts`, loopback port `17373`, token header `x-agent-pets-token`.
 - Generic event allowlist projection: `electron/event-normalizer.ts`; capability contract: `src/types/capabilities.ts`.
 - Permission Control: `electron/permission-broker.ts` owns state/TTL/anti-replay; `electron/permission-adapter-server.ts` is the token-authenticated OpenCode relay on loopback port `17374`; `electron/permission-audit.ts` persists bounded redacted terminal records; shared view/decision types are in `src/types/permission.ts`.
+- Progression: `electron/progression.ts` owns the main-process SQLite migration, XP ledger, idempotency, observed active-time and streak projection; pure level/evolution policy and sanitized snapshots live in `src/types/progression.ts`.
 - Phase 2 threat model: `docs/security/phase-2-permission-broker-threat-model.md`.
 - Hook installation and repair: `electron/setup.ts` and `integrations/`.
 - Quota adapters: `electron/quota.ts`.
@@ -33,6 +34,7 @@
 ## Current product behavior
 
 - Mood is renderer-local and resets by local date/version.
+- XP progression is main-owned and durable in `progression.sqlite`; the current selected pet is synchronized through typed IPC, while mood remains short-term and renderer-local. Generic events and MCP presentation intents never award XP.
 - Pet selection, scale, multi-pet, reactions, bubbles, hidden pets, and family mappings use `localStorage`.
 - DND, notifications, permission-bubble visibility, sound, and launch-at-startup are main-owned desktop preferences persisted under Electron `userData`; legacy sound is migrated once from renderer storage. Hiding the permission bubble never changes Broker state or the Tray attention badge.
 - Tray is a main-process singleton. Closing the pet hides it, while a destroyed renderer can be rebuilt through the existing main process.

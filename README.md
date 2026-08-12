@@ -14,6 +14,7 @@ Desktop pet that shows real-time status of your AI coding agents.
 - **Custom pets** — Import your own spritesheet, or a `.codex-pet.zip` sprite kit from sites like [codex-pets.net](https://codex-pets.net).
 - **Desktop controls** — Tray menu, native waiting/completion notifications, Do Not Disturb, sound control, and optional launch at startup.
 - **Permission Control** — OpenCode permission requests can be allowed once or denied from a Liquid Glass pet bubble; scoped hotkeys are available only while an eligible request is visible.
+- **Pet progression** — Completed sessions, bounded observed active-time, first completions of the day, and consecutive-day streaks earn durable XP. Level and evolution are restored after restart from a main-process SQLite ledger.
 
 ---
 
@@ -86,12 +87,11 @@ Click the **⚙** icon in the header to switch to Settings.
 
 #### Settings View
 
-The panel is split into **Settings** and **Pets** tabs.
+The panel is split into **Settings**, **Growth**, and **Pets** tabs.
 
 **Settings tab**
 
 - **Size** — S / M / L / XL / XXL to scale the pet.
-- **Mood** — Starts each day at a low baseline of 10. A successful task gives +4 and an error gives -6. Long tasks also earn +1 for every 2 completed tools (up to +8 per task) and +1 for every 5 minutes of work (up to +4 per task), so progress rewards are capped at +12 before the completion bonus. As mood grows, an animated energy layer built from the current pet frame intensifies around the pet's own silhouette, reaching overdrive at 90+. Click **Reset** to return to 10; it never grants extra mood.
 - **Do Not Disturb** — Suppresses native notifications, pet sounds, extra motion, and nonessential bubbles without stopping event ingestion. **Off by default.**
 - **Notifications** — Native alerts for waiting-permission, waiting-input, completion, and errors. Repeats use a per-session cooldown and terminal events are batched. **On by default.**
 - **Sound** — Short synthesized cues (Web Audio, no audio files) for success/error/waiting-permission. **Off by default.**
@@ -102,6 +102,11 @@ The panel is split into **Settings** and **Pets** tabs.
 - **Setup Wizard** — Re-run tool detection, or install/reinstall hooks.
 - **Restart Pet** — Fully relaunch Agent Pets if the pet or its animation gets stuck.
 - **Quit** — Exit Agent Pets.
+
+**Growth tab**
+
+- **Mood** — Starts each day at a low baseline of 10. A successful task gives +4 and an error gives -6. Long tasks also earn +1 for every 2 completed tools (up to +8 per task) and +1 for every 5 minutes of work (up to +4 per task), so progress rewards are capped at +12 before the completion bonus. As mood grows, an animated energy layer built from the current pet frame intensifies around the pet's own silhouette, reaching overdrive at 90+. Click **Reset** to return to 10; it never grants extra mood.
+- **XP / Level** — The Growth chip shows the selected pet's durable XP, level, evolution stage, and current streak. XP uses a versioned, idempotent ledger: a canonical session completion is +20 XP, the first completion of a local day is +10, each observed 30 minutes of active coding is +2 (capped at +10 per session), and continuing yesterday's streak is +5. Failed or cancelled work grants no permanent XP; token milestones wait for an exact token event contract.
 
 **Pets tab**
 
@@ -237,6 +242,7 @@ Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that r
 - **Desktop notifications** — Notification text is built only from the normalized Agent name and bounded project basename; prompt text, tool arguments, session identifiers, and credentials are never shown or logged. Diagnostic notification history is bounded and stores only event class/outcome metadata.
 - **Desktop preference IPC** — The main process owns Tray/DND/notification/permission-bubble/startup preferences. Renderer requests accept only an allowlist of boolean fields from validated first-party frames, and preference writes use bounded reads plus atomic replacement.
 - **Permission Broker** — Permission responses use a separate loopback port and per-install token, never the generic event endpoint. The main process enforces TTL, one-shot state transitions, anti-replay, bounded records, Adapter-owned opaque handles, scoped hotkeys, external-resolution reconciliation, and a bounded redacted audit. Only `allow_once` and `deny` are exposed; permanent approval is intentionally unavailable.
+- **Progression storage** — XP is awarded only in the Electron main process. SQLite migrations, transactionally coupled `pet_progress`/`xp_ledger` writes, unique idempotency keys, bounded session activity, and sanitized snapshots prevent renderer or duplicate-event writes from inflating progression. The database stays local and is never uploaded.
 - **Packaged runtime** — Electron fuses disable RunAsNode, Node options/inspect arguments, and privileged `file://` behavior while enforcing ASAR-only loading and embedded ASAR integrity validation.
 - **Release signing** — Production macOS and Windows artifacts should be built with the platform signing credentials configured; unsigned local builds are for development only.
 
@@ -313,6 +319,7 @@ agent-pets/
 │   ├── permission-broker.ts # Permission state machine and anti-replay
 │   ├── permission-adapter-server.ts # Dedicated OpenCode response channel
 │   ├── permission-audit.ts  # Bounded redacted local audit
+│   ├── progression.ts       # SQLite XP ledger and level projection
 │   ├── desktop-preferences.ts # Main-owned desktop preferences
 │   ├── desktop-notifications.ts # Native notification delivery and bounded log
 │   ├── desktop-tray.ts      # Tray lifecycle and menu

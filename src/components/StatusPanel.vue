@@ -8,11 +8,26 @@ const store = useAgentStore()
 const importing = ref(false)
 const editingPetId = ref<string | null>(null)
 const editName = ref('')
-const settingsTab = ref<'general' | 'pets'>('general')
+const settingsTab = ref<'general' | 'growth' | 'pets'>('general')
 const dashboardTab = ref<'sessions' | 'usage'>('sessions')
 const quotaUsage = computed(() => store.quotaUsage)
 const quotaLoading = computed(() => store.quotaLoading)
 const quotaError = computed(() => store.quotaError)
+const progression = computed(() => store.progression)
+const evolutionLabels: Record<string, string> = {
+  egg: 'Egg',
+  baby: 'Baby',
+  teen: 'Teen',
+  adult: 'Adult',
+  master: 'Master',
+}
+const evolutionLabel = computed(() => (
+  progression.value ? evolutionLabels[progression.value.evolutionStage] : ''
+))
+const progressionPercent = computed(() => {
+  if (!progression.value) return 0
+  return Math.min(100, Math.round((progression.value.xpIntoLevel / progression.value.xpToNext) * 100))
+})
 const moodStage = computed(() => {
   if (store.mood >= 90) return 'Overdrive'
   if (store.mood >= 70) return 'Radiant'
@@ -345,6 +360,15 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
         </button>
         <button
           class="settings-tab"
+          :class="{ active: settingsTab === 'growth' }"
+          role="tab"
+          :aria-selected="settingsTab === 'growth'"
+          @click="settingsTab = 'growth'"
+        >
+          Growth
+        </button>
+        <button
+          class="settings-tab"
           :class="{ active: settingsTab === 'pets' }"
           role="tab"
           :aria-selected="settingsTab === 'pets'"
@@ -356,26 +380,6 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 
       <div class="settings-content">
         <template v-if="settingsTab === 'general'">
-          <div class="settings-section">
-            <div class="mood-header">
-              <div class="mood-title">
-                <div class="section-label">Mood</div>
-                <span class="mood-readout">{{ store.mood }} · {{ moodStage }}</span>
-              </div>
-              <button class="mood-reset-btn" title="Reset to baseline" @click="store.resetMood()">Reset</button>
-            </div>
-            <div
-              class="mood-bar"
-              role="progressbar"
-              aria-label="Pet mood"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              :aria-valuenow="store.mood"
-            >
-              <div class="mood-fill" :style="{ width: store.mood + '%' }" />
-            </div>
-          </div>
-
           <div class="settings-section">
             <div class="section-label">Size</div>
             <div class="scale-options">
@@ -514,6 +518,56 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 
           <div class="settings-section">
             <button class="quit-btn" @click="quitApp">Quit</button>
+          </div>
+        </template>
+
+        <template v-else-if="settingsTab === 'growth'">
+          <div class="settings-section">
+            <div class="mood-header">
+              <div class="mood-title">
+                <div class="section-label">Mood</div>
+                <span class="mood-readout">{{ store.mood }} · {{ moodStage }}</span>
+              </div>
+              <button class="mood-reset-btn" title="Reset to baseline" @click="store.resetMood()">Reset</button>
+            </div>
+            <div
+              class="mood-bar"
+              role="progressbar"
+              aria-label="Pet mood"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="store.mood"
+            >
+              <div class="mood-fill" :style="{ width: store.mood + '%' }" />
+            </div>
+          </div>
+
+          <div v-if="progression" class="settings-section progression-card">
+            <div class="mood-header">
+              <div class="mood-title">
+                <div class="section-label">Growth</div>
+                <span class="mood-readout">Lv {{ progression.level }} · {{ evolutionLabel }}</span>
+              </div>
+              <span class="progression-xp-total">{{ progression.totalXp }} XP</span>
+            </div>
+            <div
+              class="progression-bar"
+              role="progressbar"
+              aria-label="Pet level progress"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="progressionPercent"
+            >
+              <div class="progression-fill" :style="{ width: progressionPercent + '%' }" />
+            </div>
+            <div class="progression-meta">
+              <span>{{ progression.xpIntoLevel }} / {{ progression.xpToNext }} to next level</span>
+              <span v-if="progression.currentStreak > 0">{{ progression.currentStreak }} day streak</span>
+              <span v-else>Start a streak</span>
+            </div>
+          </div>
+          <div v-else class="growth-unavailable" role="status">
+            Growth data is unavailable until local storage is ready.
           </div>
         </template>
 
@@ -1375,6 +1429,57 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   transition: width 0.3s ease;
 }
 
+.progression-card {
+  padding: 9px 10px 8px;
+  border: 1px solid rgba(139, 156, 247, 0.18);
+  border-radius: 11px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.07), transparent 54%),
+    rgba(139, 156, 247, 0.055);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+}
+
+.progression-xp-total {
+  color: #cbd2e8;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.progression-bar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.progression-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6d78d7, #9dd8ff);
+  box-shadow: 0 0 8px rgba(157, 216, 255, 0.4);
+  transition: width 0.35s ease;
+}
+
+.progression-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #858b9b;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.growth-unavailable {
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: #9ca3b4;
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .scale-options {
   display: flex;
   gap: 4px;
@@ -1476,7 +1581,8 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   .switch-track,
   .switch-thumb,
   .settings-tab,
-  .dashboard-tab {
+  .dashboard-tab,
+  .progression-fill {
     transition-duration: 0.01ms;
   }
 }
@@ -1488,7 +1594,9 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   }
 
   .desktop-toggle-group,
-  .toggle-row {
+  .toggle-row,
+  .progression-card,
+  .growth-unavailable {
     border-color: rgba(255, 255, 255, 0.22);
   }
 }
@@ -1498,6 +1606,11 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
     background: rgb(18, 18, 26);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+  }
+
+  .progression-card,
+  .growth-unavailable {
+    background: rgb(28, 27, 38);
   }
 }
 </style>

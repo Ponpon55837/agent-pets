@@ -22,12 +22,14 @@ import { DesktopNotificationService } from './desktop-notifications'
 import { DesktopTrayController } from './desktop-tray'
 import { PermissionBroker } from './permission-broker'
 import { appendPermissionAudit } from './permission-audit'
+import { ProgressionStore } from './progression'
 import {
   createPermissionAdapterServer,
   PERMISSION_ADAPTER_PORT,
   PermissionAdapterRelay,
 } from './permission-adapter-server'
 import type { DesktopPreferences } from '../src/types/desktop'
+import type { ProgressionSnapshot } from '../src/types/progression'
 import {
   IS_MAC,
   hookScriptDeployPath,
@@ -65,6 +67,7 @@ let eventServer: Server | null = null
 let permissionAdapterServer: Server | null = null
 let permissionBroker: PermissionBroker | null = null
 let permissionRelay: PermissionAdapterRelay | null = null
+let progressionStore: ProgressionStore | null = null
 let desktopPreferences: DesktopPreferencesStore | null = null
 let desktopNotifications: DesktopNotificationService | null = null
 let desktopTray: DesktopTrayController | null = null
@@ -78,6 +81,10 @@ const PERMISSION_DENY_HOTKEY = 'CommandOrControl+Shift+N'
 // Enforce Chromium's renderer sandbox even if a future BrowserWindow option
 // accidentally regresses. This must be called before app readiness.
 app.enableSandbox()
+// Phase 3 uses Node's built-in SQLite driver. Electron exposes it behind the
+// same experimental switch as the bundled Node runtime; keeping the switch in
+// the main process avoids renderer access to the database or its handles.
+app.commandLine.appendSwitch('experimental-sqlite')
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'agent-pets',
@@ -721,6 +728,40 @@ function broadcastPermissionRequests(): void {
   }
 }
 
+function broadcastProgression(snapshot?: ProgressionSnapshot): void {
+  const next = snapshot ?? progressionStore?.getSnapshot()
+  if (!next) return
+  for (const window of [petWindow, panelWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('progression-updated', next)
+    }
+  }
+}
+
+function createProgressionServices(): void {
+  if (progressionStore) return
+  try {
+    progressionStore = new ProgressionStore(join(app.getPath('userData'), 'progression.sqlite'))
+  } catch (error) {
+    // A missing SQLite runtime must not prevent the desktop pet from starting;
+    // the renderer simply keeps its progression card unavailable until the
+    // runtime is repaired. No in-memory fallback is presented as durable XP.
+    console.error('Progression storage is unavailable', error)
+    progressionStore = null
+  }
+}
+
+function isProgressionPetId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(value)
+}
+
+function setActiveProgressionPet(petId: string): ProgressionSnapshot | null {
+  if (!progressionStore) return null
+  const snapshot = progressionStore.setActivePet(petId)
+  broadcastProgression(snapshot)
+  return snapshot
+}
+
 function schedulePermissionUiSync(): void {
   queueMicrotask(() => broadcastPermissionRequests())
 }
@@ -889,6 +930,7 @@ app.whenReady().then(() => {
   createPanelWindow()
   createDesktopServices()
   createPermissionServices(permissionToken)
+  createProgressionServices()
 
   eventServer = createEventServer(
     () => [petWindow, panelWindow].filter((w): w is BrowserWindow => w !== null),
@@ -901,6 +943,12 @@ app.whenReady().then(() => {
         desktopNotifications?.handleEvent(event)
       } catch {
         console.error('Desktop notification handling failed')
+      }
+      try {
+        const result = progressionStore?.handleEvent(event)
+        if (result) broadcastProgression(result.snapshot)
+      } catch (error) {
+        console.error('Progression event handling failed', error)
       }
     },
   )
@@ -1075,6 +1123,18 @@ app.whenReady().then(() => {
   ipcMain.handle('desktop-preferences-set', (event, patch: unknown) => {
     assertTrustedIpcSender(event, panelWindow)
     return updateDesktopPreferences(patch)
+  })
+
+  ipcMain.handle('progression-init', (event, petId?: unknown) => {
+    assertTrustedIpcSender(event)
+    if (petId !== undefined && !isProgressionPetId(petId)) return null
+    return setActiveProgressionPet(typeof petId === 'string' ? petId : 'aang-airbender')
+  })
+
+  ipcMain.handle('progression-set-pet', (event, petId: unknown) => {
+    assertTrustedIpcSender(event)
+    if (!isProgressionPetId(petId)) return null
+    return setActiveProgressionPet(petId)
   })
 
   ipcMain.handle('permission-requests-init', (event) => {
@@ -1436,6 +1496,8 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   isQuitting = true
   permissionBroker?.shutdown()
+  progressionStore?.close()
+  progressionStore = null
 })
 
 app.on('will-quit', () => {
