@@ -1184,6 +1184,8 @@ Phase 4 實作補充：`electron/pet-window-mode.ts` 集中 bounded geometry（n
 **依賴：** Phase 2 capability 經驗、Event Core 相容層。
 **主要風險：** hook 格式漂移、安裝權限、不同 OS/runtime、把 SDK 做得過度抽象。
 
+Phase 5 實作補充：`electron/agent-adapter.ts` 提供 `AgentAdapter` 介面與 runtime registry；`electron/agent-adapter-operations.ts` 只包裝既有的 setup path、偵測、安裝與解除安裝邏輯，避免一次重寫 installer。`/v1/events` 先經 registry 依顯式 `adapterId` 或 source family 選擇 Adapter，再進 Event Core canonical normalizer；成功事件會帶上 sanitized `adapterId`，不把任何 response handle、token 或原始 prompt 帶入 renderer。內建 OpenCode／Codex／Claude Code 對應 capability matrix，Generic HTTP 固定 `permissions=none`、`healthCheck=false`。Setup Wizard 改由 runtime status 顯示 capability／health／diagnose，Install All 逐一呼叫 idempotent Adapter installer；fixture contract tests 覆蓋 detection、diagnose、source mapping、mismatch／unknown adapter 負向案例。既有 `install-integrations` IPC 保留作相容層，新的 Adapter IPC 只允許已註冊且可安裝的 id。
+
 ### Phase 6 — Presentation MCP
 
 **目的：** 讓 Agent 可主動請寵物說話或反應，但不擴大執行權限。

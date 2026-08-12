@@ -1,36 +1,29 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import type {
+  AdapterRuntimeStatus,
+  AgentAdapterId,
+  DiagnosticReport,
+} from '../types/agent-adapter'
+import type { AgentSource } from '../types/agent'
 
 const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
-type IntegrationTarget = 'opencode' | 'codex' | 'claude' | 'claudeCode'
-type IntegrationTestSource = 'opencode-cli' | 'opencode-desktop' | 'codex' | 'claude' | 'claude-desktop'
-
-interface ToolStatus {
-  name: string
-  detected: boolean
-  connected: boolean
-  description: string
-  target: IntegrationTarget
-  source: IntegrationTestSource
+interface ToolStatus extends AdapterRuntimeStatus {
   verifiedAt?: number
   testError?: string
+  diagnosis?: DiagnosticReport
 }
 
-const tools = ref<ToolStatus[]>([
-  { name: 'OpenCode CLI', detected: false, connected: false, description: 'Plugin at ~/.config/opencode/plugin/', target: 'opencode', source: 'opencode-cli' },
-  { name: 'OpenCode Desktop', detected: false, connected: false, description: 'Plugin in AppData', target: 'opencode', source: 'opencode-desktop' },
-  { name: 'Codex CLI', detected: false, connected: false, description: 'Hooks at ~/.codex/hooks.json', target: 'codex', source: 'codex' },
-  { name: 'Claude Code CLI', detected: false, connected: false, description: 'Hooks at ~/.claude/settings.json', target: 'claudeCode', source: 'claude' },
-  { name: 'Claude Code Desktop', detected: false, connected: false, description: 'Hooks at ~/.claude/settings.json', target: 'claudeCode', source: 'claude-desktop' },
-])
+const tools = ref<ToolStatus[]>([])
 
 const loading = ref(true)
 const error = ref('')
-const installing = ref<IntegrationTarget | 'all' | null>(null)
-const testing = ref<IntegrationTestSource | null>(null)
+const installing = ref<AgentAdapterId | 'all' | null>(null)
+const testing = ref<AgentSource | null>(null)
+const diagnosing = ref<AgentAdapterId | null>(null)
 const installError = ref('')
 
 const elapsedMs = ref(0)
@@ -59,19 +52,7 @@ async function detectTools() {
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
     ])
     if (status) {
-      tools.value[0].detected = status.opencode.cli
-      tools.value[0].connected = status.opencode.cli
-      tools.value[1].detected = status.opencode.desktop
-      tools.value[1].connected = status.opencode.desktop
-      tools.value[2].detected = status.codex.hooks
-      tools.value[2].connected = status.codex.enabled && status.codex.configured && status.codex.hookScript
-      tools.value[3].detected = status.claudeCode.settings
-      tools.value[3].connected = status.claudeCode.configured && status.claudeCode.hookScript
-      tools.value[4].detected = status.claudeCode.settings
-      tools.value[4].connected = status.claudeCode.configured && status.claudeCode.hookScript
-      for (const tool of tools.value) {
-        if (!tool.connected) tool.verifiedAt = undefined
-      }
+      tools.value = status.adapters.map(adapter => ({ ...adapter }))
     } else {
       error.value = 'Could not detect tools (timeout)'
     }
@@ -82,19 +63,24 @@ async function detectTools() {
   stopElapsedTimer()
 }
 
-async function install(target?: IntegrationTarget) {
+async function install(target?: AgentAdapterId) {
   installing.value = target ?? 'all'
   installError.value = ''
-  for (const tool of tools.value) {
-    if (!target || tool.target === target) {
-      tool.verifiedAt = undefined
-      tool.testError = undefined
-    }
-  }
   try {
-    const result = await window.electronAPI?.installIntegrations(target)
-    if (result && !result.ok) {
-      installError.value = result.error || 'Install failed'
+    const targets = target
+      ? [target]
+      : tools.value.filter(tool => tool.installable).map(tool => tool.id)
+    for (const adapterId of targets) {
+      const tool = tools.value.find(item => item.id === adapterId)
+      if (tool) {
+        tool.verifiedAt = undefined
+        tool.testError = undefined
+      }
+      const result = await window.electronAPI?.installAdapter(adapterId)
+      if (result && !result.ok) {
+        installError.value = result.error || 'Install failed'
+        break
+      }
     }
   } catch {
     installError.value = 'Install failed'
@@ -104,10 +90,11 @@ async function install(target?: IntegrationTarget) {
 }
 
 async function testIntegration(tool: ToolStatus) {
-  testing.value = tool.source
+  if (!tool.testSource) return
+  testing.value = tool.testSource
   tool.testError = undefined
   try {
-    const result = await window.electronAPI?.testIntegration(tool.source)
+    const result = await window.electronAPI?.testIntegration(tool.testSource)
     if (result?.ok && result.verifiedAt) {
       tool.verifiedAt = result.verifiedAt
     } else {
@@ -117,6 +104,40 @@ async function testIntegration(tool: ToolStatus) {
     tool.testError = 'Live event test failed'
   }
   testing.value = null
+}
+
+async function diagnoseAdapter(tool: ToolStatus) {
+  diagnosing.value = tool.id
+  tool.testError = undefined
+  try {
+    const result = await window.electronAPI?.diagnoseAdapter(tool.id)
+    if (result?.ok && result.report) {
+      tool.diagnosis = result.report
+    } else {
+      tool.testError = result?.error || 'Diagnosis failed'
+    }
+  } catch {
+    tool.testError = 'Diagnosis failed'
+  }
+  diagnosing.value = null
+}
+
+function healthLabel(tool: ToolStatus): string {
+  return tool.health.replace('_', ' ')
+}
+
+function capabilityLabels(tool: ToolStatus): string[] {
+  const capabilities = tool.capabilities
+  const labels: string[] = []
+  if (capabilities.lifecycle) labels.push('Lifecycle')
+  if (capabilities.sessions) labels.push('Sessions')
+  if (capabilities.projects) labels.push('Projects')
+  if (capabilities.toolActivity) labels.push('Tool activity')
+  if (capabilities.waitingInput) labels.push('Input')
+  if (capabilities.tokenUsage !== 'none') labels.push(`Token: ${capabilities.tokenUsage}`)
+  if (capabilities.quota !== 'none') labels.push(`Quota: ${capabilities.quota}`)
+  labels.push(`Permission: ${capabilities.permissions}`)
+  return labels
 }
 
 onMounted(() => {
@@ -152,47 +173,69 @@ onUnmounted(() => {
       <div v-else class="tools-list">
         <div
           v-for="tool in tools"
-          :key="tool.name"
+          :key="tool.id"
           class="tool-item"
-          :class="{ connected: tool.connected, detected: tool.detected && !tool.connected }"
+          :class="{ connected: tool.health === 'ready', detected: tool.health !== 'ready' && tool.health !== 'error' }"
         >
           <div class="tool-status">
-            <span class="status-dot" :class="{ green: tool.connected, yellow: tool.detected && !tool.connected, red: !tool.detected }" />
-            <span class="tool-name">{{ tool.name }}</span>
+            <span class="status-dot" :class="{ green: tool.health === 'ready', yellow: tool.health !== 'ready' && tool.health !== 'error', red: tool.health === 'error' }" />
+            <span class="tool-name">{{ tool.displayName }}</span>
+            <span class="tool-health">{{ healthLabel(tool) }}</span>
             <div class="tool-actions">
               <button
                 class="test-btn"
-                :disabled="!tool.connected || installing !== null || testing !== null"
+                v-if="tool.testSource"
+                :disabled="!tool.installed || installing !== null || testing !== null || diagnosing !== null"
                 title="Send a live event through the local receiver"
                 @click="testIntegration(tool)"
               >
-                {{ testing === tool.source ? 'Testing...' : 'Test' }}
+                {{ testing === tool.testSource ? 'Testing...' : 'Test' }}
+              </button>
+              <button
+                class="test-btn"
+                :disabled="installing !== null || testing !== null || diagnosing !== null"
+                @click="diagnoseAdapter(tool)"
+              >
+                {{ diagnosing === tool.id ? 'Diagnosing...' : 'Diagnose' }}
               </button>
               <button
                 class="install-btn"
-                :disabled="installing !== null || testing !== null"
-                @click="install(tool.target)"
+                v-if="tool.installable && tool.installTarget"
+                :disabled="installing !== null || testing !== null || diagnosing !== null"
+                @click="install(tool.id)"
               >
-                {{ installing === tool.target ? '...' : tool.connected ? 'Reinstall' : 'Install' }}
+                {{ installing === tool.id ? '...' : tool.installed ? 'Reinstall' : 'Install' }}
               </button>
             </div>
           </div>
-          <div class="tool-desc">{{ tool.description }}</div>
+          <div class="tool-desc">{{ tool.message }}</div>
+          <div class="source-list">
+            <span v-for="source in tool.sourceLabels" :key="source" class="source-chip">{{ source }}</span>
+          </div>
+          <div class="capability-list">
+            <span v-for="capability in capabilityLabels(tool)" :key="capability" class="capability-chip">{{ capability }}</span>
+          </div>
           <div v-if="tool.verifiedAt" class="test-result passed">
             Receiver verified at {{ new Date(tool.verifiedAt).toLocaleTimeString() }}
           </div>
           <div v-else-if="tool.testError" class="test-result failed">{{ tool.testError }}</div>
+          <div v-if="tool.diagnosis" class="diagnosis-list">
+            <div v-for="check in tool.diagnosis.checks" :key="check.id" class="diagnosis-row" :class="`diagnosis-${check.status}`">
+              <span aria-hidden="true">{{ check.status === 'pass' ? '✓' : check.status === 'warn' ? '!' : '×' }}</span>
+              <span>{{ check.message }}</span>
+            </div>
+          </div>
         </div>
       </div>
 
       <details class="wizard-note">
-        <summary>About testing and Codex Desktop</summary>
+        <summary>About adapters and live testing</summary>
         <div class="wizard-note-content">
-          Green means the integration files are configured. <strong>Test</strong>
-          verifies this running Agent Pets instance can receive and display a live
-          local event; it does not launch the coding tool itself.
-          Codex Desktop currently has no separate hook API; the Codex entry installs
-          the shared CLI hook.
+          Capabilities and health come from the runtime Adapter registry, not a
+          hardcoded tool list. <strong>Test</strong> verifies this Agent Pets
+          instance can receive, canonically map, and display a live local event;
+          it does not launch the coding tool itself. Generic HTTP is always
+          observe-only and cannot respond to permissions.
         </div>
       </details>
 
@@ -224,8 +267,9 @@ onUnmounted(() => {
 }
 
 .setup-wizard {
-  width: 280px;
-  max-height: 400px;
+  width: min(520px, calc(100% - 28px));
+  max-height: min(620px, calc(100vh - 28px));
+  box-sizing: border-box;
   background: rgba(25, 25, 35, 0.98);
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -348,6 +392,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .tool-actions {
@@ -399,11 +444,49 @@ onUnmounted(() => {
   color: #e0e0e0;
 }
 
+.tool-health {
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #aeb7cc;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 9px;
+  text-transform: capitalize;
+}
+
 .tool-desc {
   font-size: 10px;
-  color: #555;
+  color: #8f98ab;
   margin-top: 2px;
   margin-left: 12px;
+}
+
+.source-list,
+.capability-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 6px 0 0 12px;
+}
+
+.source-chip,
+.capability-chip {
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.source-chip {
+  color: #c9d2e7;
+  background: rgba(139, 156, 247, 0.1);
+  border: 1px solid rgba(139, 156, 247, 0.18);
+}
+
+.capability-chip {
+  color: #b8d9cc;
+  background: rgba(80, 200, 120, 0.08);
+  border: 1px solid rgba(80, 200, 120, 0.16);
 }
 
 .test-result {
@@ -419,6 +502,26 @@ onUnmounted(() => {
 .test-result.failed {
   color: #ff6b6b;
 }
+
+.diagnosis-list {
+  display: grid;
+  gap: 3px;
+  margin: 7px 0 0 12px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.diagnosis-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.diagnosis-pass { color: #80d8a0; }
+.diagnosis-warn { color: #e4ca7b; }
+.diagnosis-fail { color: #ff8989; }
 
 .wizard-note {
   font-size: 10px;
@@ -474,5 +577,19 @@ onUnmounted(() => {
 
 .action-btn.primary:hover:not(:disabled) {
   background: rgba(139, 156, 247, 0.25);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .setup-overlay { backdrop-filter: none; }
+  .setup-wizard { background: #191923; }
+}
+
+@media (prefers-contrast: more) {
+  .setup-wizard,
+  .tool-item,
+  .wizard-note { border-width: 2px; }
+  .tool-health,
+  .source-chip,
+  .capability-chip { border-color: currentColor; }
 }
 </style>

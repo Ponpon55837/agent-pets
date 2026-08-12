@@ -1,4 +1,5 @@
 import type { PermissionNotice } from './capabilities'
+import type { AgentAdapterId } from './agent-adapter'
 
 export type AgentSource =
   | 'opencode-cli'
@@ -19,6 +20,7 @@ export type AgentState =
   | 'error'
 
 export interface AgentStatusEvent {
+  adapterId?: AgentAdapterId
   source: AgentSource
   sessionId: string
   project?: string

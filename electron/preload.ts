@@ -3,6 +3,12 @@ import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/d
 import type { PermissionDecisionValue, PermissionRequestView } from '../src/types/permission'
 import type { ProgressionSnapshot } from '../src/types/progression'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
+import type {
+  AdapterDetection,
+  AdapterRuntimeStatus,
+  AgentAdapterId,
+  DiagnosticReport,
+} from '../src/types/agent-adapter'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   onAgentStatusEvent: (callback: (event: unknown) => void) => {
@@ -141,6 +147,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('integration-status')
   },
 
+  diagnoseAdapter: (id: AgentAdapterId): Promise<{
+    ok: boolean
+    report?: DiagnosticReport
+    error?: string
+  }> => {
+    return ipcRenderer.invoke('adapter-diagnose', id)
+  },
+
+  installAdapter: (id: AgentAdapterId): Promise<{
+    ok: boolean
+    status?: AdapterDetection
+    error?: string
+  }> => {
+    return ipcRenderer.invoke('adapter-install', id)
+  },
+
+  uninstallAdapter: (id: AgentAdapterId): Promise<{
+    ok: boolean
+    status?: AdapterDetection
+    error?: string
+  }> => {
+    return ipcRenderer.invoke('adapter-uninstall', id)
+  },
+
   getQuotaUsage: (force = false) => {
     return ipcRenderer.invoke('quota-usage', force)
   },
@@ -153,7 +183,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
-  testIntegration: (source: 'opencode-cli' | 'opencode-desktop' | 'codex' | 'claude' | 'claude-desktop') => {
+  testIntegration: (source: 'opencode-cli' | 'opencode-desktop' | 'codex' | 'codex-desktop' | 'claude' | 'claude-desktop') => {
     return ipcRenderer.invoke('test-integration', source)
   },
 

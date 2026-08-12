@@ -3,17 +3,26 @@ import type { BrowserWindow } from 'electron'
 import { app } from 'electron'
 import { timingSafeEqual } from 'node:crypto'
 import type { AgentStatusEvent } from '../src/types/agent'
-import { normalizeAgentStatusEvent } from './event-normalizer'
+import { normalizeAgentStatusEvent, type EventNormalizationResult } from './event-normalizer'
 export type { AgentStatusEvent } from '../src/types/agent'
 
 const MAX_BODY_BYTES = 64 * 1024
 const MAX_EVENTS_PER_WINDOW = 500
 const RATE_WINDOW_MS = 10_000
 
+export type EventIngressNormalizer = (
+  value: unknown,
+  receivedAt?: number,
+) => EventNormalizationResult
+  | { ok: true; event: AgentStatusEvent }
+  | { ok: false; error: string }
+  | Promise<EventNormalizationResult | { ok: true; event: AgentStatusEvent } | { ok: false; error: string }>
+
 export function createEventServer(
   getWindows: () => BrowserWindow[],
   eventToken: string,
   onEvent?: (event: AgentStatusEvent) => void,
+  normalizeEvent: EventIngressNormalizer = normalizeAgentStatusEvent,
 ) {
   let rateWindowStartedAt = Date.now()
   let eventsInWindow = 0
@@ -79,14 +88,14 @@ export function createEventServer(
       chunks.push(chunk)
     })
 
-    request.on('end', () => {
+    request.on('end', async () => {
       if (bodyRejected) return
 
       try {
         const parsed: unknown = JSON.parse(
           Buffer.concat(chunks).toString('utf8')
         )
-        const normalized = normalizeAgentStatusEvent(parsed)
+        const normalized = await normalizeEvent(parsed, Date.now())
         if (!normalized.ok) {
           response.writeHead(400)
           response.end(JSON.stringify({ error: normalized.error }))

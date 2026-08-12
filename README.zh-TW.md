@@ -27,6 +27,8 @@
 | Codex | ✅ | ✅ |
 | Claude Code | ✅ | ✅ |
 
+**Generic HTTP** Adapter 可供本機整合透過經驗證的 `/v1/events` 使用；它永遠是 observe-only，不具備回覆權限的能力。
+
 ---
 
 ## 快速開始
@@ -130,21 +132,21 @@
 
 ## Setup Wizard（設定精靈）
 
-Setup Wizard 會偵測每個工具的設定狀態，並在你點擊按鈕時才安裝對應的 hooks——它本身不會自動安裝任何東西：
+Setup Wizard 會讀取 runtime Agent Adapter registry，並在你點擊按鈕時才安裝對應的 hooks——它本身不會自動安裝任何東西。每個 Adapter 會回報支援的來源、能力、健康狀態與診斷檢查：
 
 - **OpenCode CLI / Desktop** — 寫入 plugin 到 `~/.config/opencode/plugin/`（注意：是單數 `plugin`，跟 OpenCode 實際掃描的目錄一致）以及對應平台的 OpenCode Desktop plugin 目錄
 - **Codex CLI** — 建立 `~/.codex/hooks.json` 並在 `~/.codex/config.toml` 啟用 hooks
 - **Claude Code CLI & Desktop** — 在 `~/.claude/settings.json` 加入 `hooks` 區塊（CLI 跟 Desktop 共用這份設定，所以裝一次兩邊都算；實際是哪一邊觸發的事件，是透過 Claude Code 的 `CLAUDE_CODE_ENTRYPOINT` 環境變數在執行當下判斷，不是安裝程式決定的）
 
-每個工具會顯示一個狀態燈：
+每個 Adapter 會顯示狀態燈與 capability chips：
 
 - 🟢 **綠燈** — 已安裝且設定完成
 - 🟡 **黃燈** — 有偵測到，但還沒（完全）設定好
-- 🔴 **紅燈** — 沒偵測到
+- 🔴 **紅燈** — 發生錯誤或不可用
 
-點工具旁的 **Install** 可以單獨（重新）安裝該項整合，或點 **Install All** 一次全部裝好。如果某個工具的狀態看起來過期了，點 **Refresh** 重新偵測。
+點 Adapter 旁的 **Diagnose** 可以查看有上限的健康檢查。可安裝的 Adapter 點 **Install** 可以單獨（重新）安裝，或點 **Install All** 以 idempotent 方式執行全部安裝器。如果狀態看起來過期，點 **Refresh** 重新偵測。
 
-設定完成的整合可以點 **Test**，透過目前 app 的本機 HTTP 接收器送出一筆短暫事件。測試通過代表這個 Agent Pets 實例確實收到並顯示了事件；它不會啟動編程工具，也不代表該工具本身已主動觸發 hook。
+設定完成的 Adapter 可以點 **Test**，透過目前 app 經 token 驗證的本機 HTTP 接收器送出一筆短暫事件。測試通過會同時驗證 HTTP 204、Adapter 選擇、canonical mapping 與 renderer 收到事件；它不會啟動編程工具，也不代表該工具本身已主動觸發 hook。Generic HTTP 永遠是 observe-only，不能回覆權限。
 
 > 註：目前沒有獨立的「Codex Desktop」hook 安裝項目——只有 Codex CLI 的 hooks 有接上。
 
@@ -322,6 +324,8 @@ node integrations/install.mjs --uninstall --claude-code
 agent-pets/
 ├── electron/
 │   ├── main.ts              # Electron 主行程
+│   ├── agent-adapter.ts     # AgentAdapter 契約與 runtime registry
+│   ├── agent-adapter-operations.ts # 跨平台 Adapter 偵測／安裝橋接
 │   ├── preload.ts           # IPC 橋接
 │   ├── event-server.ts      # HTTP 事件伺服器
 │   ├── event-normalizer.ts  # 一般事件 allowlist 與 projection
@@ -350,6 +354,7 @@ agent-pets/
 │   │   └── agentStore.ts    # Pinia store（sessions、寵物、UI 狀態）
 │   ├── types/
 │   │   ├── agent.ts         # Agent 事件型別
+│   │   ├── agent-adapter.ts  # Adapter capability／status 契約
 │   │   └── desktop.ts       # 桌面偏好 IPC 型別
 │   └── utils/
 │       ├── format.ts        # 共用格式化函式

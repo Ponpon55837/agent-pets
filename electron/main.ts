@@ -16,6 +16,8 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { unzipSync } from 'fflate'
 import { createEventServer } from './event-server'
+import { createAgentAdapterRegistry, isAgentAdapterId, type AgentAdapterRegistry } from './agent-adapter'
+import { createAgentAdapterOperations } from './agent-adapter-operations'
 import { getQuotaUsage } from './quota'
 import { DesktopPreferencesStore, resolveLoginItemExecutable } from './desktop-preferences'
 import { DesktopNotificationService } from './desktop-notifications'
@@ -45,15 +47,6 @@ import {
   hookScriptDeployPath,
   ensureDir,
   writeFileEnsured,
-  fileExists,
-  readFile,
-  openCodeCliPluginPath,
-  openCodeDesktopPluginPath,
-  codexHooksPath,
-  codexConfigPath,
-  claudeDesktopConfigPath,
-  claudeCodeSettingsPath,
-  hookScriptPath,
   installIntegration,
   uninstallIntegration,
   refreshInstalledIntegrationScripts,
@@ -74,6 +67,7 @@ let dragPollHandle: ReturnType<typeof setInterval> | null = null
 let dialogOpen = false
 let eventToken = ''
 let eventServer: Server | null = null
+let agentAdapterRegistry: AgentAdapterRegistry | null = null
 let permissionAdapterServer: Server | null = null
 let permissionBroker: PermissionBroker | null = null
 let permissionRelay: PermissionAdapterRelay | null = null
@@ -142,6 +136,7 @@ const INTEGRATION_TEST_SOURCES = [
   'opencode-cli',
   'opencode-desktop',
   'codex',
+  'codex-desktop',
   'claude',
   'claude-desktop',
 ] as const
@@ -1130,45 +1125,6 @@ function getPetsJsonPath(): string {
   return join(__dirname, '..', 'dist', 'pets', 'pets.json')
 }
 
-function isCodexHooksEnabled(config: string | null): boolean {
-  return !config?.includes('hooks = false') && !config?.includes('codex_hooks = false')
-}
-
-// Codex uses shell-form hooks (single "command" string containing the full
-// invocation). Claude Code uses exec-form (command=node executable, args=[...])
-// since Windows can't run .cmd/.bat files in exec form without a shell — so we
-// check both `command` and `args` combined here.
-function isAgentPetsHookConfigured(settingsPath: string, expectedArg: string): boolean {
-  const raw = readFile(settingsPath)
-  if (!raw) return false
-
-  try {
-    const config = JSON.parse(raw)
-    const events = config?.hooks
-    if (!events || typeof events !== 'object') return false
-
-    const hookPaths = [
-      hookScriptPath(),
-      join(hookScriptDeployPath(), 'agent-hook.cmd'),
-    ]
-    return Object.values(events).some((groups: any) => {
-      if (!Array.isArray(groups)) return false
-      return groups.some((group) => {
-        if (!Array.isArray(group?.hooks)) return false
-        return group.hooks.some((hook: any) => {
-          if (hook?.type !== 'command') return false
-          const command = typeof hook.command === 'string' ? hook.command : ''
-          const args = Array.isArray(hook.args) ? hook.args.join(' ') : ''
-          const combined = `${command} ${args}`
-          return hookPaths.some((hookPath) => combined.includes(hookPath)) && combined.includes(expectedArg)
-        })
-      })
-    })
-  } catch {
-    return false
-  }
-}
-
 app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return
 
@@ -1178,6 +1134,7 @@ app.whenReady().then(() => {
   })
 
   eventToken = refreshInstalledIntegrationScripts()
+  agentAdapterRegistry = createAgentAdapterRegistry(createAgentAdapterOperations())
   const permissionToken = ensurePermissionToken()
   configureSecureProtocol()
   createDesktopServices()
@@ -1208,6 +1165,8 @@ app.whenReady().then(() => {
         console.error('Progression event handling failed', error)
       }
     },
+    (input, receivedAt) => agentAdapterRegistry?.normalize(input, receivedAt)
+      ?? Promise.resolve({ ok: false, error: 'adapter_registry_unavailable' }),
   )
 
   // Dragging is driven from here by polling the OS cursor position, rather
@@ -1450,29 +1409,43 @@ app.whenReady().then(() => {
     return permissionBroker.decide(data.requestId, data.decision, 'bubble')
   })
 
-  ipcMain.handle('integration-status', (event) => {
+  ipcMain.handle('integration-status', async (event) => {
     assertTrustedIpcSender(event, panelWindow)
-    const codexConfig = readFile(codexConfigPath())
     return {
-      opencode: {
-        cli: fileExists(openCodeCliPluginPath()),
-        desktop: fileExists(openCodeDesktopPluginPath()),
-      },
-      codex: {
-        hooks: fileExists(codexHooksPath()),
-        enabled: isCodexHooksEnabled(codexConfig),
-        configured: isAgentPetsHookConfigured(codexHooksPath(), ' codex'),
-        hookScript: fileExists(hookScriptPath()),
-      },
-      claude: {
-        config: fileExists(claudeDesktopConfigPath()),
-        hookScript: fileExists(hookScriptPath()),
-      },
-      claudeCode: {
-        settings: fileExists(claudeCodeSettingsPath()),
-        configured: isAgentPetsHookConfigured(claudeCodeSettingsPath(), 'claude'),
-        hookScript: fileExists(hookScriptPath()),
-      },
+      adapters: await agentAdapterRegistry?.listStatuses() ?? [],
+    }
+  })
+
+  ipcMain.handle('adapter-diagnose', async (event, id: unknown) => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (!isAgentAdapterId(id)) return { ok: false, error: 'Unsupported adapter' }
+    const report = await agentAdapterRegistry?.diagnose(id)
+    return report ? { ok: true, report } : { ok: false, error: 'Adapter unavailable' }
+  })
+
+  ipcMain.handle('adapter-install', async (event, id: unknown) => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (!isAgentAdapterId(id) || id === 'generic-http') {
+      return { ok: false, error: 'Adapter is not installable' }
+    }
+    try {
+      const status = await agentAdapterRegistry?.install(id)
+      return status ? { ok: true, status } : { ok: false, error: 'Adapter unavailable' }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('adapter-uninstall', async (event, id: unknown) => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (!isAgentAdapterId(id) || id === 'generic-http') {
+      return { ok: false, error: 'Adapter is not uninstallable' }
+    }
+    try {
+      const status = await agentAdapterRegistry?.uninstall(id)
+      return status ? { ok: true, status } : { ok: false, error: 'Adapter unavailable' }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
 

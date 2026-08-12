@@ -21,6 +21,7 @@
 - Pet surface: `src/components/DesktopPet.vue` and `src/components/PetAnimation.vue`.
 - Panel/settings surface: `src/components/StatusPanel.vue` and `src/components/SetupWizard.vue`.
 - Window mode geometry: `electron/pet-window-mode.ts`; shared mode snapshot types: `src/types/pet-window.ts`.
+- Agent Adapter SDK: `electron/agent-adapter.ts` owns the runtime registry and canonical ingress selection; `electron/agent-adapter-operations.ts` wraps existing platform installers/detection; shared capability/status contracts live in `src/types/agent-adapter.ts`.
 - Canonical current event types: `src/types/agent.ts`.
 
 ## Existing security controls to preserve
@@ -45,6 +46,7 @@
 - Click-through combines renderer hit testing and Electron mouse passthrough.
 - Three Agent families are supported through hooks: Codex, Claude Code, and OpenCode.
 - OpenCode is currently the only respond-capable permission Adapter. Generic `/v1/events` remains observe-only; Codex and Claude show external-only waiting state until a verified response channel exists.
+- All `/v1/events` payloads pass through the Agent Adapter registry before Event Core normalization. Built-in source families receive `adapterId` metadata; an explicit `adapterId: generic-http` remains observe-only and cannot elevate permission capabilities. Setup Wizard health/capability cards are runtime-driven rather than a hardcoded agent list.
 
 ## Working rules
 

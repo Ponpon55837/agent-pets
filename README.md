@@ -27,6 +27,8 @@ Desktop pet that shows real-time status of your AI coding agents.
 | Codex | ✅ | ✅ |
 | Claude Code | ✅ | ✅ |
 
+The **Generic HTTP** adapter is available to local integrations through the authenticated `/v1/events` endpoint. It is observe-only and has no permission-response capability.
+
 ---
 
 ## Quick Start
@@ -130,21 +132,21 @@ Click **‹** to return to the Sessions view.
 
 ## Setup Wizard
 
-The Setup Wizard detects each tool's config, and installs its hooks when you click a button — it does not install anything on its own:
+The Setup Wizard reads the runtime Agent Adapter registry and installs hooks when you click a button — it does not install anything on its own. Each adapter reports its supported sources, capabilities, health, and diagnosis checks:
 
 - **OpenCode CLI / Desktop** — Writes a plugin to `~/.config/opencode/plugin/` (note: singular `plugin`, matching where OpenCode itself scans) and the platform's OpenCode Desktop plugin dir
 - **Codex CLI** — Creates `~/.codex/hooks.json` and enables hooks in `~/.codex/config.toml`
 - **Claude Code CLI & Desktop** — Adds a `hooks` block to `~/.claude/settings.json` (CLI and Desktop share this config, so one install covers both; which one actually fired an event is resolved at runtime via Claude Code's `CLAUDE_CODE_ENTRYPOINT` env var, not by the installer)
 
-Each tool shows a status dot:
+Each adapter shows a status dot and capability chips:
 
 - 🟢 **Green** — Installed and configured
 - 🟡 **Yellow** — Detected but not (fully) configured
-- 🔴 **Red** — Not detected
+- 🔴 **Red** — Error or unavailable
 
-Click **Install** next to a tool to (re)install just that integration, or **Install All** to do everything at once. Click **Refresh** if a tool's status seems stale.
+Click **Diagnose** to inspect bounded health checks. Click **Install** next to an installable adapter to (re)install just that integration, or **Install All** to run every adapter installer idempotently. Click **Refresh** if a status seems stale.
 
-For a configured integration, click **Test** to send a short-lived event through the running app's local HTTP receiver. A passing result confirms that this Agent Pets instance received and displayed the event; it does not launch the coding tool or prove that tool's hook has fired on its own.
+For a configured adapter, click **Test** to send a short-lived event through the running app's authenticated local HTTP receiver. A passing result confirms HTTP 204, adapter selection, canonical mapping, and renderer receipt in this Agent Pets instance; it does not launch the coding tool or prove that tool's hook has fired on its own. Generic HTTP is always observe-only and cannot respond to permissions.
 
 > Note: there is no separate "Codex Desktop" hook install — only Codex CLI hooks are wired up today.
 
@@ -322,6 +324,8 @@ node integrations/install.mjs --uninstall --claude-code
 agent-pets/
 ├── electron/
 │   ├── main.ts              # Electron main process
+│   ├── agent-adapter.ts     # AgentAdapter contract and runtime registry
+│   ├── agent-adapter-operations.ts # Platform-aware adapter detection/install bridge
 │   ├── preload.ts           # IPC bridge
 │   ├── event-server.ts      # HTTP event server
 │   ├── event-normalizer.ts  # Generic event allowlist and projection
@@ -350,6 +354,7 @@ agent-pets/
 │   │   └── agentStore.ts    # Pinia store (sessions, pets, UI state)
 │   ├── types/
 │   │   ├── agent.ts         # Agent event types
+│   │   ├── agent-adapter.ts  # Adapter capabilities/status contracts
 │   │   └── desktop.ts       # Desktop preference IPC types
 │   └── utils/
 │       ├── format.ts        # Shared formatting helpers

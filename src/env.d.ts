@@ -4,6 +4,12 @@ import type { DesktopPreferences, DesktopPreferencesPatch } from './types/deskto
 import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView } from './types/permission'
 import type { ProgressionSnapshot } from './types/progression'
 import type { PetWindowMode, PetWindowModeState } from './types/pet-window'
+import type {
+  AdapterDetection,
+  AdapterRuntimeStatus,
+  AgentAdapterId,
+  DiagnosticReport,
+} from './types/agent-adapter'
 
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
@@ -47,11 +53,21 @@ declare global {
       }>
       quitApp: () => void
       restartApp: () => void
-      checkIntegration: () => Promise<{
-        opencode: { cli: boolean; desktop: boolean }
-        codex: { hooks: boolean; enabled: boolean; configured: boolean; hookScript: boolean }
-        claude: { config: boolean; hookScript: boolean }
-        claudeCode: { settings: boolean; configured: boolean; hookScript: boolean }
+      checkIntegration: () => Promise<{ adapters: AdapterRuntimeStatus[] }>
+      diagnoseAdapter: (id: AgentAdapterId) => Promise<{
+        ok: boolean
+        report?: DiagnosticReport
+        error?: string
+      }>
+      installAdapter: (id: AgentAdapterId) => Promise<{
+        ok: boolean
+        status?: AdapterDetection
+        error?: string
+      }>
+      uninstallAdapter: (id: AgentAdapterId) => Promise<{
+        ok: boolean
+        status?: AdapterDetection
+        error?: string
       }>
       getQuotaUsage: (force?: boolean) => Promise<{
         updatedAt: string
@@ -70,7 +86,7 @@ declare global {
         }>
       }>
       onQuotaUsageUpdated: (callback: (usage: unknown) => void) => () => void
-      testIntegration: (source: 'opencode-cli' | 'opencode-desktop' | 'codex' | 'claude' | 'claude-desktop') => Promise<{
+      testIntegration: (source: 'opencode-cli' | 'opencode-desktop' | 'codex' | 'codex-desktop' | 'claude' | 'claude-desktop') => Promise<{
         ok: boolean
         verifiedAt?: number
         error?: string
