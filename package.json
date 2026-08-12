@@ -1,6 +1,6 @@
 {
   "name": "agent-pets",
-  "version": "0.5.5",
+  "version": "0.5.7",
   "description": "Desktop pet that shows the status of AI coding agents",
   "author": "Upfloor5",
   "license": "MIT",
@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build && electron-builder",
+    "test:unit": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/*.test.mts",
     "preview": "vite preview",
     "electron:dev": "vite --config vite.config.mts",
     "electron:build": "vue-tsc --noEmit && vite build && electron-builder"
@@ -50,6 +51,7 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "build/icon.png",
       "LICENSE",
       "THIRD_PARTY_NOTICES.md"
     ],

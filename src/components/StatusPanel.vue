@@ -391,9 +391,43 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
             </div>
           </div>
 
-          <div class="settings-section toggle-group">
+          <div class="settings-section toggle-group desktop-toggle-group">
+            <div class="section-label group-label">Desktop</div>
             <label class="toggle-row">
-              <span class="section-label">Sound</span>
+              <span class="setting-copy">
+                <span class="section-label">Do Not Disturb</span>
+                <span class="setting-help">Mute sounds, notifications, and extra motion</span>
+              </span>
+              <span class="switch">
+                <input
+                  type="checkbox"
+                  :checked="store.dndEnabled"
+                  @change="store.setDndEnabled(($event.target as HTMLInputElement).checked)"
+                />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
+            </label>
+
+            <label class="toggle-row">
+              <span class="setting-copy">
+                <span class="section-label">Notifications</span>
+                <span class="setting-help">Show native waiting and completion alerts</span>
+              </span>
+              <span class="switch">
+                <input
+                  type="checkbox"
+                  :checked="store.notificationsEnabled"
+                  @change="store.setNotificationsEnabled(($event.target as HTMLInputElement).checked)"
+                />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
+            </label>
+
+            <label class="toggle-row">
+              <span class="setting-copy">
+                <span class="section-label">Sound</span>
+                <span class="setting-help">Play the pet's local status cues</span>
+              </span>
               <span class="switch">
                 <input
                   type="checkbox"
@@ -403,6 +437,32 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
                 <span class="switch-track"><span class="switch-thumb" /></span>
               </span>
             </label>
+
+            <label
+              class="toggle-row"
+              :class="{ 'is-disabled': !store.launchAtStartupSupported }"
+              :title="store.launchAtStartupSupported ? 'Start Agent Pets when you sign in' : 'Available in packaged builds'"
+            >
+              <span class="setting-copy">
+                <span class="section-label">Launch at startup</span>
+                <span class="setting-help">
+                  {{ store.launchAtStartupSupported ? 'Start when you sign in' : 'Available after installation' }}
+                </span>
+              </span>
+              <span class="switch">
+                <input
+                  type="checkbox"
+                  :checked="store.launchAtStartup"
+                  :disabled="!store.launchAtStartupSupported"
+                  @change="store.setLaunchAtStartup(($event.target as HTMLInputElement).checked)"
+                />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
+            </label>
+          </div>
+
+          <div class="settings-section toggle-group">
+            <div class="section-label group-label">Pet reactions</div>
 
             <label class="toggle-row">
               <span class="section-label">Bounce &amp; shake</span>
@@ -690,7 +750,6 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   border: 1px solid rgba(139, 156, 247, 0.13);
   border-radius: 10px;
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.05), rgba(139, 156, 247, 0.045));
-  backdrop-filter: blur(6px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -974,7 +1033,6 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.025);
-  backdrop-filter: blur(4px);
   transition: border-color 0.15s, background 0.15s;
 }
 
@@ -1170,11 +1228,46 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   gap: 8px;
 }
 
+.desktop-toggle-group {
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.group-label {
+  padding-bottom: 2px;
+  color: #d9dce8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  min-height: 31px;
   cursor: pointer;
+}
+
+.toggle-row.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.setting-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.setting-help {
+  color: #9da3b4;
+  font-size: 10px;
+  line-height: 1.3;
 }
 
 .switch {
@@ -1220,6 +1313,16 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 
 .switch input:checked ~ .switch-track .switch-thumb {
   transform: translateX(14px);
+}
+
+.switch input:focus-visible ~ .switch-track {
+  outline: 2px solid rgba(173, 184, 255, 0.95);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(139, 156, 247, 0.16);
+}
+
+.switch input:disabled ~ .switch-track {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .mood-header {
@@ -1352,5 +1455,34 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 .quit-btn:hover {
   background: rgba(255, 80, 80, 0.15);
   border-color: rgba(255, 80, 80, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch-track,
+  .switch-thumb,
+  .settings-tab,
+  .dashboard-tab {
+    transition-duration: 0.01ms;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .status-panel {
+    background: rgba(12, 12, 18, 0.97);
+    border-color: rgba(255, 255, 255, 0.42);
+  }
+
+  .desktop-toggle-group,
+  .toggle-row {
+    border-color: rgba(255, 255, 255, 0.22);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .status-panel {
+    background: rgb(18, 18, 26);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 </style>

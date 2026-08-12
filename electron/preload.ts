@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   onAgentStatusEvent: (callback: (event: unknown) => void) => {
@@ -46,6 +47,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('panel-opened', handler)
     return () => {
       ipcRenderer.removeListener('panel-opened', handler)
+    }
+  },
+
+  onPanelOpenSettings: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('panel-open-settings', handler)
+    return () => {
+      ipcRenderer.removeListener('panel-open-settings', handler)
+    }
+  },
+
+  initializeDesktopPreferences: (legacySoundEnabled: boolean): Promise<DesktopPreferences> => {
+    return ipcRenderer.invoke('desktop-preferences-init', legacySoundEnabled)
+  },
+
+  setDesktopPreferences: (patch: DesktopPreferencesPatch): Promise<DesktopPreferences> => {
+    return ipcRenderer.invoke('desktop-preferences-set', patch)
+  },
+
+  onDesktopPreferencesUpdated: (callback: (preferences: DesktopPreferences) => void) => {
+    const handler = (_event: unknown, preferences: DesktopPreferences) => callback(preferences)
+    ipcRenderer.on('desktop-preferences-updated', handler)
+    return () => {
+      ipcRenderer.removeListener('desktop-preferences-updated', handler)
     }
   },
 

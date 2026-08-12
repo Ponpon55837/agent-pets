@@ -7,7 +7,9 @@ import type {
   AgentStatusEvent,
 } from '../types/agent'
 import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '../types/agent'
+import type { DesktopPreferences, DesktopPreferencesPatch } from '../types/desktop'
 import { formatProject } from '../utils/format'
+import { isDesktopEffectActive } from '../utils/desktop-effects'
 
 export interface PetEntry {
   id: string
@@ -236,6 +238,25 @@ export const useAgentStore = defineStore('agent', () => {
   // Off by default — the completion toast / "what's it doing" bubble.
   const bubbleEnabled = ref(localStorage.getItem('agent-pet-bubble') === '1')
 
+  // Desktop-wide preferences are owned by the Electron main process so the
+  // Tray and both renderer windows always agree. Sound is initialized from
+  // the legacy localStorage value once, preserving existing user choice.
+  const dndEnabled = ref(false)
+  const notificationsEnabled = ref(true)
+  const launchAtStartup = ref(false)
+  const launchAtStartupSupported = ref(false)
+  const desktopPreferencesReady = ref(false)
+  const reactionsActive = computed(() => isDesktopEffectActive(
+    desktopPreferencesReady.value,
+    dndEnabled.value,
+    reactionsEnabled.value,
+  ))
+  const bubbleActive = computed(() => isDesktopEffectActive(
+    desktopPreferencesReady.value,
+    dndEnabled.value,
+    bubbleEnabled.value,
+  ))
+
   function clampMood(value: number): number {
     if (Number.isNaN(value)) return MOOD_BASELINE
     return Math.max(0, Math.min(100, value))
@@ -267,6 +288,57 @@ export const useAgentStore = defineStore('agent', () => {
   function setSoundEnabled(enabled: boolean) {
     soundEnabled.value = enabled
     localStorage.setItem('agent-pet-sound', enabled ? '1' : '0')
+    updateDesktopPreferences({ soundEnabled: enabled })
+  }
+
+  function applyDesktopPreferences(preferences: DesktopPreferences) {
+    dndEnabled.value = preferences.dndEnabled
+    notificationsEnabled.value = preferences.notificationsEnabled
+    soundEnabled.value = preferences.soundEnabled
+    launchAtStartup.value = preferences.launchAtStartup
+    launchAtStartupSupported.value = preferences.launchAtStartupSupported
+    desktopPreferencesReady.value = true
+    localStorage.setItem('agent-pet-sound', preferences.soundEnabled ? '1' : '0')
+  }
+
+  async function initializeDesktopPreferences() {
+    if (!window.electronAPI?.initializeDesktopPreferences) {
+      desktopPreferencesReady.value = true
+      return
+    }
+    try {
+      applyDesktopPreferences(
+        await window.electronAPI.initializeDesktopPreferences(soundEnabled.value),
+      )
+    } catch {
+      console.error('Failed to initialize desktop preferences')
+    }
+  }
+
+  function updateDesktopPreferences(patch: DesktopPreferencesPatch) {
+    if (!window.electronAPI?.setDesktopPreferences) return
+    void window.electronAPI.setDesktopPreferences(patch)
+      .then(applyDesktopPreferences)
+      .catch(() => {
+        console.error('Failed to update desktop preferences')
+        void initializeDesktopPreferences()
+      })
+  }
+
+  function setDndEnabled(enabled: boolean) {
+    dndEnabled.value = enabled
+    updateDesktopPreferences({ dndEnabled: enabled })
+  }
+
+  function setNotificationsEnabled(enabled: boolean) {
+    notificationsEnabled.value = enabled
+    updateDesktopPreferences({ notificationsEnabled: enabled })
+  }
+
+  function setLaunchAtStartup(enabled: boolean) {
+    if (!launchAtStartupSupported.value) return
+    launchAtStartup.value = enabled
+    updateDesktopPreferences({ launchAtStartup: enabled })
   }
 
   function setMultiPetEnabled(enabled: boolean) {
@@ -731,9 +803,16 @@ export const useAgentStore = defineStore('agent', () => {
     toast,
     mood,
     soundEnabled,
+    dndEnabled,
+    notificationsEnabled,
+    launchAtStartup,
+    launchAtStartupSupported,
+    desktopPreferencesReady,
     multiPetEnabled,
     reactionsEnabled,
     bubbleEnabled,
+    reactionsActive,
+    bubbleActive,
     isMultiPet,
     activeSessions,
     hasSuccessSessions,
@@ -757,6 +836,11 @@ export const useAgentStore = defineStore('agent', () => {
     setPet,
     setScale,
     setSoundEnabled,
+    applyDesktopPreferences,
+    initializeDesktopPreferences,
+    setDndEnabled,
+    setNotificationsEnabled,
+    setLaunchAtStartup,
     setMultiPetEnabled,
     setReactionsEnabled,
     setBubbleEnabled,

@@ -554,14 +554,14 @@ onUnmounted(() => {
       :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
       class="pet-canvas"
       :class="{
-        'pet-reacting': store.reactionsEnabled && isReacting,
-        'pet-fidgeting': store.reactionsEnabled && isFidgeting && !isReacting && urgencyLevel === 0,
-        'pet-urgent-1': store.reactionsEnabled && !isReacting && urgencyLevel === 1,
-        'pet-urgent-2': store.reactionsEnabled && !isReacting && urgencyLevel === 2,
-        'pet-idle-ambient': store.reactionsEnabled && props.state === 'idle' && !isReacting && !isFidgeting,
-        'pet-thinking-ambient': store.reactionsEnabled && props.state === 'thinking' && !isReacting,
-        'pet-tool-ambient': store.reactionsEnabled && props.state === 'tool-running' && !isReacting,
-        'pet-waiting-input': store.reactionsEnabled && props.state === 'waiting-input' && !isReacting && urgencyLevel === 0,
+        'pet-reacting': store.reactionsActive && isReacting,
+        'pet-fidgeting': store.reactionsActive && isFidgeting && !isReacting && urgencyLevel === 0,
+        'pet-urgent-1': store.reactionsActive && !isReacting && urgencyLevel === 1,
+        'pet-urgent-2': store.reactionsActive && !isReacting && urgencyLevel === 2,
+        'pet-idle-ambient': store.reactionsActive && props.state === 'idle' && !isReacting && !isFidgeting,
+        'pet-thinking-ambient': store.reactionsActive && props.state === 'thinking' && !isReacting,
+        'pet-tool-ambient': store.reactionsActive && props.state === 'tool-running' && !isReacting,
+        'pet-waiting-input': store.reactionsActive && props.state === 'waiting-input' && !isReacting && urgencyLevel === 0,
         'pet-offline-ambient': props.state === 'offline',
         'pet-mood-happy': moodTier === 'happy',
         'pet-mood-low': moodTier === 'low',

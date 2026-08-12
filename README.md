@@ -12,6 +12,7 @@ Desktop pet that shows real-time status of your AI coding agents.
 - **Draggable pet** — Drag the pet anywhere on your screen (position is remembered across restarts).
 - **Multi-agent support** — OpenCode, Codex, Claude Code (CLI & Desktop).
 - **Custom pets** — Import your own spritesheet, or a `.codex-pet.zip` sprite kit from sites like [codex-pets.net](https://codex-pets.net).
+- **Desktop controls** — Tray menu, native waiting/completion notifications, Do Not Disturb, sound control, and optional launch at startup.
 
 ---
 
@@ -54,6 +55,8 @@ Download `Agent Pets.dmg`, open it, and drag the app to your Applications folder
 | **Drag** the pet | Move it to a new position (remembered across restarts) |
 | **Right-click** | Nothing (disabled) |
 
+The system Tray menu can show or hide the pets, open the panel or Settings, toggle Do Not Disturb, sound and notifications, configure launch at startup in packaged builds, mark pending attention on the Tray icon, and quit the app. Closing or hiding the pet window keeps hooks and background status running until **Quit** is selected.
+
 Below the pet, a floating status bar shows up to **3 lines**, one per active tool family (Codex / Claude / OpenCode). CLI and Desktop variants of the same tool are grouped onto a single line (e.g. `Claude (CLI+Desktop) · Thinking`). When nothing is active, a single line shows the pet's overall idle/offline state.
 
 ### Control Panel
@@ -88,7 +91,10 @@ The panel is split into **Settings** and **Pets** tabs.
 
 - **Size** — S / M / L / XL / XXL to scale the pet.
 - **Mood** — Starts each day at a low baseline of 10. A successful task gives +4 and an error gives -6. Long tasks also earn +1 for every 2 completed tools (up to +8 per task) and +1 for every 5 minutes of work (up to +4 per task), so progress rewards are capped at +12 before the completion bonus. As mood grows, an animated energy layer built from the current pet frame intensifies around the pet's own silhouette, reaching overdrive at 90+. Click **Reset** to return to 10; it never grants extra mood.
+- **Do Not Disturb** — Suppresses native notifications, pet sounds, extra motion, and nonessential bubbles without stopping event ingestion. **Off by default.**
+- **Notifications** — Native alerts for waiting-permission, waiting-input, completion, and errors. Repeats use a per-session cooldown and terminal events are batched. **On by default.**
 - **Sound** — Short synthesized cues (Web Audio, no audio files) for success/error/waiting-permission. **Off by default.**
+- **Launch at startup** — Start Agent Pets when you sign in. This toggle is available in packaged builds.
 - **Bounce & shake** — Click/state-change bounce, idle fidget sway, and waiting-permission shake. **Off by default.**
 - **Bubble** — The completion toast and "what's it doing" activity bubble above the pet. **Off by default.**
 - **Setup Wizard** — Re-run tool detection, or install/reinstall hooks.
@@ -226,6 +232,8 @@ Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that r
 - **Pet imports** — ZIP entry count, compressed/uncompressed sizes, JSON size, and image size/type are validated before imported files are stored.
 - **Memory bounds** — Agent sessions are capped and stale/offline entries are evicted to prevent unbounded renderer memory growth.
 - **Path sanitization** — Project paths are reduced to their basename, and filesystem destinations are constrained to their expected root.
+- **Desktop notifications** — Notification text is built only from the normalized Agent name and bounded project basename; prompt text, tool arguments, session identifiers, and credentials are never shown or logged. Diagnostic notification history is bounded and stores only event class/outcome metadata.
+- **Desktop preference IPC** — The main process owns Tray/DND/notification/startup preferences. Renderer requests accept only an allowlist of boolean fields from validated first-party frames, and preference writes use bounded reads plus atomic replacement.
 - **Packaged runtime** — Electron fuses disable RunAsNode, Node options/inspect arguments, and privileged `file://` behavior while enforcing ASAR-only loading and embedded ASAR integrity validation.
 - **Release signing** — Production macOS and Windows artifacts should be built with the platform signing credentials configured; unsigned local builds are for development only.
 
@@ -260,6 +268,12 @@ pnpm build
 
 The output will be in `release/`.
 
+### Unit Tests
+
+```bash
+pnpm test:unit
+```
+
 ### Install Hooks (for development)
 
 ```bash
@@ -292,6 +306,10 @@ agent-pets/
 │   ├── main.ts              # Electron main process
 │   ├── preload.ts           # IPC bridge
 │   ├── event-server.ts      # HTTP event server
+│   ├── desktop-preferences.ts # Main-owned desktop preferences
+│   ├── desktop-notifications.ts # Native notification delivery and bounded log
+│   ├── desktop-tray.ts      # Tray lifecycle and menu
+│   ├── notification-policy.ts # Pure notification classification/cooldown
 │   ├── quota.ts             # Codex / Claude quota readers
 │   └── setup.ts             # Platform-aware paths & setup
 ├── integrations/
@@ -307,7 +325,8 @@ agent-pets/
 │   ├── stores/
 │   │   └── agentStore.ts    # Pinia store (sessions, pets, UI state)
 │   ├── types/
-│   │   └── agent.ts         # TypeScript types
+│   │   ├── agent.ts         # Agent event types
+│   │   └── desktop.ts       # Desktop preference IPC types
 │   └── utils/
 │       ├── format.ts        # Shared formatting helpers
 │       └── sound.ts         # Synthesized audio cues (Web Audio API)
@@ -315,6 +334,7 @@ agent-pets/
 │   └── pets/
 │       ├── pets.json        # Built-in pet manifest (id/displayName/folder)
 │       └── <pet-id>/        # spritesheet.webp + pet.json per built-in pet
+├── tests/                   # Node built-in unit tests
 ├── package.json
 └── README.md
 ```

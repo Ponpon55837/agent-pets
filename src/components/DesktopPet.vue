@@ -227,7 +227,7 @@ function onClick(e: MouseEvent) {
       @click="onClick"
       @contextmenu.prevent
     >
-      <Transition v-if="store.bubbleEnabled" name="toast" mode="out-in">
+      <Transition v-if="store.bubbleActive" name="toast" mode="out-in">
         <div v-if="store.toast" key="toast" class="pet-toast" :class="store.toast.tone" data-pet-hit-target="solid">
           {{ store.toast.text }}
         </div>
@@ -250,9 +250,9 @@ function onClick(e: MouseEvent) {
               class="status-line multi-pet-status-line"
               :class="{
                 'has-quota': store.quotaByFamily[line.key],
-                'quota-motion': store.reactionsEnabled,
-                'quota-critical': store.reactionsEnabled && (store.quotaByFamily[line.key]?.remainingPercent ?? 100) < 10,
-                'quota-drain': store.reactionsEnabled && draining[line.key],
+                'quota-motion': store.reactionsActive,
+                'quota-critical': store.reactionsActive && (store.quotaByFamily[line.key]?.remainingPercent ?? 100) < 10,
+                'quota-drain': store.reactionsActive && draining[line.key],
               }"
               :style="quotaLineStyle(line.key)"
               :aria-label="quotaTitle(line.key)"
@@ -311,9 +311,9 @@ function onClick(e: MouseEvent) {
             class="status-line"
             :class="{
               'has-quota': store.quotaByFamily[line.key],
-              'quota-motion': store.reactionsEnabled,
-              'quota-critical': store.reactionsEnabled && (store.quotaByFamily[line.key]?.remainingPercent ?? 100) < 10,
-              'quota-drain': store.reactionsEnabled && draining[line.key],
+              'quota-motion': store.reactionsActive,
+              'quota-critical': store.reactionsActive && (store.quotaByFamily[line.key]?.remainingPercent ?? 100) < 10,
+              'quota-drain': store.reactionsActive && draining[line.key],
             }"
             :style="quotaLineStyle(line.key)"
             :aria-label="quotaTitle(line.key)"

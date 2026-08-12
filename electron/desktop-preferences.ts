@@ -1,0 +1,183 @@
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
+
+export function readBoundedJson(filePath: string, maxBytes = 64 * 1024): unknown | null {
+  try {
+    const stat = fs.lstatSync(filePath)
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxBytes) return null
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+export function writeJsonAtomic(filePath: string, value: unknown): void {
+  const directory = path.dirname(filePath)
+  fs.mkdirSync(directory, { recursive: true })
+  const temporaryPath = path.join(
+    directory,
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`,
+  )
+
+  try {
+    fs.writeFileSync(temporaryPath, JSON.stringify(value, null, 2), {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx',
+    })
+    fs.renameSync(temporaryPath, filePath)
+    if (process.platform !== 'win32') {
+      try { fs.chmodSync(filePath, 0o600) } catch {}
+    }
+  } catch (error) {
+    try { fs.rmSync(temporaryPath, { force: true }) } catch {}
+    throw error
+  }
+}
+
+type StoredDesktopPreferences = Omit<DesktopPreferences, 'launchAtStartupSupported'>
+
+export interface LoginItemAdapter {
+  supported: boolean
+  getOpenAtLogin(): boolean
+  setOpenAtLogin(enabled: boolean): boolean
+}
+
+export function resolveLoginItemExecutable(
+  platform: NodeJS.Platform,
+  isPackaged: boolean,
+  execPath: string,
+  portableExecutableFile?: string,
+): string | null {
+  if (!isPackaged) return null
+  const candidate = platform === 'win32' ? portableExecutableFile : execPath
+  if (!candidate || !path.isAbsolute(candidate)) return null
+  if (platform === 'win32' && path.extname(candidate).toLowerCase() !== '.exe') return null
+
+  try {
+    const stat = fs.lstatSync(candidate)
+    return stat.isFile() && !stat.isSymbolicLink() ? candidate : null
+  } catch {
+    return null
+  }
+}
+
+const BOOLEAN_KEYS = [
+  'dndEnabled',
+  'notificationsEnabled',
+  'soundEnabled',
+  'launchAtStartup',
+] as const
+
+const DEFAULTS: StoredDesktopPreferences = {
+  dndEnabled: false,
+  notificationsEnabled: true,
+  soundEnabled: false,
+  launchAtStartup: false,
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function sanitizeStored(value: unknown): Partial<StoredDesktopPreferences> {
+  if (!isRecord(value)) return {}
+  const result: Partial<StoredDesktopPreferences> = {}
+  for (const key of BOOLEAN_KEYS) {
+    if (typeof value[key] === 'boolean') result[key] = value[key]
+  }
+  return result
+}
+
+export function parseDesktopPreferencesPatch(value: unknown): DesktopPreferencesPatch {
+  if (!isRecord(value)) throw new TypeError('Desktop preferences patch must be an object')
+
+  const allowed = new Set<string>(BOOLEAN_KEYS)
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) throw new TypeError(`Unsupported desktop preference: ${key}`)
+    if (typeof value[key] !== 'boolean') {
+      throw new TypeError(`Desktop preference ${key} must be boolean`)
+    }
+  }
+
+  return sanitizeStored(value)
+}
+
+export class DesktopPreferencesStore {
+  private readonly filePath: string
+  private readonly loginItem: LoginItemAdapter
+  private stored: Partial<StoredDesktopPreferences> | null = null
+
+  constructor(filePath: string, loginItem: LoginItemAdapter) {
+    this.filePath = filePath
+    this.loginItem = loginItem
+  }
+
+  private load(): Partial<StoredDesktopPreferences> {
+    if (this.stored === null) {
+      this.stored = sanitizeStored(readBoundedJson(this.filePath))
+    }
+    return this.stored
+  }
+
+  private currentLaunchAtStartup(stored: Partial<StoredDesktopPreferences>): boolean {
+    if (!this.loginItem.supported) return false
+    try {
+      return this.loginItem.getOpenAtLogin()
+    } catch {
+      return stored.launchAtStartup ?? false
+    }
+  }
+
+  get(): DesktopPreferences {
+    const stored = this.load()
+    return {
+      ...DEFAULTS,
+      ...stored,
+      launchAtStartup: this.currentLaunchAtStartup(stored),
+      launchAtStartupSupported: this.loginItem.supported,
+    }
+  }
+
+  initializeLegacySound(legacySoundEnabled: boolean): DesktopPreferences {
+    const stored = this.load()
+    if (typeof stored.soundEnabled !== 'boolean') {
+      this.stored = { ...stored, soundEnabled: legacySoundEnabled }
+      this.persist(this.get())
+    }
+    return this.get()
+  }
+
+  update(value: unknown): DesktopPreferences {
+    const patch = parseDesktopPreferencesPatch(value)
+    const current = this.get()
+    const next: DesktopPreferences = { ...current, ...patch }
+
+    if (typeof patch.launchAtStartup === 'boolean') {
+      if (this.loginItem.supported) {
+        next.launchAtStartup = this.loginItem.setOpenAtLogin(patch.launchAtStartup)
+      } else {
+        next.launchAtStartup = false
+      }
+    }
+
+    this.stored = {
+      dndEnabled: next.dndEnabled,
+      notificationsEnabled: next.notificationsEnabled,
+      soundEnabled: next.soundEnabled,
+      launchAtStartup: next.launchAtStartup,
+    }
+    this.persist(next)
+    return next
+  }
+
+  private persist(preferences: DesktopPreferences): void {
+    writeJsonAtomic(this.filePath, {
+      dndEnabled: preferences.dndEnabled,
+      notificationsEnabled: preferences.notificationsEnabled,
+      soundEnabled: preferences.soundEnabled,
+      launchAtStartup: preferences.launchAtStartup,
+    } satisfies StoredDesktopPreferences)
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Pets 專案指南"
+  short_description: "依專案架構、安全閘門與版本流程實作 Agent Pets"
+  default_prompt: "使用 $pet-skill 依目前階段規格實作並完成驗收與安全檢測。"

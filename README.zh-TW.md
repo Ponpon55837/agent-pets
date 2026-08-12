@@ -12,6 +12,7 @@
 - **可拖曳寵物** — 拖到螢幕任意位置（重開 app 後位置會保留）。
 - **多助手支援** — OpenCode、Codex、Claude Code（CLI 與 Desktop）。
 - **自訂寵物** — 匯入自己的精靈圖，或是像 [codex-pets.net](https://codex-pets.net) 這類網站的 `.codex-pet.zip` 素材包。
+- **桌面控制** — 系統匣選單、原生等待／完成通知、勿擾模式、音效控制，以及可選的登入時啟動。
 
 ---
 
@@ -54,6 +55,8 @@
 | **拖曳**寵物 | 移動到新位置（重開 app 後會保留） |
 | **右鍵點擊** | 沒有作用（已停用） |
 
+系統匣選單可以顯示／隱藏寵物、開啟面板或 Settings、切換勿擾模式／音效／通知、在打包版本設定登入時啟動、以系統匣圖示標示待處理狀態，以及結束 app。關閉或隱藏寵物視窗後，hooks 與背景狀態仍會運作，直到選擇 **Quit**。
+
 寵物下方有一個浮動狀態列，最多顯示 **3 行**，每行對應一個目前活躍的工具家族（Codex / Claude / OpenCode）。同一工具的 CLI 跟 Desktop 版本會合併成一行顯示（例如 `Claude (CLI+Desktop) · Thinking`）。當沒有任何工具在跑時，會顯示一行寵物整體的 idle/offline 狀態。
 
 ### 控制面板
@@ -88,7 +91,10 @@
 
 - **Size** — S / M / L / XL / XXL 調整寵物大小。
 - **Mood** — 每天從低基準 10 開始；任務成功 +4、失敗 -6。長任務每完成 2 個工具會再 +1（每個任務最多 +8），每持續工作 5 分鐘也會 +1（每個任務最多 +4），因此完成獎勵之前的進度分數最多 +12。心情成長時，會以目前寵物影格生成貼合自身輪廓的動態能量層，並在 90 以上進入完整爆氣效果。點 **Reset** 只會回到 10，不會額外加分。
+- **Do Not Disturb** — 勿擾模式會抑制原生通知、寵物音效、額外動態效果與非必要氣泡，但不會停止事件接收。**預設關閉。**
+- **Notifications** — 等待核准、等待輸入、完成與錯誤的原生通知；同 session 的重複事件有冷卻時間，結束事件會批次合併。**預設開啟。**
 - **Sound** — 成功/失敗/等待核准時的短音效（用 Web Audio 即時合成，不需要音檔）。**預設關閉。**
+- **Launch at startup** — 登入系統時啟動 Agent Pets；此開關只在打包版本可用。
 - **Bounce & shake** — 點擊/狀態切換時的彈跳、閒置搖擺、waiting-permission 抖動。**預設關閉。**
 - **Bubble** — 完成提示氣泡跟寵物上方「正在做什麼」的活動氣泡。**預設關閉。**
 - **Setup Wizard** — 重新偵測工具，或安裝/重新安裝 hooks。
@@ -226,6 +232,8 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 - **寵物匯入** — 寫入前會驗證 ZIP 項目數、壓縮／解壓縮大小、JSON 大小，以及圖片大小與實際格式。
 - **記憶體上限** — Agent session 數量有上限，會優先淘汰離線／最舊項目，避免 renderer 記憶體無限成長。
 - **路徑清理** — 專案路徑只保留 basename，檔案寫入目的地也會限制在預期根目錄內。
+- **桌面通知** — 通知只會使用正規化後的 Agent 名稱與長度受限的專案 basename，不會顯示或記錄 prompt、工具參數、session identifier 或憑證；診斷紀錄有固定上限，而且只保存事件類別與結果。
+- **桌面偏好 IPC** — 系統匣／勿擾／通知／登入啟動偏好由 main process 擁有。Renderer 只能從已驗證的第一方 frame 傳送白名單 boolean 欄位，設定檔採長度受限讀取與原子替換。
 - **打包執行環境** — Electron fuses 會停用 RunAsNode、Node options／inspect 參數與 `file://` 額外權限，並強制只從 ASAR 載入及驗證內嵌 ASAR 完整性。
 - **發行簽章** — 正式發布 macOS／Windows 產物時必須配置平台簽章憑證；未簽章的本機建置只供開發測試。
 
@@ -260,6 +268,12 @@ pnpm build
 
 輸出會在 `release/` 目錄下。
 
+### 單元測試
+
+```bash
+pnpm test:unit
+```
+
 ### 安裝 Hooks（開發用）
 
 ```bash
@@ -292,6 +306,10 @@ agent-pets/
 │   ├── main.ts              # Electron 主行程
 │   ├── preload.ts           # IPC 橋接
 │   ├── event-server.ts      # HTTP 事件伺服器
+│   ├── desktop-preferences.ts # Main 擁有的桌面偏好
+│   ├── desktop-notifications.ts # 原生通知與有上限的診斷紀錄
+│   ├── desktop-tray.ts      # 系統匣生命週期與選單
+│   ├── notification-policy.ts # 純通知分類／冷卻規則
 │   ├── quota.ts             # Codex／Claude 剩餘用量讀取
 │   └── setup.ts             # 跨平台路徑與安裝邏輯
 ├── integrations/
@@ -307,7 +325,8 @@ agent-pets/
 │   ├── stores/
 │   │   └── agentStore.ts    # Pinia store（sessions、寵物、UI 狀態）
 │   ├── types/
-│   │   └── agent.ts         # TypeScript 型別
+│   │   ├── agent.ts         # Agent 事件型別
+│   │   └── desktop.ts       # 桌面偏好 IPC 型別
 │   └── utils/
 │       ├── format.ts        # 共用格式化函式
 │       └── sound.ts         # 即時合成音效（Web Audio API）
@@ -315,6 +334,7 @@ agent-pets/
 │   └── pets/
 │       ├── pets.json        # 內建寵物清單（id/displayName/folder）
 │       └── <pet-id>/        # 每隻內建寵物的 spritesheet.webp + pet.json
+├── tests/                   # Node 內建單元測試
 ├── package.json
 └── README.md
 ```

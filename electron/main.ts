@@ -1,12 +1,16 @@
 import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { join, resolve } from 'path'
-import { request as httpRequest } from 'node:http'
+import { request as httpRequest, type Server } from 'node:http'
 import * as fs from 'fs'
 import * as path from 'path'
 import { unzipSync } from 'fflate'
 import { createEventServer } from './event-server'
 import { getQuotaUsage } from './quota'
+import { DesktopPreferencesStore, resolveLoginItemExecutable } from './desktop-preferences'
+import { DesktopNotificationService } from './desktop-notifications'
+import { DesktopTrayController } from './desktop-tray'
+import type { DesktopPreferences } from '../src/types/desktop'
 import {
   IS_MAC,
   hookScriptDeployPath,
@@ -39,6 +43,11 @@ let resizeAnimHandle: ReturnType<typeof setInterval> | null = null
 let dragPollHandle: ReturnType<typeof setInterval> | null = null
 let dialogOpen = false
 let eventToken = ''
+let eventServer: Server | null = null
+let desktopPreferences: DesktopPreferencesStore | null = null
+let desktopNotifications: DesktopNotificationService | null = null
+let desktopTray: DesktopTrayController | null = null
+let isQuitting = false
 const pendingIntegrationTests = new Map<string, () => void>()
 
 // Enforce Chromium's renderer sandbox even if a future BrowserWindow option
@@ -57,11 +66,7 @@ if (!hasSingleInstanceLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    if (petWindow) {
-      if (petWindow.isMinimized()) petWindow.restore()
-      petWindow.show()
-      petWindow.focus()
-    }
+    showPetWindow()
   })
 }
 
@@ -434,6 +439,14 @@ function createPetWindow() {
     petWindow.loadURL('agent-pets://app/index.html')
   }
 
+  petWindow.on('close', (event) => {
+    if (isQuitting) return
+    event.preventDefault()
+    hidePetWindow()
+  })
+  petWindow.on('show', () => desktopTray?.rebuild())
+  petWindow.on('hide', () => desktopTray?.rebuild())
+
   petWindow.on('closed', () => {
     petWindow = null
     anchorBottomCenter = null
@@ -555,6 +568,129 @@ function repositionVisiblePanel() {
   panelWindow.setBounds(computePanelBounds(height))
 }
 
+function ensureDesktopWindows(): boolean {
+  if (!app.isReady()) return false
+  if (!petWindow || petWindow.isDestroyed()) createPetWindow()
+  if (!panelWindow || panelWindow.isDestroyed()) createPanelWindow()
+  return Boolean(petWindow && panelWindow)
+}
+
+function showPetWindow(): void {
+  if (!ensureDesktopWindows() || !petWindow) return
+  if (petWindow.isMinimized()) petWindow.restore()
+  petWindow.show()
+  petWindow.focus()
+  desktopTray?.rebuild()
+}
+
+function hidePetWindow(): void {
+  panelWindow?.hide()
+  petWindow?.hide()
+  desktopTray?.rebuild()
+}
+
+function showPanelWindow(view: 'sessions' | 'settings' = 'sessions'): void {
+  if (!ensureDesktopWindows() || !panelWindow) return
+  showPetWindow()
+  panelWindow.setBounds(computePanelBounds(view === 'settings' ? 420 : 380))
+  panelWindow.show()
+  panelWindow.focus()
+  desktopNotifications?.clearAttention()
+
+  const notifyRenderer = () => {
+    if (!panelWindow || panelWindow.isDestroyed()) return
+    panelWindow.webContents.send('panel-opened')
+    if (view === 'settings') panelWindow.webContents.send('panel-open-settings')
+  }
+  if (panelWindow.webContents.isLoading()) {
+    panelWindow.webContents.once('did-finish-load', notifyRenderer)
+  } else {
+    notifyRenderer()
+  }
+}
+
+function currentDesktopPreferences(): DesktopPreferences {
+  if (!desktopPreferences) {
+    return {
+      dndEnabled: false,
+      notificationsEnabled: true,
+      soundEnabled: false,
+      launchAtStartup: false,
+      launchAtStartupSupported: false,
+    }
+  }
+  return desktopPreferences.get()
+}
+
+function broadcastDesktopPreferences(preferences: DesktopPreferences): void {
+  for (const window of [petWindow, panelWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('desktop-preferences-updated', preferences)
+    }
+  }
+}
+
+function updateDesktopPreferences(patch: unknown): DesktopPreferences {
+  if (!desktopPreferences) throw new Error('Desktop preferences are not ready')
+  const preferences = desktopPreferences.update(patch)
+  desktopTray?.rebuild()
+  broadcastDesktopPreferences(preferences)
+  return preferences
+}
+
+function createDesktopServices(): void {
+  if (desktopPreferences || desktopTray || desktopNotifications) return
+
+  // electron-builder's Windows portable target runs the app from a temporary
+  // extraction directory. Register the original launcher path, never that
+  // ephemeral process.execPath. Unsupported/invalid paths fail closed.
+  const loginItemExecutable = resolveLoginItemExecutable(
+    process.platform,
+    app.isPackaged,
+    process.execPath,
+    process.env.PORTABLE_EXECUTABLE_FILE,
+  )
+
+  desktopPreferences = new DesktopPreferencesStore(
+    join(app.getPath('userData'), 'desktop-preferences.json'),
+    {
+      supported: loginItemExecutable !== null,
+      getOpenAtLogin: () => {
+        if (!loginItemExecutable) return false
+        return app.getLoginItemSettings({ path: loginItemExecutable }).openAtLogin
+      },
+      setOpenAtLogin: (enabled) => {
+        if (!loginItemExecutable) return false
+        app.setLoginItemSettings({ openAtLogin: enabled, path: loginItemExecutable })
+        return app.getLoginItemSettings({ path: loginItemExecutable }).openAtLogin
+      },
+    },
+  )
+
+  desktopNotifications = new DesktopNotificationService({
+    logFilePath: join(app.getPath('userData'), 'notification-log.json'),
+    getPreferences: currentDesktopPreferences,
+    isAppFocused: () => [petWindow, panelWindow].some(window => window?.isFocused()),
+    onNotificationClick: () => showPanelWindow('sessions'),
+    onAttentionChanged: count => desktopTray?.setAttentionCount(count),
+  })
+
+  desktopTray = new DesktopTrayController(
+    join(__dirname, '..', 'build', 'icon.png'),
+    {
+      getPreferences: currentDesktopPreferences,
+      updatePreferences: patch => { updateDesktopPreferences(patch) },
+      isPetVisible: () => Boolean(petWindow?.isVisible()),
+      showPet: showPetWindow,
+      hidePet: hidePetWindow,
+      openPanel: () => showPanelWindow('sessions'),
+      openSettings: () => showPanelWindow('settings'),
+      quit: () => app.quit(),
+    },
+  )
+  desktopTray.create()
+}
+
 function getPetsJsonPath(): string {
   if (app.isPackaged) {
     return join(app.getAppPath(), 'dist', 'pets', 'pets.json')
@@ -613,13 +749,19 @@ app.whenReady().then(() => {
   configureSecureProtocol()
   createPetWindow()
   createPanelWindow()
+  createDesktopServices()
 
-  createEventServer(
+  eventServer = createEventServer(
     () => [petWindow, panelWindow].filter((w): w is BrowserWindow => w !== null),
     eventToken,
     (event) => {
       if (event.originalEvent === 'AgentPetsIntegrationTest') {
         pendingIntegrationTests.get(event.sessionId)?.()
+      }
+      try {
+        desktopNotifications?.handleEvent(event)
+      } catch {
+        console.error('Desktop notification handling failed')
       }
     },
   )
@@ -704,9 +846,7 @@ app.whenReady().then(() => {
       panelWindow.hide()
       return
     }
-    panelWindow.setBounds(computePanelBounds(380))
-    panelWindow.show()
-    panelWindow.webContents.send('panel-opened')
+    showPanelWindow('sessions')
   })
 
   ipcMain.on('panel-resize', (event, payload: unknown) => {
@@ -782,6 +922,20 @@ app.whenReady().then(() => {
     if (!isTrustedIpcSender(event)) return
     app.relaunch()
     app.exit(0)
+  })
+
+  ipcMain.handle('desktop-preferences-init', (event, legacySoundEnabled?: unknown) => {
+    assertTrustedIpcSender(event)
+    if (!desktopPreferences) throw new Error('Desktop preferences are not ready')
+    const preferences = desktopPreferences.initializeLegacySound(legacySoundEnabled === true)
+    desktopTray?.rebuild()
+    broadcastDesktopPreferences(preferences)
+    return preferences
+  })
+
+  ipcMain.handle('desktop-preferences-set', (event, patch: unknown) => {
+    assertTrustedIpcSender(event, panelWindow)
+    return updateDesktopPreferences(patch)
   })
 
   ipcMain.handle('integration-status', (event) => {
@@ -1113,12 +1267,27 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createPetWindow()
       createPanelWindow()
+    } else {
+      showPetWindow()
     }
   })
 })
 
+app.on('before-quit', () => {
+  isQuitting = true
+})
+
+app.on('will-quit', () => {
+  desktopNotifications?.destroy()
+  desktopNotifications = null
+  desktopTray?.destroy()
+  desktopTray = null
+  eventServer?.close()
+  eventServer = null
+})
+
+// Agent Pets is a tray application on every supported desktop platform.
+// Hiding or closing its windows must not stop hooks or background status.
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
+  // Intentionally keep the main process alive until the user chooses Quit.
 })

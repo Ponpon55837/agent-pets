@@ -5,12 +5,15 @@ import DesktopPet from './components/DesktopPet.vue'
 import StatusPanel from './components/StatusPanel.vue'
 import SetupWizard from './components/SetupWizard.vue'
 import { playCue } from './utils/sound'
+import type { DesktopPreferences } from './types/desktop'
 
 const store = useAgentStore()
 const isPanelWindow = window.location.hash === '#panel'
 
 let cleanupListener: (() => void) | null = null
 let cleanupPanelOpened: (() => void) | null = null
+let cleanupPanelOpenSettings: (() => void) | null = null
+let cleanupDesktopPreferences: (() => void) | null = null
 let cleanupQuotaUpdated: (() => void) | null = null
 let staleTimer: ReturnType<typeof setInterval> | null = null
 let successTimer: ReturnType<typeof setInterval> | null = null
@@ -95,7 +98,13 @@ onMounted(() => {
       const cue = store.handleEvent(event as any)
       // Both windows' stores process every event identically, so only the
       // pet window actually plays audio — otherwise it'd sound twice.
-      if (cue && !isPanelWindow && store.soundEnabled) {
+      if (
+        cue
+        && !isPanelWindow
+        && store.desktopPreferencesReady
+        && store.soundEnabled
+        && !store.dndEnabled
+      ) {
         playCue(cue)
       }
     })
@@ -105,6 +114,17 @@ onMounted(() => {
       store.handlePanelOpened()
     })
   }
+  if (isPanelWindow && electronAPI?.onPanelOpenSettings) {
+    cleanupPanelOpenSettings = electronAPI.onPanelOpenSettings(() => {
+      store.openSettings()
+    })
+  }
+  if (electronAPI?.onDesktopPreferencesUpdated) {
+    cleanupDesktopPreferences = electronAPI.onDesktopPreferencesUpdated((preferences: DesktopPreferences) => {
+      store.applyDesktopPreferences(preferences)
+    })
+  }
+  void store.initializeDesktopPreferences()
   if (electronAPI?.onQuotaUsageUpdated) {
     cleanupQuotaUpdated = electronAPI.onQuotaUsageUpdated((usage: unknown) => {
       store.setQuotaUsage(usage)
@@ -179,6 +199,8 @@ watch(() => store.hasSuccessSessions, (active) => {
 onUnmounted(() => {
   cleanupListener?.()
   cleanupPanelOpened?.()
+  cleanupPanelOpenSettings?.()
+  cleanupDesktopPreferences?.()
   cleanupQuotaUpdated?.()
   window.removeEventListener('mousemove', handlePetMouseMove, true)
   window.removeEventListener('storage', handleStorage)
