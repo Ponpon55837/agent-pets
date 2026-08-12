@@ -28,10 +28,16 @@ test('migrates legacy sound once and persists desktop preferences', (t) => {
   })
 
   assert.equal(store.get().soundEnabled, false)
+  assert.equal(store.get().permissionBubbleEnabled, true)
   assert.equal(store.initializeLegacySound(true).soundEnabled, true)
 
-  const updated = store.update({ dndEnabled: true, launchAtStartup: true })
+  const updated = store.update({
+    dndEnabled: true,
+    permissionBubbleEnabled: false,
+    launchAtStartup: true,
+  })
   assert.equal(updated.dndEnabled, true)
+  assert.equal(updated.permissionBubbleEnabled, false)
   assert.equal(updated.launchAtStartup, true)
 
   const reloaded = new DesktopPreferencesStore(filePath, {
@@ -41,6 +47,7 @@ test('migrates legacy sound once and persists desktop preferences', (t) => {
   })
   assert.equal(reloaded.get().soundEnabled, true)
   assert.equal(reloaded.get().dndEnabled, true)
+  assert.equal(reloaded.get().permissionBubbleEnabled, false)
   assert.equal(reloaded.get().launchAtStartup, true)
 })
 

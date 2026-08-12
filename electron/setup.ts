@@ -180,6 +180,10 @@ function eventTokenPath(): string {
   return path.join(hookScriptDeployPath(), 'event-token')
 }
 
+function permissionTokenPath(): string {
+  return path.join(hookScriptDeployPath(), 'permission-token')
+}
+
 function ensureEventToken(): string {
   const dir = hookScriptDeployPath()
   ensureDir(dir)
@@ -192,6 +196,45 @@ function ensureEventToken(): string {
     const stat = fs.lstatSync(tokenPath)
     if (!stat.isFile() || stat.isSymbolicLink()) {
       throw new Error('Agent Pets event token path is not a regular file')
+    }
+    const existing = fs.readFileSync(tokenPath, 'utf8').trim()
+    if (/^[a-f0-9]{64}$/i.test(existing)) {
+      if (!IS_WIN) {
+        try { fs.chmodSync(tokenPath, 0o600) } catch {}
+      }
+      return existing
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code && code !== 'ENOENT') throw error
+  }
+
+  const token = randomBytes(32).toString('hex')
+  const descriptor = fs.openSync(tokenPath, 'w', 0o600)
+  try {
+    fs.writeFileSync(descriptor, `${token}\n`, 'utf8')
+    fs.fsyncSync(descriptor)
+  } finally {
+    fs.closeSync(descriptor)
+  }
+  if (!IS_WIN) {
+    try { fs.chmodSync(tokenPath, 0o600) } catch {}
+  }
+  return token
+}
+
+function ensurePermissionToken(): string {
+  const dir = hookScriptDeployPath()
+  ensureDir(dir)
+  if (!IS_WIN) {
+    try { fs.chmodSync(dir, 0o700) } catch {}
+  }
+
+  const tokenPath = permissionTokenPath()
+  try {
+    const stat = fs.lstatSync(tokenPath)
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error('Agent Pets permission token path is not a regular file')
     }
     const existing = fs.readFileSync(tokenPath, 'utf8').trim()
     if (/^[a-f0-9]{64}$/i.test(existing)) {
@@ -360,69 +403,238 @@ function openCodePluginContent(source: 'opencode-desktop' | 'opencode-cli'): str
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { randomBytes } from 'crypto';
 
-const sessionId = 'opencode-' + process.pid + '-' + Date.now();
+const SOURCE = '${source}';
+const instanceId = 'opencode-' + process.pid + '-' + Date.now() + '-' + randomBytes(6).toString('hex');
 const eventTokenPath = path.join(os.homedir(), '.desktop-pet', 'event-token');
+const permissionTokenPath = path.join(os.homedir(), '.desktop-pet', 'permission-token');
 let currentState = null;
 let stateTimer = null;
+const activePermissions = new Map();
+const decisionResults = new Map();
 
-function readEventToken() {
-  try { return fs.readFileSync(eventTokenPath, 'utf8').trim(); } catch { return ''; }
+function readToken(tokenPath) {
+  try { return fs.readFileSync(tokenPath, 'utf8').trim(); } catch { return ''; }
 }
 
-function sendEvent(state, toolName) {
-  const eventToken = readEventToken();
-  if (!eventToken) return;
-  const payload = JSON.stringify({
-    source: '${source}',
-    sessionId,
+function postJson(port, pathname, tokenHeader, token, value) {
+  return new Promise((resolve) => {
+    if (!token) { resolve({ status: 0, body: null }); return; }
+    const payload = JSON.stringify(value);
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+        [tokenHeader]: token,
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      res.on('end', () => {
+        let body = null;
+        try {
+          const text = Buffer.concat(chunks).toString('utf8');
+          body = text ? JSON.parse(text) : null;
+        } catch {}
+        resolve({ status: res.statusCode || 0, body });
+      });
+    });
+    req.setTimeout(1800, () => req.destroy());
+    req.on('error', () => resolve({ status: 0, body: null }));
+    req.write(payload);
+    req.end();
+  });
+}
+
+function sendEvent(sessionId, state, toolName, originalEvent) {
+  void postJson(17373, '/v1/events', 'X-Agent-Pets-Token', readToken(eventTokenPath), {
+    source: SOURCE,
+    sessionId: sessionId || 'unknown',
     state,
     timestamp: Date.now(),
     toolName,
+    originalEvent,
   });
-  const req = http.request({
-    hostname: '127.0.0.1',
-    port: 17373,
-    path: '/v1/events',
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(payload),
-      'X-Agent-Pets-Token': eventToken,
-    }
-  });
-  req.on('error', () => {});
-  req.write(payload);
-  req.end();
 }
 
-function setState(state, toolName) {
+function setState(sessionId, state, toolName, originalEvent) {
   if (state === currentState) return;
   currentState = state;
   if (stateTimer) clearTimeout(stateTimer);
   if (state === 'success' || state === 'error') {
     stateTimer = setTimeout(() => { currentState = null; }, 4000);
   }
-  sendEvent(state, toolName);
+  sendEvent(sessionId, state, toolName, originalEvent);
 }
 
-const DesktopPetPlugin = async () => ({
-  'tool.execute.before': async (input) => { setState('tool-running', input && input.tool); },
-  'tool.execute.after': async () => { setState('thinking'); },
+function permissionPost(pathname, value) {
+  return postJson(
+    17374,
+    pathname,
+    'X-Agent-Pets-Permission-Token',
+    readToken(permissionTokenPath),
+    value,
+  );
+}
+
+function normalizePermission(properties, projectPath) {
+  if (!properties || typeof properties !== 'object') return null;
+  const permissionId = properties.id || properties.requestID;
+  const sessionId = properties.sessionID;
+  const permission = properties.permission || properties.type;
+  if (!permissionId || !sessionId || !permission) return null;
+  const rawPatterns = properties.patterns || properties.pattern;
+  const patterns = Array.isArray(rawPatterns)
+    ? rawPatterns
+    : (typeof rawPatterns === 'string' ? [rawPatterns] : []);
+  return {
+    source: SOURCE,
+    instanceId,
+    permissionId: String(permissionId),
+    sessionId: String(sessionId),
+    project: projectPath,
+    permission: String(permission),
+    title: typeof properties.title === 'string' ? properties.title : undefined,
+    patterns: patterns.filter((item) => typeof item === 'string').slice(0, 5),
+  };
+}
+
+function deliveryResultFromError(error) {
+  const message = String(error && (error.message || error.data?.message || error));
+  return /not found|already resolved|already replied/i.test(message)
+    ? 'already_resolved'
+    : 'rejected';
+}
+
+async function replyOpenCode(client, input, decision, directory) {
+  const reply = decision === 'allow_once' ? 'once' : 'reject';
+  try {
+    let result;
+    if (client && client.permission && typeof client.permission.reply === 'function') {
+      result = await client.permission.reply({
+        requestID: input.permissionId,
+        reply,
+        directory,
+      });
+    } else if (client && typeof client.postSessionIdPermissionsPermissionId === 'function') {
+      result = await client.postSessionIdPermissionsPermissionId({
+        path: { id: input.sessionId, permissionID: input.permissionId },
+        body: { response: reply },
+        query: { directory },
+      });
+    } else {
+      return 'rejected';
+    }
+    if (result && result.error) return deliveryResultFromError(result.error);
+    return 'delivered';
+  } catch (error) {
+    return deliveryResultFromError(error);
+  }
+}
+
+async function pollPermission(client, input, directory) {
+  const startedAt = Date.now();
+  while (activePermissions.has(input.permissionId) && Date.now() - startedAt < 90000) {
+    const response = await permissionPost('/v1/permission/decision', input);
+    if (response.status === 410 || response.status === 404) break;
+    if (response.status !== 200 || !response.body || !response.body.decisionId) {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      continue;
+    }
+
+    const decisionId = String(response.body.decisionId);
+    let result = decisionResults.get(decisionId);
+    if (!result) {
+      result = await replyOpenCode(client, input, response.body.decision, directory);
+      decisionResults.set(decisionId, result);
+    }
+    const acknowledged = await permissionPost('/v1/permission/result', {
+      ...input,
+      decisionId,
+      result,
+    });
+    if (acknowledged.status === 204 || acknowledged.status === 409) {
+      decisionResults.delete(decisionId);
+      activePermissions.delete(input.permissionId);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 450));
+  }
+  activePermissions.delete(input.permissionId);
+}
+
+async function registerPermission(client, properties, projectPath, directory) {
+  const input = normalizePermission(properties, projectPath);
+  if (!input || activePermissions.has(input.permissionId)) return;
+  activePermissions.set(input.permissionId, input);
+  const response = await permissionPost('/v1/permission/request', input);
+  if (response.status !== 200 && response.status !== 201) {
+    activePermissions.delete(input.permissionId);
+    return;
+  }
+  setState(input.sessionId, 'waiting-permission', undefined, 'permission.request');
+  void pollPermission(client, input, directory);
+}
+
+async function resolvePermission(properties) {
+  const permissionId = properties && (properties.permissionID || properties.requestID || properties.id);
+  if (!permissionId) return;
+  const input = {
+    source: SOURCE,
+    instanceId,
+    permissionId: String(permissionId),
+  };
+  await permissionPost('/v1/permission/resolved', input);
+  activePermissions.delete(input.permissionId);
+}
+
+const DesktopPetPlugin = async ({ client, project, directory }) => {
+  const projectPath = project && (project.worktree || project.path) || directory;
+  return {
+  'tool.execute.before': async (input) => {
+    setState(input && input.sessionID, 'tool-running', input && input.tool, 'tool.execute.before');
+  },
+  'tool.execute.after': async (input) => {
+    setState(input && input.sessionID, 'thinking', input && input.tool, 'tool.execute.after');
+  },
   // OpenCode lifecycle notifications arrive through the generic event hook.
   // They are not direct hook keys in the current plugin API.
   event: async ({ event }) => {
+    const sessionId = event && event.properties && event.properties.sessionID;
     if (event.type === 'session.status') {
-      if (event.properties.status.type === 'busy') setState('thinking');
-      if (event.properties.status.type === 'retry') setState('thinking');
-      if (event.properties.status.type === 'idle') setState('idle');
+      if (event.properties.status.type === 'busy') setState(sessionId, 'thinking', undefined, event.type);
+      if (event.properties.status.type === 'retry') setState(sessionId, 'thinking', undefined, event.type);
+      if (event.properties.status.type === 'idle') setState(sessionId, 'idle', undefined, event.type);
     } else if (event.type === 'session.idle') {
-      setState('idle');
+      setState(sessionId, 'idle', undefined, event.type);
     } else if (event.type === 'session.error') {
-      setState('error');
+      setState(sessionId, 'error', undefined, event.type);
+    } else if (event.type === 'permission.updated' || event.type === 'permission.asked') {
+      await registerPermission(client, event.properties, projectPath, directory);
+    } else if (event.type === 'permission.replied') {
+      await resolvePermission(event.properties);
+      setState(sessionId, 'thinking', undefined, event.type);
     }
   },
-});
+  // This hook can announce waiting state, but has no stable permission ID;
+  // only permission.updated/permission.asked may create a Broker request.
+  'permission.ask': async (input) => {
+    setState(input && input.sessionID, 'waiting-permission', undefined, 'permission.ask');
+  },
+  dispose: async () => {
+    await Promise.all([...activePermissions.values()].map((input) => (
+      permissionPost('/v1/permission/resolved', input)
+    )));
+    activePermissions.clear();
+    decisionResults.clear();
+  },
+  };
+};
 
 export default DesktopPetPlugin;
 export { DesktopPetPlugin };
@@ -431,6 +643,7 @@ export { DesktopPetPlugin };
 
 function installOpenCode(): void {
   ensureEventToken()
+  ensurePermissionToken()
   writeFileEnsured(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop'))
   writeFileEnsured(openCodeCliPluginPath(), openCodePluginContent('opencode-cli'))
 }
@@ -698,6 +911,7 @@ function repairWindowsInstalledHooks(): void {
 
 function refreshInstalledIntegrationScripts(): string {
   const token = ensureEventToken()
+  ensurePermissionToken()
   if (fileExists(hookScriptPath())) installHookScript()
   if (fileExists(openCodeDesktopPluginPath())) {
     writeFileEnsured(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop'))
@@ -753,6 +967,8 @@ export {
   hookScriptDeployPath,
   eventTokenPath,
   ensureEventToken,
+  permissionTokenPath,
+  ensurePermissionToken,
   ensureDir,
   writeFileEnsured,
   fileExists,
@@ -765,4 +981,5 @@ export {
   refreshInstalledIntegrationScripts,
   readWindowState,
   writeWindowState,
+  openCodePluginContent,
 }

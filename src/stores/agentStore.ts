@@ -8,8 +8,14 @@ import type {
 } from '../types/agent'
 import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '../types/agent'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../types/desktop'
+import type { PermissionDecisionValue, PermissionRequestView } from '../types/permission'
 import { formatProject } from '../utils/format'
 import { isDesktopEffectActive } from '../utils/desktop-effects'
+import {
+  createToastCountdown,
+  getToastRemainingMs,
+  type ToastCountdown,
+} from '../utils/toast-countdown'
 
 export interface PetEntry {
   id: string
@@ -46,7 +52,6 @@ const STATUS_LINE_EXTRA_H = 22 // per additional status line beyond the first
 // window's bounds, but Windows' layered-window transparency hard-clips to
 // the window rectangle, so the tooltip got cut off / visibly broken there.
 const QUOTA_TOOLTIP_HEADROOM_H = 190
-const TOAST_DISPLAY_MS = 3_500
 const MOOD_BASELINE = 10
 const MOOD_SYSTEM_VERSION = '2'
 const MOOD_SUCCESS_REWARD = 4
@@ -196,8 +201,16 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   const showWizard = ref(false)
-  const toast = ref<{ text: string; tone: 'success' | 'error' } | null>(null)
+  const toast = ref<{
+    id: number
+    text: string
+    tone: 'success' | 'error'
+    countdown: ToastCountdown
+  } | null>(null)
+  const toastRemainingMs = ref(0)
   let toastTimer: ReturnType<typeof setTimeout> | null = null
+  let toastProgressTimer: ReturnType<typeof setTimeout> | null = null
+  let toastSequence = 0
   const moodTaskProgress = new Map<string, MoodTaskProgress>()
 
   // Light meta-progression rewards completed tools, sustained work, and
@@ -237,12 +250,14 @@ export const useAgentStore = defineStore('agent', () => {
 
   // Off by default — the completion toast / "what's it doing" bubble.
   const bubbleEnabled = ref(localStorage.getItem('agent-pet-bubble') === '1')
+  const permissionRequests = ref<PermissionRequestView[]>([])
 
   // Desktop-wide preferences are owned by the Electron main process so the
   // Tray and both renderer windows always agree. Sound is initialized from
   // the legacy localStorage value once, preserving existing user choice.
   const dndEnabled = ref(false)
   const notificationsEnabled = ref(true)
+  const permissionBubbleEnabled = ref(true)
   const launchAtStartup = ref(false)
   const launchAtStartupSupported = ref(false)
   const desktopPreferencesReady = ref(false)
@@ -255,6 +270,10 @@ export const useAgentStore = defineStore('agent', () => {
     desktopPreferencesReady.value,
     dndEnabled.value,
     bubbleEnabled.value,
+  ))
+  // Presentation-only preference; it never changes Broker or adapter state.
+  const permissionBubbleActive = computed(() => (
+    desktopPreferencesReady.value && permissionBubbleEnabled.value
   ))
 
   function clampMood(value: number): number {
@@ -280,9 +299,43 @@ export const useAgentStore = defineStore('agent', () => {
   function showToast(source: AgentSource, project: string | undefined, tone: 'success' | 'error') {
     const label = SOURCE_LABELS[source]
     const proj = formatProject(project)
-    toast.value = { text: proj ? `${label} · ${proj}` : label, tone }
+    const startedAt = Date.now()
+    const countdown = createToastCountdown(tone, startedAt)
+    if (!countdown) return
+    const nextToast = {
+      id: ++toastSequence,
+      text: proj ? `${label} · ${proj}` : label,
+      tone,
+      countdown,
+    }
+
     if (toastTimer) clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => { toast.value = null }, TOAST_DISPLAY_MS)
+    if (toastProgressTimer) clearTimeout(toastProgressTimer)
+
+    toast.value = nextToast
+    toastRemainingMs.value = getToastRemainingMs(countdown, startedAt)
+
+    const updateRemainingTime = () => {
+      if (toast.value?.id !== nextToast.id) return
+
+      const remaining = getToastRemainingMs(countdown, Date.now())
+      toastRemainingMs.value = remaining
+      if (remaining > 0) {
+        toastProgressTimer = setTimeout(updateRemainingTime, Math.min(100, remaining))
+      } else {
+        toastProgressTimer = null
+      }
+    }
+
+    toastProgressTimer = setTimeout(updateRemainingTime, 100)
+    toastTimer = setTimeout(() => {
+      if (toast.value?.id !== nextToast.id) return
+      toast.value = null
+      toastRemainingMs.value = 0
+      if (toastProgressTimer) clearTimeout(toastProgressTimer)
+      toastProgressTimer = null
+      toastTimer = null
+    }, getToastRemainingMs(countdown, startedAt))
   }
 
   function setSoundEnabled(enabled: boolean) {
@@ -294,6 +347,7 @@ export const useAgentStore = defineStore('agent', () => {
   function applyDesktopPreferences(preferences: DesktopPreferences) {
     dndEnabled.value = preferences.dndEnabled
     notificationsEnabled.value = preferences.notificationsEnabled
+    permissionBubbleEnabled.value = preferences.permissionBubbleEnabled
     soundEnabled.value = preferences.soundEnabled
     launchAtStartup.value = preferences.launchAtStartup
     launchAtStartupSupported.value = preferences.launchAtStartupSupported
@@ -333,6 +387,11 @@ export const useAgentStore = defineStore('agent', () => {
   function setNotificationsEnabled(enabled: boolean) {
     notificationsEnabled.value = enabled
     updateDesktopPreferences({ notificationsEnabled: enabled })
+  }
+
+  function setPermissionBubbleEnabled(enabled: boolean) {
+    permissionBubbleEnabled.value = enabled
+    updateDesktopPreferences({ permissionBubbleEnabled: enabled })
   }
 
   function setLaunchAtStartup(enabled: boolean) {
@@ -445,6 +504,7 @@ export const useAgentStore = defineStore('agent', () => {
       existing.lastSeenAt = event.timestamp
       existing.project = event.project
       existing.toolName = event.toolName
+      existing.permissionNotice = event.permissionNotice
     } else {
       const allSessions = Object.values(sessions.value)
       if (allSessions.length >= MAX_SESSION_COUNT) {
@@ -463,6 +523,7 @@ export const useAgentStore = defineStore('agent', () => {
         state: event.state,
         lastSeenAt: event.timestamp,
         toolName: event.toolName,
+        permissionNotice: event.permissionNotice,
       }
     }
 
@@ -695,6 +756,57 @@ export const useAgentStore = defineStore('agent', () => {
     return s.toolName
   })
 
+  const permissionNotice = computed(() => {
+    const session = highestPrioritySession.value
+    if (session?.state !== 'waiting-permission') return null
+    if (session.permissionNotice?.responseMode !== 'external_only') return null
+    return {
+      title: 'Permission needed',
+      detail: 'Return to the terminal to respond',
+    }
+  })
+
+  const permissionRequest = computed(() => permissionRequests.value[0] ?? null)
+
+  function setPermissionRequests(value: unknown): void {
+    if (!Array.isArray(value)) {
+      permissionRequests.value = []
+      return
+    }
+    const now = Date.now()
+    permissionRequests.value = value.filter((request): request is PermissionRequestView => (
+      Boolean(request)
+      && typeof request === 'object'
+      && typeof request.requestId === 'string'
+      && typeof request.action === 'string'
+      && typeof request.description === 'string'
+      && typeof request.expiresAt === 'number'
+      && Number.isFinite(request.expiresAt)
+      && request.expiresAt > now
+      && (request.status === 'pending' || request.status === 'deciding')
+      && Array.isArray(request.allowedDecisions)
+    ))
+  }
+
+  async function initializePermissionRequests(): Promise<void> {
+    try {
+      setPermissionRequests(await window.electronAPI?.initializePermissionRequests())
+    } catch {
+      permissionRequests.value = []
+    }
+  }
+
+  async function decidePermission(
+    requestId: string,
+    decision: PermissionDecisionValue,
+  ): Promise<void> {
+    try {
+      await window.electronAPI?.decidePermission(requestId, decision)
+    } catch {
+      // Main process remains authoritative; the next broker broadcast restores UI state.
+    }
+  }
+
   // The panel lives in its own always-on-top window (see electron/main.ts),
   // so opening/closing/resizing it never touches the pet window's bounds.
   function togglePanel() {
@@ -801,10 +913,12 @@ export const useAgentStore = defineStore('agent', () => {
     defaultPetId: DEFAULT_PET_ID,
     showWizard,
     toast,
+    toastRemainingMs,
     mood,
     soundEnabled,
     dndEnabled,
     notificationsEnabled,
+    permissionBubbleEnabled,
     launchAtStartup,
     launchAtStartupSupported,
     desktopPreferencesReady,
@@ -813,6 +927,7 @@ export const useAgentStore = defineStore('agent', () => {
     bubbleEnabled,
     reactionsActive,
     bubbleActive,
+    permissionBubbleActive,
     isMultiPet,
     activeSessions,
     hasSuccessSessions,
@@ -823,6 +938,12 @@ export const useAgentStore = defineStore('agent', () => {
     currentFamilyKey,
     activePetId,
     activityText,
+    permissionNotice,
+    permissionRequests,
+    permissionRequest,
+    setPermissionRequests,
+    initializePermissionRequests,
+    decidePermission,
     handleEvent,
     cleanupStale,
     handleSuccessTimeout,
@@ -840,6 +961,7 @@ export const useAgentStore = defineStore('agent', () => {
     initializeDesktopPreferences,
     setDndEnabled,
     setNotificationsEnabled,
+    setPermissionBubbleEnabled,
     setLaunchAtStartup,
     setMultiPetEnabled,
     setReactionsEnabled,

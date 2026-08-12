@@ -15,6 +15,7 @@ let cleanupPanelOpened: (() => void) | null = null
 let cleanupPanelOpenSettings: (() => void) | null = null
 let cleanupDesktopPreferences: (() => void) | null = null
 let cleanupQuotaUpdated: (() => void) | null = null
+let cleanupPermissionRequests: (() => void) | null = null
 let staleTimer: ReturnType<typeof setInterval> | null = null
 let successTimer: ReturnType<typeof setInterval> | null = null
 let quotaTimer: ReturnType<typeof setInterval> | null = null
@@ -124,6 +125,12 @@ onMounted(() => {
       store.applyDesktopPreferences(preferences)
     })
   }
+  if (electronAPI?.onPermissionRequestsUpdated) {
+    cleanupPermissionRequests = electronAPI.onPermissionRequestsUpdated((requests: unknown) => {
+      store.setPermissionRequests(requests)
+    })
+  }
+  void store.initializePermissionRequests()
   void store.initializeDesktopPreferences()
   if (electronAPI?.onQuotaUsageUpdated) {
     cleanupQuotaUpdated = electronAPI.onQuotaUsageUpdated((usage: unknown) => {
@@ -202,6 +209,7 @@ onUnmounted(() => {
   cleanupPanelOpenSettings?.()
   cleanupDesktopPreferences?.()
   cleanupQuotaUpdated?.()
+  cleanupPermissionRequests?.()
   window.removeEventListener('mousemove', handlePetMouseMove, true)
   window.removeEventListener('storage', handleStorage)
   if (staleTimer) clearInterval(staleTimer)

@@ -13,6 +13,7 @@ Desktop pet that shows real-time status of your AI coding agents.
 - **Multi-agent support** — OpenCode, Codex, Claude Code (CLI & Desktop).
 - **Custom pets** — Import your own spritesheet, or a `.codex-pet.zip` sprite kit from sites like [codex-pets.net](https://codex-pets.net).
 - **Desktop controls** — Tray menu, native waiting/completion notifications, Do Not Disturb, sound control, and optional launch at startup.
+- **Permission Control** — OpenCode permission requests can be allowed once or denied from a Liquid Glass pet bubble; scoped hotkeys are available only while an eligible request is visible.
 
 ---
 
@@ -96,7 +97,8 @@ The panel is split into **Settings** and **Pets** tabs.
 - **Sound** — Short synthesized cues (Web Audio, no audio files) for success/error/waiting-permission. **Off by default.**
 - **Launch at startup** — Start Agent Pets when you sign in. This toggle is available in packaged builds.
 - **Bounce & shake** — Click/state-change bounce, idle fidget sway, and waiting-permission shake. **Off by default.**
-- **Bubble** — The completion toast and "what's it doing" activity bubble above the pet. **Off by default.**
+- **Bubble** — The completion toast and "what's it doing" activity bubble above the pet. Ordinary success/error toasts close after about 3 seconds and show the remaining time; permission prompts never auto-dismiss. **Off by default.**
+- **Permission Bubble** — An independent switch for the Liquid Glass Allow once / Deny card. Turning it off hides only the card; pending requests remain with the Broker, stay on the Tray badge, and can still be resolved by the Agent or terminal. **On by default.**
 - **Setup Wizard** — Re-run tool detection, or install/reinstall hooks.
 - **Restart Pet** — Fully relaunch Agent Pets if the pet or its animation gets stuck.
 - **Quit** — Exit Agent Pets.
@@ -233,7 +235,8 @@ Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that r
 - **Memory bounds** — Agent sessions are capped and stale/offline entries are evicted to prevent unbounded renderer memory growth.
 - **Path sanitization** — Project paths are reduced to their basename, and filesystem destinations are constrained to their expected root.
 - **Desktop notifications** — Notification text is built only from the normalized Agent name and bounded project basename; prompt text, tool arguments, session identifiers, and credentials are never shown or logged. Diagnostic notification history is bounded and stores only event class/outcome metadata.
-- **Desktop preference IPC** — The main process owns Tray/DND/notification/startup preferences. Renderer requests accept only an allowlist of boolean fields from validated first-party frames, and preference writes use bounded reads plus atomic replacement.
+- **Desktop preference IPC** — The main process owns Tray/DND/notification/permission-bubble/startup preferences. Renderer requests accept only an allowlist of boolean fields from validated first-party frames, and preference writes use bounded reads plus atomic replacement.
+- **Permission Broker** — Permission responses use a separate loopback port and per-install token, never the generic event endpoint. The main process enforces TTL, one-shot state transitions, anti-replay, bounded records, Adapter-owned opaque handles, scoped hotkeys, external-resolution reconciliation, and a bounded redacted audit. Only `allow_once` and `deny` are exposed; permanent approval is intentionally unavailable.
 - **Packaged runtime** — Electron fuses disable RunAsNode, Node options/inspect arguments, and privileged `file://` behavior while enforcing ASAR-only loading and embedded ASAR integrity validation.
 - **Release signing** — Production macOS and Windows artifacts should be built with the platform signing credentials configured; unsigned local builds are for development only.
 
@@ -306,6 +309,10 @@ agent-pets/
 │   ├── main.ts              # Electron main process
 │   ├── preload.ts           # IPC bridge
 │   ├── event-server.ts      # HTTP event server
+│   ├── event-normalizer.ts  # Generic event allowlist and projection
+│   ├── permission-broker.ts # Permission state machine and anti-replay
+│   ├── permission-adapter-server.ts # Dedicated OpenCode response channel
+│   ├── permission-audit.ts  # Bounded redacted local audit
 │   ├── desktop-preferences.ts # Main-owned desktop preferences
 │   ├── desktop-notifications.ts # Native notification delivery and bounded log
 │   ├── desktop-tray.ts      # Tray lifecycle and menu

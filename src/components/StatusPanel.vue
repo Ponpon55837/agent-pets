@@ -425,6 +425,21 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 
             <label class="toggle-row">
               <span class="setting-copy">
+                <span class="section-label">Permission Bubble</span>
+                <span class="setting-help">Show Allow once / Deny requests; hidden requests stay pending</span>
+              </span>
+              <span class="switch">
+                <input
+                  type="checkbox"
+                  :checked="store.permissionBubbleEnabled"
+                  @change="store.setPermissionBubbleEnabled(($event.target as HTMLInputElement).checked)"
+                />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
+            </label>
+
+            <label class="toggle-row">
+              <span class="setting-copy">
                 <span class="section-label">Sound</span>
                 <span class="setting-help">Play the pet's local status cues</span>
               </span>

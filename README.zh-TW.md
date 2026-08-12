@@ -13,6 +13,7 @@
 - **多助手支援** — OpenCode、Codex、Claude Code（CLI 與 Desktop）。
 - **自訂寵物** — 匯入自己的精靈圖，或是像 [codex-pets.net](https://codex-pets.net) 這類網站的 `.codex-pet.zip` 素材包。
 - **桌面控制** — 系統匣選單、原生等待／完成通知、勿擾模式、音效控制，以及可選的登入時啟動。
+- **權限控制** — OpenCode 的 permission request 可直接在 Liquid Glass 寵物氣泡選擇只允許一次或拒絕；只有符合條件且顯示中的請求才會註冊全域快捷鍵。
 
 ---
 
@@ -96,7 +97,8 @@
 - **Sound** — 成功/失敗/等待核准時的短音效（用 Web Audio 即時合成，不需要音檔）。**預設關閉。**
 - **Launch at startup** — 登入系統時啟動 Agent Pets；此開關只在打包版本可用。
 - **Bounce & shake** — 點擊/狀態切換時的彈跳、閒置搖擺、waiting-permission 抖動。**預設關閉。**
-- **Bubble** — 完成提示氣泡跟寵物上方「正在做什麼」的活動氣泡。**預設關閉。**
+- **Bubble** — 完成提示氣泡跟寵物上方「正在做什麼」的活動氣泡。一般成功／錯誤提示約 3 秒後自動關閉，並以進度條顯示剩餘時間；權限請求絕不會自動關閉。**預設關閉。**
+- **顯示權限泡泡** — 與一般 Bubble 分開的 Liquid Glass 權限卡片開關。關閉只會隱藏 Allow once／Deny 卡片，不會允許或拒絕請求；待處理請求仍由 Broker 保留、繼續顯示在系統匣徽章，並可由 Agent 或終端機處理。**預設開啟。**
 - **Setup Wizard** — 重新偵測工具，或安裝/重新安裝 hooks。
 - **Restart Pet** — 寵物或動畫卡住時，完整重新啟動 Agent Pets。
 - **Quit** — 結束 Agent Pets。
@@ -233,7 +235,8 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 - **記憶體上限** — Agent session 數量有上限，會優先淘汰離線／最舊項目，避免 renderer 記憶體無限成長。
 - **路徑清理** — 專案路徑只保留 basename，檔案寫入目的地也會限制在預期根目錄內。
 - **桌面通知** — 通知只會使用正規化後的 Agent 名稱與長度受限的專案 basename，不會顯示或記錄 prompt、工具參數、session identifier 或憑證；診斷紀錄有固定上限，而且只保存事件類別與結果。
-- **桌面偏好 IPC** — 系統匣／勿擾／通知／登入啟動偏好由 main process 擁有。Renderer 只能從已驗證的第一方 frame 傳送白名單 boolean 欄位，設定檔採長度受限讀取與原子替換。
+- **桌面偏好 IPC** — 系統匣／勿擾／通知／權限泡泡／登入啟動偏好由 main process 擁有。Renderer 只能從已驗證的第一方 frame 傳送白名單 boolean 欄位，設定檔採長度受限讀取與原子替換。
+- **Permission Broker** — 權限回覆使用獨立 loopback port 與專用的每次安裝 token，不會經過一般事件端點。Main process 強制 TTL、一次性狀態轉換、anti-replay、資料上限、Adapter-owned opaque handle、限時快捷鍵、Agent 端解決對帳，以及內容去識別且有上限的本機 audit；只提供 `allow_once` 與 `deny`，刻意不提供永久允許。
 - **打包執行環境** — Electron fuses 會停用 RunAsNode、Node options／inspect 參數與 `file://` 額外權限，並強制只從 ASAR 載入及驗證內嵌 ASAR 完整性。
 - **發行簽章** — 正式發布 macOS／Windows 產物時必須配置平台簽章憑證；未簽章的本機建置只供開發測試。
 
@@ -306,6 +309,10 @@ agent-pets/
 │   ├── main.ts              # Electron 主行程
 │   ├── preload.ts           # IPC 橋接
 │   ├── event-server.ts      # HTTP 事件伺服器
+│   ├── event-normalizer.ts  # 一般事件 allowlist 與 projection
+│   ├── permission-broker.ts # 權限狀態機與 anti-replay
+│   ├── permission-adapter-server.ts # 獨立的 OpenCode 回覆通道
+│   ├── permission-audit.ts  # 有上限且去敏感內容的本機 audit
 │   ├── desktop-preferences.ts # Main 擁有的桌面偏好
 │   ├── desktop-notifications.ts # 原生通知與有上限的診斷紀錄
 │   ├── desktop-tray.ts      # 系統匣生命週期與選單

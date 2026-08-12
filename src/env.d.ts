@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 import type { DesktopPreferences, DesktopPreferencesPatch } from './types/desktop'
+import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView } from './types/permission'
 
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
@@ -25,6 +26,16 @@ declare global {
       initializeDesktopPreferences: (legacySoundEnabled: boolean) => Promise<DesktopPreferences>
       setDesktopPreferences: (patch: DesktopPreferencesPatch) => Promise<DesktopPreferences>
       onDesktopPreferencesUpdated: (callback: (preferences: DesktopPreferences) => void) => () => void
+      initializePermissionRequests: () => Promise<PermissionRequestView[]>
+      onPermissionRequestsUpdated: (callback: (requests: PermissionRequestView[]) => void) => () => void
+      decidePermission: (
+        requestId: string,
+        decision: PermissionDecisionValue,
+      ) => Promise<{
+        ok: boolean
+        status?: PermissionRequestStatus
+        error?: 'not_found' | 'invalid_decision' | 'conflict'
+      }>
       quitApp: () => void
       restartApp: () => void
       checkIntegration: () => Promise<{

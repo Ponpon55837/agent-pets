@@ -66,6 +66,7 @@ export function resolveLoginItemExecutable(
 const BOOLEAN_KEYS = [
   'dndEnabled',
   'notificationsEnabled',
+  'permissionBubbleEnabled',
   'soundEnabled',
   'launchAtStartup',
 ] as const
@@ -73,6 +74,7 @@ const BOOLEAN_KEYS = [
 const DEFAULTS: StoredDesktopPreferences = {
   dndEnabled: false,
   notificationsEnabled: true,
+  permissionBubbleEnabled: true,
   soundEnabled: false,
   launchAtStartup: false,
 }
@@ -176,6 +178,7 @@ export class DesktopPreferencesStore {
     writeJsonAtomic(this.filePath, {
       dndEnabled: preferences.dndEnabled,
       notificationsEnabled: preferences.notificationsEnabled,
+      permissionBubbleEnabled: preferences.permissionBubbleEnabled,
       soundEnabled: preferences.soundEnabled,
       launchAtStartup: preferences.launchAtStartup,
     } satisfies StoredDesktopPreferences)

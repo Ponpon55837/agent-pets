@@ -94,6 +94,12 @@ export class DesktopTrayController {
         click: item => this.safeUpdatePreferences({ notificationsEnabled: item.checked }),
       },
       {
+        label: 'Permission Bubble',
+        type: 'checkbox',
+        checked: preferences.permissionBubbleEnabled,
+        click: item => this.safeUpdatePreferences({ permissionBubbleEnabled: item.checked }),
+      },
+      {
         label: 'Launch at Startup',
         type: 'checkbox',
         checked: preferences.launchAtStartup,

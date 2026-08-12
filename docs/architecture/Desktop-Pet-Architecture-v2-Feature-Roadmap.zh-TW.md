@@ -650,6 +650,8 @@ Quit
 
 Tray 必須是 main process 擁有；renderer 只送 command。menu state 由單一 `DesktopPreferences` projection 建立，不能分散在元件 local state。
 
+`Permission Bubble` 是獨立於一般 `Bubble` 的 presentation preference，預設開啟。關閉時只隱藏桌面上的 Allow once／Deny 卡片；Permission Broker、Adapter 回覆通道、TTL、終端機處理與 Tray 待處理徽章都維持運作。重新開啟開關或 renderer 時，main process 先以 Broker 的 `listRequests()` 清理逾時項目，再把仍有效的待處理請求投影回 renderer；完整關閉 App 則依安全規則取消 pending request，不跨程序恢復舊 response handle。
+
 ### 9.2 Notification policy
 
 預設候選事件：

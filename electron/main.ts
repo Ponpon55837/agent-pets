@@ -1,4 +1,14 @@
-import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  screen,
+  ipcMain,
+  dialog,
+  session,
+  protocol,
+  globalShortcut,
+  powerMonitor,
+} from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { join, resolve } from 'path'
 import { request as httpRequest, type Server } from 'node:http'
@@ -10,6 +20,13 @@ import { getQuotaUsage } from './quota'
 import { DesktopPreferencesStore, resolveLoginItemExecutable } from './desktop-preferences'
 import { DesktopNotificationService } from './desktop-notifications'
 import { DesktopTrayController } from './desktop-tray'
+import { PermissionBroker } from './permission-broker'
+import { appendPermissionAudit } from './permission-audit'
+import {
+  createPermissionAdapterServer,
+  PERMISSION_ADAPTER_PORT,
+  PermissionAdapterRelay,
+} from './permission-adapter-server'
 import type { DesktopPreferences } from '../src/types/desktop'
 import {
   IS_MAC,
@@ -28,6 +45,7 @@ import {
   installIntegration,
   uninstallIntegration,
   refreshInstalledIntegrationScripts,
+  ensurePermissionToken,
   readWindowState,
   writeWindowState,
   type IntegrationTarget,
@@ -44,11 +62,18 @@ let dragPollHandle: ReturnType<typeof setInterval> | null = null
 let dialogOpen = false
 let eventToken = ''
 let eventServer: Server | null = null
+let permissionAdapterServer: Server | null = null
+let permissionBroker: PermissionBroker | null = null
+let permissionRelay: PermissionAdapterRelay | null = null
 let desktopPreferences: DesktopPreferencesStore | null = null
 let desktopNotifications: DesktopNotificationService | null = null
 let desktopTray: DesktopTrayController | null = null
 let isQuitting = false
+let notificationAttentionCount = 0
+let permissionAttentionCount = 0
 const pendingIntegrationTests = new Map<string, () => void>()
+const PERMISSION_ALLOW_HOTKEY = 'CommandOrControl+Shift+Y'
+const PERMISSION_DENY_HOTKEY = 'CommandOrControl+Shift+N'
 
 // Enforce Chromium's renderer sandbox even if a future BrowserWindow option
 // accidentally regresses. This must be called before app readiness.
@@ -444,8 +469,14 @@ function createPetWindow() {
     event.preventDefault()
     hidePetWindow()
   })
-  petWindow.on('show', () => desktopTray?.rebuild())
-  petWindow.on('hide', () => desktopTray?.rebuild())
+  petWindow.on('show', () => {
+    desktopTray?.rebuild()
+    schedulePermissionUiSync()
+  })
+  petWindow.on('hide', () => {
+    desktopTray?.rebuild()
+    schedulePermissionUiSync()
+  })
 
   petWindow.on('closed', () => {
     petWindow = null
@@ -614,6 +645,7 @@ function currentDesktopPreferences(): DesktopPreferences {
     return {
       dndEnabled: false,
       notificationsEnabled: true,
+      permissionBubbleEnabled: true,
       soundEnabled: false,
       launchAtStartup: false,
       launchAtStartupSupported: false,
@@ -635,7 +667,109 @@ function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   const preferences = desktopPreferences.update(patch)
   desktopTray?.rebuild()
   broadcastDesktopPreferences(preferences)
+  schedulePermissionUiSync()
   return preferences
+}
+
+function unregisterPermissionHotkeys(): void {
+  if (!app.isReady()) return
+  for (const accelerator of [PERMISSION_ALLOW_HOTKEY, PERMISSION_DENY_HOTKEY]) {
+    if (globalShortcut.isRegistered(accelerator)) globalShortcut.unregister(accelerator)
+  }
+}
+
+function syncTrayAttention(): void {
+  desktopTray?.setAttentionCount(notificationAttentionCount + permissionAttentionCount)
+}
+
+function broadcastPermissionRequests(): void {
+  const requests = permissionBroker?.listRequests() ?? []
+  permissionAttentionCount = requests.length
+  syncTrayAttention()
+  for (const window of [petWindow, panelWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('permission-requests-updated', requests)
+    }
+  }
+
+  unregisterPermissionHotkeys()
+  const top = requests[0]
+  const permissionBubbleEnabled = currentDesktopPreferences().permissionBubbleEnabled
+  if (
+    !permissionBubbleEnabled
+    || !top
+    || top.status !== 'pending'
+    || !top.hotkeyEligible
+    || !petWindow
+    || petWindow.isDestroyed()
+    || !petWindow.isVisible()
+  ) return
+
+  try {
+    if (top.allowedDecisions.includes('allow_once')) {
+      globalShortcut.register(PERMISSION_ALLOW_HOTKEY, () => {
+        void permissionBroker?.decide(top.requestId, 'allow_once', 'hotkey')
+      })
+    }
+    if (top.allowedDecisions.includes('deny')) {
+      globalShortcut.register(PERMISSION_DENY_HOTKEY, () => {
+        void permissionBroker?.decide(top.requestId, 'deny', 'hotkey')
+      })
+    }
+  } catch {
+    unregisterPermissionHotkeys()
+  }
+}
+
+function schedulePermissionUiSync(): void {
+  queueMicrotask(() => broadcastPermissionRequests())
+}
+
+function cancelPermissionRequests(
+  reason: 'system_lock' | 'system_suspend' | 'broker_shutdown',
+): void {
+  const broker = permissionBroker
+  if (!broker) return
+  for (const request of broker.listRequests()) {
+    broker.resolveExternally(request.requestId, reason)
+  }
+}
+
+function createPermissionServices(permissionToken: string): void {
+  if (permissionBroker || permissionRelay || permissionAdapterServer) return
+
+  const relay = new PermissionAdapterRelay()
+  const broker = new PermissionBroker({
+    onChanged: schedulePermissionUiSync,
+    onAudit: record => {
+      try {
+        appendPermissionAudit(join(app.getPath('userData'), 'permission-audit.json'), record)
+      } catch (error) {
+        console.error('Failed to persist permission audit record', error)
+      }
+    },
+  })
+  broker.registerAdapter(relay.createPort('opencode-cli'))
+  broker.registerAdapter(relay.createPort('opencode-desktop'))
+  const server = createPermissionAdapterServer({ token: permissionToken, broker, relay })
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`Permission adapter port ${PERMISSION_ADAPTER_PORT} is already in use.`)
+      return
+    }
+    console.error('Permission adapter server error:', error)
+  })
+  server.listen(PERMISSION_ADAPTER_PORT, '127.0.0.1', () => {
+    if (!app.isPackaged) {
+      console.log(`Permission adapter listening on http://127.0.0.1:${PERMISSION_ADAPTER_PORT}`)
+    }
+  })
+
+  permissionRelay = relay
+  permissionBroker = broker
+  permissionAdapterServer = server
+  powerMonitor.on('lock-screen', () => cancelPermissionRequests('system_lock'))
+  powerMonitor.on('suspend', () => cancelPermissionRequests('system_suspend'))
 }
 
 function createDesktopServices(): void {
@@ -672,7 +806,10 @@ function createDesktopServices(): void {
     getPreferences: currentDesktopPreferences,
     isAppFocused: () => [petWindow, panelWindow].some(window => window?.isFocused()),
     onNotificationClick: () => showPanelWindow('sessions'),
-    onAttentionChanged: count => desktopTray?.setAttentionCount(count),
+    onAttentionChanged: count => {
+      notificationAttentionCount = count
+      syncTrayAttention()
+    },
   })
 
   desktopTray = new DesktopTrayController(
@@ -746,10 +883,12 @@ app.whenReady().then(() => {
   })
 
   eventToken = refreshInstalledIntegrationScripts()
+  const permissionToken = ensurePermissionToken()
   configureSecureProtocol()
   createPetWindow()
   createPanelWindow()
   createDesktopServices()
+  createPermissionServices(permissionToken)
 
   eventServer = createEventServer(
     () => [petWindow, panelWindow].filter((w): w is BrowserWindow => w !== null),
@@ -936,6 +1075,27 @@ app.whenReady().then(() => {
   ipcMain.handle('desktop-preferences-set', (event, patch: unknown) => {
     assertTrustedIpcSender(event, panelWindow)
     return updateDesktopPreferences(patch)
+  })
+
+  ipcMain.handle('permission-requests-init', (event) => {
+    assertTrustedIpcSender(event)
+    return permissionBroker?.listRequests() ?? []
+  })
+
+  ipcMain.handle('permission-decide', async (event, payload: unknown) => {
+    assertTrustedIpcSender(event, petWindow)
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return { ok: false, error: 'invalid_decision' }
+    }
+    const data = payload as Record<string, unknown>
+    if (
+      typeof data.requestId !== 'string'
+      || (data.decision !== 'allow_once' && data.decision !== 'deny')
+    ) {
+      return { ok: false, error: 'invalid_decision' }
+    }
+    if (!permissionBroker) return { ok: false, error: 'not_found' }
+    return permissionBroker.decide(data.requestId, data.decision, 'bubble')
   })
 
   ipcMain.handle('integration-status', (event) => {
@@ -1275,9 +1435,16 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  permissionBroker?.shutdown()
 })
 
 app.on('will-quit', () => {
+  unregisterPermissionHotkeys()
+  permissionRelay?.shutdown()
+  permissionRelay = null
+  permissionBroker = null
+  permissionAdapterServer?.close()
+  permissionAdapterServer = null
   desktopNotifications?.destroy()
   desktopNotifications = null
   desktopTray?.destroy()

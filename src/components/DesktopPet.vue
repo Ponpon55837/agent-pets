@@ -135,6 +135,19 @@ function quotaTitle(familyKey: string): string | undefined {
   )).join('\n')
 }
 
+function permissionRiskLabel(risk: string): string {
+  if (risk === 'high') return 'High risk'
+  if (risk === 'medium') return 'Review required'
+  if (risk === 'low') return 'Low risk'
+  return 'Unknown risk'
+}
+
+function decidePermission(decision: 'allow_once' | 'deny'): void {
+  const request = store.permissionRequest
+  if (!request || request.status !== 'pending') return
+  void store.decidePermission(request.requestId, decision)
+}
+
 // The sprite is bottom-anchored inside a window that reserves fixed
 // transparent headroom above it for the quota tooltip, so how much of the
 // window is actually painted varies with pet size and status-line count.
@@ -227,9 +240,96 @@ function onClick(e: MouseEvent) {
       @click="onClick"
       @contextmenu.prevent
     >
-      <Transition v-if="store.bubbleActive" name="toast" mode="out-in">
-        <div v-if="store.toast" key="toast" class="pet-toast" :class="store.toast.tone" data-pet-hit-target="solid">
-          {{ store.toast.text }}
+      <Transition v-if="store.permissionBubbleActive && store.permissionRequest" name="toast" mode="out-in">
+        <section
+          :key="`permission-${store.permissionRequest.requestId}`"
+          class="permission-request"
+          :class="[`risk-${store.permissionRequest.risk}`, { deciding: store.permissionRequest.status === 'deciding' }]"
+          role="alertdialog"
+          aria-labelledby="permission-request-title"
+          aria-describedby="permission-request-description"
+          data-pet-hit-target="solid"
+          @mousedown.stop
+          @click.stop
+        >
+          <header class="permission-request-header">
+            <span class="permission-request-icon" aria-hidden="true">!</span>
+            <span class="permission-request-heading">
+              <strong id="permission-request-title">{{ store.permissionRequest.action }}</strong>
+              <span>{{ permissionRiskLabel(store.permissionRequest.risk) }}</span>
+            </span>
+            <span class="permission-request-queue">
+              {{ store.permissionRequest.queuePosition }}/{{ store.permissionRequest.queueSize }}
+            </span>
+          </header>
+          <p id="permission-request-description" class="permission-request-description">
+            {{ store.permissionRequest.description }}
+          </p>
+          <p v-if="store.permissionRequest.truncated" class="permission-request-warning">
+            Details were shortened. Review in OpenCode before allowing.
+          </p>
+          <div class="permission-request-actions">
+            <button
+              type="button"
+              class="permission-button deny"
+              :disabled="store.permissionRequest.status !== 'pending'"
+              @mousedown.stop
+              @click.stop="decidePermission('deny')"
+            >
+              Deny
+              <kbd v-if="store.permissionRequest.hotkeyEligible">Ctrl Shift N</kbd>
+            </button>
+            <button
+              type="button"
+              class="permission-button allow"
+              :disabled="store.permissionRequest.status !== 'pending'"
+              @mousedown.stop
+              @click.stop="decidePermission('allow_once')"
+            >
+              {{ store.permissionRequest.status === 'deciding' ? 'Sending…' : 'Allow once' }}
+              <kbd v-if="store.permissionRequest.hotkeyEligible">Ctrl Shift Y</kbd>
+            </button>
+          </div>
+        </section>
+      </Transition>
+
+      <Transition v-else-if="store.permissionBubbleActive && store.permissionNotice" name="toast" mode="out-in">
+        <div
+          key="permission"
+          class="pet-toast permission-notice"
+          role="status"
+          aria-live="polite"
+          data-pet-hit-target="solid"
+        >
+          <span class="permission-notice-icon" aria-hidden="true">!</span>
+          <span class="permission-notice-copy">
+            <strong>{{ store.permissionNotice.title }}</strong>
+            <span>{{ store.permissionNotice.detail }}</span>
+          </span>
+        </div>
+      </Transition>
+
+      <Transition v-if="!store.permissionRequest && !store.permissionNotice && store.bubbleActive" name="toast" mode="out-in">
+        <div
+          v-if="store.toast"
+          :key="`toast-${store.toast.id}`"
+          class="pet-toast timed-toast"
+          :class="store.toast.tone"
+          role="status"
+          aria-live="polite"
+          data-pet-hit-target="solid"
+        >
+          <span class="timed-toast-copy">{{ store.toast.text }}</span>
+          <span
+            class="toast-countdown-track"
+            aria-hidden="true"
+          >
+            <span
+              class="toast-countdown-fill"
+              :style="{ '--toast-duration': `${store.toast.countdown.durationMs}ms` }"
+            />
+          </span>
+          <span class="sr-only">Closes automatically in about 3 seconds.</span>
         </div>
         <div v-else-if="!isMultiPet && store.activityText" key="activity" class="pet-toast activity" data-pet-hit-target="solid">
           🔧 {{ store.activityText }}
@@ -797,6 +897,167 @@ function onClick(e: MouseEvent) {
    there's no spare window height reserved for it, and deliberately so: on
    show/hide it must never trigger a pet-window resize (that was previously
    causing a slow position drift, since every resize re-anchors the window). */
+.permission-request {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  z-index: 8;
+  width: min(248px, calc(var(--pet-w, 260px) - 8px));
+  padding: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 216, 112, 0.48);
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.16), transparent 48%),
+    linear-gradient(180deg, rgba(43, 42, 54, 0.91), rgba(24, 24, 32, 0.95));
+  backdrop-filter: blur(18px) saturate(155%);
+  -webkit-backdrop-filter: blur(18px) saturate(155%);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+  color: #f8f7fb;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  text-align: left;
+  transform: translateX(-50%);
+}
+
+.permission-request.risk-high {
+  border-color: rgba(255, 128, 118, 0.62);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.42),
+    0 0 18px rgba(255, 92, 82, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.permission-request-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.permission-request-icon {
+  display: grid;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid rgba(255, 234, 174, 0.38);
+  border-radius: 50%;
+  background: rgba(231, 190, 73, 0.2);
+  color: #ffe6a0;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.risk-high .permission-request-icon {
+  border-color: rgba(255, 173, 165, 0.42);
+  background: rgba(255, 91, 82, 0.2);
+  color: #ffc0ba;
+}
+
+.permission-request-heading {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.permission-request-heading strong {
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-request-heading span,
+.permission-request-queue {
+  color: rgba(239, 237, 246, 0.68);
+  font-size: 8.5px;
+  font-weight: 600;
+}
+
+.permission-request-queue {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.permission-request-description {
+  display: -webkit-box;
+  margin: 8px 1px;
+  overflow: hidden;
+  color: rgba(247, 245, 251, 0.88);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.permission-request-warning {
+  margin: -2px 1px 7px;
+  color: #ffd2a3;
+  font-size: 8.5px;
+  line-height: 1.3;
+}
+
+.permission-request-actions {
+  display: grid;
+  grid-template-columns: 0.82fr 1.18fr;
+  gap: 7px;
+}
+
+.permission-button {
+  display: flex;
+  min-width: 0;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8f7fb;
+  cursor: pointer;
+  font: 700 9.5px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.permission-button.allow {
+  border-color: rgba(102, 218, 164, 0.4);
+  background: rgba(67, 178, 126, 0.18);
+  color: #c8f7de;
+}
+
+.permission-button.deny {
+  color: rgba(248, 247, 251, 0.84);
+}
+
+.permission-button:hover:not(:disabled),
+.permission-button:focus-visible {
+  border-color: rgba(255, 255, 255, 0.42);
+  background-color: rgba(255, 255, 255, 0.16);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.permission-button:focus-visible {
+  box-shadow: 0 0 0 2px #14141b, 0 0 0 4px #9dd8ff;
+}
+
+.permission-button:disabled {
+  cursor: wait;
+  opacity: 0.56;
+}
+
+.permission-button kbd {
+  color: rgba(239, 237, 246, 0.62);
+  font: 600 7px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  white-space: nowrap;
+}
+
 .pet-toast {
   position: absolute;
   top: max(2px, calc(2px * var(--pet-scale, 1)));
@@ -818,6 +1079,58 @@ function onClick(e: MouseEvent) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.pet-toast.permission-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: min(240px, calc(var(--pet-w, 250px) - 10px));
+  background:
+    linear-gradient(155deg, rgba(255, 255, 255, 0.12), transparent 52%),
+    rgba(29, 27, 36, 0.94);
+  border-color: rgba(232, 198, 91, 0.58);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  color: #fff4c4;
+  text-align: left;
+  white-space: normal;
+}
+
+.permission-notice-icon {
+  display: grid;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(232, 198, 91, 0.2);
+  border: 1px solid rgba(255, 235, 164, 0.4);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.permission-notice-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.permission-notice-copy strong {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.permission-notice-copy span {
+  color: rgba(255, 248, 220, 0.82);
+  font-size: 9.5px;
+  font-weight: 500;
+  line-height: 1.3;
 }
 
 .pet-toast::after {
@@ -849,6 +1162,54 @@ function onClick(e: MouseEvent) {
   font-weight: 500;
 }
 
+.pet-toast.timed-toast {
+  display: flex;
+  min-width: 118px;
+  flex-direction: column;
+  gap: 5px;
+  padding-bottom: max(6px, calc(7px * var(--pet-scale, 1)));
+}
+
+.timed-toast-copy {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.toast-countdown-track {
+  display: block;
+  width: 100%;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.toast-countdown-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0.78;
+  transform-origin: left center;
+  animation: toast-countdown var(--toast-duration, 3000ms) linear forwards;
+}
+
+@keyframes toast-countdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
 .toast-enter-active,
 .toast-leave-active {
   transition: opacity 0.2s ease, transform 0.2s ease;
@@ -858,5 +1219,68 @@ function onClick(e: MouseEvent) {
 .toast-leave-to {
   opacity: 0;
   transform: translateX(-50%) scale(0.9) translateY(6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .permission-button {
+    transition: none;
+  }
+
+  .toast-enter-active,
+  .toast-leave-active {
+    transition: none;
+  }
+
+  .toast-countdown-fill {
+    animation-timing-function: steps(6, end);
+  }
+}
+
+@media (prefers-contrast: more) {
+  .permission-request {
+    border-width: 2px;
+    border-color: #ffe37c;
+    background: #17171d;
+  }
+
+  .permission-button {
+    border-color: currentColor;
+  }
+
+  .toast-countdown-track {
+    background: rgba(255, 255, 255, 0.38);
+    outline: 1px solid currentColor;
+    outline-offset: 1px;
+  }
+
+  .toast-countdown-fill {
+    opacity: 1;
+  }
+
+  .pet-toast.permission-notice {
+    background: #17171d;
+    border-color: #ffe37c;
+    color: #fff;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .permission-request {
+    background: #1d1b24;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .pet-toast.timed-toast {
+    background: #1d1b24;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .pet-toast.permission-notice {
+    background: #1d1b24;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 </style>

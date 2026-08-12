@@ -1,3 +1,5 @@
+import type { PermissionNotice } from './capabilities'
+
 export type AgentSource =
   | 'opencode-cli'
   | 'opencode-desktop'
@@ -24,6 +26,7 @@ export interface AgentStatusEvent {
   originalEvent?: string
   timestamp: number
   toolName?: string
+  permissionNotice?: PermissionNotice
 }
 
 export interface AgentSession {
@@ -34,6 +37,7 @@ export interface AgentSession {
   state: AgentState
   lastSeenAt: number
   toolName?: string
+  permissionNotice?: PermissionNotice
 }
 
 export const STATE_PRIORITY: Record<AgentState, number> = {

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
+import type { PermissionDecisionValue, PermissionRequestView } from '../src/types/permission'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   onAgentStatusEvent: (callback: (event: unknown) => void) => {
@@ -72,6 +73,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => {
       ipcRenderer.removeListener('desktop-preferences-updated', handler)
     }
+  },
+
+  initializePermissionRequests: (): Promise<PermissionRequestView[]> => {
+    return ipcRenderer.invoke('permission-requests-init')
+  },
+
+  onPermissionRequestsUpdated: (callback: (requests: PermissionRequestView[]) => void) => {
+    const handler = (_event: unknown, requests: PermissionRequestView[]) => callback(requests)
+    ipcRenderer.on('permission-requests-updated', handler)
+    return () => {
+      ipcRenderer.removeListener('permission-requests-updated', handler)
+    }
+  },
+
+  decidePermission: (requestId: string, decision: PermissionDecisionValue) => {
+    return ipcRenderer.invoke('permission-decide', { requestId, decision })
   },
 
   quitApp: () => {

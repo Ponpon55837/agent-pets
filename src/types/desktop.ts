@@ -1,6 +1,7 @@
 export interface DesktopPreferences {
   dndEnabled: boolean
   notificationsEnabled: boolean
+  permissionBubbleEnabled: boolean
   soundEnabled: boolean
   launchAtStartup: boolean
   launchAtStartupSupported: boolean
@@ -8,5 +9,9 @@ export interface DesktopPreferences {
 
 export type DesktopPreferencesPatch = Partial<Pick<
   DesktopPreferences,
-  'dndEnabled' | 'notificationsEnabled' | 'soundEnabled' | 'launchAtStartup'
+  'dndEnabled'
+  | 'notificationsEnabled'
+  | 'permissionBubbleEnabled'
+  | 'soundEnabled'
+  | 'launchAtStartup'
 >>

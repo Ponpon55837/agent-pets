@@ -2,44 +2,13 @@ import { createServer, IncomingMessage, ServerResponse } from 'node:http'
 import type { BrowserWindow } from 'electron'
 import { app } from 'electron'
 import { timingSafeEqual } from 'node:crypto'
-
-export interface AgentStatusEvent {
-  source: string
-  sessionId: string
-  project?: string
-  state: string
-  originalEvent?: string
-  timestamp: number
-  toolName?: string
-}
+import type { AgentStatusEvent } from '../src/types/agent'
+import { normalizeAgentStatusEvent } from './event-normalizer'
+export type { AgentStatusEvent } from '../src/types/agent'
 
 const MAX_BODY_BYTES = 64 * 1024
 const MAX_EVENTS_PER_WINDOW = 500
 const RATE_WINDOW_MS = 10_000
-const MAX_TEXT_FIELD_LENGTH = 512
-
-const VALID_SOURCES = [
-  'opencode-cli', 'opencode-desktop',
-  'opencode',
-  'codex', 'codex-desktop',
-  'claude', 'claude-desktop',
-]
-
-const VALID_STATES = [
-  'idle', 'thinking', 'tool-running',
-  'waiting-permission', 'waiting-input', 'waiting',
-  'success', 'error', 'offline',
-]
-
-function normalizeSource(source: string): string {
-  if (source === 'opencode') return 'opencode-cli'
-  return source
-}
-
-function normalizeState(state: string): string {
-  if (state === 'waiting') return 'waiting-permission'
-  return state
-}
 
 export function createEventServer(
   getWindows: () => BrowserWindow[],
@@ -117,58 +86,13 @@ export function createEventServer(
         const parsed: unknown = JSON.parse(
           Buffer.concat(chunks).toString('utf8')
         )
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        const normalized = normalizeAgentStatusEvent(parsed)
+        if (!normalized.ok) {
           response.writeHead(400)
-          response.end(JSON.stringify({ error: 'event must be an object' }))
+          response.end(JSON.stringify({ error: normalized.error }))
           return
         }
-        const event = parsed as AgentStatusEvent
-
-        if (
-          typeof event.source !== 'string'
-          || typeof event.sessionId !== 'string'
-          || typeof event.state !== 'string'
-          || typeof event.timestamp !== 'number'
-          || !Number.isFinite(event.timestamp)
-        ) {
-          response.writeHead(400)
-          response.end(JSON.stringify({ error: 'missing required fields' }))
-          return
-        }
-
-        if (!VALID_SOURCES.includes(event.source)) {
-          response.writeHead(400)
-          response.end(JSON.stringify({ error: 'invalid source' }))
-          return
-        }
-
-        if (!VALID_STATES.includes(event.state)) {
-          response.writeHead(400)
-          response.end(JSON.stringify({ error: 'invalid state' }))
-          return
-        }
-
-        if (event.sessionId.length === 0 || event.sessionId.length > 256) {
-          response.writeHead(400)
-          response.end(JSON.stringify({ error: 'invalid sessionId' }))
-          return
-        }
-
-        event.source = normalizeSource(event.source)
-        event.state = normalizeState(event.state)
-        // Status ordering and mood calculations use receipt time, not an
-        // attacker-controlled or badly skewed client clock.
-        event.timestamp = Date.now()
-
-        event.project = typeof event.project === 'string'
-          ? (event.project.split(/[/\\]/).pop() || event.project).slice(0, MAX_TEXT_FIELD_LENGTH)
-          : undefined
-        event.toolName = typeof event.toolName === 'string'
-          ? event.toolName.slice(0, MAX_TEXT_FIELD_LENGTH)
-          : undefined
-        event.originalEvent = typeof event.originalEvent === 'string'
-          ? event.originalEvent.slice(0, MAX_TEXT_FIELD_LENGTH)
-          : undefined
+        const { event } = normalized
 
         for (const win of getWindows()) {
           win.webContents.send('agent-status-event', event)

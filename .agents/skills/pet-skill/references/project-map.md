@@ -9,6 +9,9 @@
 - Electron composition root: `electron/main.ts`.
 - Preload boundary: `electron/preload.ts`; matching global types: `src/env.d.ts`.
 - Event ingress: `electron/event-server.ts`, loopback port `17373`, token header `x-agent-pets-token`.
+- Generic event allowlist projection: `electron/event-normalizer.ts`; capability contract: `src/types/capabilities.ts`.
+- Permission Control: `electron/permission-broker.ts` owns state/TTL/anti-replay; `electron/permission-adapter-server.ts` is the token-authenticated OpenCode relay on loopback port `17374`; `electron/permission-audit.ts` persists bounded redacted terminal records; shared view/decision types are in `src/types/permission.ts`.
+- Phase 2 threat model: `docs/security/phase-2-permission-broker-threat-model.md`.
 - Hook installation and repair: `electron/setup.ts` and `integrations/`.
 - Quota adapters: `electron/quota.ts`.
 - Desktop preferences: `electron/desktop-preferences.ts`; canonical shared types: `src/types/desktop.ts`.
@@ -31,12 +34,13 @@
 
 - Mood is renderer-local and resets by local date/version.
 - Pet selection, scale, multi-pet, reactions, bubbles, hidden pets, and family mappings use `localStorage`.
-- DND, notifications, sound, and launch-at-startup are main-owned desktop preferences persisted under Electron `userData`; legacy sound is migrated once from renderer storage.
+- DND, notifications, permission-bubble visibility, sound, and launch-at-startup are main-owned desktop preferences persisted under Electron `userData`; legacy sound is migrated once from renderer storage. Hiding the permission bubble never changes Broker state or the Tray attention badge.
 - Tray is a main-process singleton. Closing the pet hides it, while a destroyed renderer can be rebuilt through the existing main process.
 - Main process persists window position/size through helpers in `electron/setup.ts`.
 - Status events feed the Pinia store through the typed preload listener.
 - Click-through combines renderer hit testing and Electron mouse passthrough.
 - Three Agent families are supported through hooks: Codex, Claude Code, and OpenCode.
+- OpenCode is currently the only respond-capable permission Adapter. Generic `/v1/events` remains observe-only; Codex and Claude show external-only waiting state until a verified response channel exists.
 
 ## Working rules
 

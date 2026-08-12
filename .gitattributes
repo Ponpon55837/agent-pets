@@ -1,0 +1,12 @@
+# Keep repository text canonical and cross-platform. This prevents Windows
+# core.autocrlf settings from producing mixed line-ending warnings in reviews.
+* text=auto eol=lf
+
+*.png binary
+*.webp binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.exe binary
+*.zip binary
