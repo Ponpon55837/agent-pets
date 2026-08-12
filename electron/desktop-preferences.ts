@@ -67,6 +67,7 @@ const BOOLEAN_KEYS = [
   'dndEnabled',
   'notificationsEnabled',
   'permissionBubbleEnabled',
+  'edgeModeEnabled',
   'soundEnabled',
   'launchAtStartup',
 ] as const
@@ -75,6 +76,7 @@ const DEFAULTS: StoredDesktopPreferences = {
   dndEnabled: false,
   notificationsEnabled: true,
   permissionBubbleEnabled: true,
+  edgeModeEnabled: false,
   soundEnabled: false,
   launchAtStartup: false,
 }
@@ -167,6 +169,8 @@ export class DesktopPreferencesStore {
     this.stored = {
       dndEnabled: next.dndEnabled,
       notificationsEnabled: next.notificationsEnabled,
+      permissionBubbleEnabled: next.permissionBubbleEnabled,
+      edgeModeEnabled: next.edgeModeEnabled,
       soundEnabled: next.soundEnabled,
       launchAtStartup: next.launchAtStartup,
     }
@@ -179,6 +183,7 @@ export class DesktopPreferencesStore {
       dndEnabled: preferences.dndEnabled,
       notificationsEnabled: preferences.notificationsEnabled,
       permissionBubbleEnabled: preferences.permissionBubbleEnabled,
+      edgeModeEnabled: preferences.edgeModeEnabled,
       soundEnabled: preferences.soundEnabled,
       launchAtStartup: preferences.launchAtStartup,
     } satisfies StoredDesktopPreferences)

@@ -1158,6 +1158,8 @@ app_metadata(
 **依賴：** Phase 1 window manager；現有 click-through。
 **主要風險：** invisible click blocker、多螢幕座標、renderer/main mode race。
 
+Phase 4 實作補充：`electron/pet-window-mode.ts` 集中 bounded geometry（negative monitor origin、96px Mini、42px × 96px Edge handle、650ms dwell）。Edge Peek 是 main-owned、持久化且預設關閉的 desktop preference；開啟後只有確實貼近 work area 邊緣才會進入 Edge，使用不裁切寵物本體的 opaque Liquid Glass handle，hover/click 會以進入 Edge 前保存的完整 native bounds snapshot 回到原本位置與尺寸；若保存狀態已不再貼邊，啟動時回到 Normal。Main process 擁有 Normal／Mini／Edge state、display re-home 與 `window-state.json` 的 normal bounds／display metadata；Renderer 只透過 typed IPC 收到 mode snapshot，permission pending 時由 main 強制回 Normal。Mini／Edge 不改變 hooks、通知、XP 或權限 Broker；Normal 的 transparent region 仍由既有 hit-test 與 mouse passthrough 維持 click-through。Settings 改為可擴充的 Appearance／Desktop／Pets／Growth／Advanced 導覽，讓新增 optional feature 有明確控制位置。
+
 ### Phase 5 — Agent Adapter SDK
 
 **目的：** 先統一接入契約，再擴充 Agent 數量。

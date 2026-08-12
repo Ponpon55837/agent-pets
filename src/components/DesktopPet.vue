@@ -211,11 +211,20 @@ function onMouseDown(e: MouseEvent) {
     // did) left that poll loop running after a plain click, so the pet
     // kept chasing the cursor around indefinitely after the button was
     // released, right up until the next mousedown replaced it.
-    window.electronAPI?.notifyDragEnd()
+    window.electronAPI?.notifyDragEnd(hasMoved.value)
   }
 
   window.addEventListener('mousemove', onMove)
   window.addEventListener('mouseup', onUp)
+}
+
+function onEdgeMouseDown(e: MouseEvent): void {
+  if (e.button !== 0) return
+  e.stopPropagation()
+  // The main process restores the saved Normal bounds before starting its
+  // cursor poll. Calling the same drag path keeps mouse and keyboard entry
+  // points consistent without letting the renderer choose native bounds.
+  onMouseDown(e)
 }
 
 function onClick(e: MouseEvent) {
@@ -231,7 +240,11 @@ function onClick(e: MouseEvent) {
 </script>
 
 <template>
-  <div class="desktop-pet">
+  <div
+    class="desktop-pet"
+    :class="[`mode-${store.petWindowMode.mode}`, store.petWindowMode.edge ? `edge-${store.petWindowMode.edge}` : '']"
+    :data-pet-mode="store.petWindowMode.mode"
+  >
     <div
       ref="clickAreaRef"
       class="pet-click-area"
@@ -240,6 +253,26 @@ function onClick(e: MouseEvent) {
       @click="onClick"
       @contextmenu.prevent
     >
+      <div
+        v-if="store.petWindowMode.mode === 'edge'"
+        class="edge-peek-handle"
+        role="button"
+        tabindex="0"
+        aria-label="Expand pet from edge"
+        data-pet-hit-target="solid"
+        @mousedown.stop="onEdgeMouseDown"
+        @click.stop="store.setPetMode('normal')"
+        @keydown.enter.prevent="store.setPetMode('normal')"
+        @keydown.space.prevent="store.setPetMode('normal')"
+      >
+        <span class="edge-peek-orb" aria-hidden="true"><span /></span>
+        <span class="edge-peek-chevron" aria-hidden="true">
+          {{ store.petWindowMode.edge === 'left' ? '›' : store.petWindowMode.edge === 'right' ? '‹' : store.petWindowMode.edge === 'top' ? '⌄' : '⌃' }}
+        </span>
+        <span class="edge-peek-label">Open</span>
+      </div>
+
+      <template v-else>
       <Transition v-if="store.permissionBubbleActive && store.permissionRequest" name="toast" mode="out-in">
         <section
           :key="`permission-${store.permissionRequest.requestId}`"
@@ -344,7 +377,7 @@ function onClick(e: MouseEvent) {
               :state="line.state"
               :pet-id="line.petId"
               :since="line.since"
-              :mood="store.mood"
+              :mood="store.moodVisualsEnabled ? store.mood : undefined"
             />
             <div
               class="status-line multi-pet-status-line"
@@ -402,7 +435,7 @@ function onClick(e: MouseEvent) {
           :state="store.currentState"
           :pet-id="store.activePetId"
           :since="store.highestPrioritySession?.lastSeenAt"
-          :mood="store.mood"
+          :mood="store.moodVisualsEnabled ? store.mood : undefined"
         />
         <TransitionGroup tag="div" name="status-line" class="status-lines">
           <div
@@ -457,6 +490,7 @@ function onClick(e: MouseEvent) {
           </div>
         </TransitionGroup>
       </template>
+      </template>
     </div>
   </div>
 </template>
@@ -490,6 +524,144 @@ function onClick(e: MouseEvent) {
 .pet-click-area.dragging {
   transform: translateX(-50%) translateY(-6px) scale(1.05);
   filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.35));
+}
+
+.desktop-pet.mode-mini .status-lines,
+.desktop-pet.mode-mini .multi-pet-row {
+  display: none;
+}
+
+.desktop-pet.mode-mini .pet-click-area {
+  transform: translateX(-50%) scale(0.42);
+  transform-origin: 50% 100%;
+}
+
+.desktop-pet.mode-mini .pet-click-area.dragging {
+  transform: translateX(-50%) translateY(-3px) scale(0.46);
+}
+
+.desktop-pet.mode-edge .pet-click-area {
+  inset: 0;
+  bottom: auto;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform: none;
+  display: block;
+  cursor: pointer;
+}
+
+.edge-peek-handle {
+  pointer-events: auto;
+  position: absolute;
+  inset: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px;
+  border: 1px solid rgba(157, 216, 255, 0.58);
+  border-radius: 12px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.2), transparent 58%),
+    rgba(24, 28, 42, 0.94);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 0 0 1px rgba(157, 216, 255, 0.08);
+  backdrop-filter: blur(12px) saturate(155%);
+  -webkit-backdrop-filter: blur(12px) saturate(155%);
+  color: #e2f3ff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+  user-select: none;
+}
+
+.edge-peek-handle:hover {
+  border-color: #b9e5ff;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.26), transparent 58%),
+    rgba(31, 47, 67, 0.97);
+  transform: scale(1.03);
+}
+
+.edge-peek-handle:active {
+  transform: scale(0.97);
+}
+
+.edge-peek-handle:focus-visible {
+  outline: 2px solid #9dd8ff;
+  outline-offset: 2px;
+}
+
+.edge-peek-orb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border: 1px solid rgba(219, 243, 255, 0.88);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #f4fcff 0 12%, #9dd8ff 34%, #547ab1 100%);
+  box-shadow: 0 0 10px rgba(157, 216, 255, 0.55);
+}
+
+.edge-peek-orb span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #19253a;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.32);
+}
+
+.edge-peek-chevron {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 0 0 9px rgba(157, 216, 255, 0.6);
+}
+
+.edge-peek-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.92;
+}
+
+.desktop-pet.mode-edge.edge-left .edge-peek-handle,
+.desktop-pet.mode-edge.edge-right .edge-peek-handle {
+  writing-mode: vertical-rl;
+}
+
+.desktop-pet.mode-edge.edge-top .edge-peek-handle,
+.desktop-pet.mode-edge.edge-bottom .edge-peek-handle {
+  writing-mode: horizontal-tb;
+}
+
+.desktop-pet.mode-edge.edge-left .edge-peek-chevron {
+  order: -1;
+}
+
+.desktop-pet.mode-edge.edge-right .edge-peek-chevron {
+  order: 1;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .edge-peek-handle {
+    background: #1c2638;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .edge-peek-handle {
+    border-width: 2px;
+    border-color: #b9e5ff;
+    background: #111923;
+  }
 }
 
 .multi-pet-row {

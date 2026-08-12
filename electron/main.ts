@@ -30,6 +30,16 @@ import {
 } from './permission-adapter-server'
 import type { DesktopPreferences } from '../src/types/desktop'
 import type { ProgressionSnapshot } from '../src/types/progression'
+import type { PetEdge, PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
+import {
+  EDGE_DWELL_MS,
+  EDGE_TRIGGER_DISTANCE_PX,
+  clampWindowBounds,
+  edgeWindowBounds,
+  miniWindowBounds,
+  nearestEdge,
+  type WindowBounds,
+} from './pet-window-mode'
 import {
   IS_MAC,
   hookScriptDeployPath,
@@ -71,6 +81,15 @@ let progressionStore: ProgressionStore | null = null
 let desktopPreferences: DesktopPreferencesStore | null = null
 let desktopNotifications: DesktopNotificationService | null = null
 let desktopTray: DesktopTrayController | null = null
+let petWindowMode: PetWindowMode = 'normal'
+let petWindowEdge: PetEdge | null = null
+let normalPetBounds: WindowBounds | null = null
+// Full-size bounds captured immediately before entering Edge. The native
+// window is replaced by a small edge handle, so hover/click must restore this
+// exact snapshot instead of deriving a new position from the handle bounds.
+let edgeRestoreBounds: WindowBounds | null = null
+let edgeDwellHandle: ReturnType<typeof setTimeout> | null = null
+let edgeDwellCandidate: { displayId: number; edge: PetEdge } | null = null
 let isQuitting = false
 let notificationAttentionCount = 0
 let permissionAttentionCount = 0
@@ -102,7 +121,7 @@ if (!hasSingleInstanceLock) {
   })
 }
 
-const PANEL_WIDTH = 320
+const PANEL_WIDTH = 380
 const PANEL_GAP = 6
 // petWindow's actual bounds include a fixed, unscaled band of transparent
 // space reserved above the visible sprite for the quota tooltip to pop
@@ -395,8 +414,203 @@ function configureSecureProtocol(): void {
   })
 }
 
+function clearEdgeDwell(): void {
+  if (edgeDwellHandle) clearTimeout(edgeDwellHandle)
+  edgeDwellHandle = null
+  edgeDwellCandidate = null
+}
+
+function petModeState(): PetWindowModeState {
+  return petWindowEdge
+    ? { mode: petWindowMode, edge: petWindowEdge }
+    : { mode: petWindowMode }
+}
+
+function broadcastPetWindowMode(): void {
+  const state = petModeState()
+  for (const window of [petWindow, panelWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('pet-window-mode-updated', state)
+    }
+  }
+}
+
+function displayForBounds(bounds: WindowBounds) {
+  return screen.getDisplayMatching({
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width: Math.max(1, Math.round(bounds.width)),
+    height: Math.max(1, Math.round(bounds.height)),
+  })
+}
+
+function displayForSavedState(saved: ReturnType<typeof readWindowState>) {
+  if (saved?.displayId !== undefined) {
+    const byId = screen.getAllDisplays().find(display => display.id === saved.displayId)
+    if (byId) return byId
+  }
+  const savedBounds = saved?.normalBounds ?? (
+    saved && saved.width !== undefined && saved.height !== undefined
+      ? { x: saved.x, y: saved.y, width: saved.width, height: saved.height }
+      : null
+  )
+  return savedBounds ? displayForBounds(savedBounds) : screen.getPrimaryDisplay()
+}
+
+function persistCurrentPetWindowState(): void {
+  if (!petWindow || petWindow.isDestroyed()) return
+  const bounds = petWindow.getBounds()
+  const display = displayForBounds(bounds)
+  const normal = edgeRestoreBounds ?? normalPetBounds ?? bounds
+  writeWindowState({
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    mode: petWindowMode,
+    edge: petWindowEdge ?? undefined,
+    displayId: display.id,
+    displayBounds: display.bounds,
+    normalBounds: normal,
+  })
+}
+
+function applyNormalPetBounds(): void {
+  if (!petWindow || petWindow.isDestroyed()) return
+  clearEdgeDwell()
+  const current = petWindow.getBounds()
+  const restore = edgeRestoreBounds ?? normalPetBounds ?? current
+  const display = displayForBounds(restore)
+  const normal = clampWindowBounds(restore, display.workArea)
+  normalPetBounds = normal
+  edgeRestoreBounds = null
+  petWindowMode = 'normal'
+  petWindowEdge = null
+  petWindow.setIgnoreMouseEvents(false)
+  petWindow.setBounds(normal)
+  repositionVisiblePanel()
+  persistCurrentPetWindowState()
+  broadcastPetWindowMode()
+  desktopTray?.rebuild()
+}
+
+function applyMiniPetBounds(): void {
+  if (!petWindow || petWindow.isDestroyed()) return
+  clearEdgeDwell()
+  const current = petWindow.getBounds()
+  const normalSource = edgeRestoreBounds ?? normalPetBounds ?? current
+  const display = displayForBounds(normalSource)
+  normalPetBounds = clampWindowBounds(normalSource, display.workArea)
+  edgeRestoreBounds = null
+  petWindowMode = 'mini'
+  petWindowEdge = null
+  petWindow.setIgnoreMouseEvents(false)
+  petWindow.setBounds(miniWindowBounds(normalPetBounds, display.workArea))
+  repositionVisiblePanel()
+  persistCurrentPetWindowState()
+  broadcastPetWindowMode()
+  desktopTray?.rebuild()
+}
+
+function applyEdgePetBounds(edge: PetEdge): void {
+  if (!petWindow || petWindow.isDestroyed()) return
+  if (!currentDesktopPreferences().edgeModeEnabled) {
+    applyNormalPetBounds()
+    return
+  }
+  clearEdgeDwell()
+  const current = petWindow.getBounds()
+  // Edge can only be entered from a full-size normal window. Capture the
+  // actual bounds at this moment so expansion returns to the user's exact
+  // pre-edge position, even if a previous persisted snapshot is stale.
+  const normalSource = petWindowMode === 'normal'
+    ? current
+    : edgeRestoreBounds ?? normalPetBounds ?? current
+  const display = displayForBounds(normalSource)
+  normalPetBounds = clampWindowBounds(normalSource, display.workArea)
+  edgeRestoreBounds = { ...normalPetBounds }
+  petWindowMode = 'edge'
+  petWindowEdge = edge
+  // Edge is an explicit, opaque handle-sized window. Keep it interactive so
+  // a click or drag can expand it; click-through remains owned by Normal's
+  // transparent-region hit testing.
+  petWindow.setIgnoreMouseEvents(false)
+  petWindow.setBounds(edgeWindowBounds(normalPetBounds, display.workArea, edge))
+  repositionVisiblePanel()
+  persistCurrentPetWindowState()
+  broadcastPetWindowMode()
+  desktopTray?.rebuild()
+}
+
+function setPetWindowMode(mode: PetWindowMode): void {
+  if (!petWindow || petWindow.isDestroyed()) return
+  // A permission bubble must remain fully usable. The Broker remains the
+  // authority, so a compact/partially hidden window is never allowed while a
+  // request is pending.
+  if (mode !== 'normal' && (permissionBroker?.listRequests().length ?? 0) > 0) {
+    applyNormalPetBounds()
+    return
+  }
+  if (mode === 'normal') applyNormalPetBounds()
+  else if (mode === 'mini') applyMiniPetBounds()
+  else if (petWindowEdge) applyEdgePetBounds(petWindowEdge)
+}
+
+function toggleMiniMode(): void {
+  setPetWindowMode(petWindowMode === 'mini' ? 'normal' : 'mini')
+}
+
+function scheduleEdgeDwell(): void {
+  clearEdgeDwell()
+  if (
+    !petWindow
+    || petWindow.isDestroyed()
+    || petWindowMode !== 'normal'
+    || !currentDesktopPreferences().edgeModeEnabled
+  ) return
+  const bounds = petWindow.getBounds()
+  const display = displayForBounds(bounds)
+  const edge = nearestEdge(bounds, display.workArea, EDGE_TRIGGER_DISTANCE_PX)
+  if (!edge) return
+  edgeDwellCandidate = { displayId: display.id, edge }
+  edgeDwellHandle = setTimeout(() => {
+    edgeDwellHandle = null
+    const candidate = edgeDwellCandidate
+    edgeDwellCandidate = null
+    if (!candidate || !petWindow || petWindow.isDestroyed()) return
+    const current = petWindow.getBounds()
+    const currentDisplay = displayForBounds(current)
+    const currentEdge = nearestEdge(current, currentDisplay.workArea, EDGE_TRIGGER_DISTANCE_PX)
+    if (currentDisplay.id === candidate.displayId && currentEdge === candidate.edge) {
+      applyEdgePetBounds(candidate.edge)
+    }
+  }, EDGE_DWELL_MS)
+}
+
+function rehomePetWindowForDisplayChange(): void {
+  if (!petWindow || petWindow.isDestroyed()) return
+  const current = petWindow.getBounds()
+  const display = displayForBounds(current)
+  const normalSource = edgeRestoreBounds ?? normalPetBounds ?? current
+  normalPetBounds = clampWindowBounds(normalSource, display.workArea)
+  if (petWindowMode === 'edge') edgeRestoreBounds = { ...normalPetBounds }
+  if (petWindowMode === 'mini') {
+    petWindow.setBounds(miniWindowBounds(normalPetBounds, display.workArea))
+  } else if (petWindowMode === 'edge' && petWindowEdge) {
+    petWindow.setBounds(edgeWindowBounds(normalPetBounds, display.workArea, petWindowEdge))
+  } else {
+    petWindowMode = 'normal'
+    petWindowEdge = null
+    petWindow.setIgnoreMouseEvents(false)
+    petWindow.setBounds(normalPetBounds)
+  }
+  repositionVisiblePanel()
+  persistCurrentPetWindowState()
+  broadcastPetWindowMode()
+}
+
 function createPetWindow() {
-  const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize
+  const primaryWorkArea = screen.getPrimaryDisplay().workArea
   const rawScale = parseFloat(process.env.PET_SCALE || '1')
   const scale = clamp(isNaN(rawScale) ? 1 : rawScale, 0.3, 5)
 
@@ -421,16 +635,38 @@ function createPetWindow() {
     ? Math.round(clamp(saved.height, 80, 1_600))
     : Math.round(232 * scale) + 190
 
-  const defaultX = screenWidth - w - 30
-  const defaultY = screenHeight - h - 30
-  const x = saved ? clamp(saved.x, 0, Math.max(0, screenWidth - w)) : defaultX
-  const y = saved ? clamp(saved.y, 0, Math.max(0, screenHeight - h)) : defaultY
+  const savedDisplay = displayForSavedState(saved)
+  const savedNormal = saved?.normalBounds ?? (
+    saved
+      ? { x: saved.x, y: saved.y, width: saved.width ?? w, height: saved.height ?? h }
+      : {
+          x: primaryWorkArea.x + primaryWorkArea.width - w - 30,
+          y: primaryWorkArea.y + primaryWorkArea.height - h - 30,
+          width: w,
+          height: h,
+        }
+  )
+  normalPetBounds = clampWindowBounds(savedNormal, savedDisplay.workArea)
+  const edgeModeEnabled = currentDesktopPreferences().edgeModeEnabled
+  const attachedEdge = nearestEdge(normalPetBounds, savedDisplay.workArea, EDGE_TRIGGER_DISTANCE_PX)
+  const canRestoreEdge = saved?.mode === 'edge'
+    && edgeModeEnabled
+    && attachedEdge !== null
+    && (saved.edge === undefined || saved.edge === attachedEdge)
+  petWindowMode = saved?.mode === 'mini' ? 'mini' : canRestoreEdge ? 'edge' : 'normal'
+  petWindowEdge = canRestoreEdge ? (saved.edge ?? attachedEdge) : null
+  edgeRestoreBounds = canRestoreEdge ? { ...normalPetBounds } : null
+  const initialBounds = petWindowMode === 'mini'
+    ? miniWindowBounds(normalPetBounds, savedDisplay.workArea)
+    : petWindowMode === 'edge' && petWindowEdge
+      ? edgeWindowBounds(normalPetBounds, savedDisplay.workArea, petWindowEdge)
+      : normalPetBounds
 
   petWindow = new BrowserWindow({
-    width: w,
-    height: h,
-    x,
-    y,
+    width: initialBounds.width,
+    height: initialBounds.height,
+    x: initialBounds.x,
+    y: initialBounds.y,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -471,6 +707,10 @@ function createPetWindow() {
     petWindow.loadURL('agent-pets://app/index.html')
   }
 
+  petWindow.webContents.once('did-finish-load', () => {
+    broadcastPetWindowMode()
+  })
+
   petWindow.on('close', (event) => {
     if (isQuitting) return
     event.preventDefault()
@@ -488,6 +728,10 @@ function createPetWindow() {
   petWindow.on('closed', () => {
     petWindow = null
     anchorBottomCenter = null
+    normalPetBounds = null
+    edgeRestoreBounds = null
+    petWindowEdge = null
+    clearEdgeDwell()
     if (resizeAnimHandle) {
       clearInterval(resizeAnimHandle)
       resizeAnimHandle = null
@@ -596,7 +840,9 @@ function persistPetBounds(x: number, y: number, width: number, height: number) {
   if (persistBoundsHandle) clearTimeout(persistBoundsHandle)
   persistBoundsHandle = setTimeout(() => {
     persistBoundsHandle = null
-    writeWindowState({ x, y, width, height })
+    const current = { x, y, width, height }
+    if (petWindowMode === 'normal') normalPetBounds = current
+    persistCurrentPetWindowState()
   }, 1_000)
 }
 
@@ -629,8 +875,9 @@ function hidePetWindow(): void {
 
 function showPanelWindow(view: 'sessions' | 'settings' = 'sessions'): void {
   if (!ensureDesktopWindows() || !panelWindow) return
+  if (petWindowMode === 'edge') applyNormalPetBounds()
   showPetWindow()
-  panelWindow.setBounds(computePanelBounds(view === 'settings' ? 420 : 380))
+  panelWindow.setBounds(computePanelBounds(view === 'settings' ? 470 : 380))
   panelWindow.show()
   panelWindow.focus()
   desktopNotifications?.clearAttention()
@@ -653,6 +900,7 @@ function currentDesktopPreferences(): DesktopPreferences {
       dndEnabled: false,
       notificationsEnabled: true,
       permissionBubbleEnabled: true,
+      edgeModeEnabled: false,
       soundEnabled: false,
       launchAtStartup: false,
       launchAtStartupSupported: false,
@@ -672,6 +920,7 @@ function broadcastDesktopPreferences(preferences: DesktopPreferences): void {
 function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   if (!desktopPreferences) throw new Error('Desktop preferences are not ready')
   const preferences = desktopPreferences.update(patch)
+  if (!preferences.edgeModeEnabled && petWindowMode === 'edge') applyNormalPetBounds()
   desktopTray?.rebuild()
   broadcastDesktopPreferences(preferences)
   schedulePermissionUiSync()
@@ -691,6 +940,9 @@ function syncTrayAttention(): void {
 
 function broadcastPermissionRequests(): void {
   const requests = permissionBroker?.listRequests() ?? []
+  if (requests.length > 0 && petWindowMode !== 'normal') {
+    applyNormalPetBounds()
+  }
   permissionAttentionCount = requests.length
   syncTrayAttention()
   for (const window of [petWindow, panelWindow]) {
@@ -863,6 +1115,8 @@ function createDesktopServices(): void {
       hidePet: hidePetWindow,
       openPanel: () => showPanelWindow('sessions'),
       openSettings: () => showPanelWindow('settings'),
+      getPetMode: () => petWindowMode,
+      toggleMiniMode,
       quit: () => app.quit(),
     },
   )
@@ -926,9 +1180,12 @@ app.whenReady().then(() => {
   eventToken = refreshInstalledIntegrationScripts()
   const permissionToken = ensurePermissionToken()
   configureSecureProtocol()
+  createDesktopServices()
   createPetWindow()
   createPanelWindow()
-  createDesktopServices()
+  screen.on('display-added', rehomePetWindowForDisplayChange)
+  screen.on('display-removed', rehomePetWindowForDisplayChange)
+  screen.on('display-metrics-changed', rehomePetWindowForDisplayChange)
   createPermissionServices(permissionToken)
   createProgressionServices()
 
@@ -966,6 +1223,11 @@ app.whenReady().then(() => {
   // it can't feed back on itself this way.
   ipcMain.on('pet-drag-start', (event) => {
     if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
+    clearEdgeDwell()
+    if (petWindowMode !== 'normal') applyNormalPetBounds()
+    // A normal drag establishes a new restore point; it must not inherit an
+    // obsolete Edge snapshot from an earlier interaction.
+    edgeRestoreBounds = null
     if (dragPollHandle) {
       clearInterval(dragPollHandle)
       dragPollHandle = null
@@ -1002,7 +1264,7 @@ app.whenReady().then(() => {
 
   // Fired once when a drag ends (not per mousemove) so we're not hitting
   // disk on every pixel of movement.
-  ipcMain.on('pet-drag-end', (event) => {
+  ipcMain.on('pet-drag-end', (event, payload: unknown) => {
     if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
     if (dragPollHandle) {
       clearInterval(dragPollHandle)
@@ -1010,7 +1272,17 @@ app.whenReady().then(() => {
     }
     const [x, y] = petWindow.getPosition()
     const [width, height] = petWindow.getSize()
-    writeWindowState({ x, y, width, height })
+    normalPetBounds = { x, y, width, height }
+    edgeRestoreBounds = null
+    persistCurrentPetWindowState()
+    const moved = payload && typeof payload === 'object'
+      && (payload as Record<string, unknown>).moved === true
+    if (moved) scheduleEdgeDwell()
+  })
+
+  ipcMain.on('pet-window-hover', (event) => {
+    if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
+    if (petWindowMode === 'edge') applyNormalPetBounds()
   })
 
   ipcMain.on('pet-mouse-passthrough', (event, payload: unknown) => {
@@ -1057,6 +1329,14 @@ app.whenReady().then(() => {
     if (rawWidth === null || rawHeight === null) return
     const width = Math.round(clamp(rawWidth, 80, 1_600))
     const height = Math.round(clamp(rawHeight, 80, 1_600))
+    if (petWindowMode !== 'normal') {
+      const current = edgeRestoreBounds ?? normalPetBounds ?? petWindow.getBounds()
+      const next = { ...current, width, height }
+      normalPetBounds = next
+      if (edgeRestoreBounds) edgeRestoreBounds = { ...next }
+      persistCurrentPetWindowState()
+      return
+    }
     const { workArea } = screen.getDisplayMatching(petWindow.getBounds())
 
     if (!anchorBottomCenter) {
@@ -1098,6 +1378,18 @@ app.whenReady().then(() => {
     if (next === petContentHeight) return
     petContentHeight = next
     repositionVisiblePanel()
+  })
+
+  ipcMain.handle('pet-window-mode-set', (event, mode: unknown) => {
+    assertTrustedIpcSender(event)
+    if (mode !== 'normal' && mode !== 'mini') return petModeState()
+    setPetWindowMode(mode)
+    return petModeState()
+  })
+
+  ipcMain.handle('pet-window-mode-init', (event) => {
+    assertTrustedIpcSender(event)
+    return petModeState()
   })
 
   ipcMain.on('pet-quit', (event) => {

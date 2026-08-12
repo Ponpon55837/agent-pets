@@ -14,6 +14,7 @@ let cleanupListener: (() => void) | null = null
 let cleanupPanelOpened: (() => void) | null = null
 let cleanupPanelOpenSettings: (() => void) | null = null
 let cleanupDesktopPreferences: (() => void) | null = null
+let cleanupPetWindowMode: (() => void) | null = null
 let cleanupProgression: (() => void) | null = null
 let cleanupQuotaUpdated: (() => void) | null = null
 let cleanupPermissionRequests: (() => void) | null = null
@@ -51,6 +52,14 @@ function isPetHitTarget(clientX: number, clientY: number): boolean {
 }
 
 function handlePetMouseMove(event: MouseEvent) {
+  if (store.petWindowMode.mode === 'edge') {
+    window.electronAPI?.notifyPetHover()
+    if (petMousePassthrough) {
+      petMousePassthrough = false
+      window.electronAPI?.setMousePassthrough(false)
+    }
+    return
+  }
   const ignore = !store.isDragging && !isPetHitTarget(event.clientX, event.clientY)
   if (ignore === petMousePassthrough) return
   petMousePassthrough = ignore
@@ -88,6 +97,8 @@ function handleStorage(e: StorageEvent) {
     store.bubbleEnabled = e.newValue === '1'
   } else if (e.key === 'agent-pet-mood' && e.newValue) {
     store.mood = parseFloat(e.newValue)
+  } else if (e.key === 'agent-pet-mood-visuals') {
+    store.moodVisualsEnabled = e.newValue !== '0'
   }
 }
 
@@ -127,6 +138,11 @@ onMounted(() => {
       store.applyDesktopPreferences(preferences)
     })
   }
+  if (electronAPI?.onPetWindowModeUpdated) {
+    cleanupPetWindowMode = electronAPI.onPetWindowModeUpdated((state: unknown) => {
+      store.setPetWindowModeState(state)
+    })
+  }
   if (electronAPI?.onProgressionUpdated) {
     cleanupProgression = electronAPI.onProgressionUpdated((snapshot: unknown) => {
       store.setProgressionSnapshot(snapshot)
@@ -139,6 +155,7 @@ onMounted(() => {
   }
   void store.initializePermissionRequests()
   void store.initializeDesktopPreferences()
+  void store.initializePetWindowMode()
   void store.initializeProgression()
   if (electronAPI?.onQuotaUsageUpdated) {
     cleanupQuotaUpdated = electronAPI.onQuotaUsageUpdated((usage: unknown) => {
@@ -216,6 +233,7 @@ onUnmounted(() => {
   cleanupPanelOpened?.()
   cleanupPanelOpenSettings?.()
   cleanupDesktopPreferences?.()
+  cleanupPetWindowMode?.()
   cleanupProgression?.()
   cleanupQuotaUpdated?.()
   cleanupPermissionRequests?.()

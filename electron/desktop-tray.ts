@@ -1,5 +1,6 @@
 import { Menu, nativeImage, Tray, type NativeImage } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
+import type { PetWindowMode } from '../src/types/pet-window'
 import { createAttentionBitmap } from './tray-icon'
 
 interface DesktopTrayActions {
@@ -10,6 +11,8 @@ interface DesktopTrayActions {
   hidePet: () => void
   openPanel: () => void
   openSettings: () => void
+  getPetMode: () => PetWindowMode
+  toggleMiniMode: () => void
   quit: () => void
 }
 
@@ -73,6 +76,18 @@ export class DesktopTrayController {
       },
       { label: 'Open Control Panel', click: () => this.actions.openPanel() },
       { label: 'Open Settings', click: () => this.actions.openSettings() },
+      {
+        label: 'Mini Mode',
+        type: 'checkbox',
+        checked: this.actions.getPetMode() === 'mini',
+        click: () => this.safeToggleMiniMode(),
+      },
+      {
+        label: 'Edge Peek Mode',
+        type: 'checkbox',
+        checked: preferences.edgeModeEnabled,
+        click: item => this.safeUpdatePreferences({ edgeModeEnabled: item.checked }),
+      },
       { label: attentionLabel, enabled: false },
       { type: 'separator' },
       {
@@ -123,6 +138,15 @@ export class DesktopTrayController {
       this.actions.updatePreferences(patch)
     } catch (error) {
       console.error('Failed to update desktop preferences from Tray', error)
+      this.rebuild()
+    }
+  }
+
+  private safeToggleMiniMode(): void {
+    try {
+      this.actions.toggleMiniMode()
+    } catch (error) {
+      console.error('Failed to toggle Mini Mode from Tray', error)
       this.rebuild()
     }
   }

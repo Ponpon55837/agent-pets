@@ -8,7 +8,16 @@ const store = useAgentStore()
 const importing = ref(false)
 const editingPetId = ref<string | null>(null)
 const editName = ref('')
-const settingsTab = ref<'general' | 'growth' | 'pets'>('general')
+type SettingsSection = 'appearance' | 'desktop' | 'pets' | 'growth' | 'advanced'
+const settingsTab = ref<SettingsSection>('appearance')
+const settingsSections: Array<{ id: SettingsSection; icon: string; label: string; hint: string }> = [
+  { id: 'appearance', icon: '◈', label: 'Appearance', hint: 'Size and reactions' },
+  { id: 'desktop', icon: '⌘', label: 'Desktop', hint: 'Modes and alerts' },
+  { id: 'pets', icon: '✦', label: 'Pets', hint: 'Sprites and families' },
+  { id: 'growth', icon: '↗', label: 'Growth', hint: 'Mood and XP' },
+  { id: 'advanced', icon: '⋯', label: 'Advanced', hint: 'Setup and lifecycle' },
+]
+const activeSettingsSection = computed(() => settingsSections.find(section => section.id === settingsTab.value))
 const dashboardTab = ref<'sessions' | 'usage'>('sessions')
 const quotaUsage = computed(() => store.quotaUsage)
 const quotaLoading = computed(() => store.quotaLoading)
@@ -36,7 +45,7 @@ const moodStage = computed(() => {
 })
 
 watch(() => store.panelView, (view) => {
-  if (view === 'settings') settingsTab.value = 'general'
+  if (view === 'settings') settingsTab.value = 'appearance'
 })
 
 // Drives the "Xs" elapsed-time readout on in-flight sessions (thinking /
@@ -348,176 +357,171 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
     </template>
 
     <template v-else>
-      <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-        <button
-          class="settings-tab"
-          :class="{ active: settingsTab === 'general' }"
-          role="tab"
-          :aria-selected="settingsTab === 'general'"
-          @click="settingsTab = 'general'"
-        >
-          Settings
-        </button>
-        <button
-          class="settings-tab"
-          :class="{ active: settingsTab === 'growth' }"
-          role="tab"
-          :aria-selected="settingsTab === 'growth'"
-          @click="settingsTab = 'growth'"
-        >
-          Growth
-        </button>
-        <button
-          class="settings-tab"
-          :class="{ active: settingsTab === 'pets' }"
-          role="tab"
-          :aria-selected="settingsTab === 'pets'"
-          @click="settingsTab = 'pets'"
-        >
-          Pets
-        </button>
-      </div>
+      <div class="settings-layout">
+        <nav class="settings-nav" aria-label="Settings sections">
+          <div class="settings-nav-heading">Preferences</div>
+          <button
+            v-for="section in settingsSections"
+            :key="section.id"
+            class="settings-nav-item"
+            :class="{ active: settingsTab === section.id }"
+            role="tab"
+            :aria-selected="settingsTab === section.id"
+            @click="settingsTab = section.id"
+          >
+            <span class="settings-nav-icon" aria-hidden="true">{{ section.icon }}</span>
+            <span class="settings-nav-copy">
+              <strong>{{ section.label }}</strong>
+              <small>{{ section.hint }}</small>
+            </span>
+          </button>
+        </nav>
 
-      <div class="settings-content">
-        <template v-if="settingsTab === 'general'">
-          <div class="settings-section">
-            <div class="section-label">Size</div>
-            <div class="scale-options">
-              <div
-                v-for="opt in scaleOptions"
-                :key="opt.value"
-                class="scale-option"
-                :class="{ active: store.petScale === opt.value }"
-                @click="store.setScale(opt.value)"
-              >
-                {{ opt.label }}
-              </div>
+        <div class="settings-content">
+        <div class="settings-content-header">
+          <span class="settings-kicker">Workspace preferences</span>
+          <h2>{{ activeSettingsSection?.label }}</h2>
+        </div>
+
+        <template v-if="settingsTab === 'appearance'">
+          <div class="settings-section settings-hero-card">
+            <div class="settings-hero-icon" aria-hidden="true">◈</div>
+            <div>
+              <div class="section-label">Make the pet yours</div>
+              <p>Keep the sprite visible while choosing how much motion and feedback you want.</p>
             </div>
           </div>
 
-          <div class="settings-section toggle-group desktop-toggle-group">
-            <div class="section-label group-label">Desktop</div>
+          <div class="settings-section settings-card">
+            <div class="section-label group-label">Pet size</div>
+            <div class="scale-options">
+              <button
+                v-for="opt in scaleOptions"
+                :key="opt.value"
+                type="button"
+                class="scale-option"
+                :class="{ active: store.petScale === opt.value }"
+                :aria-pressed="store.petScale === opt.value"
+                @click="store.setScale(opt.value)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-section settings-card toggle-group">
+            <div class="section-label group-label">Pet reactions</div>
+            <label class="toggle-row">
+              <span class="setting-copy">
+                <span class="section-label">Bounce &amp; shake</span>
+                <span class="setting-help">Animate status changes and clicks</span>
+              </span>
+              <span class="switch">
+                <input type="checkbox" :checked="store.reactionsEnabled" @change="store.setReactionsEnabled(($event.target as HTMLInputElement).checked)" />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
+            </label>
+            <label class="toggle-row">
+              <span class="setting-copy">
+                <span class="section-label">Status bubble</span>
+                <span class="setting-help">Show short completion and error messages</span>
+              </span>
+              <span class="switch">
+                <input type="checkbox" :checked="store.bubbleEnabled" @change="store.setBubbleEnabled(($event.target as HTMLInputElement).checked)" />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
+            </label>
+          </div>
+        </template>
+
+        <template v-else-if="settingsTab === 'desktop'">
+          <div class="settings-section settings-hero-card">
+            <div class="settings-hero-icon" aria-hidden="true">⌘</div>
+            <div>
+              <div class="section-label">Desktop behavior</div>
+              <p>Choose which optional surfaces can follow you around the desktop.</p>
+            </div>
+          </div>
+
+          <div class="settings-section toggle-group settings-card">
+            <div class="section-label group-label">Window modes</div>
+            <label class="toggle-row">
+              <span class="setting-copy">
+                <span class="section-label">Mini mode</span>
+                <span class="setting-help">Keep the pet compact; you can return to Normal any time</span>
+              </span>
+              <span class="switch">
+                <input type="checkbox" :checked="store.petWindowMode.mode === 'mini'" @change="store.setPetMode(($event.target as HTMLInputElement).checked ? 'mini' : 'normal')" />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
+            </label>
+            <label class="toggle-row">
+              <span class="setting-copy">
+                <span class="section-label">Edge peek</span>
+                <span class="setting-help">After a 650ms edge dwell, show a dedicated handle instead of the sprite</span>
+              </span>
+              <span class="switch">
+                <input type="checkbox" :checked="store.edgeModeEnabled" @change="store.setEdgeModeEnabled(($event.target as HTMLInputElement).checked)" />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
+            </label>
+          </div>
+
+          <div class="settings-section toggle-group settings-card">
+            <div class="section-label group-label">Attention</div>
             <label class="toggle-row">
               <span class="setting-copy">
                 <span class="section-label">Do Not Disturb</span>
                 <span class="setting-help">Mute sounds, notifications, and extra motion</span>
               </span>
               <span class="switch">
-                <input
-                  type="checkbox"
-                  :checked="store.dndEnabled"
-                  @change="store.setDndEnabled(($event.target as HTMLInputElement).checked)"
-                />
+                <input type="checkbox" :checked="store.dndEnabled" @change="store.setDndEnabled(($event.target as HTMLInputElement).checked)" />
                 <span class="switch-track"><span class="switch-thumb" /></span>
               </span>
             </label>
-
             <label class="toggle-row">
               <span class="setting-copy">
                 <span class="section-label">Notifications</span>
                 <span class="setting-help">Show native waiting and completion alerts</span>
               </span>
               <span class="switch">
-                <input
-                  type="checkbox"
-                  :checked="store.notificationsEnabled"
-                  @change="store.setNotificationsEnabled(($event.target as HTMLInputElement).checked)"
-                />
+                <input type="checkbox" :checked="store.notificationsEnabled" @change="store.setNotificationsEnabled(($event.target as HTMLInputElement).checked)" />
                 <span class="switch-track"><span class="switch-thumb" /></span>
               </span>
             </label>
-
             <label class="toggle-row">
               <span class="setting-copy">
-                <span class="section-label">Permission Bubble</span>
+                <span class="section-label">Permission bubble</span>
                 <span class="setting-help">Show Allow once / Deny requests; hidden requests stay pending</span>
               </span>
               <span class="switch">
-                <input
-                  type="checkbox"
-                  :checked="store.permissionBubbleEnabled"
-                  @change="store.setPermissionBubbleEnabled(($event.target as HTMLInputElement).checked)"
-                />
+                <input type="checkbox" :checked="store.permissionBubbleEnabled" @change="store.setPermissionBubbleEnabled(($event.target as HTMLInputElement).checked)" />
                 <span class="switch-track"><span class="switch-thumb" /></span>
               </span>
             </label>
-
             <label class="toggle-row">
               <span class="setting-copy">
                 <span class="section-label">Sound</span>
                 <span class="setting-help">Play the pet's local status cues</span>
               </span>
               <span class="switch">
-                <input
-                  type="checkbox"
-                  :checked="store.soundEnabled"
-                  @change="store.setSoundEnabled(($event.target as HTMLInputElement).checked)"
-                />
+                <input type="checkbox" :checked="store.soundEnabled" @change="store.setSoundEnabled(($event.target as HTMLInputElement).checked)" />
                 <span class="switch-track"><span class="switch-thumb" /></span>
               </span>
             </label>
+          </div>
 
-            <label
-              class="toggle-row"
-              :class="{ 'is-disabled': !store.launchAtStartupSupported }"
-              :title="store.launchAtStartupSupported ? 'Start Agent Pets when you sign in' : 'Available in packaged builds'"
-            >
+          <div class="settings-section settings-card">
+            <label class="toggle-row" :class="{ 'is-disabled': !store.launchAtStartupSupported }" :title="store.launchAtStartupSupported ? 'Start Agent Pets when you sign in' : 'Available in packaged builds'">
               <span class="setting-copy">
                 <span class="section-label">Launch at startup</span>
-                <span class="setting-help">
-                  {{ store.launchAtStartupSupported ? 'Start when you sign in' : 'Available after installation' }}
-                </span>
+                <span class="setting-help">{{ store.launchAtStartupSupported ? 'Start when you sign in' : 'Available after installation' }}</span>
               </span>
               <span class="switch">
-                <input
-                  type="checkbox"
-                  :checked="store.launchAtStartup"
-                  :disabled="!store.launchAtStartupSupported"
-                  @change="store.setLaunchAtStartup(($event.target as HTMLInputElement).checked)"
-                />
+                <input type="checkbox" :checked="store.launchAtStartup" :disabled="!store.launchAtStartupSupported" @change="store.setLaunchAtStartup(($event.target as HTMLInputElement).checked)" />
                 <span class="switch-track"><span class="switch-thumb" /></span>
               </span>
             </label>
-          </div>
-
-          <div class="settings-section toggle-group">
-            <div class="section-label group-label">Pet reactions</div>
-
-            <label class="toggle-row">
-              <span class="section-label">Bounce &amp; shake</span>
-              <span class="switch">
-                <input
-                  type="checkbox"
-                  :checked="store.reactionsEnabled"
-                  @change="store.setReactionsEnabled(($event.target as HTMLInputElement).checked)"
-                />
-                <span class="switch-track"><span class="switch-thumb" /></span>
-              </span>
-            </label>
-
-            <label class="toggle-row">
-              <span class="section-label">Bubble</span>
-              <span class="switch">
-                <input
-                  type="checkbox"
-                  :checked="store.bubbleEnabled"
-                  @change="store.setBubbleEnabled(($event.target as HTMLInputElement).checked)"
-                />
-                <span class="switch-track"><span class="switch-thumb" /></span>
-              </span>
-            </label>
-          </div>
-
-          <div class="settings-section">
-            <button class="setup-btn" @click="store.showWizard = true">Setup Wizard</button>
-          </div>
-
-          <div class="settings-section">
-            <button class="restart-btn" @click="restartApp">Restart Pet</button>
-          </div>
-
-          <div class="settings-section">
-            <button class="quit-btn" @click="quitApp">Quit</button>
           </div>
         </template>
 
@@ -542,7 +546,8 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
             </div>
           </div>
 
-          <div v-if="progression" class="settings-section progression-card">
+          <template v-if="progression">
+          <div class="settings-section progression-card">
             <div class="mood-header">
               <div class="mood-title">
                 <div class="section-label">Growth</div>
@@ -566,12 +571,25 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
               <span v-else>Start a streak</span>
             </div>
           </div>
+          <div class="settings-section settings-card toggle-group">
+            <label class="toggle-row">
+              <span class="setting-copy">
+                <span class="section-label">Mood visuals</span>
+                <span class="setting-help">Keep mood tracking, but hide its aura and color changes</span>
+              </span>
+              <span class="switch">
+                <input type="checkbox" :checked="store.moodVisualsEnabled" @change="store.setMoodVisualsEnabled(($event.target as HTMLInputElement).checked)" />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
+            </label>
+          </div>
+          </template>
           <div v-else class="growth-unavailable" role="status">
             Growth data is unavailable until local storage is ready.
           </div>
         </template>
 
-        <template v-else>
+        <template v-else-if="settingsTab === 'pets'">
           <div class="settings-section">
             <div class="section-label">Pet</div>
             <div class="pet-list">
@@ -661,6 +679,22 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
             </div>
           </div>
         </template>
+
+        <template v-else>
+          <div class="settings-section settings-hero-card">
+            <div class="settings-hero-icon" aria-hidden="true">⋯</div>
+            <div>
+              <div class="section-label">Keep control</div>
+              <p>Setup, restart, and lifecycle actions stay separate from daily preferences.</p>
+            </div>
+          </div>
+          <div class="settings-section settings-card advanced-actions">
+            <button class="setup-btn" @click="store.showWizard = true">Setup Wizard</button>
+            <button class="restart-btn" @click="restartApp">Restart Pet</button>
+            <button class="quit-btn" @click="quitApp">Quit</button>
+          </div>
+        </template>
+      </div>
       </div>
     </template>
   </div>
@@ -1043,6 +1077,172 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   padding: 8px 12px 4px;
 }
 
+.settings-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.settings-nav {
+  width: 116px;
+  flex: 0 0 116px;
+  padding: 12px 8px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 10, 18, 0.18);
+}
+
+.settings-nav-heading {
+  padding: 0 7px 8px;
+  color: #7f879b;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  gap: 7px;
+  padding: 6px 7px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #9da3b5;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.settings-nav-item:hover {
+  color: #e0e5f7;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.settings-nav-item.active {
+  color: #e9f2ff;
+  border-color: rgba(157, 216, 255, 0.25);
+  background: linear-gradient(145deg, rgba(157, 216, 255, 0.2), rgba(139, 156, 247, 0.08));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 4px 12px rgba(0, 0, 0, 0.16);
+}
+
+.settings-nav-item:focus-visible {
+  outline: 2px solid #9dd8ff;
+  outline-offset: 1px;
+}
+
+.settings-nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 23px;
+  height: 23px;
+  flex: 0 0 23px;
+  border: 1px solid rgba(157, 216, 255, 0.22);
+  border-radius: 7px;
+  color: #9dd8ff;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.settings-nav-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav-copy strong {
+  overflow: hidden;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-nav-copy small {
+  overflow: hidden;
+  color: #737b90;
+  font-size: 8px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-content-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 2px 3px;
+}
+
+.settings-kicker {
+  color: #7f879b;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.settings-content-header h2 {
+  margin: 0;
+  color: #e8ecfa;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.settings-hero-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(157, 216, 255, 0.17);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(157, 216, 255, 0.1), transparent 62%),
+    rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.11);
+}
+
+.settings-hero-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 31px;
+  height: 31px;
+  flex: 0 0 31px;
+  border: 1px solid rgba(157, 216, 255, 0.38);
+  border-radius: 10px;
+  background: rgba(157, 216, 255, 0.12);
+  color: #bfe9ff;
+  font-size: 17px;
+  box-shadow: 0 0 14px rgba(157, 216, 255, 0.15);
+}
+
+.settings-hero-card p {
+  margin: 3px 0 0;
+  color: #9da6bb;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.settings-card {
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.025);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+}
+
+.advanced-actions {
+  gap: 8px;
+}
+
 .settings-tab {
   padding: 5px 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1075,6 +1275,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   flex-direction: column;
   gap: 12px;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
 }
@@ -1488,6 +1689,9 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 .scale-option {
   flex: 1;
   padding: 5px 0;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
   border-radius: 5px;
   color: #a4a8b4;
   font-size: 12px;
@@ -1581,6 +1785,8 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   .switch-track,
   .switch-thumb,
   .settings-tab,
+  .settings-nav-item,
+  .edge-peek-handle,
   .dashboard-tab,
   .progression-fill {
     transition-duration: 0.01ms;
@@ -1594,6 +1800,9 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   }
 
   .desktop-toggle-group,
+  .settings-card,
+  .settings-hero-card,
+  .settings-nav-item,
   .toggle-row,
   .progression-card,
   .growth-unavailable {
@@ -1606,6 +1815,12 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
     background: rgb(18, 18, 26);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+  }
+
+  .settings-card,
+  .settings-hero-card,
+  .settings-nav-item {
+    background: rgb(28, 27, 38);
   }
 
   .progression-card,

@@ -13,6 +13,7 @@
 - **多助手支援** — OpenCode、Codex、Claude Code（CLI 與 Desktop）。
 - **自訂寵物** — 匯入自己的精靈圖，或是像 [codex-pets.net](https://codex-pets.net) 這類網站的 `.codex-pet.zip` 素材包。
 - **桌面控制** — 系統匣選單、原生等待／完成通知、勿擾模式、音效控制，以及可選的登入時啟動。
+- **Mini／Edge 模式** — Mini 可隨時切換；Edge Peek 需由使用者在 Settings 或 Tray 開啟，拖到螢幕邊緣停留片刻會顯示專用 Liquid Glass handle，不會裁切寵物本體，且會依螢幕與 DPI 變更重新定位。
 - **權限控制** — OpenCode 的 permission request 可直接在 Liquid Glass 寵物氣泡選擇只允許一次或拒絕；只有符合條件且顯示中的請求才會註冊全域快捷鍵。
 - **寵物成長** — 完成 session、受上限保護的觀察到的工作時間、每日首次完成與連續天數會產生持久 XP；Level 與 Evolution 由主行程 SQLite ledger 保存，重開後仍會恢復。
 
@@ -57,7 +58,7 @@
 | **拖曳**寵物 | 移動到新位置（重開 app 後會保留） |
 | **右鍵點擊** | 沒有作用（已停用） |
 
-系統匣選單可以顯示／隱藏寵物、開啟面板或 Settings、切換勿擾模式／音效／通知、在打包版本設定登入時啟動、以系統匣圖示標示待處理狀態，以及結束 app。關閉或隱藏寵物視窗後，hooks 與背景狀態仍會運作，直到選擇 **Quit**。
+系統匣選單可以顯示／隱藏寵物、開啟面板或 Settings、切換 Mini／Edge Peek 模式／勿擾模式／音效／通知、在打包版本設定登入時啟動、以系統匣圖示標示待處理狀態，以及結束 app。關閉或隱藏寵物視窗後，hooks 與背景狀態仍會運作，直到選擇 **Quit**。
 
 寵物下方有一個浮動狀態列，最多顯示 **3 行**，每行對應一個目前活躍的工具家族（Codex / Claude / OpenCode）。同一工具的 CLI 跟 Desktop 版本會合併成一行顯示（例如 `Claude (CLI+Desktop) · Thinking`）。當沒有任何工具在跑時，會顯示一行寵物整體的 idle/offline 狀態。
 
@@ -87,18 +88,25 @@
 
 #### Settings 畫面
 
-面板分成 **Settings**、**Growth** 與 **Pets** 三個分頁。
+面板使用可擴充的分區導覽：**Appearance**、**Desktop**、**Pets**、**Growth** 與 **Advanced**。
 
-**Settings 分頁**
+**Appearance 分區**
 
 - **Size** — S / M / L / XL / XXL 調整寵物大小。
+- **Bounce & shake** — 點擊／狀態切換時的彈跳、閒置搖擺、waiting-permission 抖動。**預設關閉。**
+- **Status bubble** — 一般成功／錯誤提示約 3 秒後自動關閉，並以進度條顯示剩餘時間；權限請求絕不會自動關閉。**預設關閉。**
+
+**Desktop 分區**
+
+- **Mini mode** — 將寵物縮成 96px 左右的小型視圖，隨時可恢復 Normal。
+- **Edge peek** — 獨立選項，**預設關閉**。開啟後拖到任一螢幕邊緣停留約 650ms，會顯示專用 42px 厚、96px 長的 Liquid Glass handle；按下或 hover 會展開回 Normal，不會留下寵物裁切區塊。待處理的權限請求會自動恢復完整可操作視圖。
 - **Do Not Disturb** — 勿擾模式會抑制原生通知、寵物音效、額外動態效果與非必要氣泡，但不會停止事件接收。**預設關閉。**
 - **Notifications** — 等待核准、等待輸入、完成與錯誤的原生通知；同 session 的重複事件有冷卻時間，結束事件會批次合併。**預設開啟。**
 - **Sound** — 成功/失敗/等待核准時的短音效（用 Web Audio 即時合成，不需要音檔）。**預設關閉。**
 - **Launch at startup** — 登入系統時啟動 Agent Pets；此開關只在打包版本可用。
-- **Bounce & shake** — 點擊/狀態切換時的彈跳、閒置搖擺、waiting-permission 抖動。**預設關閉。**
-- **Bubble** — 完成提示氣泡跟寵物上方「正在做什麼」的活動氣泡。一般成功／錯誤提示約 3 秒後自動關閉，並以進度條顯示剩餘時間；權限請求絕不會自動關閉。**預設關閉。**
 - **顯示權限泡泡** — 與一般 Bubble 分開的 Liquid Glass 權限卡片開關。關閉只會隱藏 Allow once／Deny 卡片，不會允許或拒絕請求；待處理請求仍由 Broker 保留、繼續顯示在系統匣徽章，並可由 Agent 或終端機處理。**預設開啟。**
+
+**Advanced 分區**
 - **Setup Wizard** — 重新偵測工具，或安裝/重新安裝 hooks。
 - **Restart Pet** — 寵物或動畫卡住時，完整重新啟動 Agent Pets。
 - **Quit** — 結束 Agent Pets。
@@ -106,6 +114,7 @@
 **Growth 分頁**
 
 - **Mood** — 每天從低基準 10 開始；任務成功 +4、失敗 -6。長任務每完成 2 個工具會再 +1（每個任務最多 +8），每持續工作 5 分鐘也會 +1（每個任務最多 +4），因此完成獎勵之前的進度分數最多 +12。心情成長時，會以目前寵物影格生成貼合自身輪廓的動態能量層，並在 90 以上進入完整爆氣效果。點 **Reset** 只會回到 10，不會額外加分。
+- **Mood visuals** — 可關閉 mood 對寵物 aura、色彩與能量層的視覺影響；數值仍會持續追蹤，之後重新開啟即可恢復。
 - **XP／Level** — Growth chip 會顯示目前選取寵物的持久 XP、Level、Evolution 階段與目前 streak。XP 使用有版本的去重 ledger：每個 canonical session 完成 +20、每日首次完成 +10、每觀察到 30 分鐘 active coding +2（每個 session 最多 +10），延續前一天 streak +5。失敗或取消不會扣永久 XP；token milestone 等待精確 token event contract。
 
 **Pets 分頁**
@@ -320,6 +329,7 @@ agent-pets/
 │   ├── permission-adapter-server.ts # 獨立的 OpenCode 回覆通道
 │   ├── permission-audit.ts  # 有上限且去敏感內容的本機 audit
 │   ├── progression.ts       # SQLite XP ledger 與 Level projection
+│   ├── pet-window-mode.ts   # Mini／Edge 幾何與 dwell 常數
 │   ├── desktop-preferences.ts # Main 擁有的桌面偏好
 │   ├── desktop-notifications.ts # 原生通知與有上限的診斷紀錄
 │   ├── desktop-tray.ts      # 系統匣生命週期與選單

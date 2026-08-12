@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
 import type { PermissionDecisionValue, PermissionRequestView } from '../src/types/permission'
 import type { ProgressionSnapshot } from '../src/types/progression'
+import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   onAgentStatusEvent: (callback: (event: unknown) => void) => {
@@ -16,8 +17,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('pet-drag-start')
   },
 
-  notifyDragEnd: () => {
-    ipcRenderer.send('pet-drag-end')
+  notifyDragEnd: (moved: boolean) => {
+    ipcRenderer.send('pet-drag-end', { moved })
+  },
+
+  notifyPetHover: () => {
+    ipcRenderer.send('pet-window-hover')
+  },
+
+  setPetWindowMode: (mode: PetWindowMode): Promise<PetWindowModeState> => {
+    return ipcRenderer.invoke('pet-window-mode-set', mode)
+  },
+
+  initializePetWindowMode: (): Promise<PetWindowModeState> => {
+    return ipcRenderer.invoke('pet-window-mode-init')
+  },
+
+  onPetWindowModeUpdated: (callback: (state: PetWindowModeState) => void) => {
+    const handler = (_event: unknown, state: PetWindowModeState) => callback(state)
+    ipcRenderer.on('pet-window-mode-updated', handler)
+    return () => {
+      ipcRenderer.removeListener('pet-window-mode-updated', handler)
+    }
   },
 
   resizeWindow: (width: number, height: number) => {

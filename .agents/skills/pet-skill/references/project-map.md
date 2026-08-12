@@ -20,6 +20,7 @@
 - Realtime state and current local persistence: `src/stores/agentStore.ts`.
 - Pet surface: `src/components/DesktopPet.vue` and `src/components/PetAnimation.vue`.
 - Panel/settings surface: `src/components/StatusPanel.vue` and `src/components/SetupWizard.vue`.
+- Window mode geometry: `electron/pet-window-mode.ts`; shared mode snapshot types: `src/types/pet-window.ts`.
 - Canonical current event types: `src/types/agent.ts`.
 
 ## Existing security controls to preserve
@@ -39,6 +40,7 @@
 - DND, notifications, permission-bubble visibility, sound, and launch-at-startup are main-owned desktop preferences persisted under Electron `userData`; legacy sound is migrated once from renderer storage. Hiding the permission bubble never changes Broker state or the Tray attention badge.
 - Tray is a main-process singleton. Closing the pet hides it, while a destroyed renderer can be rebuilt through the existing main process.
 - Main process persists window position/size through helpers in `electron/setup.ts`.
+- Mini／Edge window mode is main-owned in `electron/main.ts` with pure geometry rules in `electron/pet-window-mode.ts`; the renderer receives a sanitized mode snapshot and never chooses native bounds directly. Edge Peek is a persisted, off-by-default desktop preference; when enabled it uses a 650ms dwell and a 42px-thick × 96px-long opaque handle only after the full-size window is attached to a work-area edge, restores the exact pre-edge native bounds on hover/click, and pending permission requests force Normal mode.
 - Status events feed the Pinia store through the typed preload listener.
 - Click-through combines renderer hit testing and Electron mouse passthrough.
 - Three Agent families are supported through hooks: Codex, Claude Code, and OpenCode.

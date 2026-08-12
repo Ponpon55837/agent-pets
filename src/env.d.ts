@@ -3,6 +3,7 @@
 import type { DesktopPreferences, DesktopPreferencesPatch } from './types/desktop'
 import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView } from './types/permission'
 import type { ProgressionSnapshot } from './types/progression'
+import type { PetWindowMode, PetWindowModeState } from './types/pet-window'
 
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
@@ -15,7 +16,11 @@ declare global {
     electronAPI?: {
       onAgentStatusEvent: (callback: (event: any) => void) => () => void
       startDrag: () => void
-      notifyDragEnd: () => void
+      notifyDragEnd: (moved: boolean) => void
+      notifyPetHover: () => void
+      setPetWindowMode: (mode: PetWindowMode) => Promise<PetWindowModeState>
+      initializePetWindowMode: () => Promise<PetWindowModeState>
+      onPetWindowModeUpdated: (callback: (state: PetWindowModeState) => void) => () => void
       resizeWindow: (width: number, height: number) => void
       reportContentHeight: (height: number) => void
       setMousePassthrough: (ignore: boolean) => void

@@ -10,6 +10,8 @@ import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '../types/agent'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../types/desktop'
 import type { PermissionDecisionValue, PermissionRequestView } from '../types/permission'
 import type { ProgressionSnapshot } from '../types/progression'
+import type { PetWindowMode, PetWindowModeState } from '../types/pet-window'
+import { normalizePetWindowModeState } from '../types/pet-window'
 import { formatProject } from '../utils/format'
 import { isDesktopEffectActive } from '../utils/desktop-effects'
 import {
@@ -167,6 +169,7 @@ interface MoodTaskProgress {
 export const useAgentStore = defineStore('agent', () => {
   const sessions = ref<Record<string, AgentSession>>({})
   const isDragging = ref(false)
+  const petWindowMode = ref<PetWindowModeState>({ mode: 'normal' })
   const panelView = ref<'sessions' | 'settings'>('sessions')
   const selectedPet = ref<string>(localStorage.getItem('agent-pet-id') || 'aang-airbender')
   const petScale = ref(parseFloat(localStorage.getItem('agent-pet-scale') || '1'))
@@ -268,6 +271,7 @@ export const useAgentStore = defineStore('agent', () => {
     localStorage.setItem('agent-pet-mood-version', MOOD_SYSTEM_VERSION)
   }
   const mood = ref(initialMood)
+  const moodVisualsEnabled = ref(localStorage.getItem('agent-pet-mood-visuals') !== '0')
 
   // Off by default so the app doesn't surprise anyone with sudden audio;
   // opt-in via the Settings toggle.
@@ -294,6 +298,7 @@ export const useAgentStore = defineStore('agent', () => {
   const dndEnabled = ref(false)
   const notificationsEnabled = ref(true)
   const permissionBubbleEnabled = ref(true)
+  const edgeModeEnabled = ref(false)
   const launchAtStartup = ref(false)
   const launchAtStartupSupported = ref(false)
   const desktopPreferencesReady = ref(false)
@@ -330,6 +335,11 @@ export const useAgentStore = defineStore('agent', () => {
     localStorage.setItem('agent-pet-mood', String(MOOD_BASELINE))
     localStorage.setItem('agent-pet-mood-date', todayKey())
     localStorage.setItem('agent-pet-mood-version', MOOD_SYSTEM_VERSION)
+  }
+
+  function setMoodVisualsEnabled(enabled: boolean) {
+    moodVisualsEnabled.value = enabled
+    localStorage.setItem('agent-pet-mood-visuals', enabled ? '1' : '0')
   }
 
   function showToast(source: AgentSource, project: string | undefined, tone: 'success' | 'error') {
@@ -384,6 +394,7 @@ export const useAgentStore = defineStore('agent', () => {
     dndEnabled.value = preferences.dndEnabled
     notificationsEnabled.value = preferences.notificationsEnabled
     permissionBubbleEnabled.value = preferences.permissionBubbleEnabled
+    edgeModeEnabled.value = preferences.edgeModeEnabled
     soundEnabled.value = preferences.soundEnabled
     launchAtStartup.value = preferences.launchAtStartup
     launchAtStartupSupported.value = preferences.launchAtStartupSupported
@@ -430,6 +441,11 @@ export const useAgentStore = defineStore('agent', () => {
     updateDesktopPreferences({ permissionBubbleEnabled: enabled })
   }
 
+  function setEdgeModeEnabled(enabled: boolean) {
+    edgeModeEnabled.value = enabled
+    updateDesktopPreferences({ edgeModeEnabled: enabled })
+  }
+
   function setLaunchAtStartup(enabled: boolean) {
     if (!launchAtStartupSupported.value) return
     launchAtStartup.value = enabled
@@ -460,6 +476,28 @@ export const useAgentStore = defineStore('agent', () => {
   function setScale(scale: number) {
     petScale.value = scale
     localStorage.setItem('agent-pet-scale', String(scale))
+  }
+
+  function setPetWindowModeState(value: unknown): void {
+    petWindowMode.value = normalizePetWindowModeState(value)
+  }
+
+  async function setPetMode(mode: PetWindowMode): Promise<void> {
+    try {
+      const state = await window.electronAPI?.setPetWindowMode(mode)
+      if (state) setPetWindowModeState(state)
+    } catch {
+      // Main remains authoritative; the next mode broadcast restores state.
+    }
+  }
+
+  async function initializePetWindowMode(): Promise<void> {
+    try {
+      const state = await window.electronAPI?.initializePetWindowMode()
+      if (state) setPetWindowModeState(state)
+    } catch {
+      petWindowMode.value = { mode: 'normal' }
+    }
   }
 
   function setProgressionSnapshot(value: unknown): boolean {
@@ -955,6 +993,7 @@ export const useAgentStore = defineStore('agent', () => {
   return {
     sessions,
     isDragging,
+    petWindowMode,
     panelView,
     selectedPet,
     petScale,
@@ -978,10 +1017,12 @@ export const useAgentStore = defineStore('agent', () => {
     toast,
     toastRemainingMs,
     mood,
+    moodVisualsEnabled,
     soundEnabled,
     dndEnabled,
     notificationsEnabled,
     permissionBubbleEnabled,
+    edgeModeEnabled,
     launchAtStartup,
     launchAtStartupSupported,
     desktopPreferencesReady,
@@ -1023,12 +1064,16 @@ export const useAgentStore = defineStore('agent', () => {
     handlePanelOpened,
     setPet,
     setScale,
+    setPetWindowModeState,
+    setPetMode,
+    initializePetWindowMode,
     setSoundEnabled,
     applyDesktopPreferences,
     initializeDesktopPreferences,
     setDndEnabled,
     setNotificationsEnabled,
     setPermissionBubbleEnabled,
+    setEdgeModeEnabled,
     setLaunchAtStartup,
     setMultiPetEnabled,
     setReactionsEnabled,
@@ -1036,6 +1081,7 @@ export const useAgentStore = defineStore('agent', () => {
     setFamilyPet,
     getPetForFamily,
     resetMood,
+    setMoodVisualsEnabled,
     resizePetWindow,
     loadPets,
     setQuotaUsage,

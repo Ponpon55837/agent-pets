@@ -13,6 +13,7 @@ Desktop pet that shows real-time status of your AI coding agents.
 - **Multi-agent support** — OpenCode, Codex, Claude Code (CLI & Desktop).
 - **Custom pets** — Import your own spritesheet, or a `.codex-pet.zip` sprite kit from sites like [codex-pets.net](https://codex-pets.net).
 - **Desktop controls** — Tray menu, native waiting/completion notifications, Do Not Disturb, sound control, and optional launch at startup.
+- **Mini / Edge mode** — Mini is always opt-in; Edge Peek is a separate Settings/Tray toggle (off by default) that shows a dedicated Liquid Glass handle at the display edge instead of clipping the pet. Bounds are restored across display and DPI changes.
 - **Permission Control** — OpenCode permission requests can be allowed once or denied from a Liquid Glass pet bubble; scoped hotkeys are available only while an eligible request is visible.
 - **Pet progression** — Completed sessions, bounded observed active-time, first completions of the day, and consecutive-day streaks earn durable XP. Level and evolution are restored after restart from a main-process SQLite ledger.
 
@@ -57,7 +58,7 @@ Download `Agent Pets.dmg`, open it, and drag the app to your Applications folder
 | **Drag** the pet | Move it to a new position (remembered across restarts) |
 | **Right-click** | Nothing (disabled) |
 
-The system Tray menu can show or hide the pets, open the panel or Settings, toggle Do Not Disturb, sound and notifications, configure launch at startup in packaged builds, mark pending attention on the Tray icon, and quit the app. Closing or hiding the pet window keeps hooks and background status running until **Quit** is selected.
+The system Tray menu can show or hide the pets, open the panel or Settings, toggle Mini / Edge Peek mode, Do Not Disturb, sound and notifications, configure launch at startup in packaged builds, mark pending attention on the Tray icon, and quit the app. Closing or hiding the pet window keeps hooks and background status running until **Quit** is selected.
 
 Below the pet, a floating status bar shows up to **3 lines**, one per active tool family (Codex / Claude / OpenCode). CLI and Desktop variants of the same tool are grouped onto a single line (e.g. `Claude (CLI+Desktop) · Thinking`). When nothing is active, a single line shows the pet's overall idle/offline state.
 
@@ -87,18 +88,25 @@ Click the **⚙** icon in the header to switch to Settings.
 
 #### Settings View
 
-The panel is split into **Settings**, **Growth**, and **Pets** tabs.
+The panel uses an extensible section navigator: **Appearance**, **Desktop**, **Pets**, **Growth**, and **Advanced**.
 
-**Settings tab**
+**Appearance section**
 
 - **Size** — S / M / L / XL / XXL to scale the pet.
+- **Bounce & shake** — Click/state-change bounce, idle fidget sway, and waiting-permission shake. **Off by default.**
+- **Status bubble** — Ordinary success/error toasts close after about 3 seconds and show the remaining time; permission prompts never auto-dismiss. **Off by default.**
+
+**Desktop section**
+
+- **Mini mode** — Shrinks the pet to a compact 96px surface and can be turned off at any time.
+- **Edge peek** — A separate, **off-by-default** preference. When enabled, dragging to a display edge and holding for about 650ms shows a dedicated 42px-thick × 96px-long Liquid Glass handle; click or hover expands back to Normal without leaving a clipped pet fragment. Pending permission requests always restore the normal interactive surface.
 - **Do Not Disturb** — Suppresses native notifications, pet sounds, extra motion, and nonessential bubbles without stopping event ingestion. **Off by default.**
 - **Notifications** — Native alerts for waiting-permission, waiting-input, completion, and errors. Repeats use a per-session cooldown and terminal events are batched. **On by default.**
 - **Sound** — Short synthesized cues (Web Audio, no audio files) for success/error/waiting-permission. **Off by default.**
 - **Launch at startup** — Start Agent Pets when you sign in. This toggle is available in packaged builds.
-- **Bounce & shake** — Click/state-change bounce, idle fidget sway, and waiting-permission shake. **Off by default.**
-- **Bubble** — The completion toast and "what's it doing" activity bubble above the pet. Ordinary success/error toasts close after about 3 seconds and show the remaining time; permission prompts never auto-dismiss. **Off by default.**
 - **Permission Bubble** — An independent switch for the Liquid Glass Allow once / Deny card. Turning it off hides only the card; pending requests remain with the Broker, stay on the Tray badge, and can still be resolved by the Agent or terminal. **On by default.**
+
+**Advanced section**
 - **Setup Wizard** — Re-run tool detection, or install/reinstall hooks.
 - **Restart Pet** — Fully relaunch Agent Pets if the pet or its animation gets stuck.
 - **Quit** — Exit Agent Pets.
@@ -106,6 +114,7 @@ The panel is split into **Settings**, **Growth**, and **Pets** tabs.
 **Growth tab**
 
 - **Mood** — Starts each day at a low baseline of 10. A successful task gives +4 and an error gives -6. Long tasks also earn +1 for every 2 completed tools (up to +8 per task) and +1 for every 5 minutes of work (up to +4 per task), so progress rewards are capped at +12 before the completion bonus. As mood grows, an animated energy layer built from the current pet frame intensifies around the pet's own silhouette, reaching overdrive at 90+. Click **Reset** to return to 10; it never grants extra mood.
+- **Mood visuals** — Turn off mood's aura, color, and energy-layer presentation without stopping mood tracking; re-enable it at any time.
 - **XP / Level** — The Growth chip shows the selected pet's durable XP, level, evolution stage, and current streak. XP uses a versioned, idempotent ledger: a canonical session completion is +20 XP, the first completion of a local day is +10, each observed 30 minutes of active coding is +2 (capped at +10 per session), and continuing yesterday's streak is +5. Failed or cancelled work grants no permanent XP; token milestones wait for an exact token event contract.
 
 **Pets tab**
@@ -320,6 +329,7 @@ agent-pets/
 │   ├── permission-adapter-server.ts # Dedicated OpenCode response channel
 │   ├── permission-audit.ts  # Bounded redacted local audit
 │   ├── progression.ts       # SQLite XP ledger and level projection
+│   ├── pet-window-mode.ts   # Bounded Mini/Edge geometry and dwell constants
 │   ├── desktop-preferences.ts # Main-owned desktop preferences
 │   ├── desktop-notifications.ts # Native notification delivery and bounded log
 │   ├── desktop-tray.ts      # Tray lifecycle and menu

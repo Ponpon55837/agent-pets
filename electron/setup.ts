@@ -4,6 +4,7 @@ import * as path from 'path'
 import * as os from 'os'
 import { execFileSync } from 'child_process'
 import { randomBytes } from 'crypto'
+import type { PetEdge, PetWindowMode } from '../src/types/pet-window'
 
 const IS_WIN = process.platform === 'win32'
 const IS_MAC = process.platform === 'darwin'
@@ -133,19 +134,78 @@ function windowStatePath(): string {
   return path.join(appDataDir(), 'window-state.json')
 }
 
-type PetWindowState = { x: number; y: number; width?: number; height?: number }
+interface SavedBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+interface SavedDisplayBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+type PetWindowState = {
+  x: number
+  y: number
+  width?: number
+  height?: number
+  mode?: PetWindowMode
+  edge?: PetEdge
+  displayId?: number
+  displayBounds?: SavedDisplayBounds
+  normalBounds?: SavedBounds
+}
+
+function finiteStateNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function parseSavedBounds(value: unknown): SavedBounds | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const raw = value as Record<string, unknown>
+  if (!finiteStateNumber(raw.x) || !finiteStateNumber(raw.y)
+    || !finiteStateNumber(raw.width) || !finiteStateNumber(raw.height)) return undefined
+  if (raw.width <= 0 || raw.height <= 0) return undefined
+  return {
+    x: raw.x,
+    y: raw.y,
+    width: raw.width,
+    height: raw.height,
+  }
+}
+
+function parseSavedDisplayBounds(value: unknown): SavedDisplayBounds | undefined {
+  return parseSavedBounds(value)
+}
 
 function readWindowState(): PetWindowState | null {
   const raw = readFile(windowStatePath())
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw)
-    if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+    if (finiteStateNumber(parsed.x) && finiteStateNumber(parsed.y)) {
+      const mode = parsed.mode === 'normal' || parsed.mode === 'mini' || parsed.mode === 'edge'
+        ? parsed.mode
+        : undefined
+      const edge = parsed.edge === 'left' || parsed.edge === 'right' || parsed.edge === 'top' || parsed.edge === 'bottom'
+        ? parsed.edge
+        : undefined
+      const displayBounds = parseSavedDisplayBounds(parsed.displayBounds)
+      const normalBounds = parseSavedBounds(parsed.normalBounds)
       return {
         x: parsed.x,
         y: parsed.y,
-        width: typeof parsed.width === 'number' ? parsed.width : undefined,
-        height: typeof parsed.height === 'number' ? parsed.height : undefined,
+        width: finiteStateNumber(parsed.width) && parsed.width > 0 ? parsed.width : undefined,
+        height: finiteStateNumber(parsed.height) && parsed.height > 0 ? parsed.height : undefined,
+        ...(mode ? { mode } : {}),
+        ...(edge ? { edge } : {}),
+        ...(finiteStateNumber(parsed.displayId) ? { displayId: parsed.displayId } : {}),
+        ...(displayBounds ? { displayBounds } : {}),
+        ...(normalBounds ? { normalBounds } : {}),
       }
     }
   } catch {}
