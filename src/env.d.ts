@@ -10,6 +10,12 @@ import type {
   AgentAdapterId,
   DiagnosticReport,
 } from './types/agent-adapter'
+import type { PresentationIntent, PresentationStatusUpdate } from './types/presentation'
+import type {
+  ProjectMcpRegistrySnapshot,
+  ProjectMcpRemovalSummary,
+  ProjectMcpSetupSummary,
+} from './types/project-mcp'
 
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
@@ -21,6 +27,8 @@ declare global {
   interface Window {
     electronAPI?: {
       onAgentStatusEvent: (callback: (event: any) => void) => () => void
+      onPresentationIntent: (callback: (intent: PresentationIntent) => void) => () => void
+      publishPresentationStatus: (snapshot: PresentationStatusUpdate) => void
       startDrag: () => void
       notifyDragEnd: (moved: boolean) => void
       notifyPetHover: () => void
@@ -92,6 +100,10 @@ declare global {
         error?: string
       }>
       installIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => Promise<{ ok: boolean; error?: string }>
+      setupProjectMcp: () => Promise<ProjectMcpSetupSummary>
+      listProjectMcp: () => Promise<ProjectMcpRegistrySnapshot>
+      removeProjectMcp: (projectPath: string) => Promise<ProjectMcpRemovalSummary>
+      forgetProjectMcp: (projectPath: string) => Promise<{ ok: boolean; removed: boolean; error?: string }>
       uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => Promise<{ ok: boolean; error?: string }>
       loadPets: () => Promise<Array<{ id: string; displayName: string; folder: string; builtIn: boolean }>>
       addCustomPet: (petData: { id: string; displayName: string }) => Promise<boolean>

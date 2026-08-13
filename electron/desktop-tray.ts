@@ -2,6 +2,7 @@ import { Menu, nativeImage, Tray, type NativeImage } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
 import type { PetWindowMode } from '../src/types/pet-window'
 import { createAttentionBitmap } from './tray-icon'
+import { t } from '../src/i18n'
 
 interface DesktopTrayActions {
   getPreferences: () => DesktopPreferences
@@ -54,8 +55,8 @@ export class DesktopTrayController {
     const preferences = this.actions.getPreferences()
     const visible = this.actions.isPetVisible()
     const attentionLabel = this.attentionCount > 0
-      ? `Needs attention (${this.attentionCount})`
-      : 'No pending attention'
+      ? t('needsAttention', { count: this.attentionCount })
+      : t('noPendingAttention')
 
     if (this.baseIcon) {
       this.tray.setImage(this.attentionCount > 0 && this.attentionIcon
@@ -63,27 +64,26 @@ export class DesktopTrayController {
         : this.baseIcon)
     }
 
-    this.tray.setToolTip([
-      'Agent Pets',
-      preferences.dndEnabled ? 'Do Not Disturb' : '',
-      this.attentionCount > 0 ? `${this.attentionCount} pending` : '',
-    ].filter(Boolean).join(' · '))
+    const tooltipParts = [t('appName')]
+    if (preferences.dndEnabled) tooltipParts.push(t('dnd'))
+    if (this.attentionCount > 0) tooltipParts.push(t('pendingCount', { count: this.attentionCount }))
+    this.tray.setToolTip(tooltipParts.join(' · '))
 
     this.tray.setContextMenu(Menu.buildFromTemplate([
       {
-        label: visible ? 'Hide Pets' : 'Show Pets',
+        label: visible ? t('hidePets') : t('showPets'),
         click: () => visible ? this.actions.hidePet() : this.actions.showPet(),
       },
-      { label: 'Open Control Panel', click: () => this.actions.openPanel() },
-      { label: 'Open Settings', click: () => this.actions.openSettings() },
+      { label: t('openControlPanel'), click: () => this.actions.openPanel() },
+      { label: t('openSettings'), click: () => this.actions.openSettings() },
       {
-        label: 'Mini Mode',
+        label: t('miniMode'),
         type: 'checkbox',
         checked: this.actions.getPetMode() === 'mini',
         click: () => this.safeToggleMiniMode(),
       },
       {
-        label: 'Edge Peek Mode',
+        label: t('edgePeekMode'),
         type: 'checkbox',
         checked: preferences.edgeModeEnabled,
         click: item => this.safeUpdatePreferences({ edgeModeEnabled: item.checked }),
@@ -91,40 +91,46 @@ export class DesktopTrayController {
       { label: attentionLabel, enabled: false },
       { type: 'separator' },
       {
-        label: 'Do Not Disturb',
+        label: t('dnd'),
         type: 'checkbox',
         checked: preferences.dndEnabled,
         click: item => this.safeUpdatePreferences({ dndEnabled: item.checked }),
       },
       {
-        label: 'Sound',
+        label: t('sound'),
         type: 'checkbox',
         checked: preferences.soundEnabled,
         click: item => this.safeUpdatePreferences({ soundEnabled: item.checked }),
       },
       {
-        label: 'Notifications',
+        label: t('notifications'),
         type: 'checkbox',
         checked: preferences.notificationsEnabled,
         click: item => this.safeUpdatePreferences({ notificationsEnabled: item.checked }),
       },
       {
-        label: 'Permission Bubble',
+        label: t('permissionBubble'),
         type: 'checkbox',
         checked: preferences.permissionBubbleEnabled,
         click: item => this.safeUpdatePreferences({ permissionBubbleEnabled: item.checked }),
       },
       {
-        label: 'Launch at Startup',
+        label: 'Presentation MCP',
+        type: 'checkbox',
+        checked: preferences.presentationMcpEnabled,
+        click: item => this.safeUpdatePreferences({ presentationMcpEnabled: item.checked }),
+      },
+      {
+        label: t('launchAtStartup'),
         type: 'checkbox',
         checked: preferences.launchAtStartup,
         enabled: preferences.launchAtStartupSupported,
         click: item => this.safeUpdatePreferences({ launchAtStartup: item.checked }),
       },
       { type: 'separator' },
-      { label: 'Check for Updates (not available yet)', enabled: false },
+      { label: t('checkUpdates'), enabled: false },
       { type: 'separator' },
-      { label: 'Quit', click: () => this.actions.quit() },
+      { label: t('quit'), click: () => this.actions.quit() },
     ]))
   }
 

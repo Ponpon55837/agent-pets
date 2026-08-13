@@ -3,6 +3,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { promisify } from 'node:util'
+import { translateBackendError } from '../src/i18n.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -99,9 +100,9 @@ function displayString(value: unknown, fallback: string): string {
 }
 
 function safeError(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.name === 'AbortError') return 'Request timed out. Try again.'
-  if (error instanceof QuotaDisplayError && error.message) return error.message
-  return fallback
+  if (error instanceof Error && error.name === 'AbortError') return translateBackendError('Request timed out. Try again.')
+  if (error instanceof QuotaDisplayError && error.message) return translateBackendError(error.message)
+  return translateBackendError(fallback)
 }
 
 async function readLimitedResponse(response: Response): Promise<string> {

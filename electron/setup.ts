@@ -25,7 +25,7 @@ function appDataDir(): string {
 // fix GUI apps commonly need (e.g. the "fix-path" pattern). Falls back to
 // common install locations, then the bare command as a last resort.
 let cachedNodeBin: string | null = null
-function resolveNodeBin(): string {
+export function resolveNodeBin(): string {
   if (cachedNodeBin) return cachedNodeBin
 
   if (IS_WIN) {
@@ -244,6 +244,10 @@ function permissionTokenPath(): string {
   return path.join(hookScriptDeployPath(), 'permission-token')
 }
 
+function presentationTokenPath(): string {
+  return path.join(hookScriptDeployPath(), 'presentation-token')
+}
+
 function ensureEventToken(): string {
   const dir = hookScriptDeployPath()
   ensureDir(dir)
@@ -322,6 +326,45 @@ function ensurePermissionToken(): string {
   return token
 }
 
+function ensurePresentationToken(): string {
+  const dir = hookScriptDeployPath()
+  ensureDir(dir)
+  if (!IS_WIN) {
+    try { fs.chmodSync(dir, 0o700) } catch {}
+  }
+
+  const tokenPath = presentationTokenPath()
+  try {
+    const stat = fs.lstatSync(tokenPath)
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error('Agent Pets presentation token path is not a regular file')
+    }
+    const existing = fs.readFileSync(tokenPath, 'utf8').trim()
+    if (/^[a-f0-9]{64}$/i.test(existing)) {
+      if (!IS_WIN) {
+        try { fs.chmodSync(tokenPath, 0o600) } catch {}
+      }
+      return existing
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code && code !== 'ENOENT') throw error
+  }
+
+  const token = randomBytes(32).toString('hex')
+  const descriptor = fs.openSync(tokenPath, 'w', 0o600)
+  try {
+    fs.writeFileSync(descriptor, `${token}\n`, 'utf8')
+    fs.fsyncSync(descriptor)
+  } finally {
+    fs.closeSync(descriptor)
+  }
+  if (!IS_WIN) {
+    try { fs.chmodSync(tokenPath, 0o600) } catch {}
+  }
+  return token
+}
+
 // --- Bundled integrations/ source (agent-hook.mjs, agent-hook.cmd) ---
 // electron-builder copies integrations/ to Resources/integrations via
 // extraResources; in dev __dirname is <project>/dist-electron so '..' lands
@@ -331,6 +374,16 @@ function integrationsDir(): string {
     return path.join(process.resourcesPath, 'integrations')
   }
   return path.join(__dirname, '..', 'integrations')
+}
+
+function ensurePresentationMcpScript(): void {
+  const sourcePath = path.join(integrationsDir(), 'presentation-mcp.mjs')
+  const source = readFile(sourcePath)
+  if (source !== null) writeFileEnsured(presentationMcpScriptPath(), source)
+}
+
+function presentationMcpScriptPath(): string {
+  return path.join(hookScriptDeployPath(), 'presentation-mcp.mjs')
 }
 
 // --- Write helpers ---
@@ -972,6 +1025,8 @@ function repairWindowsInstalledHooks(): void {
 function refreshInstalledIntegrationScripts(): string {
   const token = ensureEventToken()
   ensurePermissionToken()
+  ensurePresentationToken()
+  ensurePresentationMcpScript()
   if (fileExists(hookScriptPath())) installHookScript()
   if (fileExists(openCodeDesktopPluginPath())) {
     writeFileEnsured(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop'))
@@ -1029,6 +1084,10 @@ export {
   ensureEventToken,
   permissionTokenPath,
   ensurePermissionToken,
+  presentationTokenPath,
+  ensurePresentationToken,
+  ensurePresentationMcpScript,
+  presentationMcpScriptPath,
   ensureDir,
   writeFileEnsured,
   fileExists,

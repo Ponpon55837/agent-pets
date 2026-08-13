@@ -16,6 +16,7 @@
 - **Mini／Edge 模式** — Mini 可隨時切換；Edge Peek 需由使用者在 Settings 或 Tray 開啟，拖到螢幕邊緣停留片刻會顯示專用 Liquid Glass handle，不會裁切寵物本體，且會依螢幕與 DPI 變更重新定位。
 - **權限控制** — OpenCode 的 permission request 可直接在 Liquid Glass 寵物氣泡選擇只允許一次或拒絕；只有符合條件且顯示中的請求才會註冊全域快捷鍵。
 - **寵物成長** — 完成 session、受上限保護的觀察到的工作時間、每日首次完成與連續天數會產生持久 XP；Level 與 Evolution 由主行程 SQLite ledger 保存，重開後仍會恢復。
+- **Presentation MCP** — 本機、僅展示用途的 MCP bridge 提供 `pet_status`、`pet_react`、`pet_say`；不會執行命令、開啟檔案、批准權限或修改 XP。
 
 ---
 
@@ -90,7 +91,11 @@
 
 #### Settings 畫面
 
-面板使用可擴充的分區導覽：**Appearance**、**Desktop**、**Pets**、**Growth** 與 **Advanced**。
+#### 語言與文字
+
+桌面 UI 與原生提示支援繁體中文與 English，包含設定、通知、Tray、Setup Wizard、權限提示與錯誤訊息。在 Settings 的 **語言** 分區即可切換；選擇會保存到本機，並同步寵物、面板、Tray 與原生通知。`Running`、`Thinking`、`Permission`、`Idle`、`Allow once`、`Deny`、Agent 名稱、MCP 工具名稱與 token 等技術詞會保留原文，避免和實際 API／狀態名稱不一致。
+
+面板使用可擴充的分區導覽：**語言**、**Appearance**、**Desktop**、**Pets**、**Growth** 與 **Advanced**。
 
 **Appearance 分區**
 
@@ -107,6 +112,7 @@
 - **Sound** — 成功/失敗/等待核准時的短音效（用 Web Audio 即時合成，不需要音檔）。**預設關閉。**
 - **Launch at startup** — 登入系統時啟動 Agent Pets；此開關只在打包版本可用。
 - **顯示權限泡泡** — 與一般 Bubble 分開的 Liquid Glass 權限卡片開關。關閉只會隱藏 Allow once／Deny 卡片，不會允許或拒絕請求；待處理請求仍由 Broker 保留、繼續顯示在系統匣徽章，並可由 Agent 或終端機處理。**預設開啟。**
+- **Presentation MCP** — 本機 MCP 展示管道開關。開啟後 client 只能送出受限制的反應或純文字話語；勿擾模式與 waiting／error／permission 狀態優先。**預設開啟。**
 
 **Advanced 分區**
 - **Setup Wizard** — 重新偵測工具，或安裝/重新安裝 hooks。
@@ -127,6 +133,75 @@
 - **Multi-pet** — 同時有 2 個以上工具家族在跑時，改成每個家族各顯示一隻小寵物，而不是只顯示優先權最高的那隻。**預設關閉。** 開啟後，每個工具的寵物選擇也會顯示在這個分頁。
 
 點 **‹** 回到 Sessions 畫面。
+
+### Presentation MCP
+
+Presentation MCP 是給支援 MCP 的 Agent 使用的本機 stdio bridge。App 啟動後會建立 bridge 與獨立 token：
+
+```text
+Windows: %USERPROFILE%\\.desktop-pet\\presentation-mcp.mjs
+macOS/Linux: ~/.desktop-pet/presentation-mcp.mjs
+```
+
+請在 MCP client 中使用真正的 Node.js 執行這個 script。它只提供 `pet_status`（唯讀的整理後狀態）、`pet_react`（五種受限制的反應）與 `pet_say`（最長 240 字元、存活 1–15 秒的純文字）。每個 client 每 10 秒最多 3 次；queue 有上限，intent 會自動逾時，client disconnect 時會移除該 client 尚未顯示的 intent。Permission、error、waiting 與勿擾狀態永遠優先。這個管道不能控制工具、檔案、權限、XP、quota 或成就。
+
+#### 一鍵安裝到本機專案
+
+在 **Settings → Advanced** 按下 **Setup MCP for a project / 為專案設定 MCP**，於原生資料夾選擇器選擇本機專案；Agent Pets 會一次為三種支援的 project client 寫入展示 bridge：
+
+- Codex：`.codex/config.toml`（`mcp_servers.agent-pets`）
+- Claude Code：`.mcp.json`（`mcpServers.agent-pets`）
+- OpenCode：`opencode.json`（`mcp.servers.agent-pets`）
+
+這個操作可重複執行。相同設定會回報「已設定」；同名但內容不同的設定會回報衝突並完全不覆蓋。它只修改選定專案的本機設定，不執行 shell 命令，也不會重新安裝 hooks。設定完成後，請重啟對應的 Agent client，讓它重新載入 MCP 工具目錄。
+
+同一張卡片中的 **已連接專案** 清單會記住所有透過此按鈕設定的專案。開啟設定頁時會重新檢查三個 client，顯示「已連接」、「部分連接」、「有衝突」或「找不到資料夾」，並列出專案路徑與最後檢查時間。**重新檢查**會立即更新清單。**移除 MCP** 只會移除仍符合 Agent Pets 原始設定的項目；如果使用者改過設定，會保留檔案並標示衝突。若專案資料夾已不存在，可以只移除清單記錄，不會碰到其他檔案。
+
+#### 讓目前使用中的 Agent 專案接通
+
+1. 先啟動 Agent Pets，在 **Settings → Attention → Presentation MCP** 保持開啟（預設開啟）。App 必須保持執行，因為 stdio bridge 會連到它的本機 loopback control server。
+2. 確認 `node` 是真正的 Node.js，不要使用 `Agent Pets.exe` 當 interpreter。Windows PowerShell 可先確認：
+
+   ```powershell
+   $bridge = Join-Path $env:USERPROFILE '.desktop-pet\presentation-mcp.mjs'
+   node --version
+   Test-Path $bridge
+   ```
+
+3. 依照使用的 Agent client 註冊同一個 bridge。這是 presentation channel，不需要重新安裝 hooks；每個 client 只需要註冊一次，之後重啟 client。
+
+   **Codex CLI／Codex desktop／IDE extension（共用設定）：**
+
+   ```powershell
+   codex mcp add agent-pets -- node $bridge
+   codex mcp list
+   ```
+
+   **Claude Code：**
+
+   ```powershell
+   claude mcp add --scope user agent-pets -- node $bridge
+   claude mcp list
+   ```
+
+   **OpenCode：** 在 `opencode.json` 的 `mcp.servers` 加入（若使用專案設定，也可放在專案自己的設定檔）：
+
+   ```json
+   {
+     "mcp": {
+       "servers": {
+         "agent-pets": {
+           "type": "local",
+           "command": ["node", "C:/Users/<你的帳號>/.desktop-pet/presentation-mcp.mjs"]
+         }
+       }
+     }
+   }
+   ```
+
+4. 完全重啟 Agent client，並用它的 MCP 檢視功能確認 `pet_status`、`pet_react`、`pet_say` 三個工具。若只看到 hooks 的事件而看不到這三個工具，請檢查 bridge 路徑、Node executable、Presentation MCP 開關與 Agent Pets 是否仍在執行。
+
+關閉 Presentation MCP 只會拒絕新的展示 intent，不會移除既有 hooks，也不會影響 Permission Broker、XP 或一般 `/v1/events`。
 
 ---
 
@@ -252,6 +327,7 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 - **路徑清理** — 專案路徑只保留 basename，檔案寫入目的地也會限制在預期根目錄內。
 - **桌面通知** — 通知只會使用正規化後的 Agent 名稱與長度受限的專案 basename，不會顯示或記錄 prompt、工具參數、session identifier 或憑證；診斷紀錄有固定上限，而且只保存事件類別與結果。
 - **桌面偏好 IPC** — 系統匣／勿擾／通知／權限泡泡／登入啟動偏好由 main process 擁有。Renderer 只能從已驗證的第一方 frame 傳送白名單 boolean 欄位，設定檔採長度受限讀取與原子替換。
+- **Presentation MCP** — MCP bridge 只監聽 loopback，使用獨立的每次安裝 token，拒絕瀏覽器來源，限制 JSON body／請求速率，固定三個工具，清理控制字元與 markup，限制訊息長度／TTL／queue，並在 client disconnect 時移除 pending intent；它沒有命令、檔案、權限、XP、quota 或成就權限。
 - **Permission Broker** — 權限回覆使用獨立 loopback port 與專用的每次安裝 token，不會經過一般事件端點。Main process 強制 TTL、一次性狀態轉換、anti-replay、資料上限、Adapter-owned opaque handle、限時快捷鍵、Agent 端解決對帳，以及內容去識別且有上限的本機 audit；只提供 `allow_once` 與 `deny`，刻意不提供永久允許。
 - **Progression 儲存** — XP 只在 Electron 主行程發放。SQLite migration、同一 transaction 的 `pet_progress`／`xp_ledger` 更新、唯一 idempotency key、受上限保護的 session active-time 與 sanitized snapshot，避免 renderer 或重送事件灌高 XP。資料庫只留在本機，不會上傳。
 - **打包執行環境** — Electron fuses 會停用 RunAsNode、Node options／inspect 參數與 `file://` 額外權限，並強制只從 ASAR 載入及驗證內嵌 ASAR 完整性。
@@ -306,6 +382,8 @@ node integrations/install.mjs
 - `~/.claude/settings.json`（Claude Code CLI & Desktop）
 - `~/.desktop-pet/agent-hook.mjs` + `agent-hook.cmd`（上述所有工具共用的 hook script）
 - `~/.desktop-pet/event-token`（每次安裝專用的事件驗證 secret；macOS／Linux 權限為 `0600`）
+- `~/.desktop-pet/presentation-token`（獨立的 Presentation MCP secret；macOS／Linux 權限為 `0600`）
+- `~/.desktop-pet/presentation-mcp.mjs`（MCP client 使用的 stdio bridge）
 
 既有安裝升級後，Agent Pets 會自動更新受管理的 hooks。已經在執行中的 OpenCode 需要重新啟動一次，讓已載入的 plugin 套用事件驗證。
 
@@ -315,6 +393,10 @@ node integrations/install.mjs
 node integrations/install.mjs --claude-code
 node integrations/install.mjs --uninstall --claude-code
 ```
+
+桌面 App 也會在啟動時更新 presentation bridge。MCP client 應把 stdio server 指向 `~/.desktop-pet/presentation-mcp.mjs`（Windows 為 `%USERPROFILE%\\.desktop-pet\\presentation-mcp.mjs`），並使用真正的 Node.js；不可把打包後的 Agent Pets exe 當成 Node interpreter。
+
+> **語言與建置提醒：** 目前設定、Tray、通知、Setup Wizard、權限、錯誤與 onboarding 文字已集中使用繁體中文；技術狀態與工具名稱保留原文。執行 `pnpm build` 或 `pnpm electron:build` 時，建置會先只關閉本專案可辨識的 Agent Pets 程序，避免 `win-unpacked` 檔案鎖定，不會終止其他 Electron 應用程式。
 
 ---
 
@@ -333,6 +415,10 @@ agent-pets/
 │   ├── permission-adapter-server.ts # 獨立的 OpenCode 回覆通道
 │   ├── permission-audit.ts  # 有上限且去敏感內容的本機 audit
 │   ├── progression.ts       # SQLite XP ledger 與 Level projection
+│   ├── presentation-controller.ts # TTL／rate／queue 展示控制邊界
+│   ├── presentation-mcp.ts  # Loopback MCP 展示端點
+│   ├── project-mcp-setup.ts # 安全的專案本機 MCP 設定安裝器
+│   ├── project-mcp-registry.ts # 本機已連接專案清單與狀態檢查
 │   ├── pet-window-mode.ts   # Mini／Edge 幾何與 dwell 常數
 │   ├── desktop-preferences.ts # Main 擁有的桌面偏好
 │   ├── desktop-notifications.ts # 原生通知與有上限的診斷紀錄
@@ -343,7 +429,10 @@ agent-pets/
 ├── integrations/
 │   ├── install.mjs          # 獨立的 CLI hook 安裝程式
 │   ├── agent-hook.mjs       # 共用的 hook script（透過 extraResources 打包進 app）
-│   └── agent-hook.cmd       # agent-hook.mjs 的 Windows 包裝腳本
+│   ├── agent-hook.cmd       # agent-hook.mjs 的 Windows 包裝腳本
+│   └── presentation-mcp.mjs # 獨立 stdio MCP 展示 bridge
+├── scripts/
+│   └── stop-agent-pets.mjs  # 建置前清理本專案 Agent Pets 程序
 ├── src/
 │   ├── components/
 │   │   ├── DesktopPet.vue   # 寵物視窗（拖曳＋點擊）
@@ -355,7 +444,8 @@ agent-pets/
 │   ├── types/
 │   │   ├── agent.ts         # Agent 事件型別
 │   │   ├── agent-adapter.ts  # Adapter capability／status 契約
-│   │   └── desktop.ts       # 桌面偏好 IPC 型別
+│   │   ├── desktop.ts       # 桌面偏好 IPC 型別
+│   │   └── presentation.ts  # Presentation intent／status 契約
 │   └── utils/
 │       ├── format.ts        # 共用格式化函式
 │       └── sound.ts         # 即時合成音效（Web Audio API）

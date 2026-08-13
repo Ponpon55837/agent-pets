@@ -6,6 +6,7 @@ import StatusPanel from './components/StatusPanel.vue'
 import SetupWizard from './components/SetupWizard.vue'
 import { playCue } from './utils/sound'
 import type { DesktopPreferences } from './types/desktop'
+import { setLocale as applyLocale } from './i18n'
 
 const store = useAgentStore()
 const isPanelWindow = window.location.hash === '#panel'
@@ -18,6 +19,7 @@ let cleanupPetWindowMode: (() => void) | null = null
 let cleanupProgression: (() => void) | null = null
 let cleanupQuotaUpdated: (() => void) | null = null
 let cleanupPermissionRequests: (() => void) | null = null
+let cleanupPresentationIntent: (() => void) | null = null
 let staleTimer: ReturnType<typeof setInterval> | null = null
 let successTimer: ReturnType<typeof setInterval> | null = null
 let quotaTimer: ReturnType<typeof setInterval> | null = null
@@ -99,6 +101,8 @@ function handleStorage(e: StorageEvent) {
     store.mood = parseFloat(e.newValue)
   } else if (e.key === 'agent-pet-mood-visuals') {
     store.moodVisualsEnabled = e.newValue !== '0'
+  } else if (e.key === 'agent-pet-locale' && e.newValue) {
+    applyLocale(e.newValue)
   }
 }
 
@@ -121,6 +125,11 @@ onMounted(() => {
       ) {
         playCue(cue)
       }
+    })
+  }
+  if (electronAPI?.onPresentationIntent) {
+    cleanupPresentationIntent = electronAPI.onPresentationIntent((intent: unknown) => {
+      store.handlePresentationIntent(intent)
     })
   }
   if (isPanelWindow && electronAPI?.onPanelOpened) {
@@ -176,6 +185,17 @@ onMounted(() => {
 watch(() => store.petScale, (v) => {
   document.documentElement.style.setProperty('--pet-scale', String(v))
 })
+
+// The main process keeps the MCP status projection sanitized and authoritative
+// for DND/enabled state. Only the pet renderer publishes it; the panel never
+// becomes a second source of truth.
+watch(
+  () => store.getPresentationStatus(),
+  (snapshot) => {
+    if (!isPanelWindow) window.electronAPI?.publishPresentationStatus(snapshot)
+  },
+  { deep: true, immediate: true },
+)
 
 // The compact meter only needs quota while a Codex/Claude family is active.
 // The main-process cache coalesces requests from the pet and panel renderer,
@@ -237,6 +257,7 @@ onUnmounted(() => {
   cleanupProgression?.()
   cleanupQuotaUpdated?.()
   cleanupPermissionRequests?.()
+  cleanupPresentationIntent?.()
   window.removeEventListener('mousemove', handlePetMouseMove, true)
   window.removeEventListener('storage', handleStorage)
   if (staleTimer) clearInterval(staleTimer)

@@ -16,6 +16,7 @@ Desktop pet that shows real-time status of your AI coding agents.
 - **Mini / Edge mode** — Mini is always opt-in; Edge Peek is a separate Settings/Tray toggle (off by default) that shows a dedicated Liquid Glass handle at the display edge instead of clipping the pet. Bounds are restored across display and DPI changes.
 - **Permission Control** — OpenCode permission requests can be allowed once or denied from a Liquid Glass pet bubble; scoped hotkeys are available only while an eligible request is visible.
 - **Pet progression** — Completed sessions, bounded observed active-time, first completions of the day, and consecutive-day streaks earn durable XP. Level and evolution are restored after restart from a main-process SQLite ledger.
+- **Presentation MCP** — A local, presentation-only MCP bridge exposes `pet_status`, `pet_react`, and `pet_say`. It never runs commands, opens files, approves permissions, or changes XP.
 
 ---
 
@@ -90,7 +91,11 @@ Click the **⚙** icon in the header to switch to Settings.
 
 #### Settings View
 
-The panel uses an extensible section navigator: **Appearance**, **Desktop**, **Pets**, **Growth**, and **Advanced**.
+#### Language and copy
+
+The desktop UI and native prompts support Traditional Chinese and English across Settings, notifications, Tray, Setup Wizard, permission prompts, and errors. Choose **Language** in Settings; the selection is saved locally and synchronized across the pet, panel, Tray, and native notifications. Canonical technical terms such as `Running`, `Thinking`, `Permission`, `Idle`, `Allow once`, `Deny`, agent names, MCP tool names, and token terminology remain unchanged for API and status consistency.
+
+The panel uses an extensible section navigator: **Language**, **Appearance**, **Desktop**, **Pets**, **Growth**, and **Advanced**.
 
 **Appearance section**
 
@@ -107,6 +112,7 @@ The panel uses an extensible section navigator: **Appearance**, **Desktop**, **P
 - **Sound** — Short synthesized cues (Web Audio, no audio files) for success/error/waiting-permission. **Off by default.**
 - **Launch at startup** — Start Agent Pets when you sign in. This toggle is available in packaged builds.
 - **Permission Bubble** — An independent switch for the Liquid Glass Allow once / Deny card. Turning it off hides only the card; pending requests remain with the Broker, stay on the Tray badge, and can still be resolved by the Agent or terminal. **On by default.**
+- **Presentation MCP** — Allow or disable the local MCP presentation channel. When enabled, clients can send bounded reactions or plain-text speech; Do Not Disturb and waiting/error/permission states take precedence. **On by default.**
 
 **Advanced section**
 - **Setup Wizard** — Re-run tool detection, or install/reinstall hooks.
@@ -127,6 +133,75 @@ The panel uses an extensible section navigator: **Appearance**, **Desktop**, **P
 - **Multi-pet** — Show one small pet per active tool family instead of collapsing to the single highest-priority one, when 2+ are running at once. **Off by default.** Per-agent pet choices appear here when enabled.
 
 Click **‹** to return to the Sessions view.
+
+### Presentation MCP
+
+Presentation MCP is a local stdio bridge for agents that support MCP. The app creates the bridge script and a separate local token after startup:
+
+```text
+Windows: %USERPROFILE%\\.desktop-pet\\presentation-mcp.mjs
+macOS/Linux: ~/.desktop-pet/presentation-mcp.mjs
+```
+
+Configure an MCP client to launch that script with the real Node.js executable. The bridge exposes only `pet_status` (read-only sanitized status), `pet_react` (five bounded reactions), and `pet_say` (up to 240 characters of plain text for 1–15 seconds). Each client is limited to 3 requests per 10 seconds; the queue is bounded, intents expire automatically, and disconnecting the client removes its pending intents. Permission, error, waiting, and Do Not Disturb state always take precedence. This channel cannot control tools, files, permissions, XP, quota, or achievements.
+
+#### One-click project setup
+
+In **Settings → Advanced**, click **Setup MCP for a project**. Choose the local project folder in the native folder picker; Agent Pets then installs the same presentation bridge for all three supported project clients:
+
+- Codex: `.codex/config.toml` (`mcp_servers.agent-pets`)
+- Claude Code: `.mcp.json` (`mcpServers.agent-pets`)
+- OpenCode: `opencode.json` (`mcp.servers.agent-pets`)
+
+The operation is idempotent. Existing matching entries are reported as already configured; a different entry with the same server name is reported as a conflict and is never overwritten. The setup writes only project-local configuration and does not run a shell command or reinstall hooks. Restart the affected agent client after setup so it reloads its MCP catalog.
+
+The **Connected projects** list in the same card keeps every project configured through this button. It re-checks all three client entries when Settings opens and shows `Connected`, `Partial`, `Conflict`, or `Folder missing`, together with the project path and last check. **Refresh** re-checks the list. **Remove MCP** removes only matching Agent Pets entries; if a user changed an entry, it is preserved and marked as a conflict. A missing project folder can be removed from the local list without touching any files.
+
+#### Connect an agent project that is already in use
+
+1. Start Agent Pets and keep **Settings → Attention → Presentation MCP** enabled (on by default). The app must remain running because the stdio bridge connects to its local loopback control server.
+2. Use a real Node.js executable; never use the packaged `Agent Pets.exe` as the interpreter. In Windows PowerShell:
+
+   ```powershell
+   $bridge = Join-Path $env:USERPROFILE '.desktop-pet\presentation-mcp.mjs'
+   node --version
+   Test-Path $bridge
+   ```
+
+3. Register the bridge once in each agent client, then restart that client. This does not reinstall hooks.
+
+   **Codex CLI / Codex desktop / IDE extension (shared configuration):**
+
+   ```powershell
+   codex mcp add agent-pets -- node $bridge
+   codex mcp list
+   ```
+
+   **Claude Code:**
+
+   ```powershell
+   claude mcp add --scope user agent-pets -- node $bridge
+   claude mcp list
+   ```
+
+   **OpenCode:** add this server under `mcp.servers` in `opencode.json` (or the project-scoped OpenCode config):
+
+   ```json
+   {
+     "mcp": {
+       "servers": {
+         "agent-pets": {
+           "type": "local",
+           "command": ["node", "C:/Users/<your-user>/.desktop-pet/presentation-mcp.mjs"]
+         }
+       }
+     }
+   }
+   ```
+
+4. Fully restart the agent client and confirm that `pet_status`, `pet_react`, and `pet_say` appear in its MCP view. If hooks work but these tools do not appear, check the bridge path, Node executable, Presentation MCP toggle, and that Agent Pets is still running.
+
+Turning Presentation MCP off rejects new presentation intents only; it does not remove hooks or affect the Permission Broker, XP, or ordinary `/v1/events`.
 
 ---
 
@@ -252,6 +327,7 @@ Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that r
 - **Path sanitization** — Project paths are reduced to their basename, and filesystem destinations are constrained to their expected root.
 - **Desktop notifications** — Notification text is built only from the normalized Agent name and bounded project basename; prompt text, tool arguments, session identifiers, and credentials are never shown or logged. Diagnostic notification history is bounded and stores only event class/outcome metadata.
 - **Desktop preference IPC** — The main process owns Tray/DND/notification/permission-bubble/startup preferences. Renderer requests accept only an allowlist of boolean fields from validated first-party frames, and preference writes use bounded reads plus atomic replacement.
+- **Presentation MCP** — The MCP bridge is loopback-only, uses a separate per-install token, rejects browser origins, limits JSON body size and request rate, validates a fixed three-tool surface, strips control/markup characters, bounds message length/TTL/queue depth, and removes a disconnected client's pending intents. It has no command, file, permission, progression, quota, or achievement authority.
 - **Permission Broker** — Permission responses use a separate loopback port and per-install token, never the generic event endpoint. The main process enforces TTL, one-shot state transitions, anti-replay, bounded records, Adapter-owned opaque handles, scoped hotkeys, external-resolution reconciliation, and a bounded redacted audit. Only `allow_once` and `deny` are exposed; permanent approval is intentionally unavailable.
 - **Progression storage** — XP is awarded only in the Electron main process. SQLite migrations, transactionally coupled `pet_progress`/`xp_ledger` writes, unique idempotency keys, bounded session activity, and sanitized snapshots prevent renderer or duplicate-event writes from inflating progression. The database stays local and is never uploaded.
 - **Packaged runtime** — Electron fuses disable RunAsNode, Node options/inspect arguments, and privileged `file://` behavior while enforcing ASAR-only loading and embedded ASAR integrity validation.
@@ -306,6 +382,8 @@ This installs hooks for all detected tools. Hooks are installed to:
 - `~/.claude/settings.json` (Claude Code CLI & Desktop)
 - `~/.desktop-pet/agent-hook.mjs` + `agent-hook.cmd` (shared hook script all of the above call into)
 - `~/.desktop-pet/event-token` (per-install event authentication secret; mode `0600` on macOS/Linux)
+- `~/.desktop-pet/presentation-token` (separate presentation MCP secret; mode `0600` on macOS/Linux)
+- `~/.desktop-pet/presentation-mcp.mjs` (stdio bridge used by MCP clients)
 
 After upgrading an existing installation, Agent Pets refreshes managed hooks automatically. Restart a currently running OpenCode process once so its already-loaded plugin picks up event authentication.
 
@@ -315,6 +393,10 @@ Use `--claude-code` to install/uninstall the Claude Code hook only:
 node integrations/install.mjs --claude-code
 node integrations/install.mjs --uninstall --claude-code
 ```
+
+The desktop app also refreshes the presentation bridge on startup. For an MCP client, point its stdio server command at `~/.desktop-pet/presentation-mcp.mjs` (or `%USERPROFILE%\\.desktop-pet\\presentation-mcp.mjs` on Windows) and use a real Node.js executable; do not use the packaged Agent Pets executable as a Node interpreter.
+
+> **Language and build note:** Settings, Tray, notifications, Setup Wizard, permission, error, and onboarding copy now use a shared Traditional Chinese layer; canonical technical statuses and tool names remain unchanged. `pnpm build` and `pnpm electron:build` run a preflight that closes only project-owned Agent Pets processes to avoid `win-unpacked` file locks; unrelated Electron applications are not terminated.
 
 ---
 
@@ -333,6 +415,10 @@ agent-pets/
 │   ├── permission-adapter-server.ts # Dedicated OpenCode response channel
 │   ├── permission-audit.ts  # Bounded redacted local audit
 │   ├── progression.ts       # SQLite XP ledger and level projection
+│   ├── presentation-controller.ts # TTL/rate/queue presentation control plane
+│   ├── presentation-mcp.ts  # Loopback MCP presentation endpoint
+│   ├── project-mcp-setup.ts # Safe project-local MCP configuration installer
+│   ├── project-mcp-registry.ts # Local connected-project registry and status checks
 │   ├── pet-window-mode.ts   # Bounded Mini/Edge geometry and dwell constants
 │   ├── desktop-preferences.ts # Main-owned desktop preferences
 │   ├── desktop-notifications.ts # Native notification delivery and bounded log
@@ -343,7 +429,10 @@ agent-pets/
 ├── integrations/
 │   ├── install.mjs          # Standalone CLI hook installer
 │   ├── agent-hook.mjs       # Shared hook script (bundled into the app via extraResources)
-│   └── agent-hook.cmd       # Windows wrapper for agent-hook.mjs
+│   ├── agent-hook.cmd       # Windows wrapper for agent-hook.mjs
+│   └── presentation-mcp.mjs # Standalone stdio MCP presentation bridge
+├── scripts/
+│   └── stop-agent-pets.mjs  # Build preflight for project-owned Agent Pets processes
 ├── src/
 │   ├── components/
 │   │   ├── DesktopPet.vue   # Pet window (drag + click)
@@ -355,7 +444,8 @@ agent-pets/
 │   ├── types/
 │   │   ├── agent.ts         # Agent event types
 │   │   ├── agent-adapter.ts  # Adapter capabilities/status contracts
-│   │   └── desktop.ts       # Desktop preference IPC types
+│   │   ├── desktop.ts       # Desktop preference IPC types
+│   │   └── presentation.ts  # Presentation intent/status contract
 │   └── utils/
 │       ├── format.ts        # Shared formatting helpers
 │       └── sound.ts         # Synthesized audio cues (Web Audio API)

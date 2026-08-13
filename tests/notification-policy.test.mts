@@ -22,7 +22,7 @@ test('classifies waiting and terminal events without exposing tool data', () => 
     toolName: 'secret command',
   }) as any)
   assert.equal(waiting?.kind, 'waiting-permission')
-  assert.equal(waiting?.title, 'Codex needs permission')
+  assert.equal(waiting?.title, 'Codex 需要 Permission')
   assert.equal(waiting?.body, 'agent-pets')
   assert.doesNotMatch(`${waiting?.title} ${waiting?.body}`, /secret command/)
 
@@ -52,7 +52,7 @@ test('aggregates terminal notifications without project or session details', () 
   ].filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null)
 
   assert.deepEqual(aggregateTerminalNotifications(candidates), {
-    title: '2 Agent tasks finished',
-    body: '1 completed · 1 failed',
+    title: '2 個 Agent 工作已完成',
+    body: '1 個已完成 · 1 個失敗',
   })
 })

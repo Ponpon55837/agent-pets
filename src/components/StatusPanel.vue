@@ -2,46 +2,62 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAgentStore } from '../stores/agentStore'
 import { STATE_LABELS, SOURCE_LABELS, STATE_COLORS, STATE_PRIORITY, SOURCE_FAMILIES } from '../types/agent'
+import type {
+  ProjectMcpInstallStatus,
+  ProjectMcpProjectRecord,
+  ProjectMcpProjectStatus,
+  ProjectMcpRemovalStatus,
+  ProjectMcpSetupSummary,
+} from '../types/project-mcp'
 import { formatProject } from '../utils/format'
+import { locale, t, translateBackendError } from '../i18n'
 
 const store = useAgentStore()
 const importing = ref(false)
 const editingPetId = ref<string | null>(null)
 const editName = ref('')
-type SettingsSection = 'appearance' | 'desktop' | 'pets' | 'growth' | 'advanced'
+const settingUpMcp = ref(false)
+const projectMcpResult = ref<ProjectMcpSetupSummary | null>(null)
+const projectMcpError = ref('')
+const projectMcpProjects = ref<ProjectMcpProjectRecord[]>([])
+const projectMcpListLoading = ref(false)
+const projectMcpListError = ref('')
+const removingProjectMcp = ref<string | null>(null)
+type SettingsSection = 'language' | 'appearance' | 'desktop' | 'pets' | 'growth' | 'advanced'
 const settingsTab = ref<SettingsSection>('appearance')
-const settingsSections: Array<{ id: SettingsSection; icon: string; label: string; hint: string }> = [
-  { id: 'appearance', icon: '◈', label: 'Appearance', hint: 'Size and reactions' },
-  { id: 'desktop', icon: '⌘', label: 'Desktop', hint: 'Modes and alerts' },
-  { id: 'pets', icon: '✦', label: 'Pets', hint: 'Sprites and families' },
-  { id: 'growth', icon: '↗', label: 'Growth', hint: 'Mood and XP' },
-  { id: 'advanced', icon: '⋯', label: 'Advanced', hint: 'Setup and lifecycle' },
-]
-const activeSettingsSection = computed(() => settingsSections.find(section => section.id === settingsTab.value))
+const settingsSections = computed<Array<{ id: SettingsSection; icon: string; label: string; hint: string }>>(() => [
+  { id: 'language', icon: '文', label: t('language'), hint: t('languageHint') },
+  { id: 'appearance', icon: '◈', label: t('appearance'), hint: t('appearanceHint') },
+  { id: 'desktop', icon: '⌘', label: t('desktop'), hint: t('desktopHint') },
+  { id: 'pets', icon: '✦', label: t('pets'), hint: t('petsHint') },
+  { id: 'growth', icon: '↗', label: t('growth'), hint: t('growthHint') },
+  { id: 'advanced', icon: '⋯', label: t('advanced'), hint: t('advancedHint') },
+])
+const activeSettingsSection = computed(() => settingsSections.value.find(section => section.id === settingsTab.value))
 const dashboardTab = ref<'sessions' | 'usage'>('sessions')
 const quotaUsage = computed(() => store.quotaUsage)
 const quotaLoading = computed(() => store.quotaLoading)
 const quotaError = computed(() => store.quotaError)
 const progression = computed(() => store.progression)
-const evolutionLabels: Record<string, string> = {
-  egg: 'Egg',
-  baby: 'Baby',
-  teen: 'Teen',
-  adult: 'Adult',
-  master: 'Master',
-}
+const evolutionLabels = computed<Record<string, string>>(() => ({
+  egg: t('evolutionEgg'),
+  baby: t('evolutionBaby'),
+  teen: t('evolutionTeen'),
+  adult: t('evolutionAdult'),
+  master: t('evolutionMaster'),
+}))
 const evolutionLabel = computed(() => (
-  progression.value ? evolutionLabels[progression.value.evolutionStage] : ''
+  progression.value ? evolutionLabels.value[progression.value.evolutionStage] : ''
 ))
 const progressionPercent = computed(() => {
   if (!progression.value) return 0
   return Math.min(100, Math.round((progression.value.xpIntoLevel / progression.value.xpToNext) * 100))
 })
 const moodStage = computed(() => {
-  if (store.mood >= 90) return 'Overdrive'
-  if (store.mood >= 70) return 'Radiant'
-  if (store.mood >= 40) return 'Charged'
-  return 'Resting'
+  if (store.mood >= 90) return t('moodOverdrive')
+  if (store.mood >= 70) return t('moodRadiant')
+  if (store.mood >= 40) return t('moodCharged')
+  return t('moodResting')
 })
 
 watch(() => store.panelView, (view) => {
@@ -70,28 +86,35 @@ function selectDashboardTab(tab: 'sessions' | 'usage') {
 
 function formatRemaining(value: number): string {
   const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10
-  return `${rounded}% left`
+  return t('remainingPercent', { value: rounded })
+}
+
+function formatQuotaLabel(id: string, label: string): string {
+  const identity = `${id} ${label}`.toLowerCase()
+  if (identity.includes('session') || identity.includes('five_hour')) return t('fiveHourLimit')
+  if (identity.includes('weekly') || identity.includes('seven_day')) return t('weeklyLimit')
+  return label
 }
 
 function formatReset(timestamp?: string): string {
-  if (!timestamp) return 'Reset time unavailable'
+  if (!timestamp) return t('resetTimeUnavailable')
   const reset = new Date(timestamp).getTime()
-  if (!Number.isFinite(reset)) return 'Reset time unavailable'
+  if (!Number.isFinite(reset)) return t('resetTimeUnavailable')
   const deltaMinutes = Math.max(0, Math.round((reset - nowTick.value) / 60_000))
-  if (deltaMinutes < 1) return 'Resets now'
-  if (deltaMinutes < 60) return `Resets in ${deltaMinutes}m`
+  if (deltaMinutes < 1) return t('resetsNow')
+  if (deltaMinutes < 60) return t('resetsInMinutes', { minutes: deltaMinutes })
   const hours = Math.floor(deltaMinutes / 60)
   const minutes = deltaMinutes % 60
-  if (hours < 24) return `Resets in ${hours}h${minutes ? ` ${minutes}m` : ''}`
+  if (hours < 24) return t('resetsInHours', { hours, minutes })
   const days = Math.floor(hours / 24)
-  return `Resets in ${days}d ${hours % 24}h`
+  return t('resetsInDays', { days, hours: hours % 24 })
 }
 
 function formatResetAt(timestamp?: string): string {
   if (!timestamp) return ''
   const reset = new Date(timestamp)
   if (!Number.isFinite(reset.getTime())) return ''
-  return reset.toLocaleString([], {
+  return reset.toLocaleString(locale.value, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -101,7 +124,7 @@ function formatResetAt(timestamp?: string): string {
 }
 
 function formatUpdated(timestamp: string): string {
-  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return new Date(timestamp).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
 }
 
 const LIVE_STATES = new Set(['thinking', 'tool-running', 'waiting-permission', 'waiting-input'])
@@ -117,6 +140,7 @@ function elapsedLabel(session: { state: string; lastSeenAt: number }): string | 
 // pet window having already populated it.
 onMounted(() => {
   store.loadPets()
+  void refreshProjectMcpProjects()
 })
 
 function startRename(pet: { id: string; displayName: string }) {
@@ -161,13 +185,13 @@ const scaleOptions = [
 ]
 
 function formatTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString()
+  return new Date(timestamp).toLocaleTimeString(locale.value)
 }
 
 async function importPet() {
   importing.value = true
   const id = `custom-${Date.now()}`
-  const fileUrl = await window.electronAPI?.importPetSprite(id, 'Custom Pet')
+  const fileUrl = await window.electronAPI?.importPetSprite(id, t('customPet'))
   if (fileUrl) {
     await store.loadPets()
     store.setPet(id)
@@ -186,7 +210,7 @@ async function importPetZip() {
     await store.loadPets()
     store.setPet(result.id)
   } else if (result && !result.ok && result.error !== 'cancelled') {
-    importZipError.value = result.error || 'Import failed'
+    importZipError.value = translateBackendError(result.error || t('failed'))
   }
   importingZip.value = false
 }
@@ -199,10 +223,109 @@ function restartApp() {
   window.electronAPI?.restartApp()
 }
 
+async function setupProjectMcp() {
+  if (settingUpMcp.value) return
+  settingUpMcp.value = true
+  projectMcpError.value = ''
+  projectMcpResult.value = null
+  try {
+    const result = await window.electronAPI?.setupProjectMcp()
+    if (result && !result.cancelled) {
+      projectMcpResult.value = result
+      await refreshProjectMcpProjects()
+    }
+  } catch {
+    projectMcpError.value = t('mcpSetupFailed')
+  } finally {
+    settingUpMcp.value = false
+  }
+}
+
+async function refreshProjectMcpProjects() {
+  if (projectMcpListLoading.value) return
+  projectMcpListLoading.value = true
+  projectMcpListError.value = ''
+  try {
+    const result = await window.electronAPI?.listProjectMcp()
+    if (!result?.ok) {
+      projectMcpListError.value = translateBackendError(result?.error || t('mcpListFailed'))
+      return
+    }
+    projectMcpProjects.value = result.projects
+  } catch {
+    projectMcpListError.value = t('mcpListFailed')
+  } finally {
+    projectMcpListLoading.value = false
+  }
+}
+
+async function removeConnectedProject(project: ProjectMcpProjectRecord) {
+  if (removingProjectMcp.value) return
+  const confirmed = window.confirm(
+    `要從「${project.projectName}」移除 Agent Pets MCP 嗎？\n\n` +
+    '只會移除 Agent Pets 自己寫入且內容未被修改的設定。專案與其他 MCP 不會受影響。',
+  )
+  if (!confirmed) return
+
+  removingProjectMcp.value = project.projectPath
+  projectMcpListError.value = ''
+  try {
+    const result = await window.electronAPI?.removeProjectMcp(project.projectPath)
+    if (!result?.ok) {
+      projectMcpListError.value = translateBackendError(result?.error || removalSummaryLabel(result?.results.map(item => item.status) ?? []))
+      await refreshProjectMcpProjects()
+      return
+    }
+    await refreshProjectMcpProjects()
+  } catch {
+    projectMcpListError.value = t('mcpRemoveFailed')
+  } finally {
+    removingProjectMcp.value = null
+  }
+}
+
+async function forgetMissingProject(project: ProjectMcpProjectRecord) {
+  if (removingProjectMcp.value) return
+  removingProjectMcp.value = project.projectPath
+  try {
+    await window.electronAPI?.forgetProjectMcp(project.projectPath)
+    await refreshProjectMcpProjects()
+  } finally {
+    removingProjectMcp.value = null
+  }
+}
+
+function projectMcpClientLabel(client: string): string {
+  if (client === 'codex') return 'Codex'
+  if (client === 'claude') return 'Claude Code'
+  return 'OpenCode'
+}
+
+function projectMcpStatusLabel(status: ProjectMcpInstallStatus): string {
+  if (status === 'installed') return t('mcpInstalled')
+  if (status === 'already_configured') return t('mcpAlreadyConfigured')
+  if (status === 'conflict') return t('mcpConflictUnchanged')
+  return t('failed')
+}
+
+function projectMcpProjectStatusLabel(status: ProjectMcpProjectStatus): string {
+  if (status === 'connected') return t('connected')
+  if (status === 'partial') return t('partial')
+  if (status === 'conflict') return t('conflict')
+  if (status === 'missing') return t('folderMissing')
+  return t('checkFailed')
+}
+
+function removalSummaryLabel(statuses: ProjectMcpRemovalStatus[]): string {
+  return statuses.includes('conflict')
+    ? t('mcpEntryChanged')
+    : t('mcpRemoveFailed')
+}
+
 function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boolean }) {
   const message = pet.builtIn
-    ? `Hide "${pet.displayName}" from your pet list? You can't undo this from the UI, but the bundled sprite itself is untouched.`
-    : `Remove "${pet.displayName}"? This deletes the imported sprite files and can't be undone.`
+    ? `要從寵物清單隱藏「${pet.displayName}」嗎？此操作無法從介面復原，但不會刪除內建素材。`
+    : `要移除「${pet.displayName}」嗎？這會刪除匯入的素材檔案，且無法復原。`
   if (window.confirm(message)) {
     store.removePet(pet.id)
   }
@@ -220,13 +343,13 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
         &#8249;
       </button>
       <span class="panel-title">
-        {{ store.panelView === 'sessions' ? 'Agent Pets' : 'Settings' }}
+        {{ store.panelView === 'sessions' ? t('appName') : t('settings') }}
       </span>
       <div class="header-right">
         <button
           v-if="store.panelView === 'sessions'"
           class="header-btn"
-          title="Settings"
+          :title="t('settings')"
           @click="store.openSettings()"
         >
           &#9881;
@@ -236,7 +359,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
     </div>
 
     <template v-if="store.panelView === 'sessions'">
-      <div class="dashboard-tabs" role="tablist" aria-label="Dashboard sections">
+      <div class="dashboard-tabs" role="tablist" :aria-label="t('dashboardSections')">
         <button
           class="dashboard-tab"
           :class="{ active: dashboardTab === 'sessions' }"
@@ -244,7 +367,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
           :aria-selected="dashboardTab === 'sessions'"
           @click="selectDashboardTab('sessions')"
         >
-          Sessions
+          {{ t('sessions') }}
         </button>
         <button
           class="dashboard-tab"
@@ -253,13 +376,13 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
           :aria-selected="dashboardTab === 'usage'"
           @click="selectDashboardTab('usage')"
         >
-          Usage
+          {{ t('usage') }}
         </button>
       </div>
 
       <template v-if="dashboardTab === 'sessions'">
         <div v-if="sessions.length === 0" class="panel-empty">
-          No active sessions
+          {{ t('noActiveSessions') }}
         </div>
         <template v-else>
           <div class="session-list">
@@ -292,7 +415,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
           </div>
           <div v-if="hasOffline" class="session-footer">
             <button class="clear-offline-btn" @click="store.clearOfflineSessions()">
-              Clear offline
+              {{ t('clearOffline') }}
             </button>
           </div>
         </template>
@@ -301,10 +424,10 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
       <template v-else>
         <div class="usage-view">
           <div v-if="quotaLoading && !quotaUsage" class="panel-empty usage-loading">
-            Loading quota…
+            {{ t('loadingQuota') }}
           </div>
           <div v-else-if="quotaError && !quotaUsage" class="panel-empty usage-error">
-            {{ quotaError }}
+            {{ translateBackendError(quotaError) }}
           </div>
           <template v-else-if="quotaUsage">
             <div
@@ -318,18 +441,18 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
                 <span v-if="provider.plan" class="usage-plan">{{ provider.plan }}</span>
               </div>
               <div v-if="provider.error" class="usage-provider-error">
-                {{ provider.error }}
+                {{ translateBackendError(provider.error) }}
               </div>
               <div v-else class="quota-window-list">
                 <div v-for="quota in provider.windows" :key="quota.id" class="quota-window">
                   <div class="quota-copy">
-                    <span class="quota-label">{{ quota.label }}</span>
+                    <span class="quota-label">{{ formatQuotaLabel(quota.id, quota.label) }}</span>
                     <span class="quota-value">{{ formatRemaining(quota.remainingPercent) }}</span>
                   </div>
                   <div
                     class="quota-track"
                     role="progressbar"
-                    :aria-label="`${provider.name} ${quota.label} remaining`"
+                    :aria-label="t('quotaRemainingAria', { provider: provider.name, quota: formatQuotaLabel(quota.id, quota.label) })"
                     aria-valuemin="0"
                     aria-valuemax="100"
                     :aria-valuenow="quota.remainingPercent"
@@ -346,9 +469,9 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
               </div>
             </div>
             <div class="usage-footer">
-              <span>Updated {{ formatUpdated(quotaUsage.updatedAt) }}</span>
+              <span>{{ t('updated', { time: formatUpdated(quotaUsage.updatedAt) }) }}</span>
               <button class="usage-refresh" :disabled="quotaLoading" @click="refreshQuota(true)">
-                {{ quotaLoading ? 'Refreshing…' : 'Refresh' }}
+                {{ quotaLoading ? t('refreshing') : t('refresh') }}
               </button>
             </div>
           </template>
@@ -358,8 +481,8 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 
     <template v-else>
       <div class="settings-layout">
-        <nav class="settings-nav" aria-label="Settings sections">
-          <div class="settings-nav-heading">Preferences</div>
+        <nav class="settings-nav" :aria-label="t('settingsSections')">
+          <div class="settings-nav-heading">{{ t('preferences') }}</div>
           <button
             v-for="section in settingsSections"
             :key="section.id"
@@ -379,21 +502,49 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 
         <div class="settings-content">
         <div class="settings-content-header">
-          <span class="settings-kicker">Workspace preferences</span>
+          <span class="settings-kicker">{{ t('workspacePreferences') }}</span>
           <h2>{{ activeSettingsSection?.label }}</h2>
         </div>
 
-        <template v-if="settingsTab === 'appearance'">
+        <template v-if="settingsTab === 'language'">
           <div class="settings-section settings-hero-card">
-            <div class="settings-hero-icon" aria-hidden="true">◈</div>
+            <div class="settings-hero-icon" aria-hidden="true">文</div>
             <div>
-              <div class="section-label">Make the pet yours</div>
-              <p>Keep the sprite visible while choosing how much motion and feedback you want.</p>
+              <div class="section-label">{{ t('languageSection') }}</div>
+              <p>{{ t('languageHelp') }}</p>
             </div>
           </div>
 
           <div class="settings-section settings-card">
-            <div class="section-label group-label">Pet size</div>
+            <label class="language-select-row">
+              <span class="setting-copy">
+                <span class="section-label">{{ t('language') }}</span>
+                <span class="setting-help">{{ t('languageHint') }}</span>
+              </span>
+              <select
+                class="language-select"
+                :value="locale"
+                :aria-label="t('language')"
+                @change="store.setLocalePreference(($event.target as HTMLSelectElement).value as 'zh-TW' | 'en-US')"
+              >
+                <option value="zh-TW">{{ t('localeTraditionalChinese') }}</option>
+                <option value="en-US">{{ t('localeEnglish') }}</option>
+              </select>
+            </label>
+          </div>
+        </template>
+
+        <template v-else-if="settingsTab === 'appearance'">
+          <div class="settings-section settings-hero-card">
+            <div class="settings-hero-icon" aria-hidden="true">◈</div>
+            <div>
+              <div class="section-label">{{ t('makePetYours') }}</div>
+              <p>{{ t('makePetYoursHelp') }}</p>
+            </div>
+          </div>
+
+          <div class="settings-section settings-card">
+            <div class="section-label group-label">{{ t('petSize') }}</div>
             <div class="scale-options">
               <button
                 v-for="opt in scaleOptions"
@@ -410,11 +561,11 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
           </div>
 
           <div class="settings-section settings-card toggle-group">
-            <div class="section-label group-label">Pet reactions</div>
+            <div class="section-label group-label">{{ t('petReactions') }}</div>
             <label class="toggle-row">
               <span class="setting-copy">
-                <span class="section-label">Bounce &amp; shake</span>
-                <span class="setting-help">Animate status changes and clicks</span>
+                <span class="section-label">{{ t('bounceShake') }}</span>
+                <span class="setting-help">{{ t('animateStatus') }}</span>
               </span>
               <span class="switch">
                 <input type="checkbox" :checked="store.reactionsEnabled" @change="store.setReactionsEnabled(($event.target as HTMLInputElement).checked)" />
@@ -423,8 +574,8 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
             </label>
             <label class="toggle-row">
               <span class="setting-copy">
-                <span class="section-label">Status bubble</span>
-                <span class="setting-help">Show short completion and error messages</span>
+                <span class="section-label">{{ t('statusBubble') }}</span>
+                <span class="setting-help">{{ t('showCompletionError') }}</span>
               </span>
               <span class="switch">
                 <input type="checkbox" :checked="store.bubbleEnabled" @change="store.setBubbleEnabled(($event.target as HTMLInputElement).checked)" />
@@ -438,17 +589,17 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
           <div class="settings-section settings-hero-card">
             <div class="settings-hero-icon" aria-hidden="true">⌘</div>
             <div>
-              <div class="section-label">Desktop behavior</div>
-              <p>Choose which optional surfaces can follow you around the desktop.</p>
+              <div class="section-label">{{ t('desktopBehavior') }}</div>
+              <p>{{ t('desktopBehaviorHelp') }}</p>
             </div>
           </div>
 
           <div class="settings-section toggle-group settings-card">
-            <div class="section-label group-label">Window modes</div>
+            <div class="section-label group-label">{{ t('windowModes') }}</div>
             <label class="toggle-row">
               <span class="setting-copy">
-                <span class="section-label">Mini mode</span>
-                <span class="setting-help">Keep the pet compact; you can return to Normal any time</span>
+                <span class="section-label">{{ t('miniMode') }}</span>
+                <span class="setting-help">{{ t('miniModeHelp') }}</span>
               </span>
               <span class="switch">
                 <input type="checkbox" :checked="store.petWindowMode.mode === 'mini'" @change="store.setPetMode(($event.target as HTMLInputElement).checked ? 'mini' : 'normal')" />
@@ -457,8 +608,8 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
             </label>
             <label class="toggle-row">
               <span class="setting-copy">
-                <span class="section-label">Edge peek</span>
-                <span class="setting-help">After a 650ms edge dwell, show a dedicated handle instead of the sprite</span>
+                <span class="section-label">{{ t('edgePeek') }}</span>
+                <span class="setting-help">{{ t('edgePeekHelp') }}</span>
               </span>
               <span class="switch">
                 <input type="checkbox" :checked="store.edgeModeEnabled" @change="store.setEdgeModeEnabled(($event.target as HTMLInputElement).checked)" />
@@ -468,11 +619,11 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
           </div>
 
           <div class="settings-section toggle-group settings-card">
-            <div class="section-label group-label">Attention</div>
+            <div class="section-label group-label">{{ t('attention') }}</div>
             <label class="toggle-row">
               <span class="setting-copy">
-                <span class="section-label">Do Not Disturb</span>
-                <span class="setting-help">Mute sounds, notifications, and extra motion</span>
+                <span class="section-label">{{ t('dnd') }}</span>
+                <span class="setting-help">{{ t('dndHelp') }}</span>
               </span>
               <span class="switch">
                 <input type="checkbox" :checked="store.dndEnabled" @change="store.setDndEnabled(($event.target as HTMLInputElement).checked)" />
@@ -481,8 +632,8 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
             </label>
             <label class="toggle-row">
               <span class="setting-copy">
-                <span class="section-label">Notifications</span>
-                <span class="setting-help">Show native waiting and completion alerts</span>
+                <span class="section-label">{{ t('notifications') }}</span>
+                <span class="setting-help">{{ t('notificationsHelp') }}</span>
               </span>
               <span class="switch">
                 <input type="checkbox" :checked="store.notificationsEnabled" @change="store.setNotificationsEnabled(($event.target as HTMLInputElement).checked)" />
@@ -491,8 +642,8 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
             </label>
             <label class="toggle-row">
               <span class="setting-copy">
-                <span class="section-label">Permission bubble</span>
-                <span class="setting-help">Show Allow once / Deny requests; hidden requests stay pending</span>
+                <span class="section-label">{{ t('permissionBubble') }}</span>
+                <span class="setting-help">{{ t('permissionBubbleHelp') }}</span>
               </span>
               <span class="switch">
                 <input type="checkbox" :checked="store.permissionBubbleEnabled" @change="store.setPermissionBubbleEnabled(($event.target as HTMLInputElement).checked)" />
@@ -501,8 +652,18 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
             </label>
             <label class="toggle-row">
               <span class="setting-copy">
-                <span class="section-label">Sound</span>
-                <span class="setting-help">Play the pet's local status cues</span>
+                <span class="section-label">{{ t('presentationMcp') }}</span>
+                <span class="setting-help">{{ t('presentationMcpHelp') }}</span>
+              </span>
+              <span class="switch">
+                <input type="checkbox" :checked="store.presentationMcpEnabled" @change="store.setPresentationMcpEnabled(($event.target as HTMLInputElement).checked)" />
+                <span class="switch-track"><span class="switch-thumb" /></span>
+              </span>
+            </label>
+            <label class="toggle-row">
+              <span class="setting-copy">
+                <span class="section-label">{{ t('sound') }}</span>
+                <span class="setting-help">{{ t('soundHelp') }}</span>
               </span>
               <span class="switch">
                 <input type="checkbox" :checked="store.soundEnabled" @change="store.setSoundEnabled(($event.target as HTMLInputElement).checked)" />
@@ -512,10 +673,10 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
           </div>
 
           <div class="settings-section settings-card">
-            <label class="toggle-row" :class="{ 'is-disabled': !store.launchAtStartupSupported }" :title="store.launchAtStartupSupported ? 'Start Agent Pets when you sign in' : 'Available in packaged builds'">
+            <label class="toggle-row" :class="{ 'is-disabled': !store.launchAtStartupSupported }" :title="store.launchAtStartupSupported ? t('launchAtStartup') : t('availablePackaged')">
               <span class="setting-copy">
-                <span class="section-label">Launch at startup</span>
-                <span class="setting-help">{{ store.launchAtStartupSupported ? 'Start when you sign in' : 'Available after installation' }}</span>
+                <span class="section-label">{{ t('launchAtStartup') }}</span>
+                <span class="setting-help">{{ store.launchAtStartupSupported ? t('launchAtStartupHelp') : t('availablePackaged') }}</span>
               </span>
               <span class="switch">
                 <input type="checkbox" :checked="store.launchAtStartup" :disabled="!store.launchAtStartupSupported" @change="store.setLaunchAtStartup(($event.target as HTMLInputElement).checked)" />
@@ -529,15 +690,15 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
           <div class="settings-section">
             <div class="mood-header">
               <div class="mood-title">
-                <div class="section-label">Mood</div>
+                <div class="section-label">{{ t('petMood') }}</div>
                 <span class="mood-readout">{{ store.mood }} · {{ moodStage }}</span>
               </div>
-              <button class="mood-reset-btn" title="Reset to baseline" @click="store.resetMood()">Reset</button>
+              <button class="mood-reset-btn" :title="t('resetBaseline')" @click="store.resetMood()">{{ t('reset') }}</button>
             </div>
             <div
               class="mood-bar"
               role="progressbar"
-              aria-label="Pet mood"
+              :aria-label="t('petMood')"
               aria-valuemin="0"
               aria-valuemax="100"
               :aria-valuenow="store.mood"
@@ -550,7 +711,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
           <div class="settings-section progression-card">
             <div class="mood-header">
               <div class="mood-title">
-                <div class="section-label">Growth</div>
+                <div class="section-label">{{ t('growth') }}</div>
                 <span class="mood-readout">Lv {{ progression.level }} · {{ evolutionLabel }}</span>
               </div>
               <span class="progression-xp-total">{{ progression.totalXp }} XP</span>
@@ -558,7 +719,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
             <div
               class="progression-bar"
               role="progressbar"
-              aria-label="Pet level progress"
+              :aria-label="t('growth')"
               aria-valuemin="0"
               aria-valuemax="100"
               :aria-valuenow="progressionPercent"
@@ -566,16 +727,16 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
               <div class="progression-fill" :style="{ width: progressionPercent + '%' }" />
             </div>
             <div class="progression-meta">
-              <span>{{ progression.xpIntoLevel }} / {{ progression.xpToNext }} to next level</span>
-              <span v-if="progression.currentStreak > 0">{{ progression.currentStreak }} day streak</span>
-              <span v-else>Start a streak</span>
+              <span>{{ t('toNextLevel', { value: `${progression.xpIntoLevel} / ${progression.xpToNext}` }) }}</span>
+              <span v-if="progression.currentStreak > 0">{{ t('dayStreak', { days: progression.currentStreak }) }}</span>
+              <span v-else>{{ t('startStreak') }}</span>
             </div>
           </div>
           <div class="settings-section settings-card toggle-group">
             <label class="toggle-row">
               <span class="setting-copy">
-                <span class="section-label">Mood visuals</span>
-                <span class="setting-help">Keep mood tracking, but hide its aura and color changes</span>
+                <span class="section-label">{{ t('moodVisuals') }}</span>
+                <span class="setting-help">{{ t('moodVisualsHelp') }}</span>
               </span>
               <span class="switch">
                 <input type="checkbox" :checked="store.moodVisualsEnabled" @change="store.setMoodVisualsEnabled(($event.target as HTMLInputElement).checked)" />
@@ -585,13 +746,13 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
           </div>
           </template>
           <div v-else class="growth-unavailable" role="status">
-            Growth data is unavailable until local storage is ready.
+            {{ t('growthDataUnavailable') }}
           </div>
         </template>
 
         <template v-else-if="settingsTab === 'pets'">
           <div class="settings-section">
-            <div class="section-label">Pet</div>
+            <div class="section-label">{{ t('pets') }}</div>
             <div class="pet-list">
               <div
                 v-for="pet in store.visiblePets"
@@ -616,7 +777,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
                   <button
                     v-if="!pet.builtIn"
                     class="pet-edit"
-                    title="Rename"
+                    :title="t('rename')"
                     @click.stop="startRename(pet)"
                   >
                     &#9998;
@@ -624,7 +785,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
                   <button
                     v-if="pet.id !== store.defaultPetId"
                     class="pet-remove"
-                    :title="pet.builtIn ? 'Hide' : 'Remove'"
+                    :title="pet.builtIn ? t('hide') : t('remove')"
                     @click.stop="confirmRemovePet(pet)"
                   >
                     &times;
@@ -634,10 +795,10 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
             </div>
             <div class="import-row">
               <button class="import-btn" @click="importPet" :disabled="importing">
-                {{ importing ? 'Importing...' : '+ Import Sprite' }}
+                {{ importing ? t('importing') : t('importSprite') }}
               </button>
               <button class="import-btn" @click="importPetZip" :disabled="importingZip">
-                {{ importingZip ? 'Importing...' : '+ Import .zip' }}
+                {{ importingZip ? t('importing') : t('importZip') }}
               </button>
             </div>
             <div v-if="importZipError" class="import-error">{{ importZipError }}</div>
@@ -645,7 +806,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 
           <div class="settings-section toggle-group">
             <label class="toggle-row">
-              <span class="section-label">Multi-pet</span>
+              <span class="section-label">{{ t('multiPet') }}</span>
               <span class="switch">
                 <input
                   type="checkbox"
@@ -658,7 +819,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
           </div>
 
           <div v-if="store.multiPetEnabled" class="settings-section">
-            <div class="section-label">Per-Agent Pet</div>
+            <div class="section-label">{{ t('perAgentPet') }}</div>
             <div class="family-pet-list">
               <label v-for="family in SOURCE_FAMILIES" :key="family.key" class="family-pet-row">
                 <span class="family-pet-name">
@@ -670,7 +831,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
                   :value="store.familyPetIds[family.key] || ''"
                   @change="store.setFamilyPet(family.key, ($event.target as HTMLSelectElement).value || null)"
                 >
-                  <option value="">Default</option>
+                  <option value="">{{ t('defaultPet') }}</option>
                   <option v-for="pet in store.visiblePets" :key="pet.id" :value="pet.id">
                     {{ pet.displayName }}
                   </option>
@@ -684,14 +845,96 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
           <div class="settings-section settings-hero-card">
             <div class="settings-hero-icon" aria-hidden="true">⋯</div>
             <div>
-              <div class="section-label">Keep control</div>
-              <p>Setup, restart, and lifecycle actions stay separate from daily preferences.</p>
+              <div class="section-label">{{ t('keepControl') }}</div>
+              <p>{{ t('keepControlHelp') }}</p>
+            </div>
+          </div>
+          <div class="settings-section settings-card project-mcp-card">
+            <div class="section-label group-label">{{ t('presentationMcpSection') }}</div>
+            <p class="project-mcp-copy">
+              {{ t('presentationMcpSetupHelp') }}
+            </p>
+            <button class="setup-btn" :disabled="settingUpMcp" @click="setupProjectMcp">
+              {{ settingUpMcp ? t('installing') : t('setupMcpForProject') }}
+            </button>
+            <div class="project-mcp-list-header">
+              <div>
+                <div class="section-label">{{ t('connectedProjects') }}</div>
+                <p class="project-mcp-copy">
+                  {{ t('connectedProjectsHelp') }}
+                </p>
+              </div>
+              <button
+                class="project-mcp-refresh"
+                type="button"
+                :disabled="projectMcpListLoading"
+                @click="refreshProjectMcpProjects"
+              >
+                {{ projectMcpListLoading ? t('checking') : t('refresh') }}
+              </button>
+            </div>
+            <div v-if="projectMcpListError" class="project-mcp-error" role="alert">{{ projectMcpListError }}</div>
+            <div v-if="!projectMcpListLoading && projectMcpProjects.length === 0" class="project-mcp-empty">
+              {{ t('noProjectsConnected') }}
+            </div>
+            <div v-else class="project-mcp-project-list" role="list" :aria-label="t('connectedMcpProjects')">
+              <div v-for="project in projectMcpProjects" :key="project.projectPath" class="project-mcp-project-item" role="listitem">
+                <div class="project-mcp-project-heading">
+                  <div class="project-mcp-project-name">{{ project.projectName }}</div>
+                  <span class="project-mcp-project-status" :class="`project-mcp-project-${project.status}`">
+                    {{ projectMcpProjectStatusLabel(project.status) }}
+                  </span>
+                </div>
+                <div class="project-mcp-project-path" :title="project.projectPath">{{ project.projectPath }}</div>
+                <div v-if="project.results.length" class="project-mcp-project-clients">
+                  <span v-for="item in project.results" :key="item.client" :class="`project-mcp-${item.status}`">
+                    {{ projectMcpClientLabel(item.client) }}: {{ projectMcpStatusLabel(item.status) }}
+                  </span>
+                </div>
+                <div class="project-mcp-project-actions">
+                  <button
+                    v-if="project.status === 'missing'"
+                    class="project-mcp-refresh"
+                    type="button"
+                    :disabled="removingProjectMcp === project.projectPath"
+                    @click="forgetMissingProject(project)"
+                  >
+                    {{ t('forgetRecord') }}
+                  </button>
+                  <button
+                    v-else
+                    class="project-mcp-remove"
+                    type="button"
+                    :disabled="removingProjectMcp === project.projectPath"
+                    @click="removeConnectedProject(project)"
+                  >
+                    {{ removingProjectMcp === project.projectPath ? t('removing') : t('removeMcp') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div v-if="projectMcpError" class="project-mcp-error" role="alert">{{ projectMcpError }}</div>
+            <div v-if="projectMcpResult" class="project-mcp-result" role="status" aria-live="polite">
+              <div class="project-mcp-project">{{ projectMcpResult.projectPath }}</div>
+              <div
+                v-for="item in projectMcpResult.results"
+                :key="item.client"
+                class="project-mcp-result-row"
+                :class="`project-mcp-${item.status}`"
+              >
+                <span class="project-mcp-client">{{ projectMcpClientLabel(item.client) }}</span>
+                <span>{{ projectMcpStatusLabel(item.status) }}</span>
+                <span v-if="item.message" class="project-mcp-message">{{ translateBackendError(item.message) }}</span>
+              </div>
+              <div v-if="!projectMcpResult.ok" class="project-mcp-error">
+                {{ t('resultNeedsAttention') }}
+              </div>
             </div>
           </div>
           <div class="settings-section settings-card advanced-actions">
-            <button class="setup-btn" @click="store.showWizard = true">Setup Wizard</button>
-            <button class="restart-btn" @click="restartApp">Restart Pet</button>
-            <button class="quit-btn" @click="quitApp">Quit</button>
+            <button class="setup-btn" @click="store.showWizard = true">{{ t('setupWizard') }}</button>
+            <button class="restart-btn" @click="restartApp">{{ t('restartPet') }}</button>
+            <button class="quit-btn" @click="quitApp">{{ t('quit') }}</button>
           </div>
         </template>
       </div>
@@ -1243,6 +1486,190 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   gap: 8px;
 }
 
+.project-mcp-card {
+  gap: 7px;
+}
+
+.project-mcp-copy {
+  margin: 0;
+  color: #9da6bb;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.project-mcp-list-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+.project-mcp-refresh,
+.project-mcp-remove {
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #c7d0e8;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+
+.project-mcp-refresh:hover,
+.project-mcp-remove:hover {
+  background: rgba(157, 216, 255, 0.13);
+  border-color: rgba(157, 216, 255, 0.34);
+}
+
+.project-mcp-refresh:disabled,
+.project-mcp-remove:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.project-mcp-empty {
+  padding: 9px;
+  border: 1px dashed rgba(255, 255, 255, 0.13);
+  border-radius: 9px;
+  color: #8d97ad;
+  font-size: 10px;
+  text-align: center;
+}
+
+.project-mcp-project-list {
+  display: grid;
+  gap: 6px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.project-mcp-project-item {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.project-mcp-project-heading,
+.project-mcp-project-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.project-mcp-project-name {
+  min-width: 0;
+  overflow: hidden;
+  color: #e8ecfa;
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-mcp-project-status {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.project-mcp-project-connected {
+  color: #8fe3c0;
+}
+
+.project-mcp-project-partial,
+.project-mcp-project-missing {
+  color: #f4c97b;
+}
+
+.project-mcp-project-conflict,
+.project-mcp-project-error {
+  color: #ff9eae;
+}
+
+.project-mcp-project-path {
+  overflow: hidden;
+  color: #8994aa;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-mcp-project-clients {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: #9da6bb;
+  font-size: 9px;
+}
+
+.project-mcp-project-actions {
+  justify-content: flex-end;
+}
+
+.project-mcp-remove {
+  color: #ffb4c0;
+}
+
+.project-mcp-result {
+  display: grid;
+  gap: 5px;
+  margin-top: 2px;
+  padding: 7px;
+  border: 1px solid rgba(139, 156, 247, 0.16);
+  border-radius: 8px;
+  background: rgba(139, 156, 247, 0.045);
+  color: #cdd3e7;
+  font-size: 10px;
+}
+
+.project-mcp-project {
+  overflow: hidden;
+  color: #aeb8d8;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-mcp-result-row {
+  display: grid;
+  grid-template-columns: minmax(58px, auto) minmax(0, 1fr);
+  gap: 5px;
+  align-items: baseline;
+}
+
+.project-mcp-client {
+  color: #e5e7ff;
+  font-weight: 600;
+}
+
+.project-mcp-message {
+  grid-column: 2;
+  color: #8f98ac;
+  line-height: 1.35;
+}
+
+.project-mcp-installed,
+.project-mcp-already_configured {
+  color: #82d9a5;
+}
+
+.project-mcp-conflict,
+.project-mcp-error {
+  color: #ffb0a7;
+}
+
+.project-mcp-error {
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .settings-tab {
   padding: 5px 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1520,6 +1947,34 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   gap: 12px;
   min-height: 31px;
   cursor: pointer;
+}
+
+.language-select-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.language-select {
+  min-width: 132px;
+  padding: 7px 28px 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f5fb;
+  font: inherit;
+  cursor: pointer;
+}
+
+.language-select:focus-visible {
+  outline: 2px solid rgba(139, 156, 247, 0.9);
+  outline-offset: 2px;
+}
+
+.language-select option {
+  color: #171922;
+  background: #fff;
 }
 
 .toggle-row.is-disabled {

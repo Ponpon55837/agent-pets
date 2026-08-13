@@ -120,11 +120,11 @@ function inspectGenericHttp(): AdapterInspection {
   return {
     installed: true,
     health: 'ready',
-    message: 'Local /v1/events ingress is available through the authenticated receiver.',
+    message: '本機 /v1/events ingress 可透過已驗證的 receiver 使用。',
     checks: [
-      check('loopback', 'pass', 'Receiver binds to loopback only.'),
-      check('token', 'pass', 'Requests require the installation bearer token.'),
-      check('permissions', 'pass', 'Generic HTTP is observe-only and cannot respond to permissions.'),
+      check('loopback', 'pass', 'Receiver 僅繫結 loopback。'),
+      check('token', 'pass', '請求需要安裝時產生的 bearer token。'),
+      check('permissions', 'pass', 'Generic HTTP 僅能 observe-only，無法回應 Permission。'),
     ],
   }
 }
@@ -247,10 +247,10 @@ const DEFAULT_OPERATIONS: AgentAdapterOperations = {
   inspect: id => ({
     installed: id === 'generic-http',
     health: id === 'generic-http' ? 'ready' : 'needs_install',
-    message: id === 'generic-http' ? 'Local /v1/events ingress is available.' : 'Adapter is not installed.',
+    message: id === 'generic-http' ? '本機 /v1/events ingress 可使用。' : 'Adapter 尚未安裝。',
     checks: id === 'generic-http'
       ? inspectGenericHttp().checks
-      : [check('runtime', 'warn', 'Setup operations were not supplied in this runtime.')],
+      : [check('runtime', 'warn', '此執行環境未提供 Setup operations。')],
   }),
   install: () => {},
   uninstall: () => {},

@@ -20,6 +20,7 @@
 - Realtime state and current local persistence: `src/stores/agentStore.ts`.
 - Pet surface: `src/components/DesktopPet.vue` and `src/components/PetAnimation.vue`.
 - Panel/settings surface: `src/components/StatusPanel.vue` and `src/components/SetupWizard.vue`.
+- Shared Traditional Chinese copy: `src/i18n.ts`; renderer and Electron native surfaces should use this layer for user-visible text while preserving canonical technical terms.
 - Window mode geometry: `electron/pet-window-mode.ts`; shared mode snapshot types: `src/types/pet-window.ts`.
 - Agent Adapter SDK: `electron/agent-adapter.ts` owns the runtime registry and canonical ingress selection; `electron/agent-adapter-operations.ts` wraps existing platform installers/detection; shared capability/status contracts live in `src/types/agent-adapter.ts`.
 - Canonical current event types: `src/types/agent.ts`.
@@ -38,8 +39,11 @@
 - Mood is renderer-local and resets by local date/version.
 - XP progression is main-owned and durable in `progression.sqlite`; the current selected pet is synchronized through typed IPC, while mood remains short-term and renderer-local. Generic events and MCP presentation intents never award XP.
 - Pet selection, scale, multi-pet, reactions, bubbles, hidden pets, and family mappings use `localStorage`.
-- DND, notifications, permission-bubble visibility, sound, and launch-at-startup are main-owned desktop preferences persisted under Electron `userData`; legacy sound is migrated once from renderer storage. Hiding the permission bubble never changes Broker state or the Tray attention badge.
+- DND, notifications, permission-bubble visibility, sound, launch-at-startup, and the `zh-TW`／`en-US` locale are main-owned desktop preferences persisted under Electron `userData`; legacy sound is migrated once from renderer storage. Hiding the permission bubble never changes Broker state or the Tray attention badge.
 - Tray is a main-process singleton. Closing the pet hides it, while a destroyed renderer can be rebuilt through the existing main process.
+- Presentation MCP is a local, main-owned presentation channel: `electron/presentation-controller.ts` owns validation, TTL, rate and queue policy; `electron/presentation-mcp.ts` is the authenticated loopback endpoint; `integrations/presentation-mcp.mjs` is the stdio client bridge. It can only emit `pet_status`, `pet_react`, and `pet_say` intents and never mutates permission, XP, quota, history, or achievement truth.
+- Project-local MCP setup is main-owned in `electron/project-mcp-setup.ts`; the panel opens a native folder picker and writes only Codex `.codex/config.toml`, Claude Code `.mcp.json`, and OpenCode `opencode.json`. Matching entries are idempotent, conflicting entries are left untouched, and no shell command or global MCP config is used.
+- Connected project tracking is main-owned in `electron/project-mcp-registry.ts`; it stores bounded project-local paths under Electron `userData`, re-checks all three client entries when Settings opens, marks missing folders, and removes only exact Agent Pets entries. Renderer IPC exposes list, safe remove, and missing-record forget operations.
 - Main process persists window position/size through helpers in `electron/setup.ts`.
 - Mini／Edge window mode is main-owned in `electron/main.ts` with pure geometry rules in `electron/pet-window-mode.ts`; the renderer receives a sanitized mode snapshot and never chooses native bounds directly. Edge Peek is a persisted, off-by-default desktop preference; when enabled it uses a 650ms dwell and a 42px-thick × 96px-long opaque handle only after the full-size window is attached to a work-area edge, restores the exact pre-edge native bounds on hover/click, and pending permission requests force Normal mode.
 - Status events feed the Pinia store through the typed preload listener.
@@ -51,8 +55,9 @@
 ## Working rules
 
 - Keep unrelated `.claude/`, local MCP configs, build output, and user settings untouched.
-- Before packaging, identify processes by executable path. The user explicitly allows closing `release/win-unpacked/Agent Pets.exe` when it locks this project's build output; do not terminate other Agent Pets installations or unrelated Electron processes.
+- Before packaging, `pnpm build` and `pnpm electron:build` run `scripts/stop-agent-pets.mjs`. It identifies processes by executable path and only closes this project's unpacked/portable Agent Pets or workspace Electron process; do not terminate other Agent Pets installations or unrelated Electron processes.
 - Prefer narrow feature modules over adding more policy directly to `electron/main.ts`.
 - Keep `electron/preload.ts` and `src/env.d.ts` synchronized when IPC changes.
 - Update both English and Traditional Chinese README sections when user-visible behavior changes.
+- Traditional Chinese UI copy is required for new user-visible settings, Tray items, notifications, HUD, errors, and onboarding. Record any remaining localization gap in the phase report.
 - Inspect the final diff and distinguish pre-existing warnings or failures from phase regressions.

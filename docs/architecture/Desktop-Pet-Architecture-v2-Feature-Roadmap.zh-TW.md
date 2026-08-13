@@ -37,6 +37,12 @@ Architecture v2 的核心決策如下：
 9. **視覺採 Liquid Glass 原則。** 玻璃材質只用於浮動控制、導航與暫態互動層；內容層保持清楚，避免 glass-on-glass，並提供降低透明度、高對比與降低動態效果的 fallback。
 10. **版本更新是驗收後動作。** 每個 Phase 完成功能與安全檢測後先交付報告，只有使用者明確確認才更新版本；預設 patch，大型架構、持久化 schema、公開契約或安全邊界變更使用 minor。
 
+### 跨階段交付要求
+
+- **繁體中文優先：** 所有新增或修改的使用者可見設定、Tray、通知、HUD、錯誤與 onboarding 文案都必須提供繁體中文；完整 i18n 抽離可以分階段完成，但不得讓新功能只有英文可用。
+- **建置環境可重現：** `pnpm build` 與 `pnpm electron:build` 必須先執行專案限定的 Agent Pets 程序清理，只關閉可由 executable path／workspace command line 證明屬於本專案的程序，不得廣泛終止其他 Electron。
+- **環境修復可稽核：** 依賴修復不可使用 production-only prune 破壞 `package.json`、devDependencies 或 `pnpm-lock.yaml`；每次修復後要留下 type-check、unit、build 與 diff gate 證據。
+
 ---
 
 ## 1. 產品定位與範圍
@@ -1185,6 +1191,8 @@ Phase 4 實作補充：`electron/pet-window-mode.ts` 集中 bounded geometry（n
 **主要風險：** hook 格式漂移、安裝權限、不同 OS/runtime、把 SDK 做得過度抽象。
 
 Phase 5 實作補充：`electron/agent-adapter.ts` 提供 `AgentAdapter` 介面與 runtime registry；`electron/agent-adapter-operations.ts` 只包裝既有的 setup path、偵測、安裝與解除安裝邏輯，避免一次重寫 installer。`/v1/events` 先經 registry 依顯式 `adapterId` 或 source family 選擇 Adapter，再進 Event Core canonical normalizer；成功事件會帶上 sanitized `adapterId`，不把任何 response handle、token 或原始 prompt 帶入 renderer。內建 OpenCode／Codex／Claude Code 對應 capability matrix，Generic HTTP 固定 `permissions=none`、`healthCheck=false`。Setup Wizard 改由 runtime status 顯示 capability／health／diagnose，Install All 逐一呼叫 idempotent Adapter installer；fixture contract tests 覆蓋 detection、diagnose、source mapping、mismatch／unknown adapter 負向案例。既有 `install-integrations` IPC 保留作相容層，新的 Adapter IPC 只允許已註冊且可安裝的 id。
+
+Phase 6 實作補充：`electron/presentation-controller.ts` 是 main-owned Control Plane，負責固定三種 intent 的 schema、純文字清理、pet id／TTL／queue 上限、每 client 10 秒 3 次 rate limit、DND／偏好／高優先級狀態阻擋與 disconnect 清理；`electron/presentation-mcp.ts` 只提供 loopback、token 驗證的 status／intent／disconnect endpoint；`integrations/presentation-mcp.mjs` 是不持有產品權限的 stdio JSON-RPC bridge，對 MCP client 暴露 `pet_status`、`pet_react`、`pet_say`。Renderer 只接收有 TTL 的 presentation intent，將 speech 作為 Liquid Glass transient bubble，reaction 只使用既有的 optional animation layer；presentation 不進 Event Core、XP ledger、Permission Broker、quota 或 achievement truth。Presentation MCP 可由 Desktop 偏好獨立關閉，DND 或 waiting／error／permission 狀態會清除／壓制尚未顯示的 presentation。設定頁的 `project-mcp-setup` 只透過原生資料夾選擇器取得目標專案，然後由 main process 以安全、可重複執行且不覆蓋衝突設定的方式寫入 Codex `.codex/config.toml`、Claude Code `.mcp.json` 與 OpenCode `opencode.json`；`project-mcp-registry` 會在 user-data 保存多個已連接專案、重新檢查三個 client，並提供只移除完整匹配 Agent Pets entry 的安全操作；不執行 shell、不修改全域 MCP 設定，也不擴大 Presentation MCP 的工具權限。
 
 ### Phase 6 — Presentation MCP
 

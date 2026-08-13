@@ -26,12 +26,24 @@ import { PermissionBroker } from './permission-broker'
 import { appendPermissionAudit } from './permission-audit'
 import { ProgressionStore } from './progression'
 import {
+  createPresentationMcpServer,
+  PRESENTATION_MCP_PORT,
+} from './presentation-mcp'
+import {
+  normalizePresentationStatus,
+  PresentationController,
+} from './presentation-controller'
+import { ProjectMcpRegistryStore } from './project-mcp-registry'
+import {
   createPermissionAdapterServer,
   PERMISSION_ADAPTER_PORT,
   PermissionAdapterRelay,
 } from './permission-adapter-server'
 import type { DesktopPreferences } from '../src/types/desktop'
+import { setLocale, t } from '../src/i18n'
 import type { ProgressionSnapshot } from '../src/types/progression'
+import type { PresentationIntent, PresentationStatusSnapshot } from '../src/types/presentation'
+import type { ProjectMcpRegistrySnapshot, ProjectMcpRemovalSummary } from '../src/types/project-mcp'
 import type { PetEdge, PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 import {
   EDGE_DWELL_MS,
@@ -51,10 +63,15 @@ import {
   uninstallIntegration,
   refreshInstalledIntegrationScripts,
   ensurePermissionToken,
+  ensurePresentationToken,
+  ensurePresentationMcpScript,
+  presentationMcpScriptPath,
+  resolveNodeBin,
   readWindowState,
   writeWindowState,
   type IntegrationTarget,
 } from './setup'
+import { installProjectMcp, removeProjectMcp } from './project-mcp-setup'
 
 let petWindow: BrowserWindow | null = null
 let panelWindow: BrowserWindow | null = null
@@ -72,6 +89,14 @@ let permissionAdapterServer: Server | null = null
 let permissionBroker: PermissionBroker | null = null
 let permissionRelay: PermissionAdapterRelay | null = null
 let progressionStore: ProgressionStore | null = null
+let presentationController: PresentationController | null = null
+let presentationMcpServer: Server | null = null
+let projectMcpRegistry: ProjectMcpRegistryStore | null = null
+let presentationStatusProjection: PresentationStatusSnapshot = {
+  activePets: [],
+  dnd: false,
+  enabled: true,
+}
 let desktopPreferences: DesktopPreferencesStore | null = null
 let desktopNotifications: DesktopNotificationService | null = null
 let desktopTray: DesktopTrayController | null = null
@@ -895,10 +920,12 @@ function currentDesktopPreferences(): DesktopPreferences {
       dndEnabled: false,
       notificationsEnabled: true,
       permissionBubbleEnabled: true,
+      presentationMcpEnabled: true,
       edgeModeEnabled: false,
       soundEnabled: false,
       launchAtStartup: false,
       launchAtStartupSupported: false,
+      locale: 'zh-TW',
     }
   }
   return desktopPreferences.get()
@@ -915,7 +942,11 @@ function broadcastDesktopPreferences(preferences: DesktopPreferences): void {
 function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   if (!desktopPreferences) throw new Error('Desktop preferences are not ready')
   const preferences = desktopPreferences.update(patch)
+  setLocale(preferences.locale)
   if (!preferences.edgeModeEnabled && petWindowMode === 'edge') applyNormalPetBounds()
+  if (!preferences.presentationMcpEnabled || preferences.dndEnabled) {
+    presentationController?.clear()
+  }
   desktopTray?.rebuild()
   broadcastDesktopPreferences(preferences)
   schedulePermissionUiSync()
@@ -983,6 +1014,54 @@ function broadcastProgression(snapshot?: ProgressionSnapshot): void {
       window.webContents.send('progression-updated', next)
     }
   }
+}
+
+function broadcastPresentationIntent(intent: PresentationIntent): void {
+  for (const window of [petWindow, panelWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('presentation-intent', intent)
+    }
+  }
+}
+
+function createPresentationServices(presentationToken: string): void {
+  if (presentationController || presentationMcpServer) return
+
+  presentationController = new PresentationController({
+    emit: broadcastPresentationIntent,
+    getStatus: () => {
+      const preferences = currentDesktopPreferences()
+      return normalizePresentationStatus({
+        ...presentationStatusProjection,
+        dnd: preferences.dndEnabled,
+        enabled: preferences.presentationMcpEnabled,
+      })
+    },
+    getBlockReason: () => {
+      const preferences = currentDesktopPreferences()
+      if (!preferences.presentationMcpEnabled) return 'disabled'
+      if (preferences.dndEnabled) return 'dnd_enabled'
+      return null
+    },
+  })
+
+  const server = createPresentationMcpServer({
+    token: presentationToken,
+    controller: presentationController,
+  })
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`Presentation MCP port ${PRESENTATION_MCP_PORT} is already in use.`)
+      return
+    }
+    console.error('Presentation MCP server error:', error)
+  })
+  server.listen(PRESENTATION_MCP_PORT, '127.0.0.1', () => {
+    if (!app.isPackaged) {
+      console.log(`Presentation MCP control listening on http://127.0.0.1:${PRESENTATION_MCP_PORT}`)
+    }
+  })
+  presentationMcpServer = server
 }
 
 function createProgressionServices(): void {
@@ -1088,6 +1167,7 @@ function createDesktopServices(): void {
       },
     },
   )
+  setLocale(currentDesktopPreferences().locale)
 
   desktopNotifications = new DesktopNotificationService({
     logFilePath: join(app.getPath('userData'), 'notification-log.json'),
@@ -1135,11 +1215,16 @@ app.whenReady().then(() => {
 
   eventToken = refreshInstalledIntegrationScripts()
   agentAdapterRegistry = createAgentAdapterRegistry(createAgentAdapterOperations())
+  projectMcpRegistry = new ProjectMcpRegistryStore(
+    join(app.getPath('userData'), 'project-mcp-registry.json'),
+  )
   const permissionToken = ensurePermissionToken()
+  const presentationToken = ensurePresentationToken()
   configureSecureProtocol()
   createDesktopServices()
   createPetWindow()
   createPanelWindow()
+  createPresentationServices(presentationToken)
   screen.on('display-added', rehomePetWindowForDisplayChange)
   screen.on('display-removed', rehomePetWindowForDisplayChange)
   screen.on('display-metrics-changed', rehomePetWindowForDisplayChange)
@@ -1376,6 +1461,11 @@ app.whenReady().then(() => {
     return updateDesktopPreferences(patch)
   })
 
+  ipcMain.on('presentation-status-update', (event, payload: unknown) => {
+    if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
+    presentationStatusProjection = normalizePresentationStatus(payload)
+  })
+
   ipcMain.handle('progression-init', (event, petId?: unknown) => {
     assertTrustedIpcSender(event)
     if (petId !== undefined && !isProgressionPetId(petId)) return null
@@ -1494,6 +1584,119 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('project-mcp-setup', async (event) => {
+    assertTrustedIpcSender(event, panelWindow)
+    const owner = panelWindow ?? petWindow
+    if (!owner || owner.isDestroyed()) {
+      return { ok: false, results: [], error: 'No settings window is available' }
+    }
+    if (dialogOpen) {
+      return { ok: false, results: [], error: 'Another dialog is already open' }
+    }
+
+    dialogOpen = true
+    let result: Electron.OpenDialogReturnValue
+    try {
+      result = await dialog.showOpenDialog(owner, {
+        title: '將 Agent Pets MCP 安裝到專案',
+        message: '選擇本機專案資料夾',
+        properties: ['openDirectory', 'createDirectory'],
+      })
+    } catch (error) {
+      return {
+        ok: false,
+        results: [],
+        error: error instanceof Error ? error.message : String(error),
+      }
+    } finally {
+      dialogOpen = false
+    }
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { ok: false, cancelled: true, results: [] }
+    }
+
+    try {
+      // The bridge is refreshed on app startup, but refresh here as well so a
+      // project setup remains self-healing after an upgrade or interrupted copy.
+      ensurePresentationMcpScript()
+      const summary = installProjectMcp(result.filePaths[0], {
+        nodeExecutable: resolveNodeBin(),
+        bridgePath: presentationMcpScriptPath(),
+      })
+      if (summary.projectPath && projectMcpRegistry) {
+        try {
+          projectMcpRegistry.register(summary.projectPath)
+        } catch (registryError) {
+          return {
+            ...summary,
+            ok: false,
+            error: registryError instanceof Error ? registryError.message : String(registryError),
+          }
+        }
+      }
+      return summary
+    } catch (error) {
+      return {
+        ok: false,
+        results: [],
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+  })
+
+  ipcMain.handle('project-mcp-list', (event): ProjectMcpRegistrySnapshot => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (!projectMcpRegistry) return { ok: false, projects: [], error: 'Project MCP registry is unavailable' }
+    try {
+      ensurePresentationMcpScript()
+      return projectMcpRegistry.list({
+        nodeExecutable: resolveNodeBin(),
+        bridgePath: presentationMcpScriptPath(),
+      })
+    } catch (error) {
+      return {
+        ok: false,
+        projects: [],
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+  })
+
+  ipcMain.handle('project-mcp-remove', (event, projectPath: unknown): ProjectMcpRemovalSummary => {
+    assertTrustedIpcSender(event, panelWindow)
+    const requestedPath = typeof projectPath === 'string' ? projectPath : ''
+    if (!projectMcpRegistry) {
+      return { ok: false, projectPath: requestedPath, results: [], error: 'Project MCP registry is unavailable' }
+    }
+    try {
+      ensurePresentationMcpScript()
+      const summary = removeProjectMcp(requestedPath, {
+        nodeExecutable: resolveNodeBin(),
+        bridgePath: presentationMcpScriptPath(),
+      })
+      if (summary.ok) projectMcpRegistry.forget(summary.projectPath)
+      return summary
+    } catch (error) {
+      return {
+        ok: false,
+        projectPath: requestedPath,
+        results: [],
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+  })
+
+  ipcMain.handle('project-mcp-forget', (event, projectPath: unknown) => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (!projectMcpRegistry || typeof projectPath !== 'string') return { ok: false, removed: false }
+    try {
+      return { ok: true, removed: projectMcpRegistry.forget(projectPath) }
+    } catch (error) {
+      return { ok: false, removed: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   ipcMain.handle('uninstall-integrations', (event, target?: unknown) => {
     assertTrustedIpcSender(event, panelWindow)
     if (target !== undefined && !isIntegrationTarget(target)) {
@@ -1560,7 +1763,7 @@ app.whenReady().then(() => {
     const petJson = {
       id: safeId,
       displayName: String(data.displayName || safeId).slice(0, 64),
-      description: 'Custom pet',
+      description: t('customPet'),
       spritesheetPath: 'spritesheet.webp',
       spriteVersionNumber: 2,
       kind: 'person',
@@ -1623,7 +1826,7 @@ app.whenReady().then(() => {
 
     dialogOpen = true
     const result = await dialog.showOpenDialog(owner, {
-      title: 'Select a sprite kit (.codex-pet.zip)',
+      title: '選擇寵物素材包（.codex-pet.zip）',
       filters: [{ name: 'Pet sprite kit', extensions: ['zip'] }],
       properties: ['openFile'],
     })
@@ -1720,7 +1923,7 @@ app.whenReady().then(() => {
     if (!safeId || !owner) return null
     dialogOpen = true
     const result = await dialog.showOpenDialog(owner, {
-      title: 'Select spritesheet (192x208 per frame, .webp)',
+      title: '選擇 spritesheet（每格 192x208，.webp）',
       filters: [{ name: 'Images', extensions: ['webp', 'png', 'jpg'] }],
       properties: ['openFile'],
     })
@@ -1739,7 +1942,7 @@ app.whenReady().then(() => {
     const petJson = {
       id: safeId,
       displayName: String(displayName || safeId).slice(0, 64),
-      description: 'Custom pet',
+      description: t('customPet'),
       spritesheetPath: 'spritesheet.webp',
       spriteVersionNumber: 2,
       kind: 'person',
@@ -1760,6 +1963,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  presentationController?.clear()
   permissionBroker?.shutdown()
   progressionStore?.close()
   progressionStore = null
@@ -1776,6 +1980,9 @@ app.on('will-quit', () => {
   desktopNotifications = null
   desktopTray?.destroy()
   desktopTray = null
+  presentationMcpServer?.close()
+  presentationMcpServer = null
+  presentationController = null
   eventServer?.close()
   eventServer = null
 })

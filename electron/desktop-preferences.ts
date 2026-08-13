@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
+import { DEFAULT_LOCALE, isAppLocale } from '../src/types/locale.ts'
 
 export function readBoundedJson(filePath: string, maxBytes = 64 * 1024): unknown | null {
   try {
@@ -67,6 +68,7 @@ const BOOLEAN_KEYS = [
   'dndEnabled',
   'notificationsEnabled',
   'permissionBubbleEnabled',
+  'presentationMcpEnabled',
   'edgeModeEnabled',
   'soundEnabled',
   'launchAtStartup',
@@ -76,9 +78,11 @@ const DEFAULTS: StoredDesktopPreferences = {
   dndEnabled: false,
   notificationsEnabled: true,
   permissionBubbleEnabled: true,
+  presentationMcpEnabled: true,
   edgeModeEnabled: false,
   soundEnabled: false,
   launchAtStartup: false,
+  locale: DEFAULT_LOCALE,
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -91,15 +95,20 @@ function sanitizeStored(value: unknown): Partial<StoredDesktopPreferences> {
   for (const key of BOOLEAN_KEYS) {
     if (typeof value[key] === 'boolean') result[key] = value[key]
   }
+  if (isAppLocale(value.locale)) result.locale = value.locale
   return result
 }
 
 export function parseDesktopPreferencesPatch(value: unknown): DesktopPreferencesPatch {
   if (!isRecord(value)) throw new TypeError('Desktop preferences patch must be an object')
 
-  const allowed = new Set<string>(BOOLEAN_KEYS)
+  const allowed = new Set<string>([...BOOLEAN_KEYS, 'locale'])
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) throw new TypeError(`Unsupported desktop preference: ${key}`)
+    if (key === 'locale') {
+      if (!isAppLocale(value[key])) throw new TypeError('Desktop preference locale is unsupported')
+      continue
+    }
     if (typeof value[key] !== 'boolean') {
       throw new TypeError(`Desktop preference ${key} must be boolean`)
     }
@@ -170,9 +179,11 @@ export class DesktopPreferencesStore {
       dndEnabled: next.dndEnabled,
       notificationsEnabled: next.notificationsEnabled,
       permissionBubbleEnabled: next.permissionBubbleEnabled,
+      presentationMcpEnabled: next.presentationMcpEnabled,
       edgeModeEnabled: next.edgeModeEnabled,
       soundEnabled: next.soundEnabled,
       launchAtStartup: next.launchAtStartup,
+      locale: next.locale,
     }
     this.persist(next)
     return next
@@ -183,9 +194,11 @@ export class DesktopPreferencesStore {
       dndEnabled: preferences.dndEnabled,
       notificationsEnabled: preferences.notificationsEnabled,
       permissionBubbleEnabled: preferences.permissionBubbleEnabled,
+      presentationMcpEnabled: preferences.presentationMcpEnabled,
       edgeModeEnabled: preferences.edgeModeEnabled,
       soundEnabled: preferences.soundEnabled,
       launchAtStartup: preferences.launchAtStartup,
+      locale: preferences.locale,
     } satisfies StoredDesktopPreferences)
   }
 }

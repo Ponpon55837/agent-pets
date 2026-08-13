@@ -3,6 +3,12 @@ import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/d
 import type { PermissionDecisionValue, PermissionRequestView } from '../src/types/permission'
 import type { ProgressionSnapshot } from '../src/types/progression'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
+import type { PresentationIntent, PresentationStatusUpdate } from '../src/types/presentation'
+import type {
+  ProjectMcpRegistrySnapshot,
+  ProjectMcpRemovalSummary,
+  ProjectMcpSetupSummary,
+} from '../src/types/project-mcp'
 import type {
   AdapterDetection,
   AdapterRuntimeStatus,
@@ -17,6 +23,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => {
       ipcRenderer.removeListener('agent-status-event', handler)
     }
+  },
+  onPresentationIntent: (callback: (intent: PresentationIntent) => void) => {
+    const handler = (_event: unknown, intent: PresentationIntent) => callback(intent)
+    ipcRenderer.on('presentation-intent', handler)
+    return () => {
+      ipcRenderer.removeListener('presentation-intent', handler)
+    }
+  },
+  publishPresentationStatus: (snapshot: PresentationStatusUpdate) => {
+    ipcRenderer.send('presentation-status-update', snapshot)
   },
 
   startDrag: () => {
@@ -189,6 +205,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   installIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => {
     return ipcRenderer.invoke('install-integrations', target)
+  },
+
+  setupProjectMcp: (): Promise<ProjectMcpSetupSummary> => {
+    return ipcRenderer.invoke('project-mcp-setup')
+  },
+
+  listProjectMcp: (): Promise<ProjectMcpRegistrySnapshot> => {
+    return ipcRenderer.invoke('project-mcp-list')
+  },
+
+  removeProjectMcp: (projectPath: string): Promise<ProjectMcpRemovalSummary> => {
+    return ipcRenderer.invoke('project-mcp-remove', projectPath)
+  },
+
+  forgetProjectMcp: (projectPath: string): Promise<{ ok: boolean; removed: boolean; error?: string }> => {
+    return ipcRenderer.invoke('project-mcp-forget', projectPath)
   },
 
   uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => {

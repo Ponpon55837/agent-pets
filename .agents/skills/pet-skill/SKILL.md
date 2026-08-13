@@ -15,6 +15,7 @@ Work in Traditional Chinese for user-facing plans, phase reports, and handoffs. 
 4. Read the relevant section of [Desktop Pet Architecture v2](../../../docs/architecture/Desktop-Pet-Architecture-v2-Feature-Roadmap.zh-TW.md) for roadmap or architecture work.
 5. For any visual or interaction change, read [liquid-glass.md](references/liquid-glass.md).
 6. For every roadmap phase, release, security-sensitive change, or version update, read [phase-gates.md](references/phase-gates.md).
+7. For package installation, build, packaging, or environment repair, read [build-environment.md](references/build-environment.md).
 
 ## Preserve architecture boundaries
 
@@ -25,6 +26,8 @@ Work in Traditional Chinese for user-facing plans, phase reports, and handoffs. 
 - Keep MCP presentation-only: status, reaction, and speech. Do not add command, file, permission, XP, or achievement mutation tools.
 - Keep mood short-term and XP long-term. Use idempotent ledgers for durable rewards.
 - Extract focused services from `electron/main.ts` incrementally; do not combine a feature with a broad rewrite.
+- Treat Traditional Chinese UI copy as a cross-phase acceptance requirement; do not add a new user-visible surface without its Traditional Chinese wording or an explicitly recorded localization gap.
+- Reuse `src/i18n.ts` for renderer and Electron-native user-visible copy; keep canonical status, agent, MCP, and token terms stable when they are part of an external contract.
 
 ## Implement one phase at a time
 

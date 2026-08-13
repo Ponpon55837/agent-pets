@@ -65,11 +65,11 @@ function inspectOpenCode(): AdapterInspection {
   return {
     installed,
     health: installed ? 'ready' : 'needs_install',
-    message: installed ? 'At least one OpenCode plugin is installed.' : 'OpenCode plugin is not installed.',
+    message: installed ? '至少有一個 OpenCode plugin 已安裝。' : '尚未安裝 OpenCode plugin。',
     checks: [
-      check('opencode-cli', cli ? 'pass' : 'warn', cli ? 'OpenCode CLI plugin found.' : 'OpenCode CLI plugin not found.'),
-      check('opencode-desktop', desktop ? 'pass' : 'warn', desktop ? 'OpenCode Desktop plugin found.' : 'OpenCode Desktop plugin not found.'),
-      check('permission-channel', 'pass', 'Permission responses use the dedicated local broker channel.'),
+      check('opencode-cli', cli ? 'pass' : 'warn', cli ? '找到 OpenCode CLI plugin。' : '找不到 OpenCode CLI plugin。'),
+      check('opencode-desktop', desktop ? 'pass' : 'warn', desktop ? '找到 OpenCode Desktop plugin。' : '找不到 OpenCode Desktop plugin。'),
+      check('permission-channel', 'pass', 'Permission 回應使用專用的本機 Broker channel。'),
     ],
   }
 }
@@ -84,12 +84,12 @@ function inspectCodex(): AdapterInspection {
   return {
     installed: healthy,
     health: healthy ? 'ready' : partiallyInstalled ? 'degraded' : 'needs_install',
-    message: healthy ? 'Codex hooks are configured.' : 'Codex hooks need installation or repair.',
+    message: healthy ? 'Codex hooks 已完成設定。' : 'Codex hooks 需要安裝或修復。',
     checks: [
-      check('hooks-file', hooks ? 'pass' : 'fail', hooks ? 'Codex hooks.json found.' : 'Codex hooks.json is missing.'),
-      check('hooks-enabled', enabled ? 'pass' : 'fail', enabled ? 'Codex hooks are enabled.' : 'Codex hooks are disabled or unconfigured.'),
-      check('hook-script', script ? 'pass' : 'fail', script ? 'Shared hook script found.' : 'Shared hook script is missing.'),
-      check('hook-command', configured ? 'pass' : 'fail', configured ? 'Agent Pets hook command is configured.' : 'Agent Pets hook command is not configured.'),
+      check('hooks-file', hooks ? 'pass' : 'fail', hooks ? '找到 Codex hooks.json。' : '找不到 Codex hooks.json。'),
+      check('hooks-enabled', enabled ? 'pass' : 'fail', enabled ? 'Codex hooks 已啟用。' : 'Codex hooks 已停用或尚未設定。'),
+      check('hook-script', script ? 'pass' : 'fail', script ? '找到共用 hook script。' : '找不到共用 hook script。'),
+      check('hook-command', configured ? 'pass' : 'fail', configured ? 'Agent Pets hook command 已設定。' : '尚未設定 Agent Pets hook command。'),
     ],
   }
 }
@@ -103,11 +103,11 @@ function inspectClaudeCode(): AdapterInspection {
   return {
     installed: healthy,
     health: healthy ? 'ready' : partiallyInstalled ? 'degraded' : 'needs_install',
-    message: healthy ? 'Claude Code hooks are configured.' : 'Claude Code hooks need installation or repair.',
+    message: healthy ? 'Claude Code hooks 已完成設定。' : 'Claude Code hooks 需要安裝或修復。',
     checks: [
-      check('settings-file', settings ? 'pass' : 'fail', settings ? 'Claude Code settings found.' : 'Claude Code settings are missing.'),
-      check('hook-script', script ? 'pass' : 'fail', script ? 'Shared hook script found.' : 'Shared hook script is missing.'),
-      check('hook-command', configured ? 'pass' : 'fail', configured ? 'Agent Pets hook command is configured.' : 'Agent Pets hook command is not configured.'),
+      check('settings-file', settings ? 'pass' : 'fail', settings ? '找到 Claude Code settings。' : '找不到 Claude Code settings。'),
+      check('hook-script', script ? 'pass' : 'fail', script ? '找到共用 hook script。' : '找不到共用 hook script。'),
+      check('hook-command', configured ? 'pass' : 'fail', configured ? 'Agent Pets hook command 已設定。' : '尚未設定 Agent Pets hook command。'),
     ],
   }
 }
@@ -123,11 +123,11 @@ export function createAgentAdapterOperations(): AgentAdapterOperations {
           return {
             installed: true,
             health: 'ready',
-            message: 'Local /v1/events ingress is available through the authenticated receiver.',
+            message: '本機 /v1/events ingress 可透過已驗證的 receiver 使用。',
             checks: [
-              check('loopback', 'pass', 'Receiver binds to loopback only.'),
-              check('token', 'pass', 'Requests require the installation bearer token.'),
-              check('permissions', 'pass', 'Generic HTTP is observe-only and cannot respond to permissions.'),
+              check('loopback', 'pass', 'Receiver 僅繫結 loopback。'),
+              check('token', 'pass', '請求需要安裝時產生的 bearer token。'),
+              check('permissions', 'pass', 'Generic HTTP 僅能 observe-only，無法回應 Permission。'),
             ],
           }
       }

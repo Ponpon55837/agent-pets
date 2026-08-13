@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useAgentStore } from '../stores/agentStore'
 import { STATE_LABELS_SHORT, STATE_COLORS } from '../types/agent'
 import PetAnimation from './PetAnimation.vue'
+import { t } from '../i18n'
 
 const store = useAgentStore()
 const dragOffset = ref({ x: 0, y: 0 })
@@ -67,8 +68,8 @@ function quotaDetails(familyKey: string) {
 
 function quotaDetailLabel(id: string, label: string): string {
   const identity = `${id} ${label}`.toLowerCase()
-  if (identity.includes('session') || identity.includes('five_hour')) return '5-hour limit'
-  if (identity.includes('weekly') || identity.includes('seven_day')) return 'Weekly limit'
+  if (identity.includes('session') || identity.includes('five_hour')) return t('fiveHourLimit')
+  if (identity.includes('weekly') || identity.includes('seven_day')) return t('weeklyLimit')
   return label
 }
 
@@ -79,17 +80,17 @@ function quotaDetailPercent(remainingPercent: number): string {
 }
 
 function quotaResetLabel(resetsAt?: string): string {
-  if (!resetsAt) return 'Reset time unavailable'
+  if (!resetsAt) return t('resetTimeUnavailable')
   const reset = new Date(resetsAt)
-  if (!Number.isFinite(reset.getTime())) return 'Reset time unavailable'
+  if (!Number.isFinite(reset.getTime())) return t('resetTimeUnavailable')
   // No year: the longest quota window is 7 days out, so it carries no
   // information and is the single widest chunk of the tooltip.
-  return `Resets ${reset.toLocaleString([], {
+  return t('resetAt', { time: reset.toLocaleString('zh-TW', {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-  })}`
+  }) })
 }
 
 // A quota drop is the pet "taking damage" — flash the meter for a moment so
@@ -131,15 +132,15 @@ function quotaTitle(familyKey: string): string | undefined {
   const details = quotaDetails(familyKey)
   if (details.length === 0) return undefined
   return details.map((quota) => (
-    `${quotaDetailLabel(quota.id, quota.label)}: ${quotaDetailPercent(quota.remainingPercent)}% remaining · ${quotaResetLabel(quota.resetsAt)}`
+    `${quotaDetailLabel(quota.id, quota.label)}：${t('percentRemaining', { value: quotaDetailPercent(quota.remainingPercent) })} · ${quotaResetLabel(quota.resetsAt)}`
   )).join('\n')
 }
 
 function permissionRiskLabel(risk: string): string {
-  if (risk === 'high') return 'High risk'
-  if (risk === 'medium') return 'Review required'
-  if (risk === 'low') return 'Low risk'
-  return 'Unknown risk'
+  if (risk === 'high') return t('permissionRiskHigh')
+  if (risk === 'medium') return t('permissionRiskMedium')
+  if (risk === 'low') return t('permissionRiskLow')
+  return t('permissionRiskUnknown')
 }
 
 function decidePermission(decision: 'allow_once' | 'deny'): void {
@@ -237,6 +238,22 @@ function onClick(e: MouseEvent) {
   }
   store.togglePanel()
 }
+
+watch(() => store.presentationReaction, (reaction) => {
+  if (!reaction || !store.reactionsActive) return
+  if (isMultiPet.value) {
+    if (reaction.petId) {
+      const index = store.familyLines.findIndex(line => line.petId === reaction.petId)
+      if (index >= 0) multiPetRefs.value[index]?.playReaction()
+    } else {
+      multiPetRefs.value.forEach(anim => anim?.playReaction())
+    }
+    return
+  }
+  if (!reaction.petId || reaction.petId === store.activePetId) {
+    petAnimRef.value?.playReaction()
+  }
+}, { deep: true })
 </script>
 
 <template>
@@ -258,7 +275,7 @@ function onClick(e: MouseEvent) {
         class="edge-peek-handle"
         role="button"
         tabindex="0"
-        aria-label="Expand pet from edge"
+        :aria-label="t('expandFromEdge')"
         data-pet-hit-target="solid"
         @mousedown.stop="onEdgeMouseDown"
         @click.stop="store.setPetMode('normal')"
@@ -269,7 +286,7 @@ function onClick(e: MouseEvent) {
         <span class="edge-peek-chevron" aria-hidden="true">
           {{ store.petWindowMode.edge === 'left' ? '›' : store.petWindowMode.edge === 'right' ? '‹' : store.petWindowMode.edge === 'top' ? '⌄' : '⌃' }}
         </span>
-        <span class="edge-peek-label">Open</span>
+        <span class="edge-peek-label">{{ t('open') }}</span>
       </div>
 
       <template v-else>
@@ -299,7 +316,7 @@ function onClick(e: MouseEvent) {
             {{ store.permissionRequest.description }}
           </p>
           <p v-if="store.permissionRequest.truncated" class="permission-request-warning">
-            Details were shortened. Review in OpenCode before allowing.
+            {{ t('permissionWarning') }}
           </p>
           <div class="permission-request-actions">
             <button
@@ -319,7 +336,7 @@ function onClick(e: MouseEvent) {
               @mousedown.stop
               @click.stop="decidePermission('allow_once')"
             >
-              {{ store.permissionRequest.status === 'deciding' ? 'Sending…' : 'Allow once' }}
+              {{ store.permissionRequest.status === 'deciding' ? t('sending') : 'Allow once' }}
               <kbd v-if="store.permissionRequest.hotkeyEligible">Ctrl Shift Y</kbd>
             </button>
           </div>
@@ -342,7 +359,20 @@ function onClick(e: MouseEvent) {
         </div>
       </Transition>
 
-      <Transition v-if="!store.permissionRequest && !store.permissionNotice && store.bubbleActive" name="toast" mode="out-in">
+      <Transition v-else-if="store.presentationSay" name="toast" mode="out-in">
+        <div
+          key="presentation-say"
+          class="pet-toast presentation-say"
+          role="status"
+          aria-live="polite"
+          data-pet-hit-target="solid"
+        >
+          <span class="presentation-say-icon" aria-hidden="true">✦</span>
+          <span>{{ store.presentationSay.message }}</span>
+        </div>
+      </Transition>
+
+      <Transition v-else-if="!store.permissionRequest && !store.permissionNotice && store.bubbleActive" name="toast" mode="out-in">
         <div
           v-if="store.toast"
           :key="`toast-${store.toast.id}`"
@@ -362,7 +392,7 @@ function onClick(e: MouseEvent) {
               :style="{ '--toast-duration': `${store.toast.countdown.durationMs}ms` }"
             />
           </span>
-          <span class="sr-only">Closes automatically in about 3 seconds.</span>
+          <span class="sr-only">{{ t('permissionCountdown') }}</span>
         </div>
         <div v-else-if="!isMultiPet && store.activityText" key="activity" class="pet-toast activity" data-pet-hit-target="solid">
           🔧 {{ store.activityText }}
@@ -408,7 +438,7 @@ function onClick(e: MouseEvent) {
                 >
                   <span class="quota-tooltip-summary">
                     <strong>{{ quotaDetailLabel(quota.id, quota.label) }}</strong>
-                    <strong class="quota-tooltip-percent">{{ quotaDetailPercent(quota.remainingPercent) }}% remaining</strong>
+                    <strong class="quota-tooltip-percent">{{ t('percentRemaining', { value: quotaDetailPercent(quota.remainingPercent) }) }}</strong>
                   </span>
                   <span class="quota-tooltip-reset">{{ quotaResetLabel(quota.resetsAt) }}</span>
                 </span>
@@ -417,7 +447,7 @@ function onClick(e: MouseEvent) {
                 v-if="store.quotaByFamily[line.key]"
                 class="quota-meter"
                 role="progressbar"
-                :aria-label="`${line.label} ${store.quotaByFamily[line.key].label} quota remaining`"
+                :aria-label="t('quotaRemainingAria', { provider: line.label, quota: store.quotaByFamily[line.key].label })"
                 aria-valuemin="0"
                 aria-valuemax="100"
                 :aria-valuenow="store.quotaByFamily[line.key].remainingPercent"
@@ -471,7 +501,7 @@ function onClick(e: MouseEvent) {
               >
                 <span class="quota-tooltip-summary">
                   <strong>{{ quotaDetailLabel(quota.id, quota.label) }}</strong>
-                  <strong class="quota-tooltip-percent">{{ quotaDetailPercent(quota.remainingPercent) }}% remaining</strong>
+                  <strong class="quota-tooltip-percent">{{ t('percentRemaining', { value: quotaDetailPercent(quota.remainingPercent) }) }}</strong>
                 </span>
                 <span class="quota-tooltip-reset">{{ quotaResetLabel(quota.resetsAt) }}</span>
               </span>
@@ -480,7 +510,7 @@ function onClick(e: MouseEvent) {
               v-if="store.quotaByFamily[line.key]"
               class="quota-meter"
               role="progressbar"
-              :aria-label="`${line.label} ${store.quotaByFamily[line.key].label} quota remaining`"
+              :aria-label="t('quotaRemainingAria', { provider: line.label, quota: store.quotaByFamily[line.key].label })"
               aria-valuemin="0"
               aria-valuemax="100"
               :aria-valuenow="store.quotaByFamily[line.key].remainingPercent"
@@ -1273,6 +1303,35 @@ function onClick(e: MouseEvent) {
   white-space: normal;
 }
 
+.pet-toast.presentation-say {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  width: max-content;
+  max-width: min(260px, calc(var(--pet-w, 250px) - 10px));
+  background:
+    linear-gradient(155deg, rgba(255, 255, 255, 0.1), transparent 54%),
+    rgba(30, 31, 43, 0.94);
+  border-color: rgba(157, 176, 255, 0.56);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  color: #e1e6ff;
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.presentation-say-icon {
+  flex: 0 0 auto;
+  color: #aab8ff;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
 .permission-notice-icon {
   display: grid;
   flex: 0 0 22px;
@@ -1451,6 +1510,12 @@ function onClick(e: MouseEvent) {
 
   .pet-toast.permission-notice {
     background: #1d1b24;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .pet-toast.presentation-say {
+    background: #1e1f2b;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }

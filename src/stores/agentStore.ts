@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { t, translateBackendError } from '../i18n'
 import { ref, computed, watch } from 'vue'
 import type {
   AgentSession,
@@ -8,10 +9,19 @@ import type {
 } from '../types/agent'
 import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '../types/agent'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../types/desktop'
+import type { AppLocale } from '../types/locale'
+import { setLocale as applyLocale } from '../i18n'
 import type { PermissionDecisionValue, PermissionRequestView } from '../types/permission'
 import type { ProgressionSnapshot } from '../types/progression'
 import type { PetWindowMode, PetWindowModeState } from '../types/pet-window'
 import { normalizePetWindowModeState } from '../types/pet-window'
+import type {
+  PresentationIntent,
+  PresentationMood,
+  PresentationReaction,
+  PresentationStatusUpdate,
+} from '../types/presentation'
+import { PRESENTATION_REACTIONS } from '../types/presentation'
 import { formatProject } from '../utils/format'
 import { isDesktopEffectActive } from '../utils/desktop-effects'
 import {
@@ -70,6 +80,8 @@ const DEFAULT_PET_ID = 'aang-airbender'
 const MAX_QUOTA_WINDOWS = 32
 const MAX_QUOTA_TEXT_LENGTH = 96
 const EVOLUTION_STAGES = new Set(['egg', 'baby', 'teen', 'adult', 'master'])
+const PRESENTATION_MAX_QUEUE = 8
+const PRESENTATION_HIGH_PRIORITY = STATE_PRIORITY['waiting-input']
 
 type QuotaUsage = Awaited<ReturnType<NonNullable<Window['electronAPI']>['getQuotaUsage']>>
 
@@ -291,6 +303,14 @@ export const useAgentStore = defineStore('agent', () => {
   const bubbleEnabled = ref(localStorage.getItem('agent-pet-bubble') === '1')
   const permissionRequests = ref<PermissionRequestView[]>([])
   const progression = ref<ProgressionSnapshot | null>(null)
+  const presentationQueue = ref<PresentationIntent[]>([])
+  const presentationActive = ref<PresentationIntent | null>(null)
+  const presentationReaction = ref<{
+    id: string
+    reaction: PresentationReaction
+    petId?: string
+  } | null>(null)
+  let presentationTimer: ReturnType<typeof setTimeout> | null = null
 
   // Desktop-wide preferences are owned by the Electron main process so the
   // Tray and both renderer windows always agree. Sound is initialized from
@@ -298,6 +318,7 @@ export const useAgentStore = defineStore('agent', () => {
   const dndEnabled = ref(false)
   const notificationsEnabled = ref(true)
   const permissionBubbleEnabled = ref(true)
+  const presentationMcpEnabled = ref(true)
   const edgeModeEnabled = ref(false)
   const launchAtStartup = ref(false)
   const launchAtStartupSupported = ref(false)
@@ -315,6 +336,14 @@ export const useAgentStore = defineStore('agent', () => {
   // Presentation-only preference; it never changes Broker or adapter state.
   const permissionBubbleActive = computed(() => (
     desktopPreferencesReady.value && permissionBubbleEnabled.value
+  ))
+  const presentationSay = computed(() => (
+    desktopPreferencesReady.value
+    && presentationMcpEnabled.value
+    && !dndEnabled.value
+    && presentationActive.value?.kind === 'say'
+    ? presentationActive.value
+    : null
   ))
 
   function clampMood(value: number): number {
@@ -384,6 +413,116 @@ export const useAgentStore = defineStore('agent', () => {
     }, getToastRemainingMs(countdown, startedAt))
   }
 
+  function clearPresentation(): void {
+    if (presentationTimer) clearTimeout(presentationTimer)
+    presentationTimer = null
+    presentationQueue.value = []
+    presentationActive.value = null
+    presentationReaction.value = null
+  }
+
+  function presentationBlocked(): boolean {
+    return !desktopPreferencesReady.value
+      || !presentationMcpEnabled.value
+      || dndEnabled.value
+      || (STATE_PRIORITY[currentState.value] ?? 0) >= PRESENTATION_HIGH_PRIORITY
+  }
+
+  function normalizePresentationIntent(value: unknown): PresentationIntent | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const raw = value as Record<string, unknown>
+    if ((raw.kind !== 'react' && raw.kind !== 'say')
+      || typeof raw.id !== 'string'
+      || typeof raw.createdAt !== 'number'
+      || typeof raw.expiresAt !== 'number'
+      || !Number.isFinite(raw.createdAt)
+      || !Number.isFinite(raw.expiresAt)
+      || raw.expiresAt <= Date.now()) return null
+
+    const petId = raw.petId === undefined
+      ? undefined
+      : typeof raw.petId === 'string'
+        && /^[A-Za-z0-9._-]{1,64}$/.test(raw.petId)
+        && !raw.petId.includes('..')
+        ? raw.petId
+        : null
+    if (petId === null) return null
+
+    if (raw.kind === 'react') {
+      if (!PRESENTATION_REACTIONS.includes(raw.reaction as PresentationReaction)) return null
+      return {
+        id: raw.id.slice(0, 80),
+        kind: 'react',
+        ...(petId ? { petId } : {}),
+        reaction: raw.reaction as PresentationReaction,
+        createdAt: raw.createdAt,
+        expiresAt: raw.expiresAt,
+      }
+    }
+
+    if (typeof raw.message !== 'string') return null
+    const message = raw.message
+      .normalize('NFKC')
+      .replace(/[\u0000-\u001f\u007f]/g, ' ')
+      .replace(/[<>]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (message.length === 0 || message.length > 240) return null
+    return {
+      id: raw.id.slice(0, 80),
+      kind: 'say',
+      ...(petId ? { petId } : {}),
+      message,
+      createdAt: raw.createdAt,
+      expiresAt: raw.expiresAt,
+    }
+  }
+
+  function pumpPresentation(): void {
+    if (presentationTimer) clearTimeout(presentationTimer)
+    presentationTimer = null
+    const now = Date.now()
+    presentationQueue.value = presentationQueue.value.filter(intent => intent.expiresAt > now)
+    if (presentationBlocked()) {
+      clearPresentation()
+      return
+    }
+    if (presentationActive.value && presentationActive.value.expiresAt > now) {
+      presentationTimer = setTimeout(pumpPresentation, presentationActive.value.expiresAt - now)
+      return
+    }
+    presentationActive.value = presentationQueue.value.shift() ?? null
+    presentationReaction.value = null
+    if (!presentationActive.value) return
+
+    if (presentationActive.value.kind === 'react' && presentationActive.value.reaction) {
+      presentationReaction.value = {
+        id: presentationActive.value.id,
+        reaction: presentationActive.value.reaction,
+        ...(presentationActive.value.petId ? { petId: presentationActive.value.petId } : {}),
+      }
+    }
+    presentationTimer = setTimeout(pumpPresentation, Math.max(1, presentationActive.value.expiresAt - now))
+  }
+
+  function handlePresentationIntent(value: unknown): void {
+    if (presentationBlocked()) return
+    const intent = normalizePresentationIntent(value)
+    if (!intent) return
+    if (intent.petId) {
+      const knownPetIds = new Set([
+        activePetId.value,
+        ...familyLines.value.map(line => line.petId),
+      ])
+      if (!knownPetIds.has(intent.petId)) return
+    }
+    if (presentationQueue.value.length >= PRESENTATION_MAX_QUEUE) {
+      presentationQueue.value.shift()
+    }
+    presentationQueue.value.push(intent)
+    pumpPresentation()
+  }
+
   function setSoundEnabled(enabled: boolean) {
     soundEnabled.value = enabled
     localStorage.setItem('agent-pet-sound', enabled ? '1' : '0')
@@ -391,15 +530,18 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   function applyDesktopPreferences(preferences: DesktopPreferences) {
+    applyLocale(preferences.locale)
     dndEnabled.value = preferences.dndEnabled
     notificationsEnabled.value = preferences.notificationsEnabled
     permissionBubbleEnabled.value = preferences.permissionBubbleEnabled
+    presentationMcpEnabled.value = preferences.presentationMcpEnabled
     edgeModeEnabled.value = preferences.edgeModeEnabled
     soundEnabled.value = preferences.soundEnabled
     launchAtStartup.value = preferences.launchAtStartup
     launchAtStartupSupported.value = preferences.launchAtStartupSupported
     desktopPreferencesReady.value = true
     localStorage.setItem('agent-pet-sound', preferences.soundEnabled ? '1' : '0')
+    if (!preferences.presentationMcpEnabled || preferences.dndEnabled) clearPresentation()
   }
 
   async function initializeDesktopPreferences() {
@@ -441,9 +583,20 @@ export const useAgentStore = defineStore('agent', () => {
     updateDesktopPreferences({ permissionBubbleEnabled: enabled })
   }
 
+  function setPresentationMcpEnabled(enabled: boolean) {
+    presentationMcpEnabled.value = enabled
+    if (!enabled) clearPresentation()
+    updateDesktopPreferences({ presentationMcpEnabled: enabled })
+  }
+
   function setEdgeModeEnabled(enabled: boolean) {
     edgeModeEnabled.value = enabled
     updateDesktopPreferences({ edgeModeEnabled: enabled })
+  }
+
+  function setLocalePreference(next: AppLocale) {
+    const applied = applyLocale(next)
+    updateDesktopPreferences({ locale: applied })
   }
 
   function setLaunchAtStartup(enabled: boolean) {
@@ -628,6 +781,10 @@ export const useAgentStore = defineStore('agent', () => {
       }
     }
 
+    if ((STATE_PRIORITY[event.state] ?? 0) >= PRESENTATION_HIGH_PRIORITY) {
+      clearPresentation()
+    }
+
     awardMoodProgress(event, key, prevState)
 
     if ((event.state === 'success' || event.state === 'error') && prevState !== event.state) {
@@ -737,7 +894,7 @@ export const useAgentStore = defineStore('agent', () => {
       }
       return quotaUsage.value
     } catch (error) {
-      quotaError.value = error instanceof Error ? error.message : 'Could not load usage.'
+      quotaError.value = translateBackendError(error instanceof Error ? error.message : t('quotaLoadFailed'))
       return quotaUsage.value
     } finally {
       quotaLoading.value = false
@@ -862,10 +1019,34 @@ export const useAgentStore = defineStore('agent', () => {
     if (session?.state !== 'waiting-permission') return null
     if (session.permissionNotice?.responseMode !== 'external_only') return null
     return {
-      title: 'Permission needed',
-      detail: 'Return to the terminal to respond',
+      title: t('permissionNeeded'),
+      detail: t('returnToTerminal'),
     }
   })
+
+  function moodLabel(value: number): PresentationMood {
+    if (value >= 70) return 'happy'
+    if (value <= 25) return 'low'
+    return 'neutral'
+  }
+
+  function getPresentationStatus(): PresentationStatusUpdate {
+    const lines = familyLines.value.length > 0
+      ? familyLines.value
+      : [{ petId: activePetId.value, state: currentState.value }]
+    const activePets = lines.slice(0, 16).map(line => ({
+      petId: line.petId,
+      name: pets.value.find(pet => pet.id === line.petId)?.displayName ?? line.petId,
+      mood: moodLabel(mood.value),
+      level: progression.value?.level ?? 1,
+      visibleState: line.state,
+    }))
+    return {
+      activePets,
+      dnd: dndEnabled.value,
+      enabled: presentationMcpEnabled.value,
+    }
+  }
 
   const permissionRequest = computed(() => permissionRequests.value[0] ?? null)
 
@@ -1022,6 +1203,7 @@ export const useAgentStore = defineStore('agent', () => {
     dndEnabled,
     notificationsEnabled,
     permissionBubbleEnabled,
+    presentationMcpEnabled,
     edgeModeEnabled,
     launchAtStartup,
     launchAtStartupSupported,
@@ -1043,6 +1225,11 @@ export const useAgentStore = defineStore('agent', () => {
     activePetId,
     activityText,
     permissionNotice,
+    presentationSay,
+    presentationReaction,
+    handlePresentationIntent,
+    clearPresentation,
+    getPresentationStatus,
     permissionRequests,
     permissionRequest,
     progression,
@@ -1073,7 +1260,9 @@ export const useAgentStore = defineStore('agent', () => {
     setDndEnabled,
     setNotificationsEnabled,
     setPermissionBubbleEnabled,
+    setPresentationMcpEnabled,
     setEdgeModeEnabled,
+    setLocalePreference,
     setLaunchAtStartup,
     setMultiPetEnabled,
     setReactionsEnabled,

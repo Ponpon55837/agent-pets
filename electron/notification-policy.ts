@@ -1,4 +1,5 @@
 import type { AgentStatusEvent } from './event-server'
+import { t } from '../src/i18n.ts'
 
 export type NotificationKind = 'waiting-permission' | 'waiting-input' | 'success' | 'error'
 
@@ -32,7 +33,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
 
   const source = SOURCE_NAMES[event.source] ?? 'Agent'
   const project = displayText(event.project)
-  const body = project || 'Agent task'
+  const body = project || t('agentTask')
   const keyBase = `${event.source}:${event.sessionId}`
 
   switch (event.state) {
@@ -40,7 +41,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
       return {
         key: `${keyBase}:waiting-permission`,
         kind: 'waiting-permission',
-        title: `${source} needs permission`,
+        title: t('notificationNeedsPermission', { source }),
         body,
         terminal: false,
       }
@@ -48,7 +49,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
       return {
         key: `${keyBase}:waiting-input`,
         kind: 'waiting-input',
-        title: `${source} is waiting for input`,
+        title: t('notificationWaitingInput', { source }),
         body,
         terminal: false,
       }
@@ -56,7 +57,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
       return {
         key: `${keyBase}:success`,
         kind: 'success',
-        title: `${source} task completed`,
+        title: t('notificationCompleted', { source }),
         body,
         terminal: true,
       }
@@ -64,7 +65,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
       return {
         key: `${keyBase}:error`,
         kind: 'error',
-        title: `${source} task failed`,
+        title: t('notificationFailed', { source }),
         body,
         terminal: true,
       }
@@ -107,10 +108,10 @@ export function aggregateTerminalNotifications(candidates: NotificationCandidate
   const completed = candidates.filter(candidate => candidate.kind === 'success').length
   const failed = candidates.filter(candidate => candidate.kind === 'error').length
   return {
-    title: `${candidates.length} Agent tasks finished`,
+    title: t('notificationAggregate', { count: candidates.length }),
     body: [
-      completed > 0 ? `${completed} completed` : '',
-      failed > 0 ? `${failed} failed` : '',
+      completed > 0 ? t('notificationCompletedCount', { count: completed }) : '',
+      failed > 0 ? t('notificationFailedCount', { count: failed }) : '',
     ].filter(Boolean).join(' · '),
   }
 }

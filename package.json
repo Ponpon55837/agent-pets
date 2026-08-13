@@ -1,6 +1,6 @@
 {
   "name": "agent-pets",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Desktop pet that shows the status of AI coding agents",
   "author": "Upfloor5",
   "license": "MIT",
@@ -11,10 +11,12 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/stop-agent-pets.mjs",
     "build": "vue-tsc --noEmit && vite build && electron-builder",
     "test:unit": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/*.test.mts",
     "preview": "vite preview",
     "electron:dev": "vite --config vite.config.mts",
+    "preelectron:build": "node scripts/stop-agent-pets.mjs",
     "electron:build": "vue-tsc --noEmit && vite build && electron-builder"
   },
   "dependencies": {
@@ -61,7 +63,8 @@
         "to": "integrations",
         "filter": [
           "agent-hook.mjs",
-          "agent-hook.cmd"
+          "agent-hook.cmd",
+          "presentation-mcp.mjs"
         ]
       }
     ],

@@ -6,6 +6,7 @@ import type {
   DiagnosticReport,
 } from '../types/agent-adapter'
 import type { AgentSource } from '../types/agent'
+import { locale, t, translateBackendError } from '../i18n'
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -54,10 +55,10 @@ async function detectTools() {
     if (status) {
       tools.value = status.adapters.map(adapter => ({ ...adapter }))
     } else {
-      error.value = 'Could not detect tools (timeout)'
+      error.value = t('couldNotDetectTools')
     }
   } catch {
-    error.value = 'Failed to detect tools'
+    error.value = t('failedToDetectTools')
   }
   loading.value = false
   stopElapsedTimer()
@@ -78,12 +79,12 @@ async function install(target?: AgentAdapterId) {
       }
       const result = await window.electronAPI?.installAdapter(adapterId)
       if (result && !result.ok) {
-        installError.value = result.error || 'Install failed'
+        installError.value = translateBackendError(result.error || t('installFailed'))
         break
       }
     }
   } catch {
-    installError.value = 'Install failed'
+    installError.value = t('installFailed')
   }
   installing.value = null
   await detectTools()
@@ -98,10 +99,10 @@ async function testIntegration(tool: ToolStatus) {
     if (result?.ok && result.verifiedAt) {
       tool.verifiedAt = result.verifiedAt
     } else {
-      tool.testError = result?.error || 'Live event test failed'
+      tool.testError = translateBackendError(result?.error || t('liveEventTestFailed'))
     }
   } catch {
-    tool.testError = 'Live event test failed'
+    tool.testError = t('liveEventTestFailed')
   }
   testing.value = null
 }
@@ -114,26 +115,30 @@ async function diagnoseAdapter(tool: ToolStatus) {
     if (result?.ok && result.report) {
       tool.diagnosis = result.report
     } else {
-      tool.testError = result?.error || 'Diagnosis failed'
+      tool.testError = translateBackendError(result?.error || t('diagnosisFailed'))
     }
   } catch {
-    tool.testError = 'Diagnosis failed'
+    tool.testError = t('diagnosisFailed')
   }
   diagnosing.value = null
 }
 
 function healthLabel(tool: ToolStatus): string {
-  return tool.health.replace('_', ' ')
+  if (tool.health === 'ready') return t('healthReady')
+  if (tool.health === 'needs_install') return t('healthNeedsInstall')
+  if (tool.health === 'degraded') return t('healthDegraded')
+  if (tool.health === 'needs_approval') return t('healthNeedsApproval')
+  return t('healthError')
 }
 
 function capabilityLabels(tool: ToolStatus): string[] {
   const capabilities = tool.capabilities
   const labels: string[] = []
-  if (capabilities.lifecycle) labels.push('Lifecycle')
-  if (capabilities.sessions) labels.push('Sessions')
-  if (capabilities.projects) labels.push('Projects')
-  if (capabilities.toolActivity) labels.push('Tool activity')
-  if (capabilities.waitingInput) labels.push('Input')
+  if (capabilities.lifecycle) labels.push(t('capabilityLifecycle'))
+  if (capabilities.sessions) labels.push(t('capabilitySessions'))
+  if (capabilities.projects) labels.push(t('capabilityProjects'))
+  if (capabilities.toolActivity) labels.push(t('capabilityToolActivity'))
+  if (capabilities.waitingInput) labels.push(t('capabilityInput'))
   if (capabilities.tokenUsage !== 'none') labels.push(`Token: ${capabilities.tokenUsage}`)
   if (capabilities.quota !== 'none') labels.push(`Quota: ${capabilities.quota}`)
   labels.push(`Permission: ${capabilities.permissions}`)
@@ -153,7 +158,7 @@ onUnmounted(() => {
   <div class="setup-overlay" @click.self="emit('close')">
     <div class="setup-wizard">
       <div class="wizard-header">
-        <h2>Setup Wizard</h2>
+        <h2>{{ t('setupWizardTitle') }}</h2>
         <button class="close-btn" @click="emit('close')">&times;</button>
       </div>
 
@@ -161,13 +166,13 @@ onUnmounted(() => {
         <div class="pixel-loader">
           <span v-for="i in 9" :key="i" class="pixel-cell" :style="{ animationDelay: `${(i % 3) * 0.12}s` }" />
         </div>
-        <span>Detecting tools…</span>
+        <span>{{ t('detectingTools') }}</span>
         <span class="elapsed">{{ (elapsedMs / 1000).toFixed(1) }}s</span>
       </div>
 
       <div v-else-if="error" class="error-msg">
         {{ error }}
-        <button class="retry-btn" @click="detectTools">Retry</button>
+        <button class="retry-btn" @click="detectTools">{{ t('retry') }}</button>
       </div>
 
       <div v-else class="tools-list">
@@ -186,17 +191,17 @@ onUnmounted(() => {
                 class="test-btn"
                 v-if="tool.testSource"
                 :disabled="!tool.installed || installing !== null || testing !== null || diagnosing !== null"
-                title="Send a live event through the local receiver"
+                :title="t('testReceiverTitle')"
                 @click="testIntegration(tool)"
               >
-                {{ testing === tool.testSource ? 'Testing...' : 'Test' }}
+                {{ testing === tool.testSource ? t('testing') : t('test') }}
               </button>
               <button
                 class="test-btn"
                 :disabled="installing !== null || testing !== null || diagnosing !== null"
                 @click="diagnoseAdapter(tool)"
               >
-                {{ diagnosing === tool.id ? 'Diagnosing...' : 'Diagnose' }}
+                {{ diagnosing === tool.id ? t('diagnosing') : t('diagnose') }}
               </button>
               <button
                 class="install-btn"
@@ -204,7 +209,7 @@ onUnmounted(() => {
                 :disabled="installing !== null || testing !== null || diagnosing !== null"
                 @click="install(tool.id)"
               >
-                {{ installing === tool.id ? '...' : tool.installed ? 'Reinstall' : 'Install' }}
+                {{ installing === tool.id ? t('installing') : tool.installed ? t('reinstall') : t('install') }}
               </button>
             </div>
           </div>
@@ -216,7 +221,7 @@ onUnmounted(() => {
             <span v-for="capability in capabilityLabels(tool)" :key="capability" class="capability-chip">{{ capability }}</span>
           </div>
           <div v-if="tool.verifiedAt" class="test-result passed">
-            Receiver verified at {{ new Date(tool.verifiedAt).toLocaleTimeString() }}
+            {{ t('receiverVerifiedAt', { time: new Date(tool.verifiedAt).toLocaleTimeString(locale) }) }}
           </div>
           <div v-else-if="tool.testError" class="test-result failed">{{ tool.testError }}</div>
           <div v-if="tool.diagnosis" class="diagnosis-list">
@@ -229,22 +234,18 @@ onUnmounted(() => {
       </div>
 
       <details class="wizard-note">
-        <summary>About adapters and live testing</summary>
+        <summary>{{ t('aboutAdapters') }}</summary>
         <div class="wizard-note-content">
-          Capabilities and health come from the runtime Adapter registry, not a
-          hardcoded tool list. <strong>Test</strong> verifies this Agent Pets
-          instance can receive, canonically map, and display a live local event;
-          it does not launch the coding tool itself. Generic HTTP is always
-          observe-only and cannot respond to permissions.
+          {{ t('adapterNote') }}
         </div>
       </details>
 
       <div v-if="installError" class="error-msg">{{ installError }}</div>
 
       <div class="wizard-actions">
-        <button class="action-btn" @click="detectTools">Refresh</button>
+        <button class="action-btn" @click="detectTools">{{ t('refresh') }}</button>
         <button class="action-btn primary" :disabled="installing !== null" @click="install()">
-          {{ installing === 'all' ? 'Installing...' : 'Install All' }}
+          {{ installing === 'all' ? t('installing') : t('installAll') }}
         </button>
       </div>
     </div>

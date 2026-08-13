@@ -29,19 +29,25 @@ test('migrates legacy sound once and persists desktop preferences', (t) => {
 
   assert.equal(store.get().soundEnabled, false)
   assert.equal(store.get().permissionBubbleEnabled, true)
+  assert.equal(store.get().presentationMcpEnabled, true)
   assert.equal(store.get().edgeModeEnabled, false)
+  assert.equal(store.get().locale, 'zh-TW')
   assert.equal(store.initializeLegacySound(true).soundEnabled, true)
 
   const updated = store.update({
     dndEnabled: true,
     permissionBubbleEnabled: false,
+    presentationMcpEnabled: false,
     edgeModeEnabled: true,
     launchAtStartup: true,
+    locale: 'en-US',
   })
   assert.equal(updated.dndEnabled, true)
   assert.equal(updated.permissionBubbleEnabled, false)
+  assert.equal(updated.presentationMcpEnabled, false)
   assert.equal(updated.edgeModeEnabled, true)
   assert.equal(updated.launchAtStartup, true)
+  assert.equal(updated.locale, 'en-US')
 
   const reloaded = new DesktopPreferencesStore(filePath, {
     supported: true,
@@ -51,8 +57,10 @@ test('migrates legacy sound once and persists desktop preferences', (t) => {
   assert.equal(reloaded.get().soundEnabled, true)
   assert.equal(reloaded.get().dndEnabled, true)
   assert.equal(reloaded.get().permissionBubbleEnabled, false)
+  assert.equal(reloaded.get().presentationMcpEnabled, false)
   assert.equal(reloaded.get().edgeModeEnabled, true)
   assert.equal(reloaded.get().launchAtStartup, true)
+  assert.equal(reloaded.get().locale, 'en-US')
 })
 
 test('rejects unknown and non-boolean preference fields', () => {
@@ -63,6 +71,10 @@ test('rejects unknown and non-boolean preference fields', () => {
   assert.throws(
     () => parseDesktopPreferencesPatch({ callbackUrl: 'http://127.0.0.1' }),
     /Unsupported desktop preference/,
+  )
+  assert.throws(
+    () => parseDesktopPreferencesPatch({ locale: 'fr-FR' }),
+    /locale is unsupported/,
   )
 })
 
