@@ -2,6 +2,8 @@
 
 本檔案是 [Phase 8 報告](phase-8-project-pet.md) 交付後、實機驗證發現的問題與修正，供下一階段接手前快速掌握目前狀態。所有項目已修正、測試通過（89/89）、`vue-tsc --noEmit` 乾淨。
 
+> **第二輪修正（token 計算重構）見文末「## 第二輪：token 計算重構」章節。**
+
 ## 這次改了什麼
 
 ### 1. History 專案篩選失效 + Claude/Codex token 用量偏差（同一根因）
@@ -63,5 +65,33 @@
 
 ## 後續可考慮但本輪未做
 
-- Codex 的 `total_token_usage` 若因 context compaction 而重置變小，目前的處理方式是把整個新的累計值當作全新用量計入（見 [electron/local-usage.ts](../../electron/local-usage.ts) `codexUsage()` 的註解），可能在極端情況下重複計算。目前沒有實際樣本驗證是否真的發生，暫不處理。
 - `daily_stats`／`projects` 表目前沒有主動清理策略，`MAX_PROJECTS = 256` 只限制 `listProjects()` 回傳筆數，長期使用下資料表本身無上限。
+
+## 第二輪：token 計算重構
+
+使用者實測回報：「有些專案有在用，卻沒顯示正確數量，直接是 0」、「跟 Claude Code／Codex 官方顯示的用量對不起來」。追查後找到兩個根因，都已修正並補測試（新增 5 個測試，全部通過；`vue-tsc --noEmit` 乾淨）。
+
+### 根因 1：本機用量掃描只「查詢」專案身份，沒有「登記」
+
+[electron/local-usage.ts](../../electron/local-usage.ts) 掃描 Claude Code／Codex 本機 log 算出 token 用量後，過去只呼叫 `ProjectRoutingStore.resolvePath()`（唯讀）取得 `projectId` 附加在用量記錄上，從未把該專案寫進 `projects` 資料表。結果是：一個只有歷史 log、從未觸發過即時 hook 事件的專案，它的 token 用量其實已經正確算出並存好，但因為它從沒出現在 `projects` 表裡，「專案寵物」清單／History 篩選下拉選單永遠看不到它、選不到它——使用者只會看到「這個專案在用，但顯示 0」。
+
+**修正**：`LocalUsageReader` 改呼叫 `ProjectRoutingStore.trackSeen()`（既有的、給即時事件用的方法，內建節流），讓本機 log 掃描跟即時事件走同一套解析＋登記邏輯，兩者永遠不會對同一個資料夾算出不同的 `projectId`，掃描到的專案也一定會出現在清單裡。
+
+同時修正 `ProjectRoutingStore.resolvePath()` 的一個連帶問題：路徑解析結果的記憶體快取過去連「解析失敗（當下讀不到這個資料夾）」都會快取下來，之後即使資料夾恢復可讀，也會一直回傳失敗前的舊識別碼，無法自我修復。現在只快取「已透過檔案系統確認存在」的成功結果。
+
+### 根因 2：Codex context 壓縮／resume 造成的計數暴衝
+
+Codex 的 `total_token_usage` 是整個 session 的累計值。原本邏輯：只要新的累計值比上次記錄的小（代表 context 被壓縮或 resume 重置了計數器），就會把「整個新的（較小的）累計值」當成全新用量灌進去——等於在重置當下額外多算了一大筆並非真的新產生的 token，導致總量跟官方顯示的對不上、有時會看到數字突然暴衝。
+
+**修正**：偵測到計數器往下掉時，不再把新值當全新用量，而是把這次新增用量記為 0、把基準值重新校正到新的累計值，之後的差值都改用新基準計算。這樣最多是「少算一小段」，不會再「灌入一大筆從沒真的發生過的用量」。
+
+### 影響範圍
+
+- `electron/local-usage.ts`、`electron/project-routing.ts`
+- `tests/local-usage.test.mts`（新增：reset 不暴衝、只有歷史 log 的專案會被登記）、`tests/project-routing.test.mts`（沿用既有測試，無需改動）
+- 外部介面沒變：`LocalUsageReaderOptions` 的 `projectRouting` 選項仍是同一個形狀（main.ts 傳入 `projectRoutingStore` 不用改），Achievements 的 `onRecordImported` 串接（若後續重新加回）不受影響。
+
+### 尚未處理
+
+- Claude Code 較新版本的 assistant 訊息可能帶有 `usage.iterations`（單一訊息內多次工具呼叫的逐步用量陣列）。本機實測的 94 個 transcript 檔案中沒有出現 `iterations.length > 1` 的案例，因此本輪未處理；如果之後在其他帳號／版本上看到用量偏低，這是第一個該查的地方。
+- 大型持續成長的 session log 檔案，每次掃描仍會整檔重新讀取＋解析（只是靠 `recordTokenUsage` 的去重機制避免重複寫入，不是避免重複運算）。這是效能問題，不是正確性問題，暫不處理。

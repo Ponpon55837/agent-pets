@@ -21,7 +21,6 @@ interface UsageRoot {
 
 interface ParsedUsage extends HistoryTokenUsageRecord {
   dedupeKey: string
-  cumulative?: TokenCounters
   cwd?: string
 }
 
@@ -31,7 +30,12 @@ interface TokenCounters {
 }
 
 export interface ProjectPathResolver {
-  resolvePath(value: unknown): { projectId: string } | null
+  // Must resolve AND register the project (not a read-only lookup): a
+  // project whose only evidence is historical Claude/Codex log files, never
+  // a live routed event, still needs a row in the project list so its token
+  // totals are reachable from the History project filter instead of always
+  // reading back as zero.
+  trackSeen(value: unknown, seenAt?: number): { projectId: string } | null
 }
 
 export interface LocalUsageReaderOptions {
@@ -147,6 +151,15 @@ function claudeUsage(
   }
 }
 
+interface CodexUsageResult {
+  // Null when this event carries no importable token delta (first sighting
+  // of a baseline, a repeated snapshot, or a post-reset event - see below).
+  record: ParsedUsage | null
+  // The raw cumulative counter this event reported, always populated so the
+  // caller can rebase its running baseline even when `record` is null.
+  cumulative: TokenCounters
+}
+
 function codexUsage(
   record: Record<string, unknown>,
   payload: Record<string, unknown>,
@@ -157,7 +170,7 @@ function codexUsage(
   fallbackAt: number,
   previousTotal: TokenCounters | null,
   fileCwd: string | undefined,
-): ParsedUsage | null {
+): CodexUsageResult | null {
   const totalUsage = asObject(info.total_token_usage)
   // Codex's total_token_usage is cumulative for the rollout. last_token_usage
   // is a context snapshot and may be repeated on rate-limit-only events, so it
@@ -167,13 +180,16 @@ function codexUsage(
     input: token(totalUsage.input_tokens),
     output: outputCount(totalUsage),
   }
-  const input = previousTotal && currentTotal.input >= previousTotal.input
-    ? currentTotal.input - previousTotal.input
-    : currentTotal.input
-  const output = previousTotal && currentTotal.output >= previousTotal.output
-    ? currentTotal.output - previousTotal.output
-    : currentTotal.output
-  if (input === 0 && output === 0) return null
+  // A drop below the previous cumulative total means context compaction or a
+  // resumed/forked thread re-based the counter - not that Codex refunded
+  // tokens. We cannot tell how much of the smaller new total was already
+  // billed before the reset, so the safe choice is to count zero new tokens
+  // for this event and simply rebase the baseline to the new total, rather
+  // than (as before) treating the entire post-reset value as fresh spend,
+  // which could spike the displayed total far past what Codex actually used.
+  const input = previousTotal ? Math.max(0, currentTotal.input - previousTotal.input) : currentTotal.input
+  const output = previousTotal ? Math.max(0, currentTotal.output - previousTotal.output) : currentTotal.output
+  if (input === 0 && output === 0) return { record: null, cumulative: currentTotal }
 
   const sessionId = text(record.session_id)
     ?? text(record.sessionId)
@@ -183,17 +199,19 @@ function codexUsage(
   const stableKey = `line:${fileKey}:${lineNumber}`
   const occurredAt = timestamp(record.timestamp ?? payload.timestamp, fallbackAt)
   return {
-    adapterId: 'codex',
-    agentId: 'codex',
-    sessionId,
-    sourceEventId: usageId('codex', stableKey),
-    occurredAt,
-    input,
-    output,
-    quality: 'exact',
-    dedupeKey: stableKey,
+    record: {
+      adapterId: 'codex',
+      agentId: 'codex',
+      sessionId,
+      sourceEventId: usageId('codex', stableKey),
+      occurredAt,
+      input,
+      output,
+      quality: 'exact',
+      dedupeKey: stableKey,
+      cwd: fileCwd,
+    },
     cumulative: currentTotal,
-    cwd: fileCwd,
   }
 }
 
@@ -276,21 +294,33 @@ function parseUsageFile(
   maxLineBytes: number,
 ): ParsedUsage[] {
   const records = new Map<string, ParsedUsage>()
-  let previousCodexTotal: TokenCounters | null = null
-  // Codex only reports the workspace path once, on the file's leading
-  // session_meta line; every later token_count event inherits it.
-  let codexCwd: string | undefined
   const lines = content.split(/\r?\n/)
+
+  if (provider === 'codex') {
+    let previousCodexTotal: TokenCounters | null = null
+    // Codex only reports the workspace path once, on the file's leading
+    // session_meta line; every later token_count event inherits it.
+    let codexCwd: string | undefined
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index]
+      if (!line || Buffer.byteLength(line, 'utf8') > maxLineBytes) continue
+      if (codexCwd === undefined) codexCwd = codexSessionCwd(line) ?? codexCwd
+      const result = parseCodexUsageLine(line, fileKey, index + 1, fallbackAt, previousCodexTotal, codexCwd)
+      if (!result) continue
+      // Rebase the running baseline even when this event produced no
+      // importable record (first sighting, repeat, or a reset) - otherwise a
+      // reset would leave the old, now-stale total in place and every
+      // following event would keep computing its delta against it.
+      previousCodexTotal = result.cumulative
+      if (result.record) records.set(result.record.dedupeKey, result.record)
+    }
+    return [...records.values()]
+  }
+
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
     if (!line || Buffer.byteLength(line, 'utf8') > maxLineBytes) continue
-    if (provider === 'codex' && codexCwd === undefined) {
-      codexCwd = codexSessionCwd(line) ?? codexCwd
-    }
-    const parsed: ParsedUsage | null = provider === 'codex'
-      ? parseCodexUsageLine(line, fileKey, index + 1, fallbackAt, previousCodexTotal, codexCwd)
-      : parseLocalUsageLine(provider, line, fileKey, index + 1, fallbackAt)
-    if (provider === 'codex' && parsed?.cumulative) previousCodexTotal = parsed.cumulative
+    const parsed = parseLocalUsageLine(provider, line, fileKey, index + 1, fallbackAt)
     if (!parsed) continue
     // Claude streaming records may repeat the same message id with cumulative
     // usage. Keep the latest record for that message and import it once.
@@ -315,7 +345,7 @@ function parseCodexUsageLine(
   fallbackAt: number,
   previousTotal: TokenCounters | null,
   fileCwd: string | undefined,
-): ParsedUsage | null {
+): CodexUsageResult | null {
   let value: unknown
   try { value = JSON.parse(line) } catch { return null }
   const record = asObject(value)
@@ -397,7 +427,13 @@ export class LocalUsageReader {
         result.recordsParsed += records.length
         for (const record of records) {
           if (record.occurredAt <= cutoff) continue
-          const projectId = record.cwd ? this.projectRouting?.resolvePath(record.cwd)?.projectId : undefined
+          // trackSeen (not a read-only resolve) so a project whose only
+          // evidence is this log file still gets a row in the project list -
+          // otherwise its token totals would be correctly computed but
+          // permanently unreachable from the History project filter.
+          const projectId = record.cwd
+            ? this.projectRouting?.trackSeen(record.cwd, record.occurredAt)?.projectId
+            : undefined
           if (this.history.recordTokenUsage({ ...record, projectId })) result.recordsImported += 1
         }
       }

@@ -132,7 +132,7 @@ test('attributes local Codex and Claude usage to the routed project via cwd', as
   ])
 
   const projectRouting = {
-    resolvePath: (value: unknown) => (value === codexCwd ? { projectId: projectA } : null),
+    trackSeen: (value: unknown) => (value === codexCwd ? { projectId: projectA } : null),
   }
   const reader = new LocalUsageReader({ homeDir: fixture.home, history: store, now: () => now, projectRouting })
   const scan = await reader.scan()
@@ -149,6 +149,89 @@ test('attributes local Codex and Claude usage to the routed project via cwd', as
   const otherProject = store.getSummary(undefined, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')
   assert.equal(otherProject.totals.tokenInput, 0)
   assert.equal(otherProject.totals.tokenOutput, 0)
+})
+
+test('a Codex cumulative-counter reset rebases the baseline instead of overcounting', async t => {
+  const fixture = setup()
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const store = new HistoryStore(fixture.database, {
+    now: () => now,
+    localDate: () => '2026-08-13',
+  })
+  t.after(() => { store.close(); fixture.cleanup() })
+
+  const codexUsageRecord = (offsetMs: number, input: number, output: number) => ({
+    type: 'event_msg',
+    timestamp: new Date(now + offsetMs).toISOString(),
+    payload: {
+      type: 'token_count',
+      info: {
+        last_token_usage: { input_tokens: input, output_tokens: output },
+        total_token_usage: { input_tokens: input, output_tokens: output },
+      },
+    },
+  })
+  writeJsonl(path.join(fixture.home, '.codex', 'sessions', 'session.jsonl'), [
+    codexUsageRecord(0, 1_000, 200), // baseline
+    // Context compaction/resume rebases the cumulative counter down. The old
+    // behaviour would have counted this entire smaller total as fresh spend
+    // (an extra 300/60 on top of the 1000/200 already recorded) instead of
+    // rebasing to it with zero new tokens.
+    codexUsageRecord(1_000, 300, 60),
+    // Once the (now lower) baseline is exceeded again, the delta must be
+    // computed against the rebased total, not the stale pre-reset one.
+    codexUsageRecord(2_000, 350, 70),
+  ])
+
+  const reader = new LocalUsageReader({ homeDir: fixture.home, history: store, now: () => now })
+  const scan = await reader.scan()
+  assert.equal(scan.recordsImported, 2) // the reset event itself imports nothing
+
+  const summary = store.getSummary()
+  assert.equal(summary.totals.tokenInput, 1_050) // 1000 + 0 (reset) + 50
+  assert.equal(summary.totals.tokenOutput, 210) // 200 + 0 (reset) + 10
+})
+
+test('local usage scanning registers a project that has never sent a live event', async t => {
+  const fixture = setup()
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const store = new HistoryStore(fixture.database, {
+    now: () => now,
+    localDate: () => '2026-08-13',
+  })
+  t.after(() => { store.close(); fixture.cleanup() })
+
+  const codexCwd = 'C:\\Users\\dgh\\Desktop\\agent-pets'
+  writeJsonl(path.join(fixture.home, '.codex', 'sessions', 'session.jsonl'), [
+    { type: 'session_meta', payload: { cwd: codexCwd } },
+    {
+      type: 'event_msg',
+      timestamp: new Date(now).toISOString(),
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: { input_tokens: 40, output_tokens: 8 },
+          total_token_usage: { input_tokens: 40, output_tokens: 8 },
+        },
+      },
+    },
+  ])
+
+  const seenProjects: string[] = []
+  const projectRouting = {
+    // A project the reader has never registered before must still get an
+    // entry back - this is what makes the History project filter able to
+    // show it at all, instead of the token total being correct but
+    // permanently unreachable.
+    trackSeen: (value: unknown) => {
+      if (value !== codexCwd) return null
+      seenProjects.push(value)
+      return { projectId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
+    },
+  }
+  const reader = new LocalUsageReader({ homeDir: fixture.home, history: store, now: () => now, projectRouting })
+  await reader.scan()
+  assert.equal(seenProjects.length, 1)
 })
 
 test('clear history establishes a local usage cutoff and later log entries can be imported', async t => {

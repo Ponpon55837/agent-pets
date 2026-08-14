@@ -85,26 +85,34 @@ function safePetId(value: unknown): string | null {
   return typeof value === 'string' && PET_ID.test(value) ? value : null
 }
 
-/**
- * Resolve a project directory without persisting or returning its absolute
- * path. Existing junctions/symlinks are collapsed through realpath; missing
- * paths still receive a stable normalized identity so a stopped workspace can
- * be repaired later from the project picker.
- */
-export function canonicalizeProjectPath(value: unknown): string | null {
+interface CanonicalizedPath {
+  path: string
+  // False when the filesystem couldn't be consulted (missing/unreadable at
+  // this moment) and the identity falls back to a normalized-but-unverified
+  // form. Callers must not cache an unverified result: the same raw path can
+  // resolve differently once the directory becomes reachable (e.g. through a
+  // symlink/junction that didn't exist yet), and a cached miss would keep
+  // returning the stale identity forever instead of self-healing.
+  verified: boolean
+}
+
+function canonicalizeProjectPathVerbose(value: unknown): CanonicalizedPath | null {
   if (typeof value !== 'string' || value.length === 0 || value.length > MAX_PROJECT_PATH_LENGTH) return null
   if (!isAbsolute(value) || /[\u0000\r\n]/.test(value)) return null
 
   let candidate = resolve(normalize(value))
+  let verified = false
   try {
     const stat = lstatSync(candidate)
     if (stat.isSymbolicLink()) {
       candidate = realpathSync.native(candidate)
       if (!statSync(candidate).isDirectory()) return null
+      verified = true
     } else if (!stat.isDirectory()) {
       return null
     } else {
       candidate = realpathSync.native(candidate)
+      verified = true
     }
   } catch {
     // A hook can arrive just after a workspace is removed. Keep the normalized
@@ -116,7 +124,17 @@ export function canonicalizeProjectPath(value: unknown): string | null {
   while (candidate.length > root.length && (candidate.endsWith(sep) || candidate.endsWith('/'))) {
     candidate = candidate.slice(0, -1)
   }
-  return process.platform === 'win32' ? candidate.toLowerCase() : candidate
+  return { path: process.platform === 'win32' ? candidate.toLowerCase() : candidate, verified }
+}
+
+/**
+ * Resolve a project directory without persisting or returning its absolute
+ * path. Existing junctions/symlinks are collapsed through realpath; missing
+ * paths still receive a stable normalized identity so a stopped workspace can
+ * be repaired later from the project picker.
+ */
+export function canonicalizeProjectPath(value: unknown): string | null {
+  return canonicalizeProjectPathVerbose(value)?.path ?? null
 }
 
 function identityForPath(canonicalPath: string, salt: string): ProjectIdentity {
@@ -176,14 +194,21 @@ export class ProjectRoutingStore {
 
     const cached = this.pathCache.get(value)
     if (cached !== undefined) return cached
-    const identity = this.resolvePathUncached(value)
-    // Insertion order stands in for recency; evicting the oldest entry keeps
-    // this a cheap, allocation-free LRU approximation instead of a real one.
-    if (this.pathCache.size >= MAX_PATH_CACHE) {
-      const oldest = this.pathCache.keys().next().value
-      if (oldest !== undefined) this.pathCache.delete(oldest)
+
+    const canonical = canonicalizeProjectPathVerbose(value)
+    const identity = canonical ? identityForPath(canonical.path, this.salt) : null
+    // Only a verified (filesystem-confirmed) resolution is stable enough to
+    // cache. An unverified miss (directory not reachable right now) must be
+    // retried on every call so it can self-heal once the path exists again.
+    if (canonical?.verified || identity === null) {
+      // Insertion order stands in for recency; evicting the oldest entry keeps
+      // this a cheap, allocation-free LRU approximation instead of a real one.
+      if (this.pathCache.size >= MAX_PATH_CACHE) {
+        const oldest = this.pathCache.keys().next().value
+        if (oldest !== undefined) this.pathCache.delete(oldest)
+      }
+      this.pathCache.set(value, identity)
     }
-    this.pathCache.set(value, identity)
     return identity
   }
 
@@ -207,7 +232,9 @@ export class ProjectRoutingStore {
    * Cheap per-event alternative to registerPath: resolves the identity (from
    * cache, no filesystem call on repeat paths) for routing purposes, and only
    * pays for the SQLite upsert when this project hasn't been written recently.
-   * Live event ingestion should call this instead of registerPath.
+   * Live event ingestion and local-log usage scanning should call this
+   * instead of registerPath, so both paths feed the same project list through
+   * the exact same resolution logic and can never disagree on a project's id.
    */
   trackSeen(value: unknown, seenAt = this.now()): ProjectIdentity | null {
     const identity = this.resolvePath(value)
