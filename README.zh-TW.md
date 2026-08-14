@@ -161,6 +161,8 @@ macOS/Linux: ~/.desktop-pet/presentation-mcp.mjs
 
 主面板的 **History** 分頁會讀取由 main process 管理的本機彙總：近七天每日工作量、完成／失敗工作階段、觀察到的工作時間、Agent 分布、最近 Quota 快照，以及精確／估算的 token 品質。History 也會由 main process 唯讀掃描固定的本機 session log 路徑：`%USERPROFILE%\.codex\sessions`、`%USERPROFILE%\.claude\projects` 與 `%USERPROFILE%\.claude\transcripts`。Codex 的 `token_count` 會使用累積的 `total_token_usage`，只匯入單調增加的差值；重複的 context／rate-limit 快照，以及沒有累積 counter 的紀錄會忽略。Claude assistant 的 `usage` 會以精確來源解析；cache 欄位會併入 input，只有在沒有 output 時才使用 reasoning。掃描器限制檔案／行大小、拒絕逃出根目錄的連結、只接受白名單 usage 形狀、去重串流紀錄，並只保存雜湊後的 session／檔案身分。原始事件只保存受限制的中繼資料與雜湊後的專案／session 身分；HUD 不保存 prompt、工具參數、憑證或完整專案路徑。**匯出摘要**會將清理後的彙總寫入使用者選擇的 JSON 檔案。**清除歷史**只清除歷史與 Quota 快照，並建立新的本機 log cutoff，不會重設寵物 XP、等級、進化、心情或成就。原始事件有固定保留期限，長期每日彙總則可持續保留。
 
+History 上方的 **專案篩選**可以只查看某一個專案的近七日統計，其中的 token 用量也會依偵測到的專案（透過 Claude Code／Codex 本機紀錄的工作目錄）正確歸屬，而不是只顯示全域總量。專案寵物則在 **Settings → Pets → 專案寵物** 管理：卡片最上方的開關可以整個停用專案路由（停用後所有 session 都沿用目前選取的寵物，但已記錄的專案與綁定不會被刪除）；按下 **加入專案** 使用原生資料夾選擇器，接著選擇要綁定的寵物；選擇「使用目前選取的寵物」即可解除綁定；每個專案旁的移除鈕可以把它從清單拿掉（之後收到該專案的事件會自動重新加入）。未綁定的專案不會改變原本行為。若綁定的自訂寵物被移除，Agent Pets 會先使用永遠存在的預設寵物，並在設定頁標示「缺少的寵物」，重新加入或選擇其他寵物後即可修復。專案身份會以本機 salt 雜湊保存，資料庫與通知不保存完整專案路徑。
+
 #### 讓目前使用中的 Agent 專案接通
 
 1. 先啟動 Agent Pets，在 **Settings → Attention → Presentation MCP** 保持開啟（預設開啟）。App 必須保持執行，因為 stdio bridge 會連到它的本機 loopback control server。
@@ -330,6 +332,7 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 - **寵物匯入** — 寫入前會驗證 ZIP 項目數、壓縮／解壓縮大小、JSON 大小，以及圖片大小與實際格式。
 - **記憶體上限** — Agent session 數量有上限，會優先淘汰離線／最舊項目，避免 renderer 記憶體無限成長。
 - **路徑清理** — 專案路徑只保留 basename，檔案寫入目的地也會限制在預期根目錄內。
+- **專案寵物路由** — main process 只保存每次安裝 salt 產生的 project hash、basename 與 pet binding；symlink／junction 會先 canonicalize，renderer、通知與 MCP status 都不會收到完整路徑。缺少綁定寵物時只回退到預設寵物，不會自動允許或改變權限。
 - **桌面通知** — 通知只會使用正規化後的 Agent 名稱與長度受限的專案 basename，不會顯示或記錄 prompt、工具參數、session identifier 或憑證；診斷紀錄有固定上限，而且只保存事件類別與結果。
 - **桌面偏好 IPC** — 系統匣／勿擾／通知／權限泡泡／登入啟動偏好由 main process 擁有。Renderer 只能從已驗證的第一方 frame 傳送白名單 boolean 欄位，設定檔採長度受限讀取與原子替換。
 - **Presentation MCP** — MCP bridge 只監聽 loopback，使用獨立的每次安裝 token，拒絕瀏覽器來源，限制 JSON body／請求速率，固定三個工具，清理控制字元與 markup，限制訊息長度／TTL／queue，並在 client disconnect 時移除 pending intent；它沒有命令、檔案、權限、XP、quota 或成就權限。

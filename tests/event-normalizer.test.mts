@@ -42,6 +42,8 @@ test('drops callback, command, pipe, port, and forged response metadata', () => 
     pipe: '\\\\.\\pipe\\agent-pets-test',
     port: 9999,
     responseHandle: 'forged',
+    projectId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    routedPetId: 'attacker-pet',
     permissionNotice: { responseMode: 'respond' },
   }, 100)
 

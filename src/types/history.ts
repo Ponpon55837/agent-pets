@@ -11,6 +11,8 @@ export interface HistoryTokenUsageRecord {
   input?: number
   output?: number
   quality: Exclude<HistoryTokenQuality, 'none'>
+  /** Canonical project fingerprint from ProjectRoutingStore; never a raw path. */
+  projectId?: string
 }
 
 export interface HistoryDailyStat {
@@ -56,6 +58,7 @@ export interface HistorySummary {
   schemaVersion: 1
   generatedAt: number
   petId: string
+  projectId?: string
   retentionDays: number
   days: HistoryDailyStat[]
   totals: HistoryDailyStat

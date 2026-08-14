@@ -15,6 +15,7 @@ import type { PermissionDecisionValue, PermissionRequestView } from '../types/pe
 import type { ProgressionSnapshot } from '../types/progression'
 import type { PetWindowMode, PetWindowModeState } from '../types/pet-window'
 import { normalizePetWindowModeState } from '../types/pet-window'
+import type { ProjectPetView } from '../types/project-pet'
 import type {
   PresentationIntent,
   PresentationMood,
@@ -187,6 +188,10 @@ export const useAgentStore = defineStore('agent', () => {
   const petScale = ref(parseFloat(localStorage.getItem('agent-pet-scale') || '1'))
   const pets = ref<PetEntry[]>([])
   const petsLoaded = ref(false)
+  const projectPets = ref<ProjectPetView[]>([])
+  const projectPetsLoading = ref(false)
+  const projectPetsError = ref('')
+  const projectPetsEnabled = ref(true)
   const quotaUsage = ref<QuotaUsage | null>(null)
   const quotaLoading = ref(false)
   const quotaError = ref('')
@@ -758,6 +763,8 @@ export const useAgentStore = defineStore('agent', () => {
       existing.state = event.state
       existing.lastSeenAt = event.timestamp
       existing.project = event.project
+      existing.projectId = event.projectId
+      existing.routedPetId = event.routedPetId
       existing.toolName = event.toolName
       existing.permissionNotice = event.permissionNotice
     } else {
@@ -775,6 +782,8 @@ export const useAgentStore = defineStore('agent', () => {
         source: event.source,
         sessionId: event.sessionId,
         project: event.project,
+        projectId: event.projectId,
+        routedPetId: event.routedPetId,
         state: event.state,
         lastSeenAt: event.timestamp,
         toolName: event.toolName,
@@ -933,7 +942,7 @@ export const useAgentStore = defineStore('agent', () => {
         project: familySessions.length === 1 ? top.project : undefined,
         count: familySessions.length,
         since: top.lastSeenAt,
-        petId: getPetForFamily(family.key),
+        petId: top.routedPetId ?? getPetForFamily(family.key),
       }
     }).filter((line): line is NonNullable<typeof line> => line !== null)
   })
@@ -1001,6 +1010,8 @@ export const useAgentStore = defineStore('agent', () => {
   })
 
   const activePetId = computed(() => {
+    const routedPetId = highestPrioritySession.value?.routedPetId
+    if (routedPetId && pets.value.some(pet => pet.id === routedPetId)) return routedPetId
     // Per-family skins are a multi-pet feature. When that mode is off, keep
     // the original single-pet behavior: always render the global selection.
     if (!multiPetEnabled.value) return selectedPet.value
@@ -1184,6 +1195,95 @@ export const useAgentStore = defineStore('agent', () => {
       }
     } finally {
       petsLoaded.value = true
+      void refreshProjectPets()
+    }
+  }
+
+  async function refreshProjectPets(): Promise<ProjectPetView[]> {
+    if (window.electronAPI?.getProjectPetsEnabled) {
+      try {
+        projectPetsEnabled.value = await window.electronAPI.getProjectPetsEnabled()
+      } catch {
+        projectPetsEnabled.value = false
+      }
+    }
+    if (!window.electronAPI?.listProjectPets || !projectPetsEnabled.value) return projectPets.value
+    projectPetsLoading.value = true
+    projectPetsError.value = ''
+    try {
+      const list = await window.electronAPI.listProjectPets()
+      projectPets.value = Array.isArray(list) ? list : []
+    } catch (error) {
+      projectPetsError.value = translateBackendError(error instanceof Error ? error.message : t('projectPetsUnavailable'))
+    } finally {
+      projectPetsLoading.value = false
+    }
+    return projectPets.value
+  }
+
+  async function setProjectPetsEnabled(enabled: boolean): Promise<boolean> {
+    if (!window.electronAPI?.setProjectPetsEnabled) return false
+    try {
+      projectPetsEnabled.value = await window.electronAPI.setProjectPetsEnabled(enabled)
+    } catch {
+      return false
+    }
+    if (projectPetsEnabled.value) void refreshProjectPets()
+    else projectPets.value = []
+    return projectPetsEnabled.value
+  }
+
+  async function addProjectPet(): Promise<boolean> {
+    if (!window.electronAPI?.pickProjectPet) return false
+    projectPetsError.value = ''
+    try {
+      const result = await window.electronAPI.pickProjectPet()
+      if (!result.ok) {
+        if (result.error !== 'cancelled') projectPetsError.value = t('projectPetsUnavailable')
+        return false
+      }
+      const existing = projectPets.value.findIndex(project => project.projectId === result.project.projectId)
+      if (existing >= 0) projectPets.value[existing] = result.project
+      else projectPets.value = [result.project, ...projectPets.value]
+      return true
+    } catch (error) {
+      projectPetsError.value = translateBackendError(error instanceof Error ? error.message : t('projectPetsUnavailable'))
+      return false
+    }
+  }
+
+  async function setProjectPetBinding(projectId: string, petId: string | null): Promise<boolean> {
+    if (!window.electronAPI?.setProjectPetBinding) return false
+    projectPetsError.value = ''
+    try {
+      const result = await window.electronAPI.setProjectPetBinding(projectId, petId)
+      if (!result.ok) {
+        projectPetsError.value = t('projectPetsUnavailable')
+        return false
+      }
+      const index = projectPets.value.findIndex(project => project.projectId === result.project.projectId)
+      if (index >= 0) projectPets.value[index] = result.project
+      return true
+    } catch (error) {
+      projectPetsError.value = translateBackendError(error instanceof Error ? error.message : t('projectPetsUnavailable'))
+      return false
+    }
+  }
+
+  async function removeProjectPet(projectId: string): Promise<boolean> {
+    if (!window.electronAPI?.archiveProjectPet) return false
+    projectPetsError.value = ''
+    try {
+      const result = await window.electronAPI.archiveProjectPet(projectId)
+      if (!result.ok) {
+        projectPetsError.value = t('projectPetsUnavailable')
+        return false
+      }
+      projectPets.value = projectPets.value.filter(project => project.projectId !== projectId)
+      return true
+    } catch (error) {
+      projectPetsError.value = translateBackendError(error instanceof Error ? error.message : t('projectPetsUnavailable'))
+      return false
     }
   }
 
@@ -1218,6 +1318,7 @@ export const useAgentStore = defineStore('agent', () => {
         setFamilyPet(familyKey, null)
       }
     }
+    void refreshProjectPets()
   }
 
   return {
@@ -1233,6 +1334,10 @@ export const useAgentStore = defineStore('agent', () => {
     visiblePets,
     familyPetIds,
     petsLoaded,
+    projectPets,
+    projectPetsLoading,
+    projectPetsError,
+    projectPetsEnabled,
     quotaUsage,
     quotaLoading,
     quotaError,
@@ -1325,6 +1430,11 @@ export const useAgentStore = defineStore('agent', () => {
     setMoodVisualsEnabled,
     resizePetWindow,
     loadPets,
+    refreshProjectPets,
+    addProjectPet,
+    setProjectPetBinding,
+    removeProjectPet,
+    setProjectPetsEnabled,
     setQuotaUsage,
     refreshQuota,
     renamePet,

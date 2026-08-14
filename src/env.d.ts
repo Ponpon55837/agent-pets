@@ -17,6 +17,7 @@ import type {
   ProjectMcpRemovalSummary,
   ProjectMcpSetupSummary,
 } from './types/project-mcp'
+import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from './types/project-pet'
 
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
@@ -95,7 +96,13 @@ declare global {
         }>
       }>
       onQuotaUsageUpdated: (callback: (usage: unknown) => void) => () => void
-      getHistorySummary: () => Promise<HistorySummary | null>
+      getHistorySummary: (projectId?: string) => Promise<HistorySummary | null>
+      listProjectPets: () => Promise<ProjectPetView[]>
+      pickProjectPet: () => Promise<ProjectPetCommandResult>
+      setProjectPetBinding: (projectId: string, petId: string | null) => Promise<ProjectPetCommandResult>
+      archiveProjectPet: (projectId: string) => Promise<ProjectPetArchiveResult>
+      getProjectPetsEnabled: () => Promise<boolean>
+      setProjectPetsEnabled: (enabled: boolean) => Promise<boolean>
       clearHistory: () => Promise<HistoryClearResult>
       exportHistory: () => Promise<HistoryCommandResult>
       onHistoryUpdated: (callback: () => void) => () => void

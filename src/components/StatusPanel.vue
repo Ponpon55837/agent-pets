@@ -51,6 +51,7 @@ const historySummary = ref<HistorySummary | null>(null)
 const historyLoading = ref(false)
 const historyError = ref('')
 const historyAction = ref('')
+const historyProjectFilter = ref('')
 let cleanupHistoryUpdated: (() => void) | null = null
 const quotaUsage = computed(() => store.quotaUsage)
 const quotaLoading = computed(() => store.quotaLoading)
@@ -81,6 +82,13 @@ watch(() => store.panelView, (view) => {
   if (view === 'settings') settingsTab.value = 'appearance'
 })
 
+watch(() => store.projectPets, (projects) => {
+  if (historyProjectFilter.value && !projects.some(project => project.projectId === historyProjectFilter.value)) {
+    historyProjectFilter.value = ''
+    if (dashboardTab.value === 'history') void refreshHistory()
+  }
+})
+
 // Drives the "Xs" elapsed-time readout on in-flight sessions (thinking /
 // tool-running / waiting-*), matching the "Churning 7.2s" style loader.
 const nowTick = ref(Date.now())
@@ -102,12 +110,17 @@ function selectDashboardTab(tab: 'sessions' | 'usage' | 'history') {
   if (tab === 'history' && !historySummary.value) void refreshHistory()
 }
 
+function onHistoryProjectFilterChange(value: string): void {
+  historyProjectFilter.value = value
+  void refreshHistory()
+}
+
 async function refreshHistory(): Promise<void> {
   if (historyLoading.value) return
   historyLoading.value = true
   historyError.value = ''
   try {
-    const summary = await window.electronAPI?.getHistorySummary()
+    const summary = await window.electronAPI?.getHistorySummary(historyProjectFilter.value || undefined)
     historySummary.value = summary ?? null
     if (!summary) historyError.value = t('historyDataUnavailable')
   } catch {
@@ -150,6 +163,12 @@ function historyAgentLabel(adapterId: string): string {
   if (id.includes('claude')) return t('clientClaudeCode')
   if (id.includes('opencode')) return t('clientOpenCode')
   return adapterId
+}
+
+function projectPetStatusLabel(status: 'unbound' | 'bound' | 'missing-pet'): string {
+  if (status === 'bound') return t('projectPetBound')
+  if (status === 'missing-pet') return t('projectPetMissing')
+  return t('projectPetUnbound')
 }
 
 const historyMaxTokens = computed(() => Math.max(
@@ -317,6 +336,7 @@ function elapsedLabel(session: { state: string; lastSeenAt: number }): string | 
 // pet window having already populated it.
 onMounted(() => {
   store.loadPets()
+  void store.refreshProjectPets()
   if (window.electronAPI?.onHistoryUpdated) {
     cleanupHistoryUpdated = window.electronAPI.onHistoryUpdated(() => {
       if (dashboardTab.value === 'history') void refreshHistory()
@@ -416,6 +436,15 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
       : t('removePetConfirm', { name: pet.displayName }),
     tone: 'danger',
     onConfirm: () => store.removePet(pet.id),
+  })
+}
+
+function confirmRemoveProjectPet(project: { projectId: string; displayName: string }) {
+  askConfirm({
+    title: t('remove'),
+    message: t('removeProjectPetConfirm', { name: project.displayName }),
+    tone: 'danger',
+    onConfirm: () => { void store.removeProjectPet(project.projectId) },
   })
 }
 </script>
@@ -580,6 +609,18 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
               <div class="history-kicker">{{ t('historyTitle') }}</div>
               <p>{{ t('historyHelp') }}</p>
             </div>
+            <Select
+              :model-value="historyProjectFilter"
+              size="sm"
+              class="history-project-filter"
+              :aria-label="t('historyProjectFilter')"
+              @update:model-value="onHistoryProjectFilterChange"
+            >
+              <option value="">{{ t('historyAllProjects') }}</option>
+              <option v-for="project in store.projectPets" :key="project.projectId" :value="project.projectId">
+                {{ project.displayName }}
+              </option>
+            </Select>
             <div class="history-actions">
               <Button variant="secondary" size="sm" @click="exportHistory">{{ t('historyExport') }}</Button>
               <Button variant="danger" size="sm" @click="clearHistory">{{ t('historyClear') }}</Button>
@@ -954,6 +995,68 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
               </Select>
             </div>
           </Card>
+
+          <Card :title="t('projectPets')">
+            <ToggleRow
+              :model-value="store.projectPetsEnabled"
+              :label="t('projectPetsEnable')"
+              :help="t('projectPetsEnableHelp')"
+              @update:model-value="store.setProjectPetsEnabled($event)"
+            />
+            <template v-if="store.projectPetsEnabled">
+              <p class="section-copy">{{ t('projectPetsHelp') }}</p>
+              <div class="project-pet-actions">
+                <Button variant="secondary" size="sm" :disabled="store.projectPetsLoading" @click="store.addProjectPet()">
+                  {{ store.projectPetsLoading ? t('checking') : t('addProjectPet') }}
+                </Button>
+              </div>
+              <div v-if="store.projectPetsError" class="import-error" role="status">
+                {{ store.projectPetsError }}
+              </div>
+              <div v-if="store.projectPetsLoading && store.projectPets.length === 0" class="project-pet-empty">
+                {{ t('checking') }}
+              </div>
+              <div v-else-if="store.projectPets.length > 0" class="project-pet-list">
+                <div v-for="project in store.projectPets" :key="project.projectId" class="project-pet-row">
+                  <span class="field-copy">
+                    <span class="field-label" :title="project.displayName">{{ project.displayName }}</span>
+                    <span class="field-help" :class="{ 'project-pet-missing': project.bindingStatus === 'missing-pet' }">
+                      {{ projectPetStatusLabel(project.bindingStatus) }}
+                    </span>
+                  </span>
+                  <span class="project-pet-controls">
+                    <Select
+                      size="sm"
+                      class="field-control"
+                      :aria-label="`${project.displayName} ${t('projectPets')}`"
+                      :model-value="project.boundPetId ?? ''"
+                      @update:model-value="store.setProjectPetBinding(project.projectId, $event || null)"
+                    >
+                      <option value="">{{ t('useSelectedPet') }}</option>
+                      <option v-if="project.bindingStatus === 'missing-pet' && project.boundPetId" :value="project.boundPetId">
+                        {{ t('missingPet') }}
+                      </option>
+                      <option v-for="pet in store.visiblePets" :key="pet.id" :value="pet.id">
+                        {{ pet.displayName }}
+                      </option>
+                    </Select>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      :title="t('remove')"
+                      :aria-label="`${t('remove')} ${project.displayName}`"
+                      @click="confirmRemoveProjectPet(project)"
+                    >
+                      <Icon name="close" :size="13" />
+                    </Button>
+                  </span>
+                </div>
+              </div>
+              <div v-else class="project-pet-empty">
+                {{ t('projectPetsNoProjects') }}
+              </div>
+            </template>
+          </Card>
         </template>
 
         <template v-else>
@@ -1310,6 +1413,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 }
 
 .history-hero {
+  flex-wrap: wrap;
   padding: var(--space-1) 2px;
 }
 
@@ -1331,6 +1435,11 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   display: flex;
   flex: 0 0 auto;
   gap: var(--space-1);
+}
+
+.history-project-filter {
+  flex: 0 1 150px;
+  margin-left: auto;
 }
 
 .history-grid {
@@ -1581,18 +1690,72 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 }
 
 .field-label {
+  overflow: hidden;
   color: var(--text-primary);
   font-size: var(--font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .field-help {
+  overflow: hidden;
   color: var(--text-muted);
   font-size: var(--font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .field-control {
   flex: 0 0 auto;
   min-width: 128px;
+}
+
+.project-pet-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-2);
+}
+
+.project-pet-list {
+  display: flex;
+  max-height: 220px;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  overflow-y: auto;
+}
+
+.project-pet-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* The remove button eats into the row's width budget that .field-control's
+   128px assumes elsewhere (a lone select); narrow it here so long project
+   names still get enough room to read before ellipsis kicks in. */
+.project-pet-controls .field-control {
+  min-width: 108px;
+}
+
+.project-pet-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.project-pet-missing {
+  color: var(--accent-claude);
+}
+
+.project-pet-empty {
+  margin-top: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-xs);
 }
 
 .scale-options {

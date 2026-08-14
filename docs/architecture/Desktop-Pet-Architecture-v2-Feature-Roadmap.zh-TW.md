@@ -1264,6 +1264,10 @@ Phase 7 實作補充：`electron/history.ts` 是 main-owned 的 SQLite History S
 **依賴：** Phase 5 project capability、Phase 7 history。
 **主要風險：** path identity、repo/worktree 判定、使用者概念負擔、歷史歸屬。
 
+Phase 8 實作補充：`electron/project-routing.ts` 是 main-owned 的本機 SQLite 路由存放區。它會先將存在的資料夾經 realpath（包含 symlink／junction）正規化，再以每次安裝產生的 salt 雜湊成 32 字元 project ID；資料庫只保留 project ID、顯示名稱、時間與選用的 pet ID，不保存完整路徑。事件進站由 `electron/main.ts` 在 adapter normalization 後套用路由，renderer 只收到 basename、project ID 與可用的 routed pet ID；未綁定時不附加路由欄位，因此保留既有 selected-pet 行為。已綁定但寵物不可用時，main process 會回退到永遠存在的 `aang-airbender`，設定頁則標示缺少並允許重新綁定或解除綁定。
+
+`src/components/StatusPanel.vue` 的 Pets 設定加入「專案寵物」卡片，可用原生資料夾選擇器加入專案、選擇寵物或回到目前選取的寵物；History tab 提供 project filter。History Store 以 project ID 分隔同一 session ID 在不同 workspace 的 active time、token 與完成統計。Progression Store 以 project route 與 pet snapshot 固定 XP 歸屬，改變日後 binding 不會搬移既有 XP；XP ledger migration v2 將每日／事件 idempotency scope 到各 pet，避免不同專案寵物互相消耗獎勵。
+
 ### Phase 9 — Achievements
 
 **目的：** 以低成本擴充 progression 回饋。

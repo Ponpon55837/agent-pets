@@ -10,6 +10,7 @@ import type {
   ProjectMcpRemovalSummary,
   ProjectMcpSetupSummary,
 } from '../src/types/project-mcp'
+import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from '../src/types/project-pet'
 import type {
   AdapterDetection,
   AdapterRuntimeStatus,
@@ -200,8 +201,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
-  getHistorySummary: (): Promise<HistorySummary | null> => {
-    return ipcRenderer.invoke('history-summary')
+  getHistorySummary: (projectId?: string): Promise<HistorySummary | null> => {
+    return ipcRenderer.invoke('history-summary', projectId)
+  },
+
+  listProjectPets: (): Promise<ProjectPetView[]> => {
+    return ipcRenderer.invoke('project-pets-list')
+  },
+
+  pickProjectPet: (): Promise<ProjectPetCommandResult> => {
+    return ipcRenderer.invoke('project-pets-pick')
+  },
+
+  setProjectPetBinding: (projectId: string, petId: string | null): Promise<ProjectPetCommandResult> => {
+    return ipcRenderer.invoke('project-pets-bind', { projectId, petId })
+  },
+
+  archiveProjectPet: (projectId: string): Promise<ProjectPetArchiveResult> => {
+    return ipcRenderer.invoke('project-pets-archive', projectId)
+  },
+
+  getProjectPetsEnabled: (): Promise<boolean> => {
+    return ipcRenderer.invoke('project-pets-get-enabled')
+  },
+
+  setProjectPetsEnabled: (enabled: boolean): Promise<boolean> => {
+    return ipcRenderer.invoke('project-pets-set-enabled', enabled)
   },
 
   clearHistory: (): Promise<HistoryClearResult> => {

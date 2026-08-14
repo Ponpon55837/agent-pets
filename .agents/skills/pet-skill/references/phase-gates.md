@@ -33,8 +33,21 @@
 - Verify transparent-region click-through and interactive-region hit testing when affected.
 - Verify multi-monitor and DPI behavior when window geometry changes.
 
+## Common gaps that trigger extra review rounds
+
+These are recurring, concrete defect classes found in past phases (most recently Phase 8). Check each one explicitly before calling a phase done; they are cheap to check and expensive to find in review.
+
+- **New dimension on a shared aggregate.** When a change adds a new scoping column (e.g. `project_id`) to an existing table, grep every query and every writer that touches that table — including legacy/global buckets (e.g. a shared `local-usage` pet-id row) — not just the new code path. A dimension that is written in one place and filtered in another silently drops data instead of erroring.
+- **A toggle needs a real off switch, not just new UI.** If a feature changes main-process side effects (routing, XP splitting, history isolation), it needs a persisted enable/disable flag that the main process itself checks before doing the work — a renderer-only or UI-only toggle does not stop the underlying side effect.
+- **Hot-path synchronous I/O.** Any function reachable from the live event/hook pipeline (per tool-call, per state change) must not add a new synchronous filesystem stat or database write without caching or throttling. Trace the call frequency before adding fs/DB calls to `main.ts`'s event handler chain.
+- **Overflow in dynamic list rows.** A row that pairs a user- or agent-controlled text label with a fixed-width control (dropdown, button) will overlap or break once the label is long. Give the label `min-width: 0`, let it shrink, and truncate with `text-overflow: ellipsis` — do not assume short sample text is representative.
+- **Reuse existing component props before hand-rolling markup beside them.** Grep other usages of a shared component (e.g. `ToggleRow`'s `help` prop) before adding a new instance; duplicating a prop's job with an adjacent `<p>` produces a visibly different layout from every other instance of that component.
+- **One binding style per prop.** Never mix `v-model` and an explicit `@update:x` listener for the same event on one component instance — pick `v-model` when no side effect is needed, or `:model-value` + `@update:model-value` when one is.
+- **No unreachable methods.** Grep for callers before finishing; a store/service method with no IPC handler or UI entry point is dead code, not a "for later" feature.
+
 ## Diff and regression gate
 
+- For any new or changed list row, card, or dynamic label, check it against the checklist in "Common gaps that trigger extra review rounds" above, especially overflow with realistic (not just short sample) text.
 - Run `git diff --check`.
 - Review `git diff --stat`, `git diff --name-only`, and the complete relevant diff.
 - Confirm no formatter-induced unrelated edits, generated artifacts, credentials, or user-owned files were added.

@@ -30,6 +30,8 @@ test('generated OpenCode plugins are valid modules with permission hooks', async
     assert.equal(typeof hooks.dispose, 'function')
     assert.equal(code.includes("path: '/v1/permission/request'"), false)
     assert.equal(code.includes("permissionPost('/v1/permission/request'"), true)
+    assert.equal(code.includes('project: projectPath'), true)
+    assert.equal(code.includes("'tool.execute.before', projectPath"), true)
     assert.equal(code.includes("reply = decision === 'allow_once' ? 'once' : 'reject'"), true)
     assert.equal(code.includes("'always'"), false)
   }

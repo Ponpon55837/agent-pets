@@ -52,6 +52,7 @@ const MAX_ACTIVE_GAP_MS = 5 * 60 * 1000
 const LOCAL_USAGE_CUTOFF_KEY = 'local_usage_cutoff_at'
 const ACTIVE_STATES = new Set<AgentState>(['thinking', 'tool-running'])
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,256}$/
+const PROJECT_ID = /^[a-f0-9]{32}$/
 
 function databaseConstructor(): DatabaseSyncConstructor {
   const moduleRequire = createRequire(import.meta.url)
@@ -229,8 +230,13 @@ export class HistoryStore {
     const agentId = safeText(event.source, 'unknown')
     const externalId = safeText(event.sessionId).slice(0, MAX_SESSION_ID_LENGTH)
     if (!externalId) return false
-    const sessionIdHash = digest(`${adapterId}:${agentId}:${externalId}`)
-    const projectId = event.project ? digest(event.project) : ''
+    const projectId = typeof event.projectId === 'string' && PROJECT_ID.test(event.projectId)
+      ? event.projectId
+      : event.project ? digest(event.project) : ''
+    // A CLI may reuse a session ID in different workspaces. Keep their
+    // active-time and completion aggregates isolated once project routing is
+    // enabled, while the empty project ID preserves the legacy key shape.
+    const sessionIdHash = digest(`${adapterId}:${agentId}:${externalId}:${projectId}`)
     const occurredAt = Number.isFinite(event.timestamp) ? Math.min(event.timestamp, receivedAt) : receivedAt
     const safeReceivedAt = Number.isFinite(receivedAt) ? receivedAt : this.now()
     const state = event.state
@@ -366,7 +372,9 @@ export class HistoryStore {
       ? Math.min(record.occurredAt, safeReceivedAt)
       : safeReceivedAt
     const localDate = this.localDate(occurredAt)
-    const projectId = ''
+    const projectId = typeof record.projectId === 'string' && PROJECT_ID.test(record.projectId)
+      ? record.projectId
+      : ''
     const sessionId = typeof record.sessionId === 'string' && record.sessionId.length > 0
       ? digest(`${adapterId}:${agentId}:${record.sessionId}`)
       : null
@@ -374,13 +382,14 @@ export class HistoryStore {
 
     return this.transaction(() => {
       const existing = this.database.prepare(`
-        SELECT event_id, local_date, token_input, token_output, token_quality, occurred_at
+        SELECT event_id, local_date, project_id, token_input, token_output, token_quality, occurred_at
         FROM events WHERE adapter_id = ? AND source_event_id = ?
       `).get(adapterId, sourceEventId)
       if (existing) {
         const previousInput = Math.max(0, asInteger(existing.token_input))
         const previousOutput = Math.max(0, asInteger(existing.token_output))
         const previousDate = safeText(existing.local_date)
+        const previousProjectId = safeText(existing.project_id)
         const previousOccurredAt = asInteger(existing.occurred_at)
         const previousQuality = isTokenQuality(existing.token_quality)
           ? existing.token_quality
@@ -389,18 +398,20 @@ export class HistoryStore {
           previousInput === input
           && previousOutput === output
           && previousDate === localDate
+          && previousProjectId === projectId
           && previousOccurredAt === occurredAt
           && previousQuality === record.quality
         ) return false
 
         this.database.prepare(`
           UPDATE events
-          SET session_id = ?, local_date = ?, occurred_at = ?, received_at = ?,
+          SET session_id = ?, local_date = ?, project_id = ?, occurred_at = ?, received_at = ?,
               token_input = ?, token_output = ?, token_quality = ?
           WHERE event_id = ?
         `).run(
           sessionId,
           localDate,
+          projectId,
           occurredAt,
           safeReceivedAt,
           input,
@@ -411,7 +422,7 @@ export class HistoryStore {
         this.updateDailyStat(
           previousDate,
           safePet,
-          projectId,
+          previousProjectId,
           adapterId,
           null,
           0,
@@ -487,17 +498,27 @@ export class HistoryStore {
     return true
   }
 
-  getSummary(petId = DEFAULT_PET_ID): HistorySummary {
+  getSummary(petId = DEFAULT_PET_ID, projectId?: string): HistorySummary {
     const safePet = safePetId(petId)
+    const safeProject = typeof projectId === 'string' && PROJECT_ID.test(projectId) ? projectId : null
     const today = this.localDate(this.now())
     const dates = Array.from({ length: 7 }, (_, index) => dateOffset(today, index - 6))
     const placeholders = dates.map(() => '?').join(', ')
+    // Local token-usage rows are always recorded under the shared
+    // LOCAL_USAGE_PET_ID bucket (see recordTokenUsage), never under the
+    // routed pet, so a project filter must still include that bucket -
+    // scoped to the same project - or token totals would silently read
+    // zero every time a project is selected.
+    const projectClause = safeProject ? 'AND project_id = ?' : ''
+    const summaryParams = safeProject
+      ? [safePet, LOCAL_USAGE_PET_ID, safeProject, ...dates]
+      : [safePet, LOCAL_USAGE_PET_ID, ...dates]
     const rows = this.database.prepare(`
       SELECT local_date, sessions_completed, sessions_failed, active_ms,
              token_input, token_output, token_quality
       FROM daily_stats
-      WHERE (pet_id = ? OR pet_id = ?) AND local_date IN (${placeholders})
-    `).all(safePet, LOCAL_USAGE_PET_ID, ...dates)
+      WHERE (pet_id = ? OR pet_id = ?) ${projectClause} AND local_date IN (${placeholders})
+    `).all(...summaryParams)
     // A day can have multiple aggregate rows (one per project and adapter).
     // Fold them before building the seven-day projection; keeping only the
     // last row would silently drop sessions and token usage from the HUD.
@@ -511,6 +532,9 @@ export class HistoryStore {
       return byDate.get(localDate) ?? emptyDaily(localDate)
     })
     const totals = days.reduce((sum, day) => addDaily(sum, day), emptyDaily('total'))
+    const agentParams = safeProject
+      ? [safePet, LOCAL_USAGE_PET_ID, safeProject, ...dates]
+      : [safePet, LOCAL_USAGE_PET_ID, ...dates]
     const agents = this.database.prepare(`
       SELECT adapter_id,
              SUM(sessions_completed) AS sessions_completed,
@@ -520,10 +544,10 @@ export class HistoryStore {
              SUM(token_output) AS token_output,
              MAX(CASE token_quality WHEN 'exact' THEN 2 WHEN 'estimated' THEN 1 ELSE 0 END) AS token_quality_rank
       FROM daily_stats
-      WHERE (pet_id = ? OR pet_id = ?) AND local_date IN (${placeholders})
+      WHERE (pet_id = ? OR pet_id = ?) ${projectClause} AND local_date IN (${placeholders})
       GROUP BY adapter_id
       ORDER BY (token_input + token_output) DESC, active_ms DESC, adapter_id ASC
-    `).all(safePet, LOCAL_USAGE_PET_ID, ...dates).map(row => ({
+    `).all(...agentParams).map(row => ({
       adapterId: safeText(row.adapter_id, 'unknown'),
       sessionsCompleted: Math.max(0, asInteger(row.sessions_completed)),
       sessionsFailed: Math.max(0, asInteger(row.sessions_failed)),
@@ -542,6 +566,7 @@ export class HistoryStore {
       schemaVersion: 1,
       generatedAt: this.now(),
       petId: safePet,
+      ...(safeProject ? { projectId: safeProject } : {}),
       retentionDays: this.retentionDays,
       days,
       totals,
@@ -557,11 +582,11 @@ export class HistoryStore {
     }
   }
 
-  getExport(petId = DEFAULT_PET_ID): HistoryExport {
+  getExport(petId = DEFAULT_PET_ID, projectId?: string): HistoryExport {
     return {
       schemaVersion: 1,
       exportedAt: this.now(),
-      summary: this.getSummary(petId),
+      summary: this.getSummary(petId, projectId),
     }
   }
 

@@ -111,3 +111,44 @@ test('quota snapshots are bounded and history clear is independent from XP stora
   assert.equal(cleared.totals.sessionsCompleted, 0)
   assert.equal(cleared.quota, null)
 })
+
+test('history filters by project and keeps identical session IDs isolated', (t) => {
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => now })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+
+  const projectA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  const projectB = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  assert.equal(store.recordEvent(event({
+    projectId: projectA,
+    eventId: 'project-a-start',
+    timestamp: now,
+  }), 'wolf'), true)
+  assert.equal(store.recordEvent(event({
+    projectId: projectA,
+    eventId: 'project-a-finish',
+    state: 'success',
+    timestamp: now + 60_000,
+    tokenUsage: { input: 100, output: 20, quality: 'exact' },
+  }), 'wolf'), true)
+  assert.equal(store.recordEvent(event({
+    projectId: projectB,
+    eventId: 'project-b-finish',
+    state: 'success',
+    timestamp: now + 60_000,
+    tokenUsage: { input: 7, output: 3, quality: 'estimated' },
+  }), 'wolf'), true)
+
+  const projectSummary = store.getSummary('wolf', projectA)
+  assert.equal(projectSummary.projectId, projectA)
+  assert.equal(projectSummary.totals.sessionsCompleted, 1)
+  assert.equal(projectSummary.totals.tokenInput, 100)
+  assert.equal(projectSummary.totals.tokenOutput, 20)
+  assert.equal(projectSummary.agents.length, 1)
+
+  const allSummary = store.getSummary('wolf')
+  assert.equal(allSummary.totals.sessionsCompleted, 2)
+  assert.equal(allSummary.totals.tokenInput, 107)
+  assert.equal(allSummary.totals.tokenOutput, 23)
+})

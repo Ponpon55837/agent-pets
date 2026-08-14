@@ -96,6 +96,61 @@ test('imports exact Codex and Claude local log usage and deduplicates Claude str
   assert.equal(JSON.stringify(store.getExport()).includes('secret prompt'), false)
 })
 
+test('attributes local Codex and Claude usage to the routed project via cwd', async t => {
+  const fixture = setup()
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const store = new HistoryStore(fixture.database, {
+    now: () => now,
+    localDate: () => '2026-08-13',
+  })
+  t.after(() => { store.close(); fixture.cleanup() })
+
+  const projectA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  const codexCwd = 'C:\\Users\\dgh\\Desktop\\agent-pets'
+  writeJsonl(path.join(fixture.home, '.codex', 'sessions', 'session.jsonl'), [
+    { type: 'session_meta', payload: { cwd: codexCwd } },
+    {
+      type: 'event_msg',
+      timestamp: new Date(now).toISOString(),
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: { input_tokens: 40, output_tokens: 8 },
+          total_token_usage: { input_tokens: 40, output_tokens: 8 },
+        },
+      },
+    },
+  ])
+  writeJsonl(path.join(fixture.home, '.claude', 'projects', 'project', 'session.jsonl'), [
+    {
+      type: 'assistant',
+      timestamp: new Date(now).toISOString(),
+      session_id: 'claude-session',
+      cwd: codexCwd,
+      message: { id: 'message-1', usage: { input_tokens: 60, output_tokens: 12 } },
+    },
+  ])
+
+  const projectRouting = {
+    resolvePath: (value: unknown) => (value === codexCwd ? { projectId: projectA } : null),
+  }
+  const reader = new LocalUsageReader({ homeDir: fixture.home, history: store, now: () => now, projectRouting })
+  const scan = await reader.scan()
+  assert.equal(scan.recordsImported, 2)
+
+  const scoped = store.getSummary(undefined, projectA)
+  assert.equal(scoped.totals.tokenInput, 100)
+  assert.equal(scoped.totals.tokenOutput, 20)
+
+  const unscoped = store.getSummary()
+  assert.equal(unscoped.totals.tokenInput, 100)
+  assert.equal(unscoped.totals.tokenOutput, 20)
+
+  const otherProject = store.getSummary(undefined, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')
+  assert.equal(otherProject.totals.tokenInput, 0)
+  assert.equal(otherProject.totals.tokenOutput, 0)
+})
+
 test('clear history establishes a local usage cutoff and later log entries can be imported', async t => {
   const fixture = setup()
   let now = Date.UTC(2026, 7, 13, 1, 0, 0)

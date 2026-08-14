@@ -564,7 +564,7 @@ function postJson(port, pathname, tokenHeader, token, value) {
   });
 }
 
-function sendEvent(sessionId, state, toolName, originalEvent) {
+function sendEvent(sessionId, state, toolName, originalEvent, projectPath) {
   void postJson(17373, '/v1/events', 'X-Agent-Pets-Token', readToken(eventTokenPath), {
     source: SOURCE,
     sessionId: sessionId || 'unknown',
@@ -572,17 +572,18 @@ function sendEvent(sessionId, state, toolName, originalEvent) {
     timestamp: Date.now(),
     toolName,
     originalEvent,
+    project: projectPath,
   });
 }
 
-function setState(sessionId, state, toolName, originalEvent) {
+function setState(sessionId, state, toolName, originalEvent, projectPath) {
   if (state === currentState) return;
   currentState = state;
   if (stateTimer) clearTimeout(stateTimer);
   if (state === 'success' || state === 'error') {
     stateTimer = setTimeout(() => { currentState = null; }, 4000);
   }
-  sendEvent(sessionId, state, toolName, originalEvent);
+  sendEvent(sessionId, state, toolName, originalEvent, projectPath);
 }
 
 function permissionPost(pathname, value) {
@@ -690,7 +691,7 @@ async function registerPermission(client, properties, projectPath, directory) {
     activePermissions.delete(input.permissionId);
     return;
   }
-  setState(input.sessionId, 'waiting-permission', undefined, 'permission.request');
+  setState(input.sessionId, 'waiting-permission', undefined, 'permission.request', projectPath);
   void pollPermission(client, input, directory);
 }
 
@@ -710,34 +711,34 @@ const DesktopPetPlugin = async ({ client, project, directory }) => {
   const projectPath = project && (project.worktree || project.path) || directory;
   return {
   'tool.execute.before': async (input) => {
-    setState(input && input.sessionID, 'tool-running', input && input.tool, 'tool.execute.before');
+    setState(input && input.sessionID, 'tool-running', input && input.tool, 'tool.execute.before', projectPath);
   },
   'tool.execute.after': async (input) => {
-    setState(input && input.sessionID, 'thinking', input && input.tool, 'tool.execute.after');
+    setState(input && input.sessionID, 'thinking', input && input.tool, 'tool.execute.after', projectPath);
   },
   // OpenCode lifecycle notifications arrive through the generic event hook.
   // They are not direct hook keys in the current plugin API.
   event: async ({ event }) => {
     const sessionId = event && event.properties && event.properties.sessionID;
     if (event.type === 'session.status') {
-      if (event.properties.status.type === 'busy') setState(sessionId, 'thinking', undefined, event.type);
-      if (event.properties.status.type === 'retry') setState(sessionId, 'thinking', undefined, event.type);
-      if (event.properties.status.type === 'idle') setState(sessionId, 'idle', undefined, event.type);
+      if (event.properties.status.type === 'busy') setState(sessionId, 'thinking', undefined, event.type, projectPath);
+      if (event.properties.status.type === 'retry') setState(sessionId, 'thinking', undefined, event.type, projectPath);
+      if (event.properties.status.type === 'idle') setState(sessionId, 'idle', undefined, event.type, projectPath);
     } else if (event.type === 'session.idle') {
-      setState(sessionId, 'idle', undefined, event.type);
+      setState(sessionId, 'idle', undefined, event.type, projectPath);
     } else if (event.type === 'session.error') {
-      setState(sessionId, 'error', undefined, event.type);
+      setState(sessionId, 'error', undefined, event.type, projectPath);
     } else if (event.type === 'permission.updated' || event.type === 'permission.asked') {
       await registerPermission(client, event.properties, projectPath, directory);
     } else if (event.type === 'permission.replied') {
       await resolvePermission(event.properties);
-      setState(sessionId, 'thinking', undefined, event.type);
+      setState(sessionId, 'thinking', undefined, event.type, projectPath);
     }
   },
   // This hook can announce waiting state, but has no stable permission ID;
   // only permission.updated/permission.asked may create a Broker request.
   'permission.ask': async (input) => {
-    setState(input && input.sessionID, 'waiting-permission', undefined, 'permission.ask');
+    setState(input && input.sessionID, 'waiting-permission', undefined, 'permission.ask', projectPath);
   },
   dispose: async () => {
     await Promise.all([...activePermissions.values()].map((input) => (
@@ -1026,15 +1027,26 @@ function refreshInstalledIntegrationScripts(): string {
   const token = ensureEventToken()
   ensurePermissionToken()
   ensurePresentationToken()
-  ensurePresentationMcpScript()
-  if (fileExists(hookScriptPath())) installHookScript()
-  if (fileExists(openCodeDesktopPluginPath())) {
-    writeFileEnsured(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop'))
+  // A read-only home directory should not prevent the desktop pet from
+  // starting. The presentation bridge can be repaired from Setup later; the
+  // event receiver, permissions, and core UI remain available meanwhile.
+  try {
+    ensurePresentationMcpScript()
+  } catch (error) {
+    console.error('Presentation MCP script refresh skipped', error)
   }
-  if (fileExists(openCodeCliPluginPath())) {
-    writeFileEnsured(openCodeCliPluginPath(), openCodePluginContent('opencode-cli'))
+  try {
+    if (fileExists(hookScriptPath())) installHookScript()
+    if (fileExists(openCodeDesktopPluginPath())) {
+      writeFileEnsured(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop'))
+    }
+    if (fileExists(openCodeCliPluginPath())) {
+      writeFileEnsured(openCodeCliPluginPath(), openCodePluginContent('opencode-cli'))
+    }
+    repairWindowsInstalledHooks()
+  } catch (error) {
+    console.error('Installed integration refresh skipped', error)
   }
-  repairWindowsInstalledHooks()
   return token
 }
 

@@ -98,3 +98,24 @@ test('streak increments only on the next local day', () => {
     assert.equal(second.awards.some((award) => award.ruleId.endsWith('daily-streak')), true)
   })
 })
+
+test('project routing snapshots XP to the routed pet and keeps route changes separate', () => {
+  withStore((store) => {
+    const projectA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    const projectB = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    const first = store.handleEvent({
+      ...event('success', 1_700_000_000_000, 'shared-session'),
+      projectId: projectA,
+    }, 'wolf')
+    assert.equal(first.snapshot.petId, 'wolf')
+    assert.equal(first.snapshot.totalXp, 30)
+
+    const second = store.handleEvent({
+      ...event('success', 1_700_000_001_000, 'shared-session'),
+      projectId: projectB,
+    }, 'aang-airbender')
+    assert.equal(second.snapshot.petId, 'aang-airbender')
+    assert.equal(second.snapshot.totalXp, 30)
+    assert.equal(store.getSnapshot('wolf').totalXp, 30)
+  })
+})

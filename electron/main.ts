@@ -36,6 +36,7 @@ import {
   PresentationController,
 } from './presentation-controller'
 import { ProjectMcpRegistryStore } from './project-mcp-registry'
+import { ProjectRoutingStore } from './project-routing'
 import {
   createPermissionAdapterServer,
   PERMISSION_ADAPTER_PORT,
@@ -47,6 +48,7 @@ import type { ProgressionSnapshot } from '../src/types/progression'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
 import type { PresentationIntent, PresentationStatusSnapshot } from '../src/types/presentation'
 import type { ProjectMcpRegistrySnapshot, ProjectMcpRemovalSummary } from '../src/types/project-mcp'
+import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from '../src/types/project-pet'
 import type { PetEdge, PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 import {
   EDGE_DWELL_MS,
@@ -99,6 +101,7 @@ let localUsageScanPromise: Promise<void> | null = null
 let presentationController: PresentationController | null = null
 let presentationMcpServer: Server | null = null
 let projectMcpRegistry: ProjectMcpRegistryStore | null = null
+let projectRoutingStore: ProjectRoutingStore | null = null
 let presentationStatusProjection: PresentationStatusSnapshot = {
   activePets: [],
   dnd: false,
@@ -1026,9 +1029,9 @@ function broadcastProgression(snapshot?: ProgressionSnapshot): void {
   }
 }
 
-function currentHistorySummary(): HistorySummary | null {
+function currentHistorySummary(projectId?: string): HistorySummary | null {
   if (!historyStore) return null
-  return historyStore.getSummary(progressionStore?.getActivePetId() ?? 'aang-airbender')
+  return historyStore.getSummary(progressionStore?.getActivePetId() ?? 'aang-airbender', projectId)
 }
 
 async function refreshLocalUsage(): Promise<void> {
@@ -1120,6 +1123,7 @@ function createHistoryServices(): void {
     localUsageReader = new LocalUsageReader({
       homeDir: app.getPath('home'),
       history: historyStore,
+      projectRouting: projectRoutingStore,
     })
     localUsageScanTimer = setInterval(() => {
       void refreshLocalUsage()
@@ -1262,6 +1266,101 @@ function getPetsJsonPath(): string {
   return join(__dirname, '..', 'dist', 'pets', 'pets.json')
 }
 
+function availablePetIds(): Set<string> {
+  const ids = new Set<string>()
+  try {
+    const raw = JSON.parse(fs.readFileSync(getPetsJsonPath(), 'utf-8'))
+    if (Array.isArray(raw)) {
+      for (const pet of raw) {
+        if (pet && typeof pet.id === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(pet.id)) ids.add(pet.id)
+      }
+    }
+  } catch {}
+
+  const customBase = path.resolve(hookScriptDeployPath(), 'custom')
+  try {
+    for (const entry of fs.readdirSync(customBase, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^[A-Za-z0-9._-]{1,128}$/.test(entry.name)) continue
+      const petJsonPath = safeJoin(customBase, entry.name, 'pet.json')
+      if (!petJsonPath || !fs.existsSync(petJsonPath)) continue
+      try {
+        const pet = JSON.parse(fs.readFileSync(petJsonPath, 'utf-8'))
+        const id = typeof pet.id === 'string' ? pet.id : entry.name
+        if (/^[A-Za-z0-9._-]{1,128}$/.test(id)) ids.add(id)
+      } catch {}
+    }
+  } catch {}
+  ids.add('aang-airbender')
+  return ids
+}
+
+let availablePetIdsCache: { ids: Set<string>; expiresAt: number } | null = null
+const AVAILABLE_PET_IDS_CACHE_MS = 5_000
+
+// Live event ingestion calls this on every tool-call/state event; re-reading
+// pets.json plus the whole custom-pets directory that often would add a
+// second batch of synchronous disk I/O to the same hot path project routing
+// already had to be freed of. User-initiated calls (pick/bind/list) skip
+// this and always read fresh.
+function availablePetIdsCached(): Set<string> {
+  const now = Date.now()
+  if (availablePetIdsCache && availablePetIdsCache.expiresAt > now) return availablePetIdsCache.ids
+  const ids = availablePetIds()
+  availablePetIdsCache = { ids, expiresAt: now + AVAILABLE_PET_IDS_CACHE_MS }
+  return ids
+}
+
+function createProjectRoutingServices(): void {
+  if (projectRoutingStore) return
+  try {
+    projectRoutingStore = new ProjectRoutingStore(
+      join(app.getPath('userData'), 'project-routing.sqlite'),
+      { defaultPetId: 'aang-airbender' },
+    )
+  } catch (error) {
+    console.error('Project routing storage is unavailable', error)
+    projectRoutingStore = null
+  }
+}
+
+function rawProjectPath(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+  const value = (input as Record<string, unknown>).project
+  return typeof value === 'string' ? value : undefined
+}
+
+function projectViewList(): ProjectPetView[] {
+  return projectRoutingStore?.listProjects(availablePetIds()) ?? []
+}
+
+async function normalizeIngressEvent(input: unknown, receivedAt?: number) {
+  const normalized = await agentAdapterRegistry?.normalize(input, receivedAt)
+  if (!normalized) return { ok: false as const, error: 'adapter_registry_unavailable' }
+  if (!normalized.ok || !projectRoutingStore) return normalized
+
+  try {
+    const available = availablePetIdsCached()
+    const identity = projectRoutingStore.trackSeen(rawProjectPath(input), receivedAt)
+    if (!identity) return normalized
+    const route = projectRoutingStore.route(identity.projectId, available)
+    if (route.fallback) {
+      console.warn(`Project pet binding for ${identity.displayName} is unavailable; using default pet.`)
+    }
+    return {
+      ok: true as const,
+      event: {
+        ...normalized.event,
+        project: identity.displayName,
+        projectId: identity.projectId,
+        ...(route.petId ? { routedPetId: route.petId } : {}),
+      },
+    }
+  } catch (error) {
+    console.error('Project routing failed; preserving unbound event behavior', error)
+    return normalized
+  }
+}
+
 app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return
 
@@ -1275,6 +1374,7 @@ app.whenReady().then(() => {
   projectMcpRegistry = new ProjectMcpRegistryStore(
     join(app.getPath('userData'), 'project-mcp-registry.json'),
   )
+  createProjectRoutingServices()
   const permissionToken = ensurePermissionToken()
   const presentationToken = ensurePresentationToken()
   configureSecureProtocol()
@@ -1302,21 +1402,21 @@ app.whenReady().then(() => {
         console.error('Desktop notification handling failed')
       }
       try {
-        const result = progressionStore?.handleEvent(event)
+        const result = progressionStore?.handleEvent(event, event.routedPetId)
         if (result) broadcastProgression(result.snapshot)
       } catch (error) {
         console.error('Progression event handling failed', error)
       }
       try {
-        if (historyStore?.recordEvent(event, progressionStore?.getActivePetId() ?? 'aang-airbender')) {
+        const routedPetId = event.routedPetId ?? progressionStore?.getActivePetId() ?? 'aang-airbender'
+        if (historyStore?.recordEvent(event, routedPetId)) {
           broadcastHistoryUpdated()
         }
       } catch (error) {
         console.error('History event handling failed', error)
       }
     },
-    (input, receivedAt) => agentAdapterRegistry?.normalize(input, receivedAt)
-      ?? Promise.resolve({ ok: false, error: 'adapter_registry_unavailable' }),
+    normalizeIngressEvent,
   )
 
   // Dragging is driven from here by polling the OS cursor position, rather
@@ -1622,10 +1722,10 @@ app.whenReady().then(() => {
     return usage
   })
 
-  ipcMain.handle('history-summary', async (event) => {
+  ipcMain.handle('history-summary', async (event, projectId: unknown) => {
     assertTrustedIpcSender(event, panelWindow)
     await refreshLocalUsage()
-    return currentHistorySummary()
+    return currentHistorySummary(typeof projectId === 'string' ? projectId : undefined)
   })
 
   ipcMain.handle('history-clear', (event): HistoryClearResult => {
@@ -1695,6 +1795,100 @@ app.whenReady().then(() => {
       return { ok: true }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('project-pets-list', (event): ProjectPetView[] => {
+    assertTrustedIpcSender(event, panelWindow)
+    try {
+      return projectViewList()
+    } catch (error) {
+      console.error('Project pet list failed', error)
+      return []
+    }
+  })
+
+  ipcMain.handle('project-pets-get-enabled', (event): boolean => {
+    assertTrustedIpcSender(event, panelWindow)
+    return projectRoutingStore?.isEnabled() ?? false
+  })
+
+  ipcMain.handle('project-pets-set-enabled', (event, value: unknown): boolean => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (!projectRoutingStore) return false
+    try {
+      projectRoutingStore.setEnabled(value === true)
+      return projectRoutingStore.isEnabled()
+    } catch (error) {
+      console.error('Project pet enable toggle failed', error)
+      return projectRoutingStore.isEnabled()
+    }
+  })
+
+  ipcMain.handle('project-pets-pick', async (event): Promise<ProjectPetCommandResult> => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (!projectRoutingStore) return { ok: false, error: 'unavailable' }
+    const owner = panelWindow ?? petWindow
+    if (!owner || owner.isDestroyed() || dialogOpen) return { ok: false, error: 'unavailable' }
+
+    dialogOpen = true
+    let result: Electron.OpenDialogReturnValue
+    try {
+      result = await dialog.showOpenDialog(owner, {
+        title: t('chooseProjectPet'),
+        message: t('chooseProjectPetHelp'),
+        properties: ['openDirectory', 'createDirectory'],
+      })
+    } catch {
+      return { ok: false, error: 'unavailable' }
+    } finally {
+      dialogOpen = false
+    }
+    if (result.canceled || result.filePaths.length === 0) return { ok: false, error: 'cancelled' }
+
+    try {
+      const project = projectRoutingStore.registerPath(result.filePaths[0], Date.now(), availablePetIds())
+      return project ? { ok: true, project } : { ok: false, error: 'invalid_project' }
+    } catch (error) {
+      console.error('Project pet registration failed', error)
+      return { ok: false, error: 'unavailable' }
+    }
+  })
+
+  ipcMain.handle('project-pets-bind', (event, payload: unknown): ProjectPetCommandResult => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (!projectRoutingStore || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return { ok: false, error: 'unavailable' }
+    }
+    const input = payload as Record<string, unknown>
+    const projectId = typeof input.projectId === 'string' ? input.projectId : ''
+    const petId = input.petId === null ? null : typeof input.petId === 'string' ? input.petId : undefined
+    if (!/^[a-f0-9]{32}$/.test(projectId)) return { ok: false, error: 'invalid_project' }
+    if (petId === undefined) return { ok: false, error: 'invalid_pet' }
+    const available = availablePetIds()
+    if (petId !== null && (!/^[A-Za-z0-9._-]{1,128}$/.test(petId) || !available.has(petId))) {
+      return { ok: false, error: 'invalid_pet' }
+    }
+    try {
+      const project = projectRoutingStore.setBinding(projectId, petId, available)
+      return project ? { ok: true, project } : { ok: false, error: 'not_found' }
+    } catch (error) {
+      console.error('Project pet binding failed', error)
+      return { ok: false, error: 'unavailable' }
+    }
+  })
+
+  ipcMain.handle('project-pets-archive', (event, projectId: unknown): ProjectPetArchiveResult => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (!projectRoutingStore) return { ok: false, error: 'unavailable' }
+    if (typeof projectId !== 'string' || !/^[a-f0-9]{32}$/.test(projectId)) {
+      return { ok: false, error: 'invalid_project' }
+    }
+    try {
+      return projectRoutingStore.archiveProject(projectId) ? { ok: true } : { ok: false, error: 'not_found' }
+    } catch (error) {
+      console.error('Project pet archive failed', error)
+      return { ok: false, error: 'unavailable' }
     }
   })
 
@@ -2087,6 +2281,8 @@ app.on('before-quit', () => {
   progressionStore = null
   historyStore?.close()
   historyStore = null
+  projectRoutingStore?.close()
+  projectRoutingStore = null
 })
 
 app.on('will-quit', () => {

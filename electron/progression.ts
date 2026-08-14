@@ -149,16 +149,17 @@ export class ProgressionStore {
     return this.snapshotFromRow(this.readProgress(safePetId))
   }
 
-  handleEvent(event: AgentStatusEvent): ProgressionEventResult {
+  handleEvent(event: AgentStatusEvent, routedPetId?: string): ProgressionEventResult {
     const occurredAt = Number.isFinite(event.timestamp) ? event.timestamp : this.now()
+    const petId = normalizePetId(routedPetId ?? event.routedPetId, this.activePetId)
     if (event.originalEvent === 'AgentPetsIntegrationTest') {
-      return { snapshot: this.getSnapshot(), awards: [] }
+      return { snapshot: this.getSnapshot(petId), awards: [] }
     }
 
     const awards = this.transaction(() => {
-      const petId = this.activePetId
       this.ensurePet(petId)
-      const sessionKey = `${event.source}:${event.sessionId}`.slice(0, MAX_SESSION_KEY_LENGTH)
+      const routeKey = event.projectId || petId
+      const sessionKey = `${event.source}:${event.sessionId}:${routeKey}:${petId}`.slice(0, MAX_SESSION_KEY_LENGTH)
       const previous = this.readActivity(sessionKey)
       let activeMs = previous?.activeMs ?? 0
       if (previous && occurredAt > previous.lastSeenAt && isActiveState(previous.lastState)) {
@@ -189,7 +190,7 @@ export class ProgressionStore {
       return result
     })
 
-    return { snapshot: this.getSnapshot(), awards }
+    return { snapshot: this.getSnapshot(petId), awards }
   }
 
   close(): void {
@@ -212,9 +213,7 @@ export class ProgressionStore {
     `)
 
     const migration = this.database.prepare('SELECT version FROM schema_migrations WHERE version = 1').get()
-    if (migration) return
-
-    this.transaction(() => {
+    if (!migration) this.transaction(() => {
       this.database.exec(`
         CREATE TABLE IF NOT EXISTS pets (
           pet_id TEXT PRIMARY KEY,
@@ -260,6 +259,21 @@ export class ProgressionStore {
       this.database.prepare(
         `UPDATE schema_migrations SET applied_at = ?, checksum = ? WHERE version = 1`,
       ).run(this.now(), XP_POLICY_VERSION)
+    })
+
+    // v2 scopes idempotency to each pet. Without this, a first completion on
+    // one routed project consumes the same daily reward for every other pet.
+    const hasV2 = Boolean(this.database.prepare('SELECT version FROM schema_migrations WHERE version = 2').get())
+    if (!hasV2) this.transaction(() => {
+      this.database.prepare(`
+        UPDATE xp_ledger
+        SET idempotency_key = pet_id || ':' || idempotency_key
+        WHERE idempotency_key NOT LIKE pet_id || ':%'
+      `).run()
+      this.database.prepare(
+        `INSERT INTO schema_migrations(version, name, applied_at, checksum)
+         VALUES (2, 'progression-pet-idempotency', ?, ?)`,
+      ).run(this.now(), `${XP_POLICY_VERSION}-pet-idempotency`)
     })
   }
 
@@ -379,7 +393,9 @@ export class ProgressionStore {
     occurredAt: number,
     awards: ProgressionAward[],
   ): void {
-    const sessionKey = `${event.source}:${event.sessionId}`.slice(0, MAX_SESSION_KEY_LENGTH)
+    // Include the canonical project route so identical session IDs from two
+    // workspaces cannot suppress one another's completion XP.
+    const sessionKey = `${event.source}:${event.sessionId}:${event.projectId ?? 'unbound'}`.slice(0, MAX_SESSION_KEY_LENGTH)
     const date = this.localDate(occurredAt)
     const completedRule = `${XP_POLICY_VERSION}.session-completed`
     if (this.insertAward(petId, completedRule, `completed:${sessionKey}`, XP_RULES.sessionCompleted, occurredAt, event.source)) {
@@ -419,6 +435,7 @@ export class ProgressionStore {
     eventId?: string,
     metadata?: Record<string, unknown>,
   ): boolean {
+    const scopedIdempotencyKey = `${petId}:${idempotencyKey}`
     const inserted = changedCount(this.database.prepare(`
       INSERT OR IGNORE INTO xp_ledger(
         ledger_id, pet_id, event_id, rule_id, idempotency_key, amount, occurred_at, local_date, metadata_json
@@ -428,7 +445,7 @@ export class ProgressionStore {
       petId,
       eventId ?? null,
       ruleId,
-      idempotencyKey,
+      scopedIdempotencyKey,
       amount,
       occurredAt,
       this.localDate(occurredAt),

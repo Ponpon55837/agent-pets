@@ -22,11 +22,16 @@ interface UsageRoot {
 interface ParsedUsage extends HistoryTokenUsageRecord {
   dedupeKey: string
   cumulative?: TokenCounters
+  cwd?: string
 }
 
 interface TokenCounters {
   input: number
   output: number
+}
+
+export interface ProjectPathResolver {
+  resolvePath(value: unknown): { projectId: string } | null
 }
 
 export interface LocalUsageReaderOptions {
@@ -37,6 +42,7 @@ export interface LocalUsageReaderOptions {
   maxFileBytes?: number
   maxTotalBytes?: number
   maxLineBytes?: number
+  projectRouting?: ProjectPathResolver | null
 }
 
 export interface LocalUsageScanResult {
@@ -137,6 +143,7 @@ function claudeUsage(
     output,
     quality: 'exact',
     dedupeKey: stableKey,
+    cwd: text(record.cwd),
   }
 }
 
@@ -149,6 +156,7 @@ function codexUsage(
   lineNumber: number,
   fallbackAt: number,
   previousTotal: TokenCounters | null,
+  fileCwd: string | undefined,
 ): ParsedUsage | null {
   const totalUsage = asObject(info.total_token_usage)
   // Codex's total_token_usage is cumulative for the rollout. last_token_usage
@@ -185,6 +193,7 @@ function codexUsage(
     quality: 'exact',
     dedupeKey: stableKey,
     cumulative: currentTotal,
+    cwd: fileCwd,
   }
 }
 
@@ -268,12 +277,18 @@ function parseUsageFile(
 ): ParsedUsage[] {
   const records = new Map<string, ParsedUsage>()
   let previousCodexTotal: TokenCounters | null = null
+  // Codex only reports the workspace path once, on the file's leading
+  // session_meta line; every later token_count event inherits it.
+  let codexCwd: string | undefined
   const lines = content.split(/\r?\n/)
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
     if (!line || Buffer.byteLength(line, 'utf8') > maxLineBytes) continue
+    if (provider === 'codex' && codexCwd === undefined) {
+      codexCwd = codexSessionCwd(line) ?? codexCwd
+    }
     const parsed: ParsedUsage | null = provider === 'codex'
-      ? parseCodexUsageLine(line, fileKey, index + 1, fallbackAt, previousCodexTotal)
+      ? parseCodexUsageLine(line, fileKey, index + 1, fallbackAt, previousCodexTotal, codexCwd)
       : parseLocalUsageLine(provider, line, fileKey, index + 1, fallbackAt)
     if (provider === 'codex' && parsed?.cumulative) previousCodexTotal = parsed.cumulative
     if (!parsed) continue
@@ -284,12 +299,22 @@ function parseUsageFile(
   return [...records.values()]
 }
 
+function codexSessionCwd(line: string): string | undefined {
+  let value: unknown
+  try { value = JSON.parse(line) } catch { return undefined }
+  const record = asObject(value)
+  if (!record || record.type !== 'session_meta') return undefined
+  const payload = asObject(record.payload)
+  return payload ? text(payload.cwd) : undefined
+}
+
 function parseCodexUsageLine(
   line: string,
   fileKey: string,
   lineNumber: number,
   fallbackAt: number,
   previousTotal: TokenCounters | null,
+  fileCwd: string | undefined,
 ): ParsedUsage | null {
   let value: unknown
   try { value = JSON.parse(line) } catch { return null }
@@ -300,7 +325,7 @@ function parseCodexUsageLine(
   const info = asObject(payload.info)
   const usage = info ? asObject(info.last_token_usage) : null
   if (!info || !usage) return null
-  return codexUsage(record, payload, info, usage, fileKey, lineNumber, fallbackAt, previousTotal)
+  return codexUsage(record, payload, info, usage, fileKey, lineNumber, fallbackAt, previousTotal, fileCwd)
 }
 
 export class LocalUsageReader {
@@ -311,6 +336,7 @@ export class LocalUsageReader {
   private readonly maxFileBytes: number
   private readonly maxTotalBytes: number
   private readonly maxLineBytes: number
+  private readonly projectRouting: ProjectPathResolver | null
   private readonly fileCache = new Map<string, { mtimeMs: number; size: number }>()
   private activeScan: Promise<LocalUsageScanResult> | null = null
 
@@ -322,6 +348,7 @@ export class LocalUsageReader {
     this.maxFileBytes = Math.max(64 * 1024, Math.min(DEFAULT_MAX_FILE_BYTES, Math.floor(options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES)))
     this.maxTotalBytes = Math.max(this.maxFileBytes, Math.min(DEFAULT_MAX_TOTAL_BYTES, Math.floor(options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES)))
     this.maxLineBytes = Math.max(4 * 1024, Math.min(DEFAULT_MAX_LINE_BYTES, Math.floor(options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES)))
+    this.projectRouting = options.projectRouting ?? null
   }
 
   scan(): Promise<LocalUsageScanResult> {
@@ -370,7 +397,8 @@ export class LocalUsageReader {
         result.recordsParsed += records.length
         for (const record of records) {
           if (record.occurredAt <= cutoff) continue
-          if (this.history.recordTokenUsage(record)) result.recordsImported += 1
+          const projectId = record.cwd ? this.projectRouting?.resolvePath(record.cwd)?.projectId : undefined
+          if (this.history.recordTokenUsage({ ...record, projectId })) result.recordsImported += 1
         }
       }
     }

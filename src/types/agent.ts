@@ -30,6 +30,10 @@ export interface AgentStatusEvent {
   source: AgentSource
   sessionId: string
   project?: string
+  /** Main-process canonical project fingerprint; never a raw path. */
+  projectId?: string
+  /** Main-process routing result; absent means preserve legacy selected-pet behavior. */
+  routedPetId?: string
   state: AgentState
   originalEvent?: string
   timestamp: number
@@ -45,6 +49,8 @@ export interface AgentSession {
   source: AgentSource
   sessionId: string
   project?: string
+  projectId?: string
+  routedPetId?: string
   state: AgentState
   lastSeenAt: number
   toolName?: string
