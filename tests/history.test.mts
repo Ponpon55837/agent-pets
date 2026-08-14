@@ -1,0 +1,113 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import test from 'node:test'
+import { HistoryStore } from '../electron/history.ts'
+import type { AgentStatusEvent } from '../src/types/agent.ts'
+
+function databasePath(): { filePath: string; directory: string } {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-history-'))
+  return { filePath: path.join(directory, 'history.sqlite'), directory }
+}
+
+function event(overrides: Partial<AgentStatusEvent> = {}): AgentStatusEvent {
+  return {
+    adapterId: 'codex',
+    source: 'codex',
+    sessionId: 'session-1',
+    state: 'thinking',
+    timestamp: Date.UTC(2026, 7, 13, 1, 0, 0),
+    ...overrides,
+  }
+}
+
+test('history writes idempotent events and serves seven-day aggregates', (t) => {
+  const dayOne = Date.UTC(2026, 7, 10, 1, 0, 0)
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, {
+    now: () => now,
+    localDate: timestamp => timestamp < Date.UTC(2026, 7, 13) ? '2026-08-10' : '2026-08-13',
+  })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+
+  assert.equal(store.recordEvent(event({ timestamp: dayOne, eventId: 'start' })), true)
+  assert.equal(store.recordEvent(event({ state: 'tool-running', timestamp: dayOne + 60_000, eventId: 'tool' })), true)
+  assert.equal(store.recordEvent(event({
+    state: 'success',
+    timestamp: dayOne + 120_000,
+    eventId: 'finish',
+    tokenUsage: { input: 120, output: 40, quality: 'exact' },
+  })), true)
+  assert.equal(store.recordEvent(event({ state: 'success', timestamp: dayOne + 120_000, eventId: 'finish' })), false)
+
+  const summary = store.getSummary()
+  const oldDay = summary.days.find(day => day.localDate === '2026-08-10')!
+  assert.equal(oldDay.sessionsCompleted, 1)
+  assert.equal(oldDay.activeMs, 120_000)
+  assert.equal(oldDay.tokenInput, 120)
+  assert.equal(oldDay.tokenOutput, 40)
+  assert.equal(oldDay.tokenQuality, 'exact')
+  assert.equal(summary.totals.sessionsCompleted, 1)
+  assert.equal(summary.agents[0].adapterId, 'codex')
+  assert.equal(summary.agents[0].tokenInput, 120)
+  assert.equal(summary.agents[0].tokenOutput, 40)
+  assert.equal(summary.agents[0].tokenQuality, 'exact')
+})
+
+test('history distinguishes estimated and exact token quality and redacts event content', (t) => {
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => now })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+
+  assert.equal(store.recordEvent(event({
+    eventId: 'estimated',
+    project: 'C:\\Users\\dgh\\private-project',
+    tokenUsage: { input: 10, output: 5, quality: 'estimated' },
+  })), true)
+  const estimated = store.getSummary()
+  assert.equal(estimated.tokenQuality, 'estimated')
+  assert.equal(estimated.totals.tokenInput, 10)
+  assert.equal(estimated.totals.tokenOutput, 5)
+
+  assert.equal(store.recordEvent(event({
+    eventId: 'exact',
+    tokenUsage: { input: 20, output: 8, quality: 'exact' },
+  })), true)
+  const exact = store.getSummary()
+  assert.equal(exact.tokenQuality, 'exact')
+  assert.equal(exact.totals.tokenInput, 30)
+  assert.equal(exact.totals.tokenOutput, 13)
+  const exported = JSON.stringify(store.getExport())
+  assert.equal(exported.includes('private-project'), false)
+  assert.equal(exported.includes('tool argument'), false)
+})
+
+test('quota snapshots are bounded and history clear is independent from XP storage', (t) => {
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => now })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+
+  assert.equal(store.recordQuotaSnapshot({
+    updatedAt: new Date(now).toISOString(),
+    providers: [{
+      id: 'codex',
+      name: 'Codex',
+      plan: 'Plus',
+      secret: 'must-not-persist',
+      windows: [{ id: 'session', label: 'Session', remainingPercent: 87.5, resetsAt: new Date(now + 60_000).toISOString() }],
+    }],
+  }), true)
+  assert.equal(store.getSummary().quota?.providers[0].windows[0].remainingPercent, 87.5)
+  const quotaExport = JSON.stringify(store.getExport())
+  assert.equal(quotaExport.includes('must-not-persist'), false)
+
+  store.recordEvent(event({ eventId: 'clear-me', state: 'success' }))
+  store.clear()
+  const cleared = store.getSummary()
+  assert.equal(cleared.totals.sessionsCompleted, 0)
+  assert.equal(cleared.quota, null)
+})

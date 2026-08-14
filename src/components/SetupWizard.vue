@@ -259,7 +259,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--surface-scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -271,7 +271,7 @@ onUnmounted(() => {
   width: min(520px, calc(100% - 28px));
   max-height: min(620px, calc(100vh - 28px));
   box-sizing: border-box;
-  background: rgba(25, 25, 35, 0.98);
+  background: var(--surface-overlay);
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 14px;
@@ -289,7 +289,7 @@ onUnmounted(() => {
 
 .wizard-header h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--font-lg);
   font-weight: 600;
   color: #e0e0e0;
 }
@@ -298,7 +298,7 @@ onUnmounted(() => {
   background: none;
   border: none;
   color: #888;
-  font-size: 18px;
+  font-size: var(--font-xl);
   cursor: pointer;
   padding: 0 4px;
 }
@@ -311,7 +311,7 @@ onUnmounted(() => {
   color: #888;
   text-align: center;
   padding: 16px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -341,14 +341,14 @@ onUnmounted(() => {
 .elapsed {
   font-variant-numeric: tabular-nums;
   color: #555;
-  font-size: 10px;
+  font-size: var(--font-xs);
 }
 
 .error-msg {
   color: #ff6b6b;
   text-align: center;
   padding: 12px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -361,7 +361,7 @@ onUnmounted(() => {
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.05);
   color: #ccc;
-  font-size: 11px;
+  font-size: var(--font-xs);
   cursor: pointer;
 }
 
@@ -409,7 +409,7 @@ onUnmounted(() => {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
   color: #ccc;
-  font-size: 10px;
+  font-size: var(--font-xs);
   cursor: pointer;
 }
 
@@ -440,7 +440,7 @@ onUnmounted(() => {
 }
 
 .tool-name {
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 500;
   color: #e0e0e0;
 }
@@ -451,12 +451,12 @@ onUnmounted(() => {
   color: #aeb7cc;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 9px;
+  font-size: var(--font-xs);
   text-transform: capitalize;
 }
 
 .tool-desc {
-  font-size: 10px;
+  font-size: var(--font-xs);
   color: #8f98ab;
   margin-top: 2px;
   margin-left: 12px;
@@ -474,7 +474,7 @@ onUnmounted(() => {
 .capability-chip {
   padding: 2px 6px;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: var(--font-xs);
   line-height: 1.2;
 }
 
@@ -493,7 +493,7 @@ onUnmounted(() => {
 .test-result {
   margin-top: 3px;
   margin-left: 12px;
-  font-size: 10px;
+  font-size: var(--font-xs);
 }
 
 .test-result.passed {
@@ -516,7 +516,7 @@ onUnmounted(() => {
   display: flex;
   gap: 6px;
   align-items: flex-start;
-  font-size: 10px;
+  font-size: var(--font-xs);
   line-height: 1.35;
 }
 
@@ -525,7 +525,7 @@ onUnmounted(() => {
 .diagnosis-fail { color: #ff8989; }
 
 .wizard-note {
-  font-size: 10px;
+  font-size: var(--font-xs);
   line-height: 1.4;
   color: #888;
   padding: 5px 8px;
@@ -556,7 +556,7 @@ onUnmounted(() => {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
   color: #ccc;
-  font-size: 11px;
+  font-size: var(--font-xs);
   cursor: pointer;
   transition: all 0.15s;
 }

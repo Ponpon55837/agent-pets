@@ -1236,6 +1236,8 @@ Phase 6 實作補充：`electron/presentation-controller.ts` 是 main-owned Cont
 - 清除 History 不等於重置 Pet；
 - 不顯示 prompt、tool args、secret 或未經同意的完整 project path。
 
+Phase 7 實作補充：`electron/history.ts` 是 main-owned 的 SQLite History Store，使用獨立 schema migration、WAL、事件去重、bounded active-time、90 日 raw event retention 與 daily aggregate projection。`electron/local-usage.ts` 由 main process 唯讀掃描固定的 Codex／Claude JSONL session-log roots，解析 `token_count`／assistant `usage`、合併 cache／reasoning 到既有 input／output buckets、去重串流紀錄，並只寫入雜湊後身分與 token totals；History metadata 會保存 Clear History 後的 local-log cutoff，避免舊 log 立即回填。`src/components/StatusPanel.vue` 的 History tab 只讀取七日彙總與 sanitized quota snapshot；`src/components/ProjectMcpPanel.vue` 則把專案 MCP 設定從設定頁抽成獨立的完整面板，保留原生資料夾選擇器、idempotent install、衝突保留與安全移除。History export 只輸出 summary，不輸出 raw event payload；clear history 與 progression.sqlite 完全分離。
+
 **依賴：** Phase 3 persistence、Phase 5 canonical adapters。
 **主要風險：** DB 膨脹、聚合重複、隱私、時區與 estimated data 誤導。
 

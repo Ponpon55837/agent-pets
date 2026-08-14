@@ -155,7 +155,11 @@ In **Settings → Advanced**, click **Setup MCP for a project**. Choose the loca
 
 The operation is idempotent. Existing matching entries are reported as already configured; a different entry with the same server name is reported as a conflict and is never overwritten. The setup writes only project-local configuration and does not run a shell command or reinstall hooks. Restart the affected agent client after setup so it reloads its MCP catalog.
 
-The **Connected projects** list in the same card keeps every project configured through this button. It re-checks all three client entries when Settings opens and shows `Connected`, `Partial`, `Conflict`, or `Folder missing`, together with the project path and last check. **Refresh** re-checks the list. **Remove MCP** removes only matching Agent Pets entries; if a user changed an entry, it is preserved and marked as a conflict. A missing project folder can be removed from the local list without touching any files.
+The button opens a dedicated MCP panel, separate from the Setup Wizard and the growing Settings page. The panel keeps every project configured through this button, re-checks all three client entries, and shows `Connected`, `Partial`, `Conflict`, or `Folder missing`, together with the project path and last check. **Refresh** re-checks the list. **Remove MCP** removes only matching Agent Pets entries; if a user changed an entry, it is preserved and marked as a conflict. A missing project folder can be removed from the local list without touching any files. **Done** returns to Settings.
+
+### History HUD
+
+The **History** tab in the main panel reads a local, main-process-owned aggregate projection: seven daily buckets, completed/failed sessions, observed active time, Agent distribution, the latest quota snapshot, and exact-versus-estimated token quality. The History reader also scans only the fixed local session-log roots `%USERPROFILE%\.codex\sessions`, `%USERPROFILE%\.claude\projects`, and `%USERPROFILE%\.claude\transcripts` from the main process. Codex `token_count` records use the cumulative `total_token_usage` counter and import only the monotonic delta; repeated context/rate-limit snapshots and records without a cumulative counter are ignored. Claude assistant `usage` records are parsed as exact usage; cache fields are folded into input and reasoning is used only when output is absent. The reader is read-only, bounded by file/line limits, skips links outside those roots, deduplicates streaming records, and stores only hashed session/file identities. Prompts, tool arguments, credentials, and full project paths are not persisted in the HUD data. **Export summary** writes the sanitized projection to a user-selected JSON file. **Clear history** clears history and quota snapshots only, establishes a new local-log cutoff, and never resets pet XP, level, evolution, mood, or achievements. Raw events use a bounded retention window while daily aggregates remain available for long-term progression views.
 
 #### Connect an agent project that is already in use
 
@@ -321,6 +325,7 @@ Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that r
 - **Renderer isolation** — Renderer processes run with Chromium sandboxing, context isolation, no Node.js integration, a restrictive CSP, a secure custom `agent-pets://` protocol instead of privileged `file://` pages, blocked popups/navigation, denied permissions, and validated main-frame IPC senders.
 - **Local event server** — The event server listens on `127.0.0.1` only, authenticates every hook request with a per-install secret, rejects browser-originated and non-JSON requests, rate-limits events, and accepts only bounded, whitelisted fields.
 - **Quota requests** — The quota feature connects only to the exact HTTPS Codex and Anthropic quota/auth endpoints. Redirects, oversized responses, excessive window counts, and malformed renderer IPC payloads are rejected. OAuth credentials stay in the Electron main process and are never exposed to the renderer or command-line arguments.
+- **Local usage reader** — Token history is read-only and main-process-owned. It scans only the known Codex/Claude JSONL roots, caps files and line sizes, rejects symlinks/reparse paths that escape those roots, parses an allowlisted usage shape, hashes source identities, and never persists raw log lines or prompt content.
 - **Credential refresh** — Expired OAuth tokens are refreshed and merged back into the original Codex auth file or Claude credential store so the CLIs keep working. Writes use account/change guards, restrictive file permissions, and atomic replacement where applicable.
 - **Pet imports** — ZIP entry count, compressed/uncompressed sizes, JSON size, and image size/type are validated before imported files are stored.
 - **Memory bounds** — Agent sessions are capped and stale/offline entries are evicted to prevent unbounded renderer memory growth.
@@ -425,6 +430,7 @@ agent-pets/
 │   ├── desktop-tray.ts      # Tray lifecycle and menu
 │   ├── notification-policy.ts # Pure notification classification/cooldown
 │   ├── quota.ts             # Codex / Claude quota readers
+│   ├── local-usage.ts       # Bounded Codex / Claude session-log token reader
 │   └── setup.ts             # Platform-aware paths & setup
 ├── integrations/
 │   ├── install.mjs          # Standalone CLI hook installer

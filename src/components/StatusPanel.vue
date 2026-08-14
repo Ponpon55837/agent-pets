@@ -2,39 +2,56 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAgentStore } from '../stores/agentStore'
 import { STATE_LABELS, SOURCE_LABELS, STATE_COLORS, STATE_PRIORITY, SOURCE_FAMILIES } from '../types/agent'
-import type {
-  ProjectMcpInstallStatus,
-  ProjectMcpProjectRecord,
-  ProjectMcpProjectStatus,
-  ProjectMcpRemovalStatus,
-  ProjectMcpSetupSummary,
-} from '../types/project-mcp'
 import { formatProject } from '../utils/format'
 import { locale, t, translateBackendError } from '../i18n'
+import type { HistoryAgentStat, HistoryDailyStat, HistorySummary } from '../types/history'
+import Button from './ui/Button.vue'
+import Card from './ui/Card.vue'
+import ConfirmDialog from './ui/ConfirmDialog.vue'
+import Icon from './ui/Icon.vue'
+import ProgressTrack from './ui/ProgressTrack.vue'
+import Select from './ui/Select.vue'
+import ToggleRow from './ui/ToggleRow.vue'
 
 const store = useAgentStore()
 const importing = ref(false)
 const editingPetId = ref<string | null>(null)
 const editName = ref('')
-const settingUpMcp = ref(false)
-const projectMcpResult = ref<ProjectMcpSetupSummary | null>(null)
-const projectMcpError = ref('')
-const projectMcpProjects = ref<ProjectMcpProjectRecord[]>([])
-const projectMcpListLoading = ref(false)
-const projectMcpListError = ref('')
-const removingProjectMcp = ref<string | null>(null)
+
 type SettingsSection = 'language' | 'appearance' | 'desktop' | 'pets' | 'growth' | 'advanced'
 const settingsTab = ref<SettingsSection>('appearance')
 const settingsSections = computed<Array<{ id: SettingsSection; icon: string; label: string; hint: string }>>(() => [
-  { id: 'language', icon: '文', label: t('language'), hint: t('languageHint') },
-  { id: 'appearance', icon: '◈', label: t('appearance'), hint: t('appearanceHint') },
-  { id: 'desktop', icon: '⌘', label: t('desktop'), hint: t('desktopHint') },
-  { id: 'pets', icon: '✦', label: t('pets'), hint: t('petsHint') },
-  { id: 'growth', icon: '↗', label: t('growth'), hint: t('growthHint') },
-  { id: 'advanced', icon: '⋯', label: t('advanced'), hint: t('advancedHint') },
+  { id: 'language', icon: 'language', label: t('language'), hint: t('languageHint') },
+  { id: 'appearance', icon: 'appearance', label: t('appearance'), hint: t('appearanceHint') },
+  { id: 'desktop', icon: 'desktop', label: t('desktop'), hint: t('desktopHint') },
+  { id: 'pets', icon: 'pets', label: t('pets'), hint: t('petsHint') },
+  { id: 'growth', icon: 'growth', label: t('growth'), hint: t('growthHint') },
+  { id: 'advanced', icon: 'advanced', label: t('advanced'), hint: t('advancedHint') },
 ])
 const activeSettingsSection = computed(() => settingsSections.value.find(section => section.id === settingsTab.value))
-const dashboardTab = ref<'sessions' | 'usage'>('sessions')
+type DashboardTab = 'sessions' | 'usage' | 'history'
+const dashboardTab = ref<DashboardTab>('sessions')
+const dashboardTabs = computed<Array<{ id: DashboardTab; label: string }>>(() => [
+  { id: 'sessions', label: t('sessions') },
+  { id: 'usage', label: t('tokenRemaining') },
+  { id: 'history', label: t('history') },
+])
+
+// Arrow-key navigation is expected of role="tablist" and was missing.
+function onTabKeydown(event: KeyboardEvent) {
+  const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+  if (!step) return
+  event.preventDefault()
+  const ids = dashboardTabs.value.map(tab => tab.id)
+  const next = ids[(ids.indexOf(dashboardTab.value) + step + ids.length) % ids.length]
+  selectDashboardTab(next)
+  ;(document.getElementById(`tab-${next}`) as HTMLElement | null)?.focus()
+}
+const historySummary = ref<HistorySummary | null>(null)
+const historyLoading = ref(false)
+const historyError = ref('')
+const historyAction = ref('')
+let cleanupHistoryUpdated: (() => void) | null = null
 const quotaUsage = computed(() => store.quotaUsage)
 const quotaLoading = computed(() => store.quotaLoading)
 const quotaError = computed(() => store.quotaError)
@@ -79,9 +96,169 @@ async function refreshQuota(force = false) {
   await store.refreshQuota(force)
 }
 
-function selectDashboardTab(tab: 'sessions' | 'usage') {
+function selectDashboardTab(tab: 'sessions' | 'usage' | 'history') {
   dashboardTab.value = tab
   if (tab === 'usage' && !quotaUsage.value) void refreshQuota()
+  if (tab === 'history' && !historySummary.value) void refreshHistory()
+}
+
+async function refreshHistory(): Promise<void> {
+  if (historyLoading.value) return
+  historyLoading.value = true
+  historyError.value = ''
+  try {
+    const summary = await window.electronAPI?.getHistorySummary()
+    historySummary.value = summary ?? null
+    if (!summary) historyError.value = t('historyDataUnavailable')
+  } catch {
+    historySummary.value = null
+    historyError.value = t('historyDataUnavailable')
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+function historyDateLabel(value: string): string {
+  const date = new Date(`${value}T12:00:00`)
+  if (!Number.isFinite(date.getTime())) return value
+  // Weekday + date used to be requested here ("週三 8/13"), but that string
+  // is wider than the 7-day chart's label column in both locales and wraps
+  // to two lines, which staggers every row under it — see history-day-row.
+  return date.toLocaleDateString(locale.value, { month: 'numeric', day: 'numeric' })
+}
+
+function historyDayLabel(day: HistoryDailyStat): string {
+  if (historySummary.value?.days.at(-1)?.localDate === day.localDate) return t('historyToday')
+  return historyDateLabel(day.localDate)
+}
+
+function historyDuration(value: number): string {
+  const minutes = Math.max(0, Math.round(value / 60_000))
+  if (minutes < 60) return `${minutes}m`
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
+function historyTokenLabel(quality: HistorySummary['tokenQuality']): string {
+  if (quality === 'exact') return t('historyTokenExact')
+  if (quality === 'estimated') return t('historyTokenEstimated')
+  return t('historyTokenUnavailable')
+}
+
+function historyAgentLabel(adapterId: string): string {
+  const id = adapterId.toLowerCase()
+  if (id.includes('codex')) return t('clientCodex')
+  if (id.includes('claude')) return t('clientClaudeCode')
+  if (id.includes('opencode')) return t('clientOpenCode')
+  return adapterId
+}
+
+const historyMaxTokens = computed(() => Math.max(
+  1,
+  ...(historySummary.value?.days.map(day => day.tokenInput + day.tokenOutput) ?? [1]),
+))
+
+// ProgressTrack takes a 0-100 number and does its own clamping, so this
+// returns a percentage rather than the CSS width string it used to build.
+function historyDayTokenPercent(day: HistoryDailyStat): number {
+  const total = day.tokenInput + day.tokenOutput
+  return Math.round((total / historyMaxTokens.value) * 100)
+}
+
+function historyDayTokenTotal(day: HistoryDailyStat): number {
+  return day.tokenInput + day.tokenOutput
+}
+
+// The day column is too narrow for a raw token count once it hits five or
+// six digits, so this renders "12.3k" the way the pet's own quota readouts
+// already do elsewhere in the panel.
+const compactNumberFormatter = computed(() => new Intl.NumberFormat(locale.value, {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+}))
+
+function formatCompactNumber(value: number): string {
+  return compactNumberFormatter.value.format(value)
+}
+
+function historyTrackingSinceLabel(): string {
+  const since = historySummary.value?.tokenTrackingSince
+  if (!since) return ''
+  const date = new Date(since)
+  if (!Number.isFinite(date.getTime())) return ''
+  return t('historyTrackingSince', {
+    date: date.toLocaleDateString(locale.value, { year: 'numeric', month: '2-digit', day: '2-digit' }),
+  })
+}
+
+function historyAgentTokenTotal(agent: HistoryAgentStat): number {
+  return agent.tokenInput + agent.tokenOutput
+}
+
+function historyAgentBarPercent(agent: HistoryAgentStat): number {
+  const summary = historySummary.value
+  if (!summary) return 0
+  const totalTokens = summary.totals.tokenInput + summary.totals.tokenOutput
+  if (totalTokens > 0) {
+    return Math.round((historyAgentTokenTotal(agent) / totalTokens) * 100)
+  }
+  const totalActiveMs = Math.max(1, summary.totals.activeMs)
+  return Math.round((agent.activeMs / totalActiveMs) * 100)
+}
+
+async function exportHistory(): Promise<void> {
+  historyAction.value = ''
+  try {
+    const result = await window.electronAPI?.exportHistory()
+    if (result?.ok) historyAction.value = t('historyExported')
+    else if (result?.error === 'cancelled') historyAction.value = t('historyExportCancelled')
+    else historyAction.value = t('historyActionFailed')
+  } catch {
+    historyAction.value = t('historyActionFailed')
+  }
+}
+
+// One in-panel confirmation flow for every destructive action. A native
+// window.confirm() would steal focus, which the main process reads as a blur
+// and hides the panel mid-confirmation.
+const confirmDialog = ref<{
+  title: string
+  message?: string
+  tone: 'default' | 'danger'
+  onConfirm: () => void | Promise<void>
+} | null>(null)
+
+function askConfirm(request: NonNullable<typeof confirmDialog.value>) {
+  confirmDialog.value = request
+}
+
+async function acceptConfirm() {
+  const pending = confirmDialog.value
+  confirmDialog.value = null
+  await pending?.onConfirm()
+}
+
+function clearHistory(): void {
+  askConfirm({
+    title: t('historyClear'),
+    message: t('historyClearConfirm'),
+    tone: 'danger',
+    onConfirm: performClearHistory,
+  })
+}
+
+async function performClearHistory(): Promise<void> {
+  historyAction.value = ''
+  try {
+    const result = await window.electronAPI?.clearHistory()
+    if (result?.ok) {
+      historyAction.value = t('historyCleared')
+      await refreshHistory()
+    } else {
+      historyAction.value = t('historyActionFailed')
+    }
+  } catch {
+    historyAction.value = t('historyActionFailed')
+  }
 }
 
 function formatRemaining(value: number): string {
@@ -140,7 +317,15 @@ function elapsedLabel(session: { state: string; lastSeenAt: number }): string | 
 // pet window having already populated it.
 onMounted(() => {
   store.loadPets()
-  void refreshProjectMcpProjects()
+  if (window.electronAPI?.onHistoryUpdated) {
+    cleanupHistoryUpdated = window.electronAPI.onHistoryUpdated(() => {
+      if (dashboardTab.value === 'history') void refreshHistory()
+    })
+  }
+})
+
+onUnmounted(() => {
+  cleanupHistoryUpdated?.()
 })
 
 function startRename(pet: { id: string; displayName: string }) {
@@ -223,164 +408,78 @@ function restartApp() {
   window.electronAPI?.restartApp()
 }
 
-async function setupProjectMcp() {
-  if (settingUpMcp.value) return
-  settingUpMcp.value = true
-  projectMcpError.value = ''
-  projectMcpResult.value = null
-  try {
-    const result = await window.electronAPI?.setupProjectMcp()
-    if (result && !result.cancelled) {
-      projectMcpResult.value = result
-      await refreshProjectMcpProjects()
-    }
-  } catch {
-    projectMcpError.value = t('mcpSetupFailed')
-  } finally {
-    settingUpMcp.value = false
-  }
-}
-
-async function refreshProjectMcpProjects() {
-  if (projectMcpListLoading.value) return
-  projectMcpListLoading.value = true
-  projectMcpListError.value = ''
-  try {
-    const result = await window.electronAPI?.listProjectMcp()
-    if (!result?.ok) {
-      projectMcpListError.value = translateBackendError(result?.error || t('mcpListFailed'))
-      return
-    }
-    projectMcpProjects.value = result.projects
-  } catch {
-    projectMcpListError.value = t('mcpListFailed')
-  } finally {
-    projectMcpListLoading.value = false
-  }
-}
-
-async function removeConnectedProject(project: ProjectMcpProjectRecord) {
-  if (removingProjectMcp.value) return
-  const confirmed = window.confirm(
-    `要從「${project.projectName}」移除 Agent Pets MCP 嗎？\n\n` +
-    '只會移除 Agent Pets 自己寫入且內容未被修改的設定。專案與其他 MCP 不會受影響。',
-  )
-  if (!confirmed) return
-
-  removingProjectMcp.value = project.projectPath
-  projectMcpListError.value = ''
-  try {
-    const result = await window.electronAPI?.removeProjectMcp(project.projectPath)
-    if (!result?.ok) {
-      projectMcpListError.value = translateBackendError(result?.error || removalSummaryLabel(result?.results.map(item => item.status) ?? []))
-      await refreshProjectMcpProjects()
-      return
-    }
-    await refreshProjectMcpProjects()
-  } catch {
-    projectMcpListError.value = t('mcpRemoveFailed')
-  } finally {
-    removingProjectMcp.value = null
-  }
-}
-
-async function forgetMissingProject(project: ProjectMcpProjectRecord) {
-  if (removingProjectMcp.value) return
-  removingProjectMcp.value = project.projectPath
-  try {
-    await window.electronAPI?.forgetProjectMcp(project.projectPath)
-    await refreshProjectMcpProjects()
-  } finally {
-    removingProjectMcp.value = null
-  }
-}
-
-function projectMcpClientLabel(client: string): string {
-  if (client === 'codex') return 'Codex'
-  if (client === 'claude') return 'Claude Code'
-  return 'OpenCode'
-}
-
-function projectMcpStatusLabel(status: ProjectMcpInstallStatus): string {
-  if (status === 'installed') return t('mcpInstalled')
-  if (status === 'already_configured') return t('mcpAlreadyConfigured')
-  if (status === 'conflict') return t('mcpConflictUnchanged')
-  return t('failed')
-}
-
-function projectMcpProjectStatusLabel(status: ProjectMcpProjectStatus): string {
-  if (status === 'connected') return t('connected')
-  if (status === 'partial') return t('partial')
-  if (status === 'conflict') return t('conflict')
-  if (status === 'missing') return t('folderMissing')
-  return t('checkFailed')
-}
-
-function removalSummaryLabel(statuses: ProjectMcpRemovalStatus[]): string {
-  return statuses.includes('conflict')
-    ? t('mcpEntryChanged')
-    : t('mcpRemoveFailed')
-}
-
 function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boolean }) {
-  const message = pet.builtIn
-    ? `要從寵物清單隱藏「${pet.displayName}」嗎？此操作無法從介面復原，但不會刪除內建素材。`
-    : `要移除「${pet.displayName}」嗎？這會刪除匯入的素材檔案，且無法復原。`
-  if (window.confirm(message)) {
-    store.removePet(pet.id)
-  }
+  askConfirm({
+    title: pet.builtIn ? t('hide') : t('remove'),
+    message: pet.builtIn
+      ? t('hidePetConfirm', { name: pet.displayName })
+      : t('removePetConfirm', { name: pet.displayName }),
+    tone: 'danger',
+    onConfirm: () => store.removePet(pet.id),
+  })
 }
 </script>
 
 <template>
   <div class="status-panel" @click.stop>
     <div class="panel-header">
-      <button
+      <Button
         v-if="store.panelView === 'settings'"
-        class="header-btn"
+        variant="ghost"
+        icon-only
+        :title="t('back')"
+        :aria-label="t('back')"
         @click="store.backToSessions()"
       >
-        &#8249;
-      </button>
+        <Icon name="back" />
+      </Button>
       <span class="panel-title">
         {{ store.panelView === 'sessions' ? t('appName') : t('settings') }}
       </span>
       <div class="header-right">
-        <button
+        <Button
           v-if="store.panelView === 'sessions'"
-          class="header-btn"
+          variant="ghost"
+          icon-only
           :title="t('settings')"
+          :aria-label="t('settings')"
           @click="store.openSettings()"
         >
-          &#9881;
-        </button>
-        <button class="header-btn" @click="store.closePanel()">&times;</button>
+          <Icon name="settings" />
+        </Button>
+        <Button
+          variant="ghost"
+          icon-only
+          :title="t('close')"
+          :aria-label="t('close')"
+          @click="store.closePanel()"
+        >
+          <Icon name="close" />
+        </Button>
       </div>
     </div>
 
     <template v-if="store.panelView === 'sessions'">
       <div class="dashboard-tabs" role="tablist" :aria-label="t('dashboardSections')">
         <button
+          v-for="tab in dashboardTabs"
+          :key="tab.id"
           class="dashboard-tab"
-          :class="{ active: dashboardTab === 'sessions' }"
+          :class="{ active: dashboardTab === tab.id }"
           role="tab"
-          :aria-selected="dashboardTab === 'sessions'"
-          @click="selectDashboardTab('sessions')"
+          :id="`tab-${tab.id}`"
+          :aria-selected="dashboardTab === tab.id"
+          :aria-controls="`panel-${tab.id}`"
+          :tabindex="dashboardTab === tab.id ? 0 : -1"
+          @click="selectDashboardTab(tab.id)"
+          @keydown="onTabKeydown"
         >
-          {{ t('sessions') }}
-        </button>
-        <button
-          class="dashboard-tab"
-          :class="{ active: dashboardTab === 'usage' }"
-          role="tab"
-          :aria-selected="dashboardTab === 'usage'"
-          @click="selectDashboardTab('usage')"
-        >
-          {{ t('usage') }}
+          {{ tab.label }}
         </button>
       </div>
 
       <template v-if="dashboardTab === 'sessions'">
+        <div id="panel-sessions" role="tabpanel" aria-labelledby="tab-sessions" class="tab-panel">
         <div v-if="sessions.length === 0" class="panel-empty">
           {{ t('noActiveSessions') }}
         </div>
@@ -414,15 +513,16 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
             </div>
           </div>
           <div v-if="hasOffline" class="session-footer">
-            <button class="clear-offline-btn" @click="store.clearOfflineSessions()">
+            <Button variant="secondary" size="sm" @click="store.clearOfflineSessions()">
               {{ t('clearOffline') }}
-            </button>
+            </Button>
           </div>
         </template>
+        </div>
       </template>
 
-      <template v-else>
-        <div class="usage-view">
+      <template v-else-if="dashboardTab === 'usage'">
+        <div id="panel-usage" role="tabpanel" aria-labelledby="tab-usage" class="usage-view">
           <div v-if="quotaLoading && !quotaUsage" class="panel-empty usage-loading">
             {{ t('loadingQuota') }}
           </div>
@@ -430,16 +530,15 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
             {{ translateBackendError(quotaError) }}
           </div>
           <template v-else-if="quotaUsage">
-            <div
+            <Card
               v-for="provider in quotaUsage.providers"
               :key="provider.id"
-              class="usage-provider"
-              :class="`provider-${provider.id}`"
+              :tone="provider.id === 'claude' ? 'claude' : 'accent'"
             >
-              <div class="usage-provider-header">
+              <template #heading>
                 <span class="usage-provider-name">{{ provider.name }}</span>
                 <span v-if="provider.plan" class="usage-plan">{{ provider.plan }}</span>
-              </div>
+              </template>
               <div v-if="provider.error" class="usage-provider-error">
                 {{ translateBackendError(provider.error) }}
               </div>
@@ -449,16 +548,12 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
                     <span class="quota-label">{{ formatQuotaLabel(quota.id, quota.label) }}</span>
                     <span class="quota-value">{{ formatRemaining(quota.remainingPercent) }}</span>
                   </div>
-                  <div
-                    class="quota-track"
-                    role="progressbar"
+                  <ProgressTrack
+                    class="quota-progress"
+                    :value="quota.remainingPercent"
+                    :tone="provider.id === 'claude' ? 'claude' : 'accent'"
                     :aria-label="t('quotaRemainingAria', { provider: provider.name, quota: formatQuotaLabel(quota.id, quota.label) })"
-                    aria-valuemin="0"
-                    aria-valuemax="100"
-                    :aria-valuenow="quota.remainingPercent"
-                  >
-                    <div class="quota-fill" :style="{ width: quota.remainingPercent + '%' }" />
-                  </div>
+                  />
                   <div class="quota-reset">
                     <span>{{ formatReset(quota.resetsAt) }}</span>
                     <span v-if="formatResetAt(quota.resetsAt)" class="quota-reset-at">
@@ -467,14 +562,110 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
                   </div>
                 </div>
               </div>
-            </div>
+            </Card>
             <div class="usage-footer">
               <span>{{ t('updated', { time: formatUpdated(quotaUsage.updatedAt) }) }}</span>
-              <button class="usage-refresh" :disabled="quotaLoading" @click="refreshQuota(true)">
+              <Button variant="secondary" size="sm" :disabled="quotaLoading" @click="refreshQuota(true)">
                 {{ quotaLoading ? t('refreshing') : t('refresh') }}
-              </button>
+              </Button>
             </div>
           </template>
+        </div>
+      </template>
+
+      <template v-else>
+        <div id="panel-history" role="tabpanel" aria-labelledby="tab-history" class="history-view">
+          <div class="history-hero">
+            <div>
+              <div class="history-kicker">{{ t('historyTitle') }}</div>
+              <p>{{ t('historyHelp') }}</p>
+            </div>
+            <div class="history-actions">
+              <Button variant="secondary" size="sm" @click="exportHistory">{{ t('historyExport') }}</Button>
+              <Button variant="danger" size="sm" @click="clearHistory">{{ t('historyClear') }}</Button>
+            </div>
+          </div>
+
+          <div v-if="historyLoading && !historySummary" class="panel-empty">{{ t('checking') }}</div>
+          <div v-else-if="historyError && !historySummary" class="panel-empty history-error">{{ historyError }}</div>
+          <template v-else-if="historySummary">
+            <div class="history-grid history-overview-grid">
+              <Card :title="t('historyPetProgression')">
+                <template v-if="progression">
+                  <div class="history-level-row">
+                    <strong>{{ t('historyLevel', { level: progression.level }) }}</strong>
+                    <span>{{ evolutionLabel }}</span>
+                  </div>
+                  <ProgressTrack :value="progressionPercent" :aria-label="t('growth')" />
+                  <div class="history-meta-row">
+                    <span>{{ progression.xpIntoLevel }} / {{ progression.xpToNext }} XP</span>
+                    <span>{{ moodStage }}</span>
+                  </div>
+                </template>
+                <span v-else class="history-muted">{{ t('growthDataUnavailable') }}</span>
+              </Card>
+              <Card :title="t('historyStreakTitle')" tone="success">
+                <strong>{{ t('historyStreak', { days: progression?.currentStreak ?? 0 }) }}</strong>
+                <span class="history-muted">{{ t('historyLongestStreak', { days: progression?.longestStreak ?? 0 }) }}</span>
+                <span class="history-muted">{{ t('historyRetention', { days: historySummary.retentionDays }) }}</span>
+              </Card>
+            </div>
+
+            <Card :title="t('historyTokenTrend')" tone="accent">
+              <template #heading>
+                <span class="history-muted">{{ t('historyUpdated', { time: formatUpdated(new Date(historySummary.generatedAt).toISOString()) }) }}</span>
+              </template>
+              <div class="history-day-list">
+                <div
+                  v-for="day in historySummary.days"
+                  :key="day.localDate"
+                  class="history-day-row"
+                  :title="`${day.sessionsCompleted}${t('historyCompleted')} · ${day.sessionsFailed}${t('historyFailed')}`"
+                >
+                  <span class="history-day-label">{{ historyDayLabel(day) }}</span>
+                  <ProgressTrack
+                    class="history-day-track"
+                    :value="historyDayTokenPercent(day)"
+                    tone="accent"
+                    :aria-label="`${historyDayLabel(day)} ${historyDayTokenTotal(day)} tokens`"
+                  />
+                  <span class="history-day-count">{{ formatCompactNumber(historyDayTokenTotal(day)) }}</span>
+                </div>
+              </div>
+            </Card>
+
+            <div class="history-grid history-detail-grid">
+              <Card :title="t('historySessions')" tone="success">
+                <div class="history-stat-big">{{ historySummary.totals.sessionsCompleted + historySummary.totals.sessionsFailed }}</div>
+                <div class="history-stat-row"><span>{{ t('historyCompleted') }}</span><strong>{{ historySummary.totals.sessionsCompleted }}</strong></div>
+                <div class="history-stat-row"><span>{{ t('historyFailed') }}</span><strong>{{ historySummary.totals.sessionsFailed }}</strong></div>
+                <div class="history-stat-row"><span>{{ t('historyActiveTime') }}</span><strong>{{ historyDuration(historySummary.totals.activeMs) }}</strong></div>
+              </Card>
+              <Card :title="t('historyTokens')" tone="accent">
+                <div class="history-stat-big">{{ (historySummary.totals.tokenInput + historySummary.totals.tokenOutput).toLocaleString(locale) }}</div>
+                <div class="history-token-quality">{{ historyTokenLabel(historySummary.tokenQuality) }}</div>
+                <div class="history-muted">{{ historySummary.totals.tokenInput.toLocaleString(locale) }} in · {{ historySummary.totals.tokenOutput.toLocaleString(locale) }} out</div>
+                <div class="history-tracking-note">
+                  <span>{{ historyTrackingSinceLabel() }}</span>
+                  <span class="history-tracking-explain">{{ t('historyTrackingExplain') }}</span>
+                </div>
+              </Card>
+            </div>
+
+            <Card :title="t('historyAgentDistribution')">
+              <div v-if="historySummary.agents.length === 0" class="history-muted">{{ t('historyNoData') }}</div>
+              <div v-else class="history-agent-list">
+                <div v-for="agent in historySummary.agents" :key="agent.adapterId" class="history-agent-row">
+                  <div class="history-agent-heading"><span>{{ historyAgentLabel(agent.adapterId) }}</span><strong>{{ historyAgentTokenTotal(agent).toLocaleString(locale) }}</strong></div>
+                  <ProgressTrack :value="historyAgentBarPercent(agent)" decorative />
+                  <div class="history-muted">{{ agent.tokenInput.toLocaleString(locale) }} {{ t('historyTokenIn') }} · {{ agent.tokenOutput.toLocaleString(locale) }} {{ t('historyTokenOut') }} · {{ historyTokenLabel(agent.tokenQuality) }}</div>
+                  <div class="history-muted">{{ historyDuration(agent.activeMs) }} · {{ agent.sessionsCompleted }}✓ {{ agent.sessionsFailed }}!</div>
+                </div>
+              </div>
+            </Card>
+
+          </template>
+          <div v-if="historyAction" class="history-action-status" role="status" aria-live="polite">{{ historyAction }}</div>
         </div>
       </template>
     </template>
@@ -492,7 +683,7 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
             :aria-selected="settingsTab === section.id"
             @click="settingsTab = section.id"
           >
-            <span class="settings-nav-icon" aria-hidden="true">{{ section.icon }}</span>
+            <span class="settings-nav-icon" aria-hidden="true"><Icon :name="section.icon" :size="15" /></span>
             <span class="settings-nav-copy">
               <strong>{{ section.label }}</strong>
               <small>{{ section.hint }}</small>
@@ -507,243 +698,159 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
         </div>
 
         <template v-if="settingsTab === 'language'">
-          <div class="settings-section settings-hero-card">
-            <div class="settings-hero-icon" aria-hidden="true">文</div>
-            <div>
-              <div class="section-label">{{ t('languageSection') }}</div>
-              <p>{{ t('languageHelp') }}</p>
-            </div>
-          </div>
-
-          <div class="settings-section settings-card">
-            <label class="language-select-row">
-              <span class="setting-copy">
-                <span class="section-label">{{ t('language') }}</span>
-                <span class="setting-help">{{ t('languageHint') }}</span>
+          <Card :title="t('languageSection')">
+            <p class="section-copy">{{ t('languageHelp') }}</p>
+            <div class="field-row">
+              <span class="field-copy">
+                <span class="field-label">{{ t('language') }}</span>
+                <span class="field-help">{{ t('languageHint') }}</span>
               </span>
-              <select
-                class="language-select"
-                :value="locale"
+              <Select
+                :model-value="locale"
                 :aria-label="t('language')"
-                @change="store.setLocalePreference(($event.target as HTMLSelectElement).value as 'zh-TW' | 'en-US')"
+                class="field-control"
+                @update:model-value="store.setLocalePreference($event as 'zh-TW' | 'en-US')"
               >
                 <option value="zh-TW">{{ t('localeTraditionalChinese') }}</option>
                 <option value="en-US">{{ t('localeEnglish') }}</option>
-              </select>
-            </label>
-          </div>
+              </Select>
+            </div>
+          </Card>
         </template>
 
         <template v-else-if="settingsTab === 'appearance'">
-          <div class="settings-section settings-hero-card">
-            <div class="settings-hero-icon" aria-hidden="true">◈</div>
-            <div>
-              <div class="section-label">{{ t('makePetYours') }}</div>
-              <p>{{ t('makePetYoursHelp') }}</p>
-            </div>
-          </div>
-
-          <div class="settings-section settings-card">
-            <div class="section-label group-label">{{ t('petSize') }}</div>
-            <div class="scale-options">
-              <button
+          <Card :title="t('petSize')">
+            <div class="scale-options" role="group" :aria-label="t('petSize')">
+              <Button
                 v-for="opt in scaleOptions"
                 :key="opt.value"
-                type="button"
-                class="scale-option"
-                :class="{ active: store.petScale === opt.value }"
-                :aria-pressed="store.petScale === opt.value"
+                size="sm"
+                variant="secondary"
+                :active="store.petScale === opt.value"
                 @click="store.setScale(opt.value)"
               >
                 {{ opt.label }}
-              </button>
+              </Button>
             </div>
-          </div>
+          </Card>
 
-          <div class="settings-section settings-card toggle-group">
-            <div class="section-label group-label">{{ t('petReactions') }}</div>
-            <label class="toggle-row">
-              <span class="setting-copy">
-                <span class="section-label">{{ t('bounceShake') }}</span>
-                <span class="setting-help">{{ t('animateStatus') }}</span>
-              </span>
-              <span class="switch">
-                <input type="checkbox" :checked="store.reactionsEnabled" @change="store.setReactionsEnabled(($event.target as HTMLInputElement).checked)" />
-                <span class="switch-track"><span class="switch-thumb" /></span>
-              </span>
-            </label>
-            <label class="toggle-row">
-              <span class="setting-copy">
-                <span class="section-label">{{ t('statusBubble') }}</span>
-                <span class="setting-help">{{ t('showCompletionError') }}</span>
-              </span>
-              <span class="switch">
-                <input type="checkbox" :checked="store.bubbleEnabled" @change="store.setBubbleEnabled(($event.target as HTMLInputElement).checked)" />
-                <span class="switch-track"><span class="switch-thumb" /></span>
-              </span>
-            </label>
-          </div>
+          <Card :title="t('petReactions')">
+            <ToggleRow
+              :model-value="store.reactionsEnabled"
+              :label="t('bounceShake')"
+              :help="t('animateStatus')"
+              @update:model-value="store.setReactionsEnabled($event)"
+            />
+            <ToggleRow
+              :model-value="store.bubbleEnabled"
+              :label="t('statusBubble')"
+              :help="t('showCompletionError')"
+              @update:model-value="store.setBubbleEnabled($event)"
+            />
+          </Card>
         </template>
 
         <template v-else-if="settingsTab === 'desktop'">
-          <div class="settings-section settings-hero-card">
-            <div class="settings-hero-icon" aria-hidden="true">⌘</div>
-            <div>
-              <div class="section-label">{{ t('desktopBehavior') }}</div>
-              <p>{{ t('desktopBehaviorHelp') }}</p>
-            </div>
-          </div>
+          <Card :title="t('windowModes')">
+            <ToggleRow
+              :model-value="store.petWindowMode.mode === 'mini'"
+              :label="t('miniMode')"
+              :help="t('miniModeHelp')"
+              @update:model-value="store.setPetMode($event ? 'mini' : 'normal')"
+            />
+            <ToggleRow
+              :model-value="store.edgeModeEnabled"
+              :label="t('edgePeek')"
+              :help="t('edgePeekHelp')"
+              @update:model-value="store.setEdgeModeEnabled($event)"
+            />
+          </Card>
 
-          <div class="settings-section toggle-group settings-card">
-            <div class="section-label group-label">{{ t('windowModes') }}</div>
-            <label class="toggle-row">
-              <span class="setting-copy">
-                <span class="section-label">{{ t('miniMode') }}</span>
-                <span class="setting-help">{{ t('miniModeHelp') }}</span>
-              </span>
-              <span class="switch">
-                <input type="checkbox" :checked="store.petWindowMode.mode === 'mini'" @change="store.setPetMode(($event.target as HTMLInputElement).checked ? 'mini' : 'normal')" />
-                <span class="switch-track"><span class="switch-thumb" /></span>
-              </span>
-            </label>
-            <label class="toggle-row">
-              <span class="setting-copy">
-                <span class="section-label">{{ t('edgePeek') }}</span>
-                <span class="setting-help">{{ t('edgePeekHelp') }}</span>
-              </span>
-              <span class="switch">
-                <input type="checkbox" :checked="store.edgeModeEnabled" @change="store.setEdgeModeEnabled(($event.target as HTMLInputElement).checked)" />
-                <span class="switch-track"><span class="switch-thumb" /></span>
-              </span>
-            </label>
-          </div>
+          <!-- Attention used to also carry Sound and Presentation MCP, which
+               are not attention controls — they now sit in their own groups. -->
+          <Card :title="t('attention')">
+            <ToggleRow
+              :model-value="store.dndEnabled"
+              :label="t('dnd')"
+              :help="t('dndHelp')"
+              @update:model-value="store.setDndEnabled($event)"
+            />
+            <ToggleRow
+              :model-value="store.notificationsEnabled"
+              :label="t('notifications')"
+              :help="t('notificationsHelp')"
+              @update:model-value="store.setNotificationsEnabled($event)"
+            />
+            <ToggleRow
+              :model-value="store.permissionBubbleEnabled"
+              :label="t('permissionBubble')"
+              :help="t('permissionBubbleHelp')"
+              @update:model-value="store.setPermissionBubbleEnabled($event)"
+            />
+          </Card>
 
-          <div class="settings-section toggle-group settings-card">
-            <div class="section-label group-label">{{ t('attention') }}</div>
-            <label class="toggle-row">
-              <span class="setting-copy">
-                <span class="section-label">{{ t('dnd') }}</span>
-                <span class="setting-help">{{ t('dndHelp') }}</span>
-              </span>
-              <span class="switch">
-                <input type="checkbox" :checked="store.dndEnabled" @change="store.setDndEnabled(($event.target as HTMLInputElement).checked)" />
-                <span class="switch-track"><span class="switch-thumb" /></span>
-              </span>
-            </label>
-            <label class="toggle-row">
-              <span class="setting-copy">
-                <span class="section-label">{{ t('notifications') }}</span>
-                <span class="setting-help">{{ t('notificationsHelp') }}</span>
-              </span>
-              <span class="switch">
-                <input type="checkbox" :checked="store.notificationsEnabled" @change="store.setNotificationsEnabled(($event.target as HTMLInputElement).checked)" />
-                <span class="switch-track"><span class="switch-thumb" /></span>
-              </span>
-            </label>
-            <label class="toggle-row">
-              <span class="setting-copy">
-                <span class="section-label">{{ t('permissionBubble') }}</span>
-                <span class="setting-help">{{ t('permissionBubbleHelp') }}</span>
-              </span>
-              <span class="switch">
-                <input type="checkbox" :checked="store.permissionBubbleEnabled" @change="store.setPermissionBubbleEnabled(($event.target as HTMLInputElement).checked)" />
-                <span class="switch-track"><span class="switch-thumb" /></span>
-              </span>
-            </label>
-            <label class="toggle-row">
-              <span class="setting-copy">
-                <span class="section-label">{{ t('presentationMcp') }}</span>
-                <span class="setting-help">{{ t('presentationMcpHelp') }}</span>
-              </span>
-              <span class="switch">
-                <input type="checkbox" :checked="store.presentationMcpEnabled" @change="store.setPresentationMcpEnabled(($event.target as HTMLInputElement).checked)" />
-                <span class="switch-track"><span class="switch-thumb" /></span>
-              </span>
-            </label>
-            <label class="toggle-row">
-              <span class="setting-copy">
-                <span class="section-label">{{ t('sound') }}</span>
-                <span class="setting-help">{{ t('soundHelp') }}</span>
-              </span>
-              <span class="switch">
-                <input type="checkbox" :checked="store.soundEnabled" @change="store.setSoundEnabled(($event.target as HTMLInputElement).checked)" />
-                <span class="switch-track"><span class="switch-thumb" /></span>
-              </span>
-            </label>
-          </div>
+          <Card :title="t('sound')">
+            <ToggleRow
+              :model-value="store.soundEnabled"
+              :label="t('sound')"
+              :help="t('soundHelp')"
+              @update:model-value="store.setSoundEnabled($event)"
+            />
+          </Card>
 
-          <div class="settings-section settings-card">
-            <label class="toggle-row" :class="{ 'is-disabled': !store.launchAtStartupSupported }" :title="store.launchAtStartupSupported ? t('launchAtStartup') : t('availablePackaged')">
-              <span class="setting-copy">
-                <span class="section-label">{{ t('launchAtStartup') }}</span>
-                <span class="setting-help">{{ store.launchAtStartupSupported ? t('launchAtStartupHelp') : t('availablePackaged') }}</span>
-              </span>
-              <span class="switch">
-                <input type="checkbox" :checked="store.launchAtStartup" :disabled="!store.launchAtStartupSupported" @change="store.setLaunchAtStartup(($event.target as HTMLInputElement).checked)" />
-                <span class="switch-track"><span class="switch-thumb" /></span>
-              </span>
-            </label>
-          </div>
+          <Card :title="t('system')">
+            <ToggleRow
+              :model-value="store.presentationMcpEnabled"
+              :label="t('presentationMcp')"
+              :help="t('presentationMcpHelp')"
+              @update:model-value="store.setPresentationMcpEnabled($event)"
+            />
+            <ToggleRow
+              :model-value="store.launchAtStartup"
+              :label="t('launchAtStartup')"
+              :help="store.launchAtStartupSupported ? t('launchAtStartupHelp') : t('availablePackaged')"
+              :disabled="!store.launchAtStartupSupported"
+              @update:model-value="store.setLaunchAtStartup($event)"
+            />
+          </Card>
         </template>
 
         <template v-else-if="settingsTab === 'growth'">
-          <div class="settings-section">
-            <div class="mood-header">
-              <div class="mood-title">
-                <div class="section-label">{{ t('petMood') }}</div>
-                <span class="mood-readout">{{ store.mood }} · {{ moodStage }}</span>
-              </div>
-              <button class="mood-reset-btn" :title="t('resetBaseline')" @click="store.resetMood()">{{ t('reset') }}</button>
+          <Card :title="t('petMood')">
+            <template #heading>
+              <Button size="sm" variant="secondary" :title="t('resetBaseline')" @click="store.resetMood()">
+                {{ t('reset') }}
+              </Button>
+            </template>
+            <div class="stat-row">
+              <span class="stat-readout">{{ store.mood }} · {{ moodStage }}</span>
             </div>
-            <div
-              class="mood-bar"
-              role="progressbar"
-              :aria-label="t('petMood')"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              :aria-valuenow="store.mood"
-            >
-              <div class="mood-fill" :style="{ width: store.mood + '%' }" />
-            </div>
-          </div>
+            <ProgressTrack :value="store.mood" tone="success" :aria-label="t('petMood')" />
+          </Card>
 
           <template v-if="progression">
-          <div class="settings-section progression-card">
-            <div class="mood-header">
-              <div class="mood-title">
-                <div class="section-label">{{ t('growth') }}</div>
-                <span class="mood-readout">Lv {{ progression.level }} · {{ evolutionLabel }}</span>
+            <Card :title="t('growth')" tone="accent">
+              <template #heading>
+                <span class="stat-readout">{{ progression.totalXp }} XP</span>
+              </template>
+              <div class="stat-row">
+                <span class="stat-readout">Lv {{ progression.level }} · {{ evolutionLabel }}</span>
               </div>
-              <span class="progression-xp-total">{{ progression.totalXp }} XP</span>
-            </div>
-            <div
-              class="progression-bar"
-              role="progressbar"
-              :aria-label="t('growth')"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              :aria-valuenow="progressionPercent"
-            >
-              <div class="progression-fill" :style="{ width: progressionPercent + '%' }" />
-            </div>
-            <div class="progression-meta">
-              <span>{{ t('toNextLevel', { value: `${progression.xpIntoLevel} / ${progression.xpToNext}` }) }}</span>
-              <span v-if="progression.currentStreak > 0">{{ t('dayStreak', { days: progression.currentStreak }) }}</span>
-              <span v-else>{{ t('startStreak') }}</span>
-            </div>
-          </div>
-          <div class="settings-section settings-card toggle-group">
-            <label class="toggle-row">
-              <span class="setting-copy">
-                <span class="section-label">{{ t('moodVisuals') }}</span>
-                <span class="setting-help">{{ t('moodVisualsHelp') }}</span>
-              </span>
-              <span class="switch">
-                <input type="checkbox" :checked="store.moodVisualsEnabled" @change="store.setMoodVisualsEnabled(($event.target as HTMLInputElement).checked)" />
-                <span class="switch-track"><span class="switch-thumb" /></span>
-              </span>
-            </label>
-          </div>
+              <ProgressTrack :value="progressionPercent" :aria-label="t('growth')" />
+              <div class="stat-row muted">
+                <span>{{ t('toNextLevel', { value: `${progression.xpIntoLevel} / ${progression.xpToNext}` }) }}</span>
+                <span v-if="progression.currentStreak > 0">{{ t('dayStreak', { days: progression.currentStreak }) }}</span>
+                <span v-else>{{ t('startStreak') }}</span>
+              </div>
+            </Card>
+            <Card :title="t('moodVisuals')">
+              <ToggleRow
+                :model-value="store.moodVisualsEnabled"
+                :label="t('moodVisuals')"
+                :help="t('moodVisualsHelp')"
+                @update:model-value="store.setMoodVisualsEnabled($event)"
+              />
+            </Card>
           </template>
           <div v-else class="growth-unavailable" role="status">
             {{ t('growthDataUnavailable') }}
@@ -751,199 +858,141 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
         </template>
 
         <template v-else-if="settingsTab === 'pets'">
-          <div class="settings-section">
-            <div class="section-label">{{ t('pets') }}</div>
+          <Card :title="t('pets')">
             <div class="pet-list">
-              <div
-                v-for="pet in store.visiblePets"
-                :key="pet.id"
-                class="pet-option"
-                :class="{ active: store.selectedPet === pet.id }"
-                @click="store.setPet(pet.id)"
-              >
-                <template v-if="editingPetId === pet.id">
-                  <input
-                    v-model="editName"
-                    class="pet-rename-input"
-                    maxlength="64"
-                    @keyup.enter="confirmRename"
-                    @keyup.escape="cancelRename"
-                    @blur="confirmRename"
-                    @click.stop
-                  />
-                </template>
-                <template v-else>
+              <template v-for="pet in store.visiblePets" :key="pet.id">
+                <input
+                  v-if="editingPetId === pet.id"
+                  v-model="editName"
+                  class="pet-rename-input"
+                  maxlength="64"
+                  @keyup.enter="confirmRename"
+                  @keyup.escape="cancelRename"
+                  @blur="confirmRename"
+                />
+                <!-- Was a <div> with @click, unreachable by keyboard even
+                     though picking a pet is the main action here. It can't
+                     be a <button> either — the rename/remove actions inside
+                     it are themselves buttons, and a button can't nest
+                     inside a button (the browser would silently close the
+                     outer tag early and break both the click target and the
+                     nested actions). role="button" + explicit key handling
+                     gets the same keyboard reachability without that trap. -->
+                <div
+                  v-else
+                  class="pet-option"
+                  :class="{ active: store.selectedPet === pet.id }"
+                  role="button"
+                  tabindex="0"
+                  :aria-pressed="store.selectedPet === pet.id"
+                  @click="store.setPet(pet.id)"
+                  @keydown.enter="store.setPet(pet.id)"
+                  @keydown.space.prevent="store.setPet(pet.id)"
+                >
                   <span class="pet-name">{{ pet.displayName }}</span>
-                  <button
-                    v-if="!pet.builtIn"
-                    class="pet-edit"
-                    :title="t('rename')"
-                    @click.stop="startRename(pet)"
-                  >
-                    &#9998;
-                  </button>
-                  <button
-                    v-if="pet.id !== store.defaultPetId"
-                    class="pet-remove"
-                    :title="pet.builtIn ? t('hide') : t('remove')"
-                    @click.stop="confirmRemovePet(pet)"
-                  >
-                    &times;
-                  </button>
-                </template>
-              </div>
+                  <span class="pet-actions">
+                    <Button
+                      v-if="!pet.builtIn"
+                      variant="ghost"
+                      size="sm"
+                      :title="t('rename')"
+                      :aria-label="t('rename')"
+                      @click.stop="startRename(pet)"
+                    >
+                      <Icon name="edit" :size="13" />
+                    </Button>
+                    <Button
+                      v-if="pet.id !== store.defaultPetId"
+                      variant="ghost"
+                      size="sm"
+                      :title="pet.builtIn ? t('hide') : t('remove')"
+                      :aria-label="pet.builtIn ? t('hide') : t('remove')"
+                      @click.stop="confirmRemovePet(pet)"
+                    >
+                      <Icon name="close" :size="13" />
+                    </Button>
+                  </span>
+                </div>
+              </template>
             </div>
             <div class="import-row">
-              <button class="import-btn" @click="importPet" :disabled="importing">
+              <Button variant="primary" size="sm" :disabled="importing" @click="importPet">
                 {{ importing ? t('importing') : t('importSprite') }}
-              </button>
-              <button class="import-btn" @click="importPetZip" :disabled="importingZip">
+              </Button>
+              <Button variant="primary" size="sm" :disabled="importingZip" @click="importPetZip">
                 {{ importingZip ? t('importing') : t('importZip') }}
-              </button>
+              </Button>
             </div>
             <div v-if="importZipError" class="import-error">{{ importZipError }}</div>
-          </div>
+          </Card>
 
-          <div class="settings-section toggle-group">
-            <label class="toggle-row">
-              <span class="section-label">{{ t('multiPet') }}</span>
-              <span class="switch">
-                <input
-                  type="checkbox"
-                  :checked="store.multiPetEnabled"
-                  @change="store.setMultiPetEnabled(($event.target as HTMLInputElement).checked)"
-                />
-                <span class="switch-track"><span class="switch-thumb" /></span>
+          <Card :title="t('multiPet')">
+            <ToggleRow
+              :model-value="store.multiPetEnabled"
+              :label="t('multiPet')"
+              @update:model-value="store.setMultiPetEnabled($event)"
+            />
+          </Card>
+
+          <Card v-if="store.multiPetEnabled" :title="t('perAgentPet')">
+            <div class="field-row" v-for="family in SOURCE_FAMILIES" :key="family.key">
+              <span class="family-pet-name">
+                <span class="family-pet-dot" :class="`family-${family.key}`" />
+                {{ family.label }}
               </span>
-            </label>
-          </div>
-
-          <div v-if="store.multiPetEnabled" class="settings-section">
-            <div class="section-label">{{ t('perAgentPet') }}</div>
-            <div class="family-pet-list">
-              <label v-for="family in SOURCE_FAMILIES" :key="family.key" class="family-pet-row">
-                <span class="family-pet-name">
-                  <span class="family-pet-dot" :class="`family-${family.key}`" />
-                  {{ family.label }}
-                </span>
-                <select
-                  class="family-pet-select"
-                  :value="store.familyPetIds[family.key] || ''"
-                  @change="store.setFamilyPet(family.key, ($event.target as HTMLSelectElement).value || null)"
-                >
-                  <option value="">{{ t('defaultPet') }}</option>
-                  <option v-for="pet in store.visiblePets" :key="pet.id" :value="pet.id">
-                    {{ pet.displayName }}
-                  </option>
-                </select>
-              </label>
+              <Select
+                size="sm"
+                class="field-control"
+                :aria-label="family.label"
+                :model-value="store.familyPetIds[family.key] || ''"
+                @update:model-value="store.setFamilyPet(family.key, $event || null)"
+              >
+                <option value="">{{ t('defaultPet') }}</option>
+                <option v-for="pet in store.visiblePets" :key="pet.id" :value="pet.id">
+                  {{ pet.displayName }}
+                </option>
+              </Select>
             </div>
-          </div>
+          </Card>
         </template>
 
         <template v-else>
-          <div class="settings-section settings-hero-card">
-            <div class="settings-hero-icon" aria-hidden="true">⋯</div>
-            <div>
-              <div class="section-label">{{ t('keepControl') }}</div>
-              <p>{{ t('keepControlHelp') }}</p>
+          <Card :title="t('presentationMcpSection')">
+            <p class="section-copy">{{ t('presentationMcpSetupHelp') }}</p>
+            <Button variant="primary" size="sm" block @click="store.openProjectMcpPanel">
+              {{ t('projectMcpPanelTitle') }}
+            </Button>
+          </Card>
+          <Card :title="t('keepControl')">
+            <p class="section-copy">{{ t('keepControlHelp') }}</p>
+            <div class="advanced-actions">
+              <Button variant="primary" size="sm" block @click="store.showWizard = true">{{ t('setupWizard') }}</Button>
+              <Button variant="secondary" size="sm" block @click="restartApp">{{ t('restartPet') }}</Button>
+              <Button variant="danger" size="sm" block @click="quitApp">{{ t('quit') }}</Button>
             </div>
-          </div>
-          <div class="settings-section settings-card project-mcp-card">
-            <div class="section-label group-label">{{ t('presentationMcpSection') }}</div>
-            <p class="project-mcp-copy">
-              {{ t('presentationMcpSetupHelp') }}
-            </p>
-            <button class="setup-btn" :disabled="settingUpMcp" @click="setupProjectMcp">
-              {{ settingUpMcp ? t('installing') : t('setupMcpForProject') }}
-            </button>
-            <div class="project-mcp-list-header">
-              <div>
-                <div class="section-label">{{ t('connectedProjects') }}</div>
-                <p class="project-mcp-copy">
-                  {{ t('connectedProjectsHelp') }}
-                </p>
-              </div>
-              <button
-                class="project-mcp-refresh"
-                type="button"
-                :disabled="projectMcpListLoading"
-                @click="refreshProjectMcpProjects"
-              >
-                {{ projectMcpListLoading ? t('checking') : t('refresh') }}
-              </button>
-            </div>
-            <div v-if="projectMcpListError" class="project-mcp-error" role="alert">{{ projectMcpListError }}</div>
-            <div v-if="!projectMcpListLoading && projectMcpProjects.length === 0" class="project-mcp-empty">
-              {{ t('noProjectsConnected') }}
-            </div>
-            <div v-else class="project-mcp-project-list" role="list" :aria-label="t('connectedMcpProjects')">
-              <div v-for="project in projectMcpProjects" :key="project.projectPath" class="project-mcp-project-item" role="listitem">
-                <div class="project-mcp-project-heading">
-                  <div class="project-mcp-project-name">{{ project.projectName }}</div>
-                  <span class="project-mcp-project-status" :class="`project-mcp-project-${project.status}`">
-                    {{ projectMcpProjectStatusLabel(project.status) }}
-                  </span>
-                </div>
-                <div class="project-mcp-project-path" :title="project.projectPath">{{ project.projectPath }}</div>
-                <div v-if="project.results.length" class="project-mcp-project-clients">
-                  <span v-for="item in project.results" :key="item.client" :class="`project-mcp-${item.status}`">
-                    {{ projectMcpClientLabel(item.client) }}: {{ projectMcpStatusLabel(item.status) }}
-                  </span>
-                </div>
-                <div class="project-mcp-project-actions">
-                  <button
-                    v-if="project.status === 'missing'"
-                    class="project-mcp-refresh"
-                    type="button"
-                    :disabled="removingProjectMcp === project.projectPath"
-                    @click="forgetMissingProject(project)"
-                  >
-                    {{ t('forgetRecord') }}
-                  </button>
-                  <button
-                    v-else
-                    class="project-mcp-remove"
-                    type="button"
-                    :disabled="removingProjectMcp === project.projectPath"
-                    @click="removeConnectedProject(project)"
-                  >
-                    {{ removingProjectMcp === project.projectPath ? t('removing') : t('removeMcp') }}
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div v-if="projectMcpError" class="project-mcp-error" role="alert">{{ projectMcpError }}</div>
-            <div v-if="projectMcpResult" class="project-mcp-result" role="status" aria-live="polite">
-              <div class="project-mcp-project">{{ projectMcpResult.projectPath }}</div>
-              <div
-                v-for="item in projectMcpResult.results"
-                :key="item.client"
-                class="project-mcp-result-row"
-                :class="`project-mcp-${item.status}`"
-              >
-                <span class="project-mcp-client">{{ projectMcpClientLabel(item.client) }}</span>
-                <span>{{ projectMcpStatusLabel(item.status) }}</span>
-                <span v-if="item.message" class="project-mcp-message">{{ translateBackendError(item.message) }}</span>
-              </div>
-              <div v-if="!projectMcpResult.ok" class="project-mcp-error">
-                {{ t('resultNeedsAttention') }}
-              </div>
-            </div>
-          </div>
-          <div class="settings-section settings-card advanced-actions">
-            <button class="setup-btn" @click="store.showWizard = true">{{ t('setupWizard') }}</button>
-            <button class="restart-btn" @click="restartApp">{{ t('restartPet') }}</button>
-            <button class="quit-btn" @click="quitApp">{{ t('quit') }}</button>
-          </div>
+          </Card>
         </template>
       </div>
       </div>
     </template>
+
+    <ConfirmDialog
+      :open="confirmDialog !== null"
+      :title="confirmDialog?.title ?? ''"
+      :message="confirmDialog?.message"
+      :tone="confirmDialog?.tone"
+      @confirm="acceptConfirm"
+      @cancel="confirmDialog = null"
+    />
   </div>
 </template>
 
 <style scoped>
+/* Everything here reads from src/styles/tokens.css. No bare hex or rgba():
+   a literal colour in this file is a bug, because it cannot be themed or
+   audited. Buttons, cards, toggles, progress bars, selects and icons all
+   come from components/ui/ — do not re-style them locally. */
+
 .status-panel {
   position: relative;
   width: 100%;
@@ -952,127 +1001,202 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
      no matter what's behind the window (bright desktop wallpaper, video,
      etc.) — the glass look comes from the blur + highlight, not from
      letting the backdrop show through at full strength. */
-  background:
-    linear-gradient(160deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.015) 22%, rgba(255, 255, 255, 0) 45%),
-    rgba(18, 18, 26, 0.86);
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: #e0e0e0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: 13px;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  background: var(--surface-panel);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-md);
+  text-shadow: var(--text-shadow-panel);
   overflow: hidden;
-  backdrop-filter: blur(24px) saturate(165%);
-  -webkit-backdrop-filter: blur(24px) saturate(165%);
-  box-shadow:
-    0 18px 40px rgba(0, 0, 0, 0.4),
-    0 2px 6px rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
-    inset 0 -18px 30px -20px rgba(0, 0, 0, 0.35);
+  backdrop-filter: var(--surface-blur);
+  -webkit-backdrop-filter: var(--surface-blur);
+  box-shadow: var(--shadow-panel);
   z-index: 9999;
   display: flex;
   flex-direction: column;
 }
 
-.status-panel::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 8%;
-  right: 8%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
-  pointer-events: none;
-}
+/* ── Header ──────────────────────────────────────────────────────────── */
 
 .panel-header {
   position: relative;
   display: flex;
+  flex-shrink: 0;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 14px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0));
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .panel-title {
-  font-weight: 600;
-  font-size: 13px;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+  flex: 1;
+  font-size: var(--font-md);
+  font-weight: var(--weight-medium);
 }
 
 .header-right {
   display: flex;
-  gap: 4px;
-}
-
-.header-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  color: #a8adbd;
-  font-size: 16px;
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-  transition: color 0.15s, background 0.15s, border-color 0.15s;
-}
-
-.header-btn:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.14);
+  gap: var(--space-1);
 }
 
 .panel-empty {
-  padding: 20px 14px;
+  padding: var(--space-5) var(--space-3);
   text-align: center;
-  color: #a3a7b4;
-  font-size: 12px;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
 }
+
+/* ── Dashboard tabs ──────────────────────────────────────────────────── */
 
 .dashboard-tabs {
   display: flex;
   flex-shrink: 0;
-  gap: 4px;
-  padding: 8px 12px 4px;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3) var(--space-1);
 }
 
 .dashboard-tab {
-  padding: 5px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.03);
-  color: #9298aa;
+  padding: 5px var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
   font: inherit;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--font-xs);
+  font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .dashboard-tab:hover {
-  color: #d0d3df;
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--text-primary);
+  background: var(--surface-raised-hover);
+  border-color: var(--border-strong);
 }
 
 .dashboard-tab.active {
-  color: #e5e7ff;
-  background: rgba(139, 156, 247, 0.22);
-  border-color: rgba(139, 156, 247, 0.4);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 10px rgba(139, 156, 247, 0.18);
+  color: var(--accent-bright);
+  background: var(--accent-soft);
+  border-color: var(--border-accent-strong);
 }
 
-.usage-view {
+.dashboard-tab:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.tab-panel {
+  display: flex;
   min-height: 0;
-  padding: 4px 10px 10px;
+  flex: 1;
+  flex-direction: column;
+}
+
+/* ── Sessions ────────────────────────────────────────────────────────── */
+
+.session-list {
+  min-height: 0;
+  flex: 1;
+  padding: var(--space-2);
+  overflow-y: auto;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 7px var(--space-2);
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.session-item:hover {
+  background: var(--surface-raised);
+}
+
+.session-source {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+}
+
+.session-info {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.state-chip {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 5px;
+  padding: 2px var(--space-2);
+  border: 1px solid;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-medium);
+}
+
+.state-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+}
+
+.state-chip.live .state-dot {
+  animation: state-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes state-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+.state-elapsed {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.session-project {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-time {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.session-footer {
+  display: flex;
+  flex-shrink: 0;
+  justify-content: center;
+  padding: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* ── Usage ───────────────────────────────────────────────────────────── */
+
+.usage-view {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) var(--space-3);
   overflow-y: auto;
 }
 
@@ -1087,238 +1211,233 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 
 .usage-error,
 .usage-provider-error {
-  color: #ff9a9a;
+  color: var(--state-error-soft);
 }
 
-.usage-provider {
-  margin-top: 6px;
-  padding: 10px;
-  border: 1px solid rgba(139, 156, 247, 0.13);
-  border-radius: 10px;
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.05), rgba(139, 156, 247, 0.045));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.usage-provider.provider-claude {
-  border-color: rgba(213, 155, 255, 0.13);
-  background: rgba(213, 155, 255, 0.04);
-}
-
-.usage-provider-header,
 .quota-copy,
 .usage-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .usage-provider-name {
-  color: #e0e3ef;
-  font-size: 12px;
-  font-weight: 650;
+  color: var(--text-primary);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
 }
 
 .usage-plan {
   padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
-  color: #aeb4c5;
-  font-size: 9px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised-hover);
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
 }
 
 .usage-provider-error {
-  padding-top: 8px;
-  font-size: 10px;
+  padding-top: var(--space-2);
+  font-size: var(--font-xs);
   line-height: 1.45;
 }
 
 .quota-window-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 10px;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 
 .quota-label {
-  color: #b7bccb;
-  font-size: 10px;
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
 }
 
 .quota-value {
-  color: #f1f3ff;
-  font-size: 10px;
-  font-weight: 650;
+  color: var(--text-bright);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
 }
 
-.quota-track {
-  height: 6px;
-  margin-top: 4px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.09);
-}
-
-.quota-fill {
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #667eea, #8b9cf7);
-  transition: width 0.35s ease;
-}
-
-.provider-claude .quota-fill {
-  background: linear-gradient(90deg, #b56ee2, #d59bff);
+.quota-progress {
+  margin-top: var(--space-1);
 }
 
 .quota-reset {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
   margin-top: 3px;
-  color: #858b9b;
-  font-size: 9px;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
 }
 
 .quota-reset-at {
-  color: #a3a8b7;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
 .usage-footer {
-  padding: 9px 2px 0;
-  color: #858b9b;
-  font-size: 9px;
+  padding: var(--space-2) 2px 0;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
 }
 
-.usage-refresh {
-  padding: 4px 9px;
-  border: 1px solid rgba(139, 156, 247, 0.23);
-  border-radius: 6px;
-  background: rgba(139, 156, 247, 0.08);
-  color: #adb8ff;
-  font: inherit;
-  font-size: 9px;
-  cursor: pointer;
-}
+/* ── History ─────────────────────────────────────────────────────────── */
 
-.usage-refresh:hover:not(:disabled) {
-  background: rgba(139, 156, 247, 0.15);
-}
-
-.usage-refresh:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.session-list {
-  padding: 6px;
+.history-view {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-3);
   overflow-y: auto;
-  max-height: 320px;
 }
 
-.session-item {
+.history-hero,
+.history-level-row,
+.history-meta-row,
+.history-agent-heading,
+.history-stat-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 8px;
-  transition: background 0.15s;
+  justify-content: space-between;
+  gap: var(--space-2);
 }
 
-.session-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+.history-hero {
+  padding: var(--space-1) 2px;
 }
 
-.session-source {
-  font-weight: 600;
-  font-size: 11px;
-  min-width: 50px;
-  color: #8b9cf7;
+.history-kicker {
+  color: var(--text-primary);
+  font-size: var(--font-md);
+  font-weight: var(--weight-bold);
 }
 
-.session-info {
-  flex: 1;
+.history-hero p {
+  max-width: 230px;
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  line-height: 1.4;
+}
+
+.history-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-1);
+}
+
+.history-grid {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: 1fr 1fr;
+}
+
+.history-muted {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  line-height: 1.4;
+}
+
+.history-error {
+  color: var(--state-error-soft);
+}
+
+.history-level-row,
+.history-meta-row,
+.history-stat-row,
+.history-agent-heading {
+  font-size: var(--font-xs);
+}
+
+.history-stat-big {
+  color: var(--text-bright);
+  font-size: var(--font-xl);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-token-quality {
+  color: var(--state-info);
+  font-size: var(--font-xs);
+}
+
+.history-tracking-note {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--font-xs);
 }
 
-.state-chip {
-  font-size: 11px;
-  display: inline-flex;
+.history-tracking-note > :first-child {
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
+}
+
+.history-tracking-explain {
+  line-height: 1.5;
+}
+
+.history-day-list,
+.history-agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.history-day-row {
+  display: grid;
   align-items: center;
-  gap: 5px;
-  width: fit-content;
-  padding: 2px 8px 2px 6px;
-  border-radius: 999px;
-  border: 1px solid transparent;
+  gap: var(--space-2);
+  /* Was 52px for the date label, which "Wed 8/13"-style formatting (weekday
+     + numeric date) overflows in both locales — it wrapped to two lines and
+     staggered every row under it. The label is now numeric-only ("8/13")
+     and both text columns are nowrap + a fixed min width so the row can
+     never wrap regardless of locale or content length. */
+  grid-template-columns: minmax(34px, auto) 1fr minmax(48px, auto);
+  font-size: var(--font-xs);
 }
 
-.state-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
+.history-day-label,
+.history-day-count {
+  white-space: nowrap;
 }
 
-.state-chip.live .state-dot {
-  animation: pulse-dot 1.2s ease-in-out infinite;
+.history-day-label {
+  color: var(--text-secondary);
 }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(0.75); }
-}
-
-.state-elapsed {
+.history-day-count {
+  color: var(--text-primary);
   font-variant-numeric: tabular-nums;
-  opacity: 0.7;
-  font-size: 10px;
+  text-align: right;
 }
 
-.session-project {
-  font-size: 10px;
-  color: #a4a8b4;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
-}
-
-.session-time {
-  font-size: 10px;
-  color: #8f94a3;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
-}
-
-.session-footer {
-  padding: 4px 10px 8px;
+.history-agent-row {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
-.clear-offline-btn {
-  padding: 4px 10px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.03);
-  color: #a4a8b4;
-  font-size: 10px;
-  cursor: pointer;
-  transition: all 0.15s;
+.history-action-status {
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  text-align: center;
 }
 
-.clear-offline-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #ccc;
-}
-
-.settings-tabs {
-  display: flex;
-  flex-shrink: 0;
-  gap: 4px;
-  padding: 8px 12px 4px;
-}
+/* ── Settings ────────────────────────────────────────────────────────── */
 
 .settings-layout {
   display: flex;
@@ -1327,18 +1446,22 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
 }
 
 .settings-nav {
-  width: 116px;
-  flex: 0 0 116px;
-  padding: 12px 8px;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(8, 10, 18, 0.18);
+  display: flex;
+  width: 132px;
+  flex: 0 0 132px;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-2);
+  border-right: 1px solid var(--border-subtle);
+  background: var(--surface-sunken);
+  overflow-y: auto;
 }
 
 .settings-nav-heading {
-  padding: 0 7px 8px;
-  color: #7f879b;
-  font-size: 9px;
-  font-weight: 700;
+  padding: 0 7px var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -1347,476 +1470,174 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 44px;
-  gap: 7px;
-  padding: 6px 7px;
+  min-height: 40px;
+  gap: var(--space-2);
+  padding: var(--space-1) 7px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: transparent;
-  color: #9da3b5;
+  color: var(--text-secondary);
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .settings-nav-item:hover {
-  color: #e0e5f7;
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+  background: var(--surface-raised);
 }
 
 .settings-nav-item.active {
-  color: #e9f2ff;
-  border-color: rgba(157, 216, 255, 0.25);
-  background: linear-gradient(145deg, rgba(157, 216, 255, 0.2), rgba(139, 156, 247, 0.08));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 4px 12px rgba(0, 0, 0, 0.16);
+  color: var(--accent-bright);
+  border-color: var(--border-accent-strong);
+  background: var(--accent-soft);
 }
 
 .settings-nav-item:focus-visible {
-  outline: 2px solid #9dd8ff;
-  outline-offset: 1px;
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .settings-nav-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 23px;
-  height: 23px;
-  flex: 0 0 23px;
-  border: 1px solid rgba(157, 216, 255, 0.22);
-  border-radius: 7px;
-  color: #9dd8ff;
-  font-size: 13px;
-  line-height: 1;
+  flex: 0 0 auto;
+  color: inherit;
 }
 
 .settings-nav-copy {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 2px;
 }
 
 .settings-nav-copy strong {
-  overflow: hidden;
-  color: inherit;
-  font-size: 10px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
 }
 
 .settings-nav-copy small {
-  overflow: hidden;
-  color: #737b90;
-  font-size: 8px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+}
+
+.settings-content {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  overflow-y: auto;
 }
 
 .settings-content-header {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 2px 2px 3px;
 }
 
 .settings-kicker {
-  color: #7f879b;
-  font-size: 9px;
-  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .settings-content-header h2 {
   margin: 0;
-  color: #e8ecfa;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  font-size: var(--font-lg);
+  font-weight: var(--weight-medium);
 }
 
-.settings-hero-card {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid rgba(157, 216, 255, 0.17);
-  border-radius: 12px;
-  background:
-    linear-gradient(135deg, rgba(157, 216, 255, 0.1), transparent 62%),
-    rgba(255, 255, 255, 0.035);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.11);
-}
-
-.settings-hero-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 31px;
-  height: 31px;
-  flex: 0 0 31px;
-  border: 1px solid rgba(157, 216, 255, 0.38);
-  border-radius: 10px;
-  background: rgba(157, 216, 255, 0.12);
-  color: #bfe9ff;
-  font-size: 17px;
-  box-shadow: 0 0 14px rgba(157, 216, 255, 0.15);
-}
-
-.settings-hero-card p {
-  margin: 3px 0 0;
-  color: #9da6bb;
-  font-size: 10px;
-  line-height: 1.35;
-}
-
-.settings-card {
-  padding: 9px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 11px;
-  background: rgba(255, 255, 255, 0.025);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
-}
-
-.advanced-actions {
-  gap: 8px;
-}
-
-.project-mcp-card {
-  gap: 7px;
-}
-
-.project-mcp-copy {
+.section-copy {
   margin: 0;
-  color: #9da6bb;
-  font-size: 10px;
-  line-height: 1.45;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  line-height: 1.5;
 }
 
-.project-mcp-list-header {
+/* A labelled control sitting on one row — the settings equivalent of
+   ToggleRow, for anything that is not a switch. */
+.field-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-top: 5px;
+  gap: var(--space-3);
 }
 
-.project-mcp-refresh,
-.project-mcp-remove {
+.field-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.field-label {
+  color: var(--text-primary);
+  font-size: var(--font-sm);
+}
+
+.field-help {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+}
+
+.field-control {
   flex: 0 0 auto;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 8px;
-  padding: 5px 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #c7d0e8;
-  cursor: pointer;
-  font: inherit;
-  font-size: 10px;
+  min-width: 128px;
 }
 
-.project-mcp-refresh:hover,
-.project-mcp-remove:hover {
-  background: rgba(157, 216, 255, 0.13);
-  border-color: rgba(157, 216, 255, 0.34);
+.scale-options {
+  display: flex;
+  gap: var(--space-1);
 }
 
-.project-mcp-refresh:disabled,
-.project-mcp-remove:disabled {
-  cursor: wait;
-  opacity: 0.55;
+.scale-options > * {
+  flex: 1;
 }
 
-.project-mcp-empty {
-  padding: 9px;
-  border: 1px dashed rgba(255, 255, 255, 0.13);
-  border-radius: 9px;
-  color: #8d97ad;
-  font-size: 10px;
+.stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-xs);
+}
+
+.stat-row.muted {
+  color: var(--text-muted);
+}
+
+.stat-readout {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.growth-unavailable {
+  padding: var(--space-4);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: var(--font-sm);
   text-align: center;
 }
 
-.project-mcp-project-list {
-  display: grid;
-  gap: 6px;
-  max-height: 190px;
-  overflow-y: auto;
-}
-
-.project-mcp-project-item {
-  display: grid;
-  gap: 4px;
-  padding: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.035);
-}
-
-.project-mcp-project-heading,
-.project-mcp-project-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 7px;
-}
-
-.project-mcp-project-name {
-  min-width: 0;
-  overflow: hidden;
-  color: #e8ecfa;
-  font-size: 11px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-mcp-project-status {
-  flex: 0 0 auto;
-  font-size: 9px;
-  font-weight: 650;
-}
-
-.project-mcp-project-connected {
-  color: #8fe3c0;
-}
-
-.project-mcp-project-partial,
-.project-mcp-project-missing {
-  color: #f4c97b;
-}
-
-.project-mcp-project-conflict,
-.project-mcp-project-error {
-  color: #ff9eae;
-}
-
-.project-mcp-project-path {
-  overflow: hidden;
-  color: #8994aa;
-  font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-mcp-project-clients {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  color: #9da6bb;
-  font-size: 9px;
-}
-
-.project-mcp-project-actions {
-  justify-content: flex-end;
-}
-
-.project-mcp-remove {
-  color: #ffb4c0;
-}
-
-.project-mcp-result {
-  display: grid;
-  gap: 5px;
-  margin-top: 2px;
-  padding: 7px;
-  border: 1px solid rgba(139, 156, 247, 0.16);
-  border-radius: 8px;
-  background: rgba(139, 156, 247, 0.045);
-  color: #cdd3e7;
-  font-size: 10px;
-}
-
-.project-mcp-project {
-  overflow: hidden;
-  color: #aeb8d8;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-mcp-result-row {
-  display: grid;
-  grid-template-columns: minmax(58px, auto) minmax(0, 1fr);
-  gap: 5px;
-  align-items: baseline;
-}
-
-.project-mcp-client {
-  color: #e5e7ff;
-  font-weight: 600;
-}
-
-.project-mcp-message {
-  grid-column: 2;
-  color: #8f98ac;
-  line-height: 1.35;
-}
-
-.project-mcp-installed,
-.project-mcp-already_configured {
-  color: #82d9a5;
-}
-
-.project-mcp-conflict,
-.project-mcp-error {
-  color: #ffb0a7;
-}
-
-.project-mcp-error {
-  font-size: 10px;
-  line-height: 1.4;
-}
-
-.settings-tab {
-  padding: 5px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.03);
-  color: #9298aa;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
-}
-
-.settings-tab:hover {
-  color: #d0d3df;
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.14);
-}
-
-.settings-tab.active {
-  color: #e5e7ff;
-  background: rgba(139, 156, 247, 0.22);
-  border-color: rgba(139, 156, 247, 0.4);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 10px rgba(139, 156, 247, 0.18);
-}
-
-.settings-content {
-  padding: 8px 12px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.settings-section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.family-pet-list {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 3px 0;
-}
-
-.family-pet-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 32px;
-  padding: 3px 5px 3px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.family-pet-row:hover {
-  border-color: rgba(139, 156, 247, 0.25);
-  background: rgba(139, 156, 247, 0.06);
-}
-
-.family-pet-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: #c8c8d2;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.family-pet-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  box-shadow: 0 0 6px currentColor;
-}
-
-.family-pet-dot.family-codex {
-  color: #8b9cf7;
-  background: #8b9cf7;
-}
-
-.family-pet-dot.family-claude {
-  color: #d59bff;
-  background: #d59bff;
-}
-
-.family-pet-dot.family-opencode {
-  color: #50c878;
-  background: #50c878;
-}
-
-.family-pet-select {
-  width: 132px;
-  min-width: 0;
-  appearance: none;
-  -webkit-appearance: none;
-  padding: 6px 28px 6px 9px;
-  border: 1px solid rgba(139, 156, 247, 0.22);
-  border-radius: 6px;
-  outline: none;
-  background-color: rgba(17, 17, 27, 0.9);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='m1 1 4 4 4-4' fill='none' stroke='%238b9cf7' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.4'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 9px center;
-  color: #cdd4ff;
-  font: inherit;
-  font-size: 10px;
-  cursor: pointer;
-  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
-}
-
-.family-pet-select:hover {
-  border-color: rgba(139, 156, 247, 0.5);
-  background-color: rgba(30, 30, 45, 0.95);
-}
-
-.family-pet-select:focus {
-  border-color: #8b9cf7;
-  box-shadow: 0 0 0 2px rgba(139, 156, 247, 0.14);
-}
-
-.family-pet-select option {
-  background: #1b1b29;
-  color: #ddd;
-}
-
-.section-label {
-  font-size: 10px;
-  color: #9da3b5;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
-}
+/* ── Pets ────────────────────────────────────────────────────────────── */
 
 .pet-list {
   display: flex;
+  max-height: 168px;
   flex-direction: column;
   gap: 2px;
-  max-height: 140px;
   overflow-y: auto;
 }
 
@@ -1824,463 +1645,132 @@ function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boole
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 7px 10px;
-  border-radius: 6px;
-  color: #ccc;
-  font-size: 13px;
+  width: 100%;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-sm);
+  text-align: left;
   cursor: pointer;
-  transition: background 0.15s;
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .pet-option:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: var(--surface-raised);
+  color: var(--text-primary);
 }
 
 .pet-option.active {
-  background: rgba(139, 156, 247, 0.15);
-  color: #8b9cf7;
+  border-color: var(--border-accent-strong);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
+.pet-option:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .pet-name {
-  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pet-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
 }
 
 .pet-rename-input {
-  flex: 1;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(139, 156, 247, 0.4);
-  border-radius: 4px;
-  color: #fff;
-  font-size: 13px;
-  padding: 2px 6px;
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-accent-strong);
+  border-radius: var(--radius-sm);
   outline: none;
-  font-family: inherit;
-}
-
-.pet-rename-input:focus {
-  border-color: #8b9cf7;
-}
-
-.pet-edit {
-  background: none;
-  border: none;
-  color: #9499aa;
-  font-size: 13px;
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
-}
-
-.pet-edit:hover {
-  color: #8b9cf7;
-}
-
-.pet-remove {
-  background: none;
-  border: none;
-  color: #9499aa;
-  font-size: 14px;
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
-}
-
-.pet-remove:hover {
-  color: #ff6b6b;
+  background: var(--surface-raised-hover);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-sm);
 }
 
 .import-row {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
+}
+
+.import-row > * {
+  flex: 1;
 }
 
 .import-error {
-  font-size: 10px;
-  color: #ff6b6b;
-}
-
-.import-btn {
-  flex: 1;
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: 1px solid rgba(80, 200, 120, 0.25);
-  background: rgba(80, 200, 120, 0.06);
-  color: #50c878;
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.import-btn:hover {
-  background: rgba(80, 200, 120, 0.12);
-}
-
-.import-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.toggle-group {
-  gap: 8px;
-}
-
-.desktop-toggle-group {
-  padding: 8px 9px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 11px;
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.group-label {
-  padding-bottom: 2px;
-  color: #d9dce8;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-}
-
-.toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 31px;
-  cursor: pointer;
-}
-
-.language-select-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.language-select {
-  min-width: 132px;
-  padding: 7px 28px 7px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #f4f5fb;
-  font: inherit;
-  cursor: pointer;
-}
-
-.language-select:focus-visible {
-  outline: 2px solid rgba(139, 156, 247, 0.9);
-  outline-offset: 2px;
-}
-
-.language-select option {
-  color: #171922;
-  background: #fff;
-}
-
-.toggle-row.is-disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.setting-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.setting-help {
-  color: #9da3b4;
-  font-size: 10px;
-  line-height: 1.3;
-}
-
-.switch {
-  position: relative;
-  display: inline-flex;
-  width: 34px;
-  height: 20px;
-  flex-shrink: 0;
-}
-
-.switch input {
-  position: absolute;
-  inset: 0;
-  margin: 0;
-  opacity: 0;
-  cursor: pointer;
-  z-index: 1;
-}
-
-.switch-track {
-  position: absolute;
-  inset: 0;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.15);
-  transition: background 0.2s ease;
-}
-
-.switch-thumb {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
-  transition: transform 0.2s ease;
-}
-
-.switch input:checked ~ .switch-track {
-  background: #8b9cf7;
-}
-
-.switch input:checked ~ .switch-track .switch-thumb {
-  transform: translateX(14px);
-}
-
-.switch input:focus-visible ~ .switch-track {
-  outline: 2px solid rgba(173, 184, 255, 0.95);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 4px rgba(139, 156, 247, 0.16);
-}
-
-.switch input:disabled ~ .switch-track {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.mood-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.mood-reset-btn {
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.03);
-  color: #a4a8b4;
-  font-size: 9px;
-  cursor: pointer;
-}
-
-.mood-reset-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #ccc;
-}
-
-.mood-bar {
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-}
-
-.mood-fill {
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #ff6b6b, #c8b450, #50c878);
-  transition: width 0.3s ease;
-}
-
-.progression-card {
-  padding: 9px 10px 8px;
-  border: 1px solid rgba(139, 156, 247, 0.18);
-  border-radius: 11px;
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.07), transparent 54%),
-    rgba(139, 156, 247, 0.055);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09);
-}
-
-.progression-xp-total {
-  color: #cbd2e8;
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
-}
-
-.progression-bar {
-  height: 7px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.09);
-}
-
-.progression-fill {
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #6d78d7, #9dd8ff);
-  box-shadow: 0 0 8px rgba(157, 216, 255, 0.4);
-  transition: width 0.35s ease;
-}
-
-.progression-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: #858b9b;
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
-}
-
-.growth-unavailable {
-  padding: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  color: #9ca3b4;
-  background: rgba(255, 255, 255, 0.035);
-  font-size: 10px;
+  color: var(--state-error-soft);
+  font-size: var(--font-xs);
   line-height: 1.4;
 }
 
-.scale-options {
+.family-pet-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-primary);
+  font-size: var(--font-sm);
+}
+
+.family-pet-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  box-shadow: 0 0 6px currentColor;
+}
+
+/* Applied dynamically as `family-${family.key}`. */
+.family-pet-dot.family-codex {
+  color: var(--accent);
+  background: var(--accent);
+}
+
+.family-pet-dot.family-claude {
+  color: var(--accent-claude);
+  background: var(--accent-claude);
+}
+
+.family-pet-dot.family-opencode {
+  color: var(--state-success);
+  background: var(--state-success);
+}
+
+/* ── Advanced ────────────────────────────────────────────────────────── */
+
+.advanced-actions {
   display: flex;
-  gap: 4px;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
-.scale-option {
-  flex: 1;
-  padding: 5px 0;
-  border: 1px solid transparent;
-  background: transparent;
-  font: inherit;
-  border-radius: 5px;
-  color: #a4a8b4;
-  font-size: 12px;
-  cursor: pointer;
-  text-align: center;
-  transition: all 0.15s;
-}
-
-.scale-option:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #ccc;
-}
-
-.scale-option.active {
-  background: rgba(139, 156, 247, 0.18);
-  color: #8b9cf7;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 0 8px rgba(139, 156, 247, 0.15);
-}
-
-.setup-btn,
-.restart-btn,
-.quit-btn,
-.import-btn {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-.setup-btn {
-  width: 100%;
-  padding: 7px 12px;
-  border-radius: 6px;
-  border: 1px solid rgba(139, 156, 247, 0.2);
-  background: rgba(139, 156, 247, 0.06);
-  color: #8b9cf7;
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.setup-btn:hover {
-  background: rgba(139, 156, 247, 0.12);
-}
-
-.mood-title {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-}
-
-.mood-readout {
-  color: #cbd2e8;
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
-}
-
-.restart-btn {
-  width: 100%;
-  padding: 7px 12px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 190, 90, 0.25);
-  background: rgba(255, 190, 90, 0.06);
-  color: #ffc56d;
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.restart-btn:hover {
-  background: rgba(255, 190, 90, 0.14);
-  border-color: rgba(255, 190, 90, 0.42);
-}
-
-.quit-btn {
-  width: 100%;
-  padding: 7px 12px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 80, 80, 0.25);
-  background: rgba(255, 80, 80, 0.06);
-  color: #ff6b6b;
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.quit-btn:hover {
-  background: rgba(255, 80, 80, 0.15);
-  border-color: rgba(255, 80, 80, 0.4);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .switch-track,
-  .switch-thumb,
-  .settings-tab,
-  .settings-nav-item,
-  .edge-peek-handle,
-  .dashboard-tab,
-  .progression-fill {
-    transition-duration: 0.01ms;
-  }
-}
-
-@media (prefers-contrast: more) {
-  .status-panel {
-    background: rgba(12, 12, 18, 0.97);
-    border-color: rgba(255, 255, 255, 0.42);
+/* ── Narrow panel ────────────────────────────────────────────────────
+   The panel can be resized down by the user; below this the two-column
+   history grid and the settings sidebar stop being readable. */
+@media (max-width: 420px) {
+  .history-grid {
+    grid-template-columns: 1fr;
   }
 
-  .desktop-toggle-group,
-  .settings-card,
-  .settings-hero-card,
-  .settings-nav-item,
-  .toggle-row,
-  .progression-card,
-  .growth-unavailable {
-    border-color: rgba(255, 255, 255, 0.22);
-  }
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .status-panel {
-    background: rgb(18, 18, 26);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
+  .settings-nav {
+    width: 112px;
+    flex-basis: 112px;
   }
 
-  .settings-card,
-  .settings-hero-card,
-  .settings-nav-item {
-    background: rgb(28, 27, 38);
-  }
-
-  .progression-card,
-  .growth-unavailable {
-    background: rgb(28, 27, 38);
+  .settings-nav-copy small {
+    display: none;
   }
 }
 </style>

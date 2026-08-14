@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
 import type { PermissionDecisionValue, PermissionRequestView } from '../src/types/permission'
 import type { ProgressionSnapshot } from '../src/types/progression'
+import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 import type { PresentationIntent, PresentationStatusUpdate } from '../src/types/presentation'
 import type {
@@ -79,8 +80,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('panel-toggle')
   },
 
-  resizePanel: (height: number) => {
-    ipcRenderer.send('panel-resize', { height })
+  resizePanel: (height: number, width?: number) => {
+    ipcRenderer.send('panel-resize', { height, ...(width === undefined ? {} : { width }) })
   },
 
   hidePanel: () => {
@@ -196,6 +197,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('quota-usage-updated', handler)
     return () => {
       ipcRenderer.removeListener('quota-usage-updated', handler)
+    }
+  },
+
+  getHistorySummary: (): Promise<HistorySummary | null> => {
+    return ipcRenderer.invoke('history-summary')
+  },
+
+  clearHistory: (): Promise<HistoryClearResult> => {
+    return ipcRenderer.invoke('history-clear')
+  },
+
+  exportHistory: (): Promise<HistoryCommandResult> => {
+    return ipcRenderer.invoke('history-export')
+  },
+
+  onHistoryUpdated: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('history-updated', handler)
+    return () => {
+      ipcRenderer.removeListener('history-updated', handler)
     }
   },
 

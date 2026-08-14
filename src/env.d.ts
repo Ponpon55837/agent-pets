@@ -3,6 +3,7 @@
 import type { DesktopPreferences, DesktopPreferencesPatch } from './types/desktop'
 import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView } from './types/permission'
 import type { ProgressionSnapshot } from './types/progression'
+import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from './types/history'
 import type { PetWindowMode, PetWindowModeState } from './types/pet-window'
 import type {
   AdapterDetection,
@@ -39,7 +40,7 @@ declare global {
       reportContentHeight: (height: number) => void
       setMousePassthrough: (ignore: boolean) => void
       togglePanel: () => void
-      resizePanel: (height: number) => void
+      resizePanel: (height: number, width?: number) => void
       hidePanel: () => void
       onPanelOpened: (callback: () => void) => () => void
       onPanelOpenSettings: (callback: () => void) => () => void
@@ -94,6 +95,10 @@ declare global {
         }>
       }>
       onQuotaUsageUpdated: (callback: (usage: unknown) => void) => () => void
+      getHistorySummary: () => Promise<HistorySummary | null>
+      clearHistory: () => Promise<HistoryClearResult>
+      exportHistory: () => Promise<HistoryCommandResult>
+      onHistoryUpdated: (callback: () => void) => () => void
       testIntegration: (source: 'opencode-cli' | 'opencode-desktop' | 'codex' | 'codex-desktop' | 'claude' | 'claude-desktop') => Promise<{
         ok: boolean
         verifiedAt?: number

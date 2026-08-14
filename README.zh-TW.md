@@ -155,7 +155,11 @@ macOS/Linux: ~/.desktop-pet/presentation-mcp.mjs
 
 這個操作可重複執行。相同設定會回報「已設定」；同名但內容不同的設定會回報衝突並完全不覆蓋。它只修改選定專案的本機設定，不執行 shell 命令，也不會重新安裝 hooks。設定完成後，請重啟對應的 Agent client，讓它重新載入 MCP 工具目錄。
 
-同一張卡片中的 **已連接專案** 清單會記住所有透過此按鈕設定的專案。開啟設定頁時會重新檢查三個 client，顯示「已連接」、「部分連接」、「有衝突」或「找不到資料夾」，並列出專案路徑與最後檢查時間。**重新檢查**會立即更新清單。**移除 MCP** 只會移除仍符合 Agent Pets 原始設定的項目；如果使用者改過設定，會保留檔案並標示衝突。若專案資料夾已不存在，可以只移除清單記錄，不會碰到其他檔案。
+這個按鈕會開啟獨立的 MCP 完整面板，不會把設定精靈或主設定頁越堆越大。面板會記住所有透過此按鈕設定的專案，重新檢查三個 client，顯示「已連接」、「部分連接」、「有衝突」或「找不到資料夾」，並列出專案路徑與最後檢查時間。**重新檢查**會立即更新清單。**移除 MCP** 只會移除仍符合 Agent Pets 原始設定的項目；如果使用者改過設定，會保留檔案並標示衝突。若專案資料夾已不存在，可以只移除清單記錄，不會碰到其他檔案。按下 **完成** 會回到設定頁。
+
+### History HUD（歷史儀表板）
+
+主面板的 **History** 分頁會讀取由 main process 管理的本機彙總：近七天每日工作量、完成／失敗工作階段、觀察到的工作時間、Agent 分布、最近 Quota 快照，以及精確／估算的 token 品質。History 也會由 main process 唯讀掃描固定的本機 session log 路徑：`%USERPROFILE%\.codex\sessions`、`%USERPROFILE%\.claude\projects` 與 `%USERPROFILE%\.claude\transcripts`。Codex 的 `token_count` 會使用累積的 `total_token_usage`，只匯入單調增加的差值；重複的 context／rate-limit 快照，以及沒有累積 counter 的紀錄會忽略。Claude assistant 的 `usage` 會以精確來源解析；cache 欄位會併入 input，只有在沒有 output 時才使用 reasoning。掃描器限制檔案／行大小、拒絕逃出根目錄的連結、只接受白名單 usage 形狀、去重串流紀錄，並只保存雜湊後的 session／檔案身分。原始事件只保存受限制的中繼資料與雜湊後的專案／session 身分；HUD 不保存 prompt、工具參數、憑證或完整專案路徑。**匯出摘要**會將清理後的彙總寫入使用者選擇的 JSON 檔案。**清除歷史**只清除歷史與 Quota 快照，並建立新的本機 log cutoff，不會重設寵物 XP、等級、進化、心情或成就。原始事件有固定保留期限，長期每日彙總則可持續保留。
 
 #### 讓目前使用中的 Agent 專案接通
 
@@ -321,6 +325,7 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 - **Renderer 隔離** — Renderer 啟用 Chromium sandbox 與 context isolation、停用 Node.js integration，使用安全的自訂 `agent-pets://` protocol 取代高權限 `file://` 頁面，並以嚴格 CSP、禁止彈窗／外部導頁、拒絕權限請求及 IPC 主 frame 來源驗證縮小攻擊面。
 - **本機事件伺服器** — 只監聽 `127.0.0.1`，每個 hook 請求都必須通過每次安裝專用 secret 驗證；同時拒絕瀏覽器來源與非 JSON 請求、限制事件速率，且只接受長度受限的白名單欄位。
 - **用量查詢** — Quota 功能只允許連線到指定的 Codex 與 Anthropic HTTPS quota／驗證端點，拒絕轉址、過大回應、過多 window 與格式錯誤的 renderer IPC payload。OAuth 憑證只存在 Electron 主行程，不會傳給 renderer 或出現在命令列參數。
+- **本機用量讀取器** — Token 歷史由 main process 唯讀管理，只掃描固定的 Codex／Claude JSONL 路徑，限制檔案與行大小，拒絕逃出根目錄的 symlink／reparse path，解析白名單欄位並雜湊來源身分；不保存原始 log、prompt 或工具內容。
 - **憑證更新** — OAuth token 過期時會更新，並安全合併回原本的 Codex auth 檔或 Claude 憑證儲存區，避免 CLI 登入失效；檔案寫入會做帳號／變更檢查、限制檔案權限，並盡可能採原子替換。
 - **寵物匯入** — 寫入前會驗證 ZIP 項目數、壓縮／解壓縮大小、JSON 大小，以及圖片大小與實際格式。
 - **記憶體上限** — Agent session 數量有上限，會優先淘汰離線／最舊項目，避免 renderer 記憶體無限成長。
@@ -425,6 +430,7 @@ agent-pets/
 │   ├── desktop-tray.ts      # 系統匣生命週期與選單
 │   ├── notification-policy.ts # 純通知分類／冷卻規則
 │   ├── quota.ts             # Codex／Claude 剩餘用量讀取
+│   ├── local-usage.ts       # 受限制的 Codex／Claude session log token 讀取
 │   └── setup.ts             # 跨平台路徑與安裝邏輯
 ├── integrations/
 │   ├── install.mjs          # 獨立的 CLI hook 安裝程式

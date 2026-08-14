@@ -653,7 +653,7 @@ watch(() => store.presentationReaction, (reaction) => {
 }
 
 .edge-peek-label {
-  font-size: 8px;
+  font-size: var(--font-xs);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -751,7 +751,7 @@ watch(() => store.presentationReaction, (reaction) => {
     inset 0 1px 0 rgba(255, 255, 255, 0.18);
   color: #f2f2f2;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
-  font-size: 10.5px;
+  font-size: var(--font-sm);
   line-height: 1.3;
   padding: 3px 9px;
   border-radius: 11px;
@@ -775,7 +775,7 @@ watch(() => store.presentationReaction, (reaction) => {
   flex-shrink: 0;
   min-width: 25px;
   color: color-mix(in srgb, var(--quota-color) 82%, white);
-  font-size: 8.5px;
+  font-size: var(--font-xs);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -817,7 +817,7 @@ watch(() => store.presentationReaction, (reaction) => {
     inset 0 1px 0 rgba(255, 255, 255, 0.16);
   color: #f3f4f7;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   font-weight: 500;
   line-height: 1.4;
   text-align: left;
@@ -1148,7 +1148,7 @@ watch(() => store.presentationReaction, (reaction) => {
   border-radius: 50%;
   background: rgba(231, 190, 73, 0.2);
   color: #ffe6a0;
-  font-size: 13px;
+  font-size: var(--font-md);
   font-weight: 800;
 }
 
@@ -1167,7 +1167,7 @@ watch(() => store.presentationReaction, (reaction) => {
 
 .permission-request-heading strong {
   overflow: hidden;
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1176,7 +1176,7 @@ watch(() => store.presentationReaction, (reaction) => {
 .permission-request-heading span,
 .permission-request-queue {
   color: rgba(239, 237, 246, 0.68);
-  font-size: 8.5px;
+  font-size: var(--font-xs);
   font-weight: 600;
 }
 
@@ -1190,7 +1190,7 @@ watch(() => store.presentationReaction, (reaction) => {
   margin: 8px 1px;
   overflow: hidden;
   color: rgba(247, 245, 251, 0.88);
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-weight: 500;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -1201,7 +1201,7 @@ watch(() => store.presentationReaction, (reaction) => {
 .permission-request-warning {
   margin: -2px 1px 7px;
   color: #ffd2a3;
-  font-size: 8.5px;
+  font-size: var(--font-xs);
   line-height: 1.3;
 }
 
@@ -1328,7 +1328,7 @@ watch(() => store.presentationReaction, (reaction) => {
 .presentation-say-icon {
   flex: 0 0 auto;
   color: #aab8ff;
-  font-size: 13px;
+  font-size: var(--font-md);
   line-height: 1.25;
 }
 
@@ -1341,7 +1341,7 @@ watch(() => store.presentationReaction, (reaction) => {
   border-radius: 50%;
   background: rgba(232, 198, 91, 0.2);
   border: 1px solid rgba(255, 235, 164, 0.4);
-  font-size: 13px;
+  font-size: var(--font-md);
   font-weight: 800;
 }
 
@@ -1353,13 +1353,13 @@ watch(() => store.presentationReaction, (reaction) => {
 }
 
 .permission-notice-copy strong {
-  font-size: 11px;
+  font-size: var(--font-xs);
   line-height: 1.2;
 }
 
 .permission-notice-copy span {
   color: rgba(255, 248, 220, 0.82);
-  font-size: 9.5px;
+  font-size: var(--font-xs);
   font-weight: 500;
   line-height: 1.3;
 }

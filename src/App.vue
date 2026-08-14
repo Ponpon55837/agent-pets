@@ -4,6 +4,7 @@ import { useAgentStore } from './stores/agentStore'
 import DesktopPet from './components/DesktopPet.vue'
 import StatusPanel from './components/StatusPanel.vue'
 import SetupWizard from './components/SetupWizard.vue'
+import ProjectMcpPanel from './components/ProjectMcpPanel.vue'
 import { playCue } from './utils/sound'
 import type { DesktopPreferences } from './types/desktop'
 import { setLocale as applyLocale } from './i18n'
@@ -273,6 +274,9 @@ onUnmounted(() => {
       <StatusPanel />
       <Transition name="wizard">
         <SetupWizard v-if="store.showWizard" @close="store.showWizard = false" />
+      </Transition>
+      <Transition name="wizard">
+        <ProjectMcpPanel v-if="store.showProjectMcpPanel" @close="store.closeProjectMcpPanel()" />
       </Transition>
     </template>
     <DesktopPet v-else />

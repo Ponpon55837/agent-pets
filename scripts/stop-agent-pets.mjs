@@ -3,6 +3,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const WINDOWS = process.platform === 'win32'
+const MAC = process.platform === 'darwin'
 const POWERSHELL = process.env.SystemRoot
   ? path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   : 'powershell.exe'
@@ -38,6 +39,8 @@ export function isProjectAgentPetsProcess(processInfo, workspaceRoot) {
   const localElectron = `${root}/node_modules/electron/dist/electron.exe`
   const unpackedPet = `${root}/release/win-unpacked/agent pets.exe`
   const releaseDirectory = `${root}/release`
+  const localElectronMac = `${root}/node_modules/electron/dist/electron.app/contents/macos/electron`
+  const macAppSuffix = '/agent pets.app/contents/macos/agent pets'
 
   if (executablePath === unpackedPet) return 'release/win-unpacked/Agent Pets.exe'
 
@@ -56,6 +59,17 @@ export function isProjectAgentPetsProcess(processInfo, workspaceRoot) {
     return 'workspace Electron process'
   }
 
+  // electron-builder's macOS unpacked output lands under release/<arch>/ (mac,
+  // mac-arm64, mac-universal, ...); match the bundle suffix instead of a
+  // fixed directory name.
+  if (executablePath.startsWith(`${root}/release/`) && executablePath.endsWith(macAppSuffix)) {
+    return 'release macOS Agent Pets.app'
+  }
+
+  if (executablePath === localElectronMac && commandLine.includes(root)) {
+    return 'workspace Electron process (macOS)'
+  }
+
   // WMI can omit ExecutablePath for protected processes. Only accept the
   // strongest project-specific command-line signatures in that case.
   if (!executablePath && commandLine.includes(root)) {
@@ -67,6 +81,17 @@ export function isProjectAgentPetsProcess(processInfo, workspaceRoot) {
     }
     if (commandLine.includes('/node_modules/electron/dist/electron.exe')) {
       return 'workspace Electron process (command line)'
+    }
+  }
+
+  // macOS `ps` output rarely separates a clean ExecutablePath field; fall
+  // back to the same command-line signatures used above.
+  if (!executablePath && commandLine.includes(root)) {
+    if (commandLine.includes('/release/') && commandLine.includes(macAppSuffix)) {
+      return 'release macOS Agent Pets.app (command line)'
+    }
+    if (commandLine.includes('/node_modules/electron/dist/electron.app/contents/macos/electron')) {
+      return 'workspace Electron process (macOS, command line)'
     }
   }
 
@@ -119,14 +144,46 @@ function listWindowsProcesses() {
   }
 }
 
+function listMacProcesses() {
+  // `ps` prints the full command line last (args often contain spaces, e.g.
+  // ".app/Contents/MacOS/Agent Pets"), so it cannot be split into separate
+  // executable-path/command-line fields the way WMI's structured output can.
+  // Leave ExecutablePath unset and let isProjectAgentPetsProcess fall back to
+  // its command-line-only matching branch.
+  const result = spawnSync('ps', ['-axww', '-o', 'pid=,command='], { encoding: 'utf8', timeout: 10_000 })
+  if (result.status !== 0) {
+    throw new Error('無法讀取 macOS 程序清單；為避免誤觸其他 Electron，停止建置。')
+  }
+  const processes = []
+  for (const line of String(result.stdout || '').split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const match = trimmed.match(/^(\d+)\s+(.*)$/)
+    if (!match) continue
+    const [, pidStr, commandLine] = match
+    processes.push({ ProcessId: Number(pidStr), ExecutablePath: undefined, CommandLine: commandLine })
+  }
+  return processes
+}
+
 export function findProjectAgentPetsProcesses(workspaceRoot = process.cwd()) {
-  if (!WINDOWS) return []
-  return listWindowsProcesses()
-    .map(processInfo => ({
-      ...processInfo,
-      reason: isProjectAgentPetsProcess(processInfo, workspaceRoot),
-    }))
-    .filter(processInfo => processInfo.reason !== null)
+  if (WINDOWS) {
+    return listWindowsProcesses()
+      .map(processInfo => ({
+        ...processInfo,
+        reason: isProjectAgentPetsProcess(processInfo, workspaceRoot),
+      }))
+      .filter(processInfo => processInfo.reason !== null)
+  }
+  if (MAC) {
+    return listMacProcesses()
+      .map(processInfo => ({
+        ...processInfo,
+        reason: isProjectAgentPetsProcess(processInfo, workspaceRoot),
+      }))
+      .filter(processInfo => processInfo.reason !== null)
+  }
+  return []
 }
 
 function stopProcess(processInfo) {
@@ -135,28 +192,41 @@ function stopProcess(processInfo) {
     throw new Error(`無效的程序 PID：${String(processInfo.ProcessId)}`)
   }
 
-  const result = spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
-    encoding: 'utf8',
-    windowsHide: true,
-  })
-  if (result.status !== 0) {
-    // A parent process may have already terminated this PID as part of /T.
-    // Treat that race as success only after tasklist confirms the PID is gone.
-    const stillRunning = spawnSync('tasklist.exe', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
+  if (WINDOWS) {
+    const result = spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
       encoding: 'utf8',
       windowsHide: true,
     })
-    if (stillRunning.status === 0 && !String(stillRunning.stdout || '').includes(String(pid))) {
-      return
+    if (result.status !== 0) {
+      // A parent process may have already terminated this PID as part of /T.
+      // Treat that race as success only after tasklist confirms the PID is gone.
+      const stillRunning = spawnSync('tasklist.exe', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
+        encoding: 'utf8',
+        windowsHide: true,
+      })
+      if (stillRunning.status === 0 && !String(stillRunning.stdout || '').includes(String(pid))) {
+        return
+      }
+      const detail = String(result.stderr || result.stdout || '').trim()
+      throw new Error(`無法關閉 PID ${pid}${detail ? `：${detail}` : ''}`)
     }
+    return
+  }
+
+  // macOS: SIGKILL directly, since the build must not proceed while the app
+  // still holds the .app bundle open.
+  const result = spawnSync('kill', ['-9', String(pid)], { encoding: 'utf8' })
+  if (result.status !== 0) {
+    const stillRunning = spawnSync('ps', ['-p', String(pid)], { encoding: 'utf8' })
+    if (stillRunning.status !== 0) return
     const detail = String(result.stderr || result.stdout || '').trim()
     throw new Error(`無法關閉 PID ${pid}${detail ? `：${detail}` : ''}`)
   }
 }
 
 export function stopProjectAgentPets(workspaceRoot = process.cwd()) {
-  if (!WINDOWS) {
-    console.log('非 Windows 環境：略過 Agent Pets 程序清理。')
+  if (!WINDOWS && !MAC) {
+    console.log('非 Windows/macOS 環境：略過 Agent Pets 程序清理。')
     return
   }
 

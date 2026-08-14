@@ -74,3 +74,44 @@ test('build preflight does not treat another project portable build as owned', (
     null,
   )
 })
+
+const macWorkspace = '/Users/dgh/Desktop/agent-pets'
+
+test('build preflight matches the release macOS Agent Pets.app (any arch subdirectory)', () => {
+  assert.equal(
+    isProjectAgentPetsProcess(
+      {
+        ProcessId: 111,
+        CommandLine: `${macWorkspace}/release/mac-arm64/Agent Pets.app/Contents/MacOS/Agent Pets`,
+      },
+      macWorkspace,
+    ),
+    'release macOS Agent Pets.app (command line)',
+  )
+})
+
+test('build preflight matches the workspace Electron development process on macOS', () => {
+  assert.equal(
+    isProjectAgentPetsProcess(
+      {
+        ProcessId: 222,
+        CommandLine: `${macWorkspace}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron .`,
+      },
+      macWorkspace,
+    ),
+    'workspace Electron process (macOS, command line)',
+  )
+})
+
+test('build preflight does not stop an unrelated macOS Agent Pets.app in another project', () => {
+  assert.equal(
+    isProjectAgentPetsProcess(
+      {
+        ProcessId: 333,
+        CommandLine: '/Users/dgh/Desktop/another-project/release/mac/Agent Pets.app/Contents/MacOS/Agent Pets',
+      },
+      macWorkspace,
+    ),
+    null,
+  )
+})

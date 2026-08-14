@@ -1,0 +1,134 @@
+/* Design tokens — the single source of truth for every colour, size, and
+   radius in the app. Values here are lifted from the pre-token stylesheets
+   (the most frequently repeated literal won each slot), so adopting a token
+   in place of a literal is a no-op visually.
+
+   Rule: component <style> blocks must not contain bare hex or rgba() values.
+   State colours that JS needs (STATE_COLORS in types/agent.ts) are the one
+   documented exception — they are mirrored here as --state-* so CSS can use
+   the same palette. */
+
+:root {
+  /* ── Surfaces ─────────────────────────────────────────────────────────
+     Three materials, app-wide. `panel` is the glass window itself, `raised`
+     is anything sitting on it (cards, rows), `overlay` is a modal above it. */
+  --surface-panel: rgba(18, 18, 26, 0.86);
+  --surface-raised: rgba(255, 255, 255, 0.05);
+  --surface-raised-hover: rgba(255, 255, 255, 0.08);
+  --surface-sunken: rgba(8, 10, 18, 0.18);
+  --surface-overlay: rgba(25, 25, 35, 0.98);
+  --surface-scrim: rgba(0, 0, 0, 0.5);
+  --surface-blur: blur(24px) saturate(165%);
+
+  /* Native <option> popups are painted by the OS, not by us — they need an
+     opaque colour or Windows/macOS fall back to their own light palette. */
+  --surface-option: #1b1b29;
+
+  /* ── Borders ──────────────────────────────────────────────────────────── */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --border-accent: rgba(139, 156, 247, 0.22);
+  --border-accent-strong: rgba(139, 156, 247, 0.4);
+
+  /* ── Accent ───────────────────────────────────────────────────────────── */
+  --accent: #8b9cf7;
+  --accent-bright: #cdd4ff;
+  --accent-wash: rgba(139, 156, 247, 0.08);
+  --accent-soft: rgba(139, 156, 247, 0.15);
+  --accent-strong: rgba(139, 156, 247, 0.25);
+  --accent-glow: rgba(139, 156, 247, 0.14);
+
+  /* Provider-tinted fills. Claude keeps its own hue so the two providers stay
+     distinguishable in the Usage view at a glance. */
+  --gradient-accent: linear-gradient(90deg, #667eea, #8b9cf7);
+  --gradient-claude: linear-gradient(90deg, #b56ee2, #d59bff);
+  --accent-claude: #d59bff;
+  --border-claude: rgba(213, 155, 255, 0.13);
+  --surface-claude: rgba(213, 155, 255, 0.04);
+
+  /* ── Semantic state colours (mirrors STATE_COLORS in types/agent.ts) ──── */
+  --state-success: #50c878;
+  --state-error: #ff6b6b;
+  --state-error-soft: #ff9a9a;
+  --state-warn: #c8b450;
+  --state-warn-bright: #ffe37c;
+  --state-info: #9dd8ff;
+  --state-idle: #666;
+  --state-offline: #555;
+
+  /* ── Text — four levels, nothing in between ───────────────────────────── */
+  --text-primary: #e8ecfa;
+  --text-secondary: #a4a8b4;
+  --text-muted: #858b9b;
+  --text-bright: #f1f3ff;
+  --text-on-option: #ddd;
+
+  /* ── Type scale — five steps, floor at 11px ───────────────────────────
+     The old stylesheets ran down to 8px; anything below --font-xs is a bug.
+     CJK glyphs lose stroke definition below 11px on both Windows and macOS. */
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-md: 13px;
+  --font-lg: 15px;
+  --font-xl: 18px;
+
+  --weight-normal: 400;
+  --weight-medium: 600;
+  --weight-bold: 700;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* ── Spacing — 4px base ───────────────────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  /* ── Radii — four steps ───────────────────────────────────────────────── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /* ── Elevation ────────────────────────────────────────────────────────── */
+  --shadow-panel:
+    0 18px 40px rgba(0, 0, 0, 0.4),
+    0 2px 6px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    inset 0 -18px 30px -20px rgba(0, 0, 0, 0.35);
+  --shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --text-shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.55);
+
+  /* ── Focus ────────────────────────────────────────────────────────────
+     One ring, applied by the ui/ primitives so it never has to be
+     hand-written per component again. */
+  --focus-ring-width: 2px;
+  --focus-ring-color: var(--state-info);
+  --focus-ring-offset: 1px;
+
+  /* ── Motion ───────────────────────────────────────────────────────────── */
+  --transition-fast: 0.15s ease;
+  --transition-base: 0.2s ease;
+  --transition-slow: 0.35s ease;
+}
+
+/* Honour the OS "reduce motion" setting in one place rather than auditing
+   the ~54 transition/animation declarations across components. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-fast: 0s;
+    --transition-base: 0s;
+    --transition-slow: 0s;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

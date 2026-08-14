@@ -13,7 +13,7 @@ Work in Traditional Chinese for user-facing plans, phase reports, and handoffs. 
 2. Preserve user-owned changes. The untracked `.claude/` directory is not part of the skill and must not be modified unless the user explicitly requests it.
 3. Read [project-map.md](references/project-map.md) for source ownership, runtime boundaries, and package-manager rules.
 4. Read the relevant section of [Desktop Pet Architecture v2](../../../docs/architecture/Desktop-Pet-Architecture-v2-Feature-Roadmap.zh-TW.md) for roadmap or architecture work.
-5. For any visual or interaction change, read [liquid-glass.md](references/liquid-glass.md).
+5. For any visual or interaction change, read [liquid-glass.md](references/liquid-glass.md) and [ui-design-system.md](references/ui-design-system.md).
 6. For every roadmap phase, release, security-sensitive change, or version update, read [phase-gates.md](references/phase-gates.md).
 7. For package installation, build, packaging, or environment repair, read [build-environment.md](references/build-environment.md).
 
@@ -55,6 +55,7 @@ Work in Traditional Chinese for user-facing plans, phase reports, and handoffs. 
 - Prefer the regular, legible treatment. Use a clear treatment only over visually rich content with a tested dimming layer.
 - Provide opaque/high-contrast and reduced-motion fallbacks. Verify light and dark wallpapers and focus states.
 - Preserve the pet and existing visual personality; do not restyle unrelated surfaces in a feature phase.
+- Use the token layer (`src/styles/tokens.css`) and the shared primitives (`src/components/ui/`) documented in [ui-design-system.md](references/ui-design-system.md) instead of hand-rolling a new button, card, toggle, dropdown, progress bar, confirmation dialog, or icon. This app ships for both Windows and macOS; a plain-text glyph icon or a `window.confirm()` dialog is a cross-platform bug, not a style choice.
 
 ## Package and version
 

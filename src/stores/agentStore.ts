@@ -251,6 +251,7 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   const showWizard = ref(false)
+  const showProjectMcpPanel = ref(false)
   const toast = ref<{
     id: number
     text: string
@@ -1050,13 +1051,31 @@ export const useAgentStore = defineStore('agent', () => {
 
   const permissionRequest = computed(() => permissionRequests.value[0] ?? null)
 
+  // The broker's `agentId` is the literal AgentSource string for every
+  // respond-capable adapter (see electron/permission-adapter-server.ts,
+  // which sets `agentId: payload.source` from the same 'opencode-cli' /
+  // 'opencode-desktop' values AgentStatusEvent.source uses), so a request
+  // and the session it blocks share the exact same getSessionKey().
+  function settleWaitingPermission(agentId: string, sessionId: string): void {
+    const key = getSessionKey(agentId as AgentSource, sessionId)
+    const session = sessions.value[key]
+    if (!session || session.state !== 'waiting-permission') return
+    // The user (or the broker's own TTL) has resolved this request, but a
+    // Codex/Claude session may never send a follow-up hook event — without
+    // this, the pet stays stuck showing "Waiting Permission" forever even
+    // though nothing is actually waiting anymore (see GH issue #1). This is
+    // a local, visual-only fallback: any real event still overwrites it.
+    session.state = 'idle'
+    session.permissionNotice = undefined
+  }
+
   function setPermissionRequests(value: unknown): void {
     if (!Array.isArray(value)) {
       permissionRequests.value = []
       return
     }
     const now = Date.now()
-    permissionRequests.value = value.filter((request): request is PermissionRequestView => (
+    const next = value.filter((request): request is PermissionRequestView => (
       Boolean(request)
       && typeof request === 'object'
       && typeof request.requestId === 'string'
@@ -1068,6 +1087,15 @@ export const useAgentStore = defineStore('agent', () => {
       && (request.status === 'pending' || request.status === 'deciding')
       && Array.isArray(request.allowedDecisions)
     ))
+    // A request that drops out of the pending/deciding set — decided,
+    // expired, or cancelled — is done blocking its session even if we were
+    // never told the outcome explicitly (e.g. TTL expiry has no decidePermission
+    // caller at all).
+    const stillPending = new Set(next.map(request => request.requestId))
+    for (const request of permissionRequests.value) {
+      if (!stillPending.has(request.requestId)) settleWaitingPermission(request.agentId, request.sessionId)
+    }
+    permissionRequests.value = next
   }
 
   async function initializePermissionRequests(): Promise<void> {
@@ -1082,6 +1110,11 @@ export const useAgentStore = defineStore('agent', () => {
     requestId: string,
     decision: PermissionDecisionValue,
   ): Promise<void> {
+    // Settle locally right away rather than waiting on the broker's own
+    // broadcast round-trip — see settleWaitingPermission for why this can't
+    // just wait for the next hook event.
+    const request = permissionRequests.value.find(candidate => candidate.requestId === requestId)
+    if (request) settleWaitingPermission(request.agentId, request.sessionId)
     try {
       await window.electronAPI?.decidePermission(requestId, decision)
     } catch {
@@ -1097,17 +1130,32 @@ export const useAgentStore = defineStore('agent', () => {
 
   function closePanel() {
     showWizard.value = false
+    showProjectMcpPanel.value = false
     window.electronAPI?.hidePanel()
   }
 
   function openSettings() {
     panelView.value = 'settings'
+    showProjectMcpPanel.value = false
     window.electronAPI?.resizePanel(420)
+  }
+
+  function openProjectMcpPanel() {
+    panelView.value = 'settings'
+    showWizard.value = false
+    showProjectMcpPanel.value = true
+    window.electronAPI?.resizePanel(720, 680)
+  }
+
+  function closeProjectMcpPanel() {
+    showProjectMcpPanel.value = false
+    window.electronAPI?.resizePanel(420, 380)
   }
 
   function backToSessions() {
     panelView.value = 'sessions'
     showWizard.value = false
+    showProjectMcpPanel.value = false
     window.electronAPI?.resizePanel(380)
   }
 
@@ -1116,6 +1164,7 @@ export const useAgentStore = defineStore('agent', () => {
   function handlePanelOpened() {
     panelView.value = 'sessions'
     showWizard.value = false
+    showProjectMcpPanel.value = false
   }
 
   function resizePetWindow() {
@@ -1195,6 +1244,7 @@ export const useAgentStore = defineStore('agent', () => {
     quotaSettleMinIntervalMs: QUOTA_SETTLE_MIN_INTERVAL_MS,
     defaultPetId: DEFAULT_PET_ID,
     showWizard,
+    showProjectMcpPanel,
     toast,
     toastRemainingMs,
     mood,
@@ -1247,6 +1297,8 @@ export const useAgentStore = defineStore('agent', () => {
     togglePanel,
     closePanel,
     openSettings,
+    openProjectMcpPanel,
+    closeProjectMcpPanel,
     backToSessions,
     handlePanelOpened,
     setPet,

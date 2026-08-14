@@ -19,12 +19,14 @@ import { createEventServer } from './event-server'
 import { createAgentAdapterRegistry, isAgentAdapterId, type AgentAdapterRegistry } from './agent-adapter'
 import { createAgentAdapterOperations } from './agent-adapter-operations'
 import { getQuotaUsage } from './quota'
-import { DesktopPreferencesStore, resolveLoginItemExecutable } from './desktop-preferences'
+import { DesktopPreferencesStore, resolveLoginItemExecutable, writeJsonAtomic } from './desktop-preferences'
 import { DesktopNotificationService } from './desktop-notifications'
 import { DesktopTrayController } from './desktop-tray'
 import { PermissionBroker } from './permission-broker'
 import { appendPermissionAudit } from './permission-audit'
 import { ProgressionStore } from './progression'
+import { HistoryStore } from './history'
+import { LocalUsageReader } from './local-usage'
 import {
   createPresentationMcpServer,
   PRESENTATION_MCP_PORT,
@@ -42,6 +44,7 @@ import {
 import type { DesktopPreferences } from '../src/types/desktop'
 import { setLocale, t } from '../src/i18n'
 import type { ProgressionSnapshot } from '../src/types/progression'
+import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
 import type { PresentationIntent, PresentationStatusSnapshot } from '../src/types/presentation'
 import type { ProjectMcpRegistrySnapshot, ProjectMcpRemovalSummary } from '../src/types/project-mcp'
 import type { PetEdge, PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
@@ -89,6 +92,10 @@ let permissionAdapterServer: Server | null = null
 let permissionBroker: PermissionBroker | null = null
 let permissionRelay: PermissionAdapterRelay | null = null
 let progressionStore: ProgressionStore | null = null
+let historyStore: HistoryStore | null = null
+let localUsageReader: LocalUsageReader | null = null
+let localUsageScanTimer: ReturnType<typeof setInterval> | null = null
+let localUsageScanPromise: Promise<void> | null = null
 let presentationController: PresentationController | null = null
 let presentationMcpServer: Server | null = null
 let projectMcpRegistry: ProjectMcpRegistryStore | null = null
@@ -141,6 +148,8 @@ if (!hasSingleInstanceLock) {
 }
 
 const PANEL_WIDTH = 380
+const PANEL_MIN_WIDTH = 340
+const PANEL_MAX_WIDTH = 760
 const PANEL_GAP = 6
 // petWindow's actual bounds include a fixed, unscaled band of transparent
 // space reserved above the visible sprite for the quota tooltip to pop
@@ -812,10 +821,11 @@ function createPanelWindow() {
   })
 }
 
-function computePanelBounds(height: number) {
+function computePanelBounds(height: number, width = PANEL_WIDTH) {
+  const panelWidth = Math.round(clamp(width, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH))
   if (!petWindow) {
     const { workArea } = screen.getPrimaryDisplay()
-    return { x: workArea.x, y: workArea.y, width: PANEL_WIDTH, height }
+    return { x: workArea.x, y: workArea.y, width: panelWidth, height }
   }
 
   const petBounds = petWindow.getBounds()
@@ -833,9 +843,9 @@ function computePanelBounds(height: number) {
     : petBounds.height - PET_WINDOW_TOP_HEADROOM
   const visibleTop = petBounds.y + petBounds.height - visibleHeight
   const { workArea } = screen.getDisplayMatching(petBounds)
-  const maxX = Math.max(workArea.x, workArea.x + workArea.width - PANEL_WIDTH)
+  const maxX = Math.max(workArea.x, workArea.x + workArea.width - panelWidth)
   const maxY = Math.max(workArea.y, workArea.y + workArea.height - height)
-  let x = petBounds.x + Math.round(petBounds.width / 2) - Math.round(PANEL_WIDTH / 2)
+  let x = petBounds.x + Math.round(petBounds.width / 2) - Math.round(panelWidth / 2)
   const aboveY = visibleTop - height - PANEL_GAP
   const belowY = visibleTop + visibleHeight + PANEL_GAP
   let y = aboveY
@@ -849,7 +859,7 @@ function computePanelBounds(height: number) {
   x = clamp(x, workArea.x, maxX)
   y = clamp(y, workArea.y, maxY)
 
-  return { x, y, width: PANEL_WIDTH, height }
+  return { x, y, width: panelWidth, height }
 }
 
 // Status-line count can flap as agents come and go, so coalesce the writes
@@ -868,8 +878,8 @@ function persistPetBounds(x: number, y: number, width: number, height: number) {
 
 function repositionVisiblePanel() {
   if (!panelWindow?.isVisible()) return
-  const [, height] = panelWindow.getSize()
-  panelWindow.setBounds(computePanelBounds(height))
+  const [width, height] = panelWindow.getSize()
+  panelWindow.setBounds(computePanelBounds(height, width))
 }
 
 function ensureDesktopWindows(): boolean {
@@ -1016,6 +1026,32 @@ function broadcastProgression(snapshot?: ProgressionSnapshot): void {
   }
 }
 
+function currentHistorySummary(): HistorySummary | null {
+  if (!historyStore) return null
+  return historyStore.getSummary(progressionStore?.getActivePetId() ?? 'aang-airbender')
+}
+
+async function refreshLocalUsage(): Promise<void> {
+  if (!localUsageReader || localUsageScanPromise) return localUsageScanPromise ?? Promise.resolve()
+  localUsageScanPromise = localUsageReader.scan()
+    .then(result => {
+      if (result.recordsImported > 0) broadcastHistoryUpdated()
+    })
+    .catch(error => {
+      console.error('Local token usage scan failed', error)
+    })
+    .finally(() => {
+      localUsageScanPromise = null
+    })
+  return localUsageScanPromise
+}
+
+function broadcastHistoryUpdated(): void {
+  for (const window of [petWindow, panelWindow]) {
+    if (window && !window.isDestroyed()) window.webContents.send('history-updated')
+  }
+}
+
 function broadcastPresentationIntent(intent: PresentationIntent): void {
   for (const window of [petWindow, panelWindow]) {
     if (window && !window.isDestroyed()) {
@@ -1074,6 +1110,27 @@ function createProgressionServices(): void {
     // runtime is repaired. No in-memory fallback is presented as durable XP.
     console.error('Progression storage is unavailable', error)
     progressionStore = null
+  }
+}
+
+function createHistoryServices(): void {
+  if (historyStore) return
+  try {
+    historyStore = new HistoryStore(join(app.getPath('userData'), 'history.sqlite'))
+    localUsageReader = new LocalUsageReader({
+      homeDir: app.getPath('home'),
+      history: historyStore,
+    })
+    localUsageScanTimer = setInterval(() => {
+      void refreshLocalUsage()
+    }, 60_000)
+    void refreshLocalUsage()
+  } catch (error) {
+    // History is an additive HUD feature. A broken history database must not
+    // prevent the pet, event receiver, XP, or permission controls from booting.
+    console.error('History storage is unavailable', error)
+    historyStore = null
+    localUsageReader = null
   }
 }
 
@@ -1230,6 +1287,7 @@ app.whenReady().then(() => {
   screen.on('display-metrics-changed', rehomePetWindowForDisplayChange)
   createPermissionServices(permissionToken)
   createProgressionServices()
+  createHistoryServices()
 
   eventServer = createEventServer(
     () => [petWindow, panelWindow].filter((w): w is BrowserWindow => w !== null),
@@ -1248,6 +1306,13 @@ app.whenReady().then(() => {
         if (result) broadcastProgression(result.snapshot)
       } catch (error) {
         console.error('Progression event handling failed', error)
+      }
+      try {
+        if (historyStore?.recordEvent(event, progressionStore?.getActivePetId() ?? 'aang-airbender')) {
+          broadcastHistoryUpdated()
+        }
+      } catch (error) {
+        console.error('History event handling failed', error)
       }
     },
     (input, receivedAt) => agentAdapterRegistry?.normalize(input, receivedAt)
@@ -1357,7 +1422,11 @@ app.whenReady().then(() => {
     const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
     const height = finiteNumber(data.height)
     if (height === null) return
-    panelWindow.setBounds(computePanelBounds(Math.round(clamp(height, 160, 900))))
+    const requestedWidth = finiteNumber(data.width)
+    const width = requestedWidth === null
+      ? panelWindow.getBounds().width
+      : Math.round(clamp(requestedWidth, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH))
+    panelWindow.setBounds(computePanelBounds(Math.round(clamp(height, 160, 900)), width))
   })
 
   ipcMain.on('panel-hide', (event) => {
@@ -1542,10 +1611,55 @@ app.whenReady().then(() => {
   ipcMain.handle('quota-usage', async (event, force?: unknown) => {
     assertTrustedIpcSender(event)
     const usage = await getQuotaUsage(force === true)
+    try {
+      if (historyStore?.recordQuotaSnapshot(usage)) broadcastHistoryUpdated()
+    } catch (error) {
+      console.error('History quota snapshot failed', error)
+    }
     for (const win of [petWindow, panelWindow]) {
       if (win && !win.isDestroyed()) win.webContents.send('quota-usage-updated', usage)
     }
     return usage
+  })
+
+  ipcMain.handle('history-summary', async (event) => {
+    assertTrustedIpcSender(event, panelWindow)
+    await refreshLocalUsage()
+    return currentHistorySummary()
+  })
+
+  ipcMain.handle('history-clear', (event): HistoryClearResult => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (!historyStore) return { ok: false, error: 'unavailable' }
+    try {
+      historyStore.clear()
+      broadcastHistoryUpdated()
+      return { ok: true }
+    } catch {
+      return { ok: false, error: 'unavailable' }
+    }
+  })
+
+  ipcMain.handle('history-export', async (event): Promise<HistoryCommandResult> => {
+    assertTrustedIpcSender(event, panelWindow)
+    if (!historyStore) return { ok: false, error: 'unavailable' }
+    await refreshLocalUsage()
+    const defaultName = `agent-pets-history-${new Date().toISOString().slice(0, 10)}.json`
+    const saveOptions = {
+      title: '匯出 History',
+      defaultPath: join(app.getPath('documents'), defaultName),
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    }
+    const result = panelWindow
+      ? await dialog.showSaveDialog(panelWindow, saveOptions)
+      : await dialog.showSaveDialog(saveOptions)
+    if (result.canceled || !result.filePath) return { ok: false, error: 'cancelled' }
+    try {
+      writeJsonAtomic(result.filePath, historyStore.getExport(progressionStore?.getActivePetId() ?? 'aang-airbender'))
+      return { ok: true, path: result.filePath }
+    } catch {
+      return { ok: false, error: 'write_failed' }
+    }
   })
 
   ipcMain.handle('test-integration', async (event, source: IntegrationTestSource) => {
@@ -1963,10 +2077,16 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  if (localUsageScanTimer) clearInterval(localUsageScanTimer)
+  localUsageScanTimer = null
+  localUsageReader = null
+  localUsageScanPromise = null
   presentationController?.clear()
   permissionBroker?.shutdown()
   progressionStore?.close()
   progressionStore = null
+  historyStore?.close()
+  historyStore = null
 })
 
 app.on('will-quit', () => {

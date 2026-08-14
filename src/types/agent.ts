@@ -19,6 +19,12 @@ export type AgentState =
   | 'success'
   | 'error'
 
+export interface AgentTokenUsage {
+  input?: number
+  output?: number
+  quality: 'estimated' | 'exact'
+}
+
 export interface AgentStatusEvent {
   adapterId?: AgentAdapterId
   source: AgentSource
@@ -27,7 +33,10 @@ export interface AgentStatusEvent {
   state: AgentState
   originalEvent?: string
   timestamp: number
+  eventId?: string
+  sourceEventId?: string
   toolName?: string
+  tokenUsage?: AgentTokenUsage
   permissionNotice?: PermissionNotice
 }
 
@@ -53,6 +62,11 @@ export const STATE_PRIORITY: Record<AgentState, number> = {
   offline: 0,
 }
 
+// Deliberately not localized, like SOURCE_LABELS below: these are the agent's
+// technical run states (idle/thinking/waiting-permission/...), not prose —
+// translating them read as inconsistent next to the English tool/session
+// vocabulary the rest of the panel already uses, so they stay English in
+// every locale.
 export const STATE_LABELS: Record<AgentState, string> = {
   offline: 'Offline',
   idle: 'Idle',
