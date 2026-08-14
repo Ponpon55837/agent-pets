@@ -79,6 +79,7 @@ import {
   type IntegrationTarget,
 } from './setup'
 import { installProjectMcp, removeProjectMcp } from './project-mcp-setup'
+import { parsePetBehaviorManifest, type SanitizedPetBehaviorManifest } from './pet-behavior-manifest'
 
 let petWindow: BrowserWindow | null = null
 let panelWindow: BrowserWindow | null = null
@@ -88,6 +89,7 @@ let anchorBottomCenter: { x: number; y: number } | null = null
 let petContentHeight: number | null = null
 let resizeAnimHandle: ReturnType<typeof setInterval> | null = null
 let dragPollHandle: ReturnType<typeof setInterval> | null = null
+let shimejiPersistHandle: ReturnType<typeof setTimeout> | null = null
 let dialogOpen = false
 let eventToken = ''
 let eventServer: Server | null = null
@@ -510,6 +512,14 @@ function persistCurrentPetWindowState(): void {
   })
 }
 
+function scheduleShimejiPositionPersist(): void {
+  if (shimejiPersistHandle) clearTimeout(shimejiPersistHandle)
+  shimejiPersistHandle = setTimeout(() => {
+    shimejiPersistHandle = null
+    persistCurrentPetWindowState()
+  }, 2_000)
+}
+
 function applyNormalPetBounds(): void {
   if (!petWindow || petWindow.isDestroyed()) return
   clearEdgeDwell()
@@ -767,6 +777,10 @@ function createPetWindow() {
     edgeRestoreBounds = null
     petWindowEdge = null
     clearEdgeDwell()
+    if (shimejiPersistHandle) {
+      clearTimeout(shimejiPersistHandle)
+      shimejiPersistHandle = null
+    }
     if (resizeAnimHandle) {
       clearInterval(resizeAnimHandle)
       resizeAnimHandle = null
@@ -939,6 +953,7 @@ function currentDesktopPreferences(): DesktopPreferences {
       presentationMcpEnabled: true,
       achievementsEnabled: true,
       edgeModeEnabled: false,
+      shimejiEnabled: false,
       soundEnabled: false,
       launchAtStartup: false,
       launchAtStartupSupported: false,
@@ -952,6 +967,23 @@ function broadcastDesktopPreferences(preferences: DesktopPreferences): void {
   for (const window of [petWindow, panelWindow]) {
     if (window && !window.isDestroyed()) {
       window.webContents.send('desktop-preferences-updated', preferences)
+    }
+  }
+}
+
+function currentPowerSaveState(): boolean {
+  try {
+    return powerMonitor.isOnBatteryPower()
+  } catch {
+    return false
+  }
+}
+
+function broadcastPowerSaveState(): void {
+  const powerSave = currentPowerSaveState()
+  for (const window of [petWindow, panelWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('power-save-state-updated', powerSave)
     }
   }
 }
@@ -1419,6 +1451,9 @@ app.whenReady().then(() => {
   createDesktopServices()
   createPetWindow()
   createPanelWindow()
+  powerMonitor.on('on-battery', broadcastPowerSaveState)
+  powerMonitor.on('on-ac', broadcastPowerSaveState)
+  broadcastPowerSaveState()
   createPresentationServices(presentationToken)
   screen.on('display-added', rehomePetWindowForDisplayChange)
   screen.on('display-removed', rehomePetWindowForDisplayChange)
@@ -1490,6 +1525,10 @@ app.whenReady().then(() => {
   ipcMain.on('pet-drag-start', (event) => {
     if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
     clearEdgeDwell()
+    if (shimejiPersistHandle) {
+      clearTimeout(shimejiPersistHandle)
+      shimejiPersistHandle = null
+    }
     if (petWindowMode !== 'normal') applyNormalPetBounds()
     // A normal drag establishes a new restore point; it must not inherit an
     // obsolete Edge snapshot from an earlier interaction.
@@ -1549,6 +1588,33 @@ app.whenReady().then(() => {
   ipcMain.on('pet-window-hover', (event) => {
     if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
     if (petWindowMode === 'edge') applyNormalPetBounds()
+  })
+
+  // 自主走動只接受 renderer 請求的有限 step；native bounds、display 選擇
+  // 與所有安全閘門都由 main process 擁有，Shimeji 不會取得通用移動 API。
+  ipcMain.on('shimeji-walk-step', (event, payload: unknown) => {
+    if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
+    const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    const rawDelta = data.deltaX
+    if (typeof rawDelta !== 'number' || !Number.isFinite(rawDelta)) return
+    const preferences = currentDesktopPreferences()
+    if (!preferences.shimejiEnabled || preferences.dndEnabled) return
+    if (petWindowMode !== 'normal' || dragPollHandle || (permissionBroker?.listRequests().length ?? 0) > 0) return
+    // 電池模式是 native 的省電訊號；跳過自主移動，避免與使用者目前的
+    // 工作負載競爭資源。
+    if (currentPowerSaveState()) return
+
+    const deltaX = Math.round(Math.max(-24, Math.min(24, rawDelta)))
+    if (deltaX === 0) return
+    const current = petWindow.getBounds()
+    const display = displayForBounds(current)
+    const target = clampWindowBounds({ ...current, x: current.x + deltaX }, display.workArea)
+    const targetDisplay = displayForBounds(target)
+    if (targetDisplay.id !== display.id) return
+    if (target.x === current.x && target.y === current.y) return
+    petWindow.setPosition(target.x, target.y)
+    normalPetBounds = target
+    scheduleShimejiPositionPersist()
   })
 
   ipcMain.on('pet-mouse-passthrough', (event, payload: unknown) => {
@@ -1685,6 +1751,11 @@ app.whenReady().then(() => {
   ipcMain.handle('desktop-preferences-set', (event, patch: unknown) => {
     assertTrustedIpcSender(event, panelWindow)
     return updateDesktopPreferences(patch)
+  })
+
+  ipcMain.handle('power-save-state', (event) => {
+    assertTrustedIpcSender(event)
+    return currentPowerSaveState()
   })
 
   ipcMain.on('presentation-status-update', (event, payload: unknown) => {
@@ -2088,19 +2159,35 @@ app.whenReady().then(() => {
   ipcMain.handle('load-pets', (event) => {
     assertTrustedIpcSender(event)
     const builtinPath = getPetsJsonPath()
-    let builtin: Array<{ id: string; displayName: string; folder: string; builtIn: boolean }> = []
+    let builtin: Array<{
+      id: string
+      displayName: string
+      folder: string
+      builtIn: boolean
+      behaviorManifest?: SanitizedPetBehaviorManifest
+    }> = []
     try {
       const raw = fs.readFileSync(builtinPath, 'utf-8')
-      builtin = JSON.parse(raw).map((p: any) => ({
-        id: String(p.id || ''),
-        displayName: String(p.displayName || p.id || ''),
-        folder: String(p.folder || p.id || ''),
-        builtIn: true,
-      }))
+      builtin = JSON.parse(raw).map((p: any) => {
+        const behaviorManifest = parsePetBehaviorManifest(p.behaviorManifest)
+        return {
+          id: String(p.id || ''),
+          displayName: String(p.displayName || p.id || ''),
+          folder: String(p.folder || p.id || ''),
+          builtIn: true,
+          ...(behaviorManifest ? { behaviorManifest } : {}),
+        }
+      })
     } catch {}
 
     const customBase = path.resolve(hookScriptDeployPath(), 'custom')
-    let custom: Array<{ id: string; displayName: string; folder: string; builtIn: boolean }> = []
+    let custom: Array<{
+      id: string
+      displayName: string
+      folder: string
+      builtIn: boolean
+      behaviorManifest?: SanitizedPetBehaviorManifest
+    }> = []
     if (fs.existsSync(customBase)) {
       const entries = fs.readdirSync(customBase, { withFileTypes: true })
       for (const entry of entries) {
@@ -2111,11 +2198,13 @@ app.whenReady().then(() => {
         if (!petJsonPath || !fs.existsSync(petJsonPath)) continue
         try {
           const petData = JSON.parse(fs.readFileSync(petJsonPath, 'utf-8'))
+          const behaviorManifest = parsePetBehaviorManifest(petData.behaviorManifest)
           custom.push({
             id: String(petData.id || safe),
             displayName: String(petData.displayName || safe),
             folder: safe,
             builtIn: false,
+            ...(behaviorManifest ? { behaviorManifest } : {}),
           })
         } catch {}
       }
@@ -2268,6 +2357,7 @@ app.whenReady().then(() => {
       const customDir = safeJoin(hookScriptDeployPath(), 'custom', safeId)
       if (!customDir) return { ok: false, error: 'Invalid destination path' }
       ensureDir(customDir)
+      const behaviorManifest = parsePetBehaviorManifest(petData.behaviorManifest)
 
       // Renderer sniffs the actual image bytes rather than trusting the
       // extension (see importPetSprite below), so normalizing to
@@ -2281,6 +2371,7 @@ app.whenReady().then(() => {
         spritesheetPath: 'spritesheet.webp',
         spriteVersionNumber: 2,
         kind: petData.kind === 'animal' ? 'animal' : 'person',
+        ...(behaviorManifest ? { behaviorManifest } : {}),
       }
       writeFileEnsured(join(customDir, 'pet.json'), JSON.stringify(petJson, null, 2))
 

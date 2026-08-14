@@ -14,6 +14,7 @@ Desktop pet that shows real-time status of your AI coding agents.
 - **Custom pets** — Import your own spritesheet, or a `.codex-pet.zip` sprite kit from sites like [codex-pets.net](https://codex-pets.net).
 - **Desktop controls** — Tray menu, native waiting/completion notifications, Do Not Disturb, sound control, and optional launch at startup.
 - **Mini / Edge mode** — Mini is always opt-in; Edge Peek is a separate Settings/Tray toggle (off by default) that shows a dedicated Liquid Glass handle at the display edge instead of clipping the pet. Bounds are restored across display and DPI changes.
+- **Optional Shimeji behavior** — A separate Settings toggle enables low-cadence idle walking, sleep, and cursor reactions. It is off by default and pauses for active work, Permission, DND, reduced motion, background, or power saving; walking is clamped to the current display work area.
 - **Permission Control** — OpenCode permission requests can be allowed once or denied from a Liquid Glass pet bubble; scoped hotkeys are available only while an eligible request is visible.
 - **Pet progression** — Completed sessions, bounded observed active-time, first completions of the day, and consecutive-day streaks earn durable XP. Level and evolution are restored after restart from a main-process SQLite ledger.
 - **Achievement gallery** — The Growth chip shows ten pet-scoped long-term milestones. Unlocks are evaluated and persisted once in the main process, with a one-shot native notification and visual reward; token milestones show exact versus estimated quality. The Growth toggle can stop new unlocks without affecting XP, permissions, or event ingestion.
@@ -108,6 +109,7 @@ The panel uses an extensible section navigator: **Language**, **Appearance**, **
 
 - **Mini mode** — Shrinks the pet to a compact 96px surface and can be turned off at any time.
 - **Edge peek** — A separate, **off-by-default** preference. When enabled, dragging to a display edge and holding for about 650ms shows a dedicated 42px-thick × 96px-long Liquid Glass handle; click or hover expands back to Normal without leaving a clipped pet fragment. Pending permission requests always restore the normal interactive surface.
+- **Shimeji behavior** — Enable it under **Settings → Desktop → Desktop behavior** when you want autonomous idle movement. The scheduler uses one low-frequency timer for the whole pet window, falls back to Idle when a sprite manifest lacks Walk/Sleep rows, and never moves Mini/Edge or crosses a monitor boundary.
 - **Do Not Disturb** — Suppresses native notifications, pet sounds, extra motion, and nonessential bubbles without stopping event ingestion. **Off by default.**
 - **Notifications** — Native alerts for waiting-permission, waiting-input, completion, and errors. Repeats use a per-session cooldown and terminal events are batched. **On by default.**
 - **Sound** — Short synthesized cues (Web Audio, no audio files) for success/error/waiting-permission. **Off by default.**
@@ -239,7 +241,11 @@ For a configured adapter, click **Test** to send a short-lived event through the
 
 ### Spritesheet Format
 
-Custom pets use the same spritesheet format as built-in pets:
+Custom pets use the same spritesheet format as built-in pets. A `pet.json` may optionally declare a bounded `behaviorManifest` with `walk` and/or `sleep` row definitions; missing definitions safely fall back to Idle:
+
+```json
+{"behaviorManifest":{"walk":{"row":1},"sleep":{"row":5}}}
+```
 
 - **Format**: `.webp`, `.png`, or `.jpg` (built-in pets ship as `.webp`; imports of any of the three are copied in as-is and rendered by content, not by file extension)
 - **Grid**: 8 columns × 11 rows (only rows 0–8 are currently used; 9 and 10 are reserved for future states)

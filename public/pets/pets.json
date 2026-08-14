@@ -2,21 +2,35 @@
   {
     "id": "aang-airbender",
     "displayName": "Aang Airbender",
-    "folder": "aang-airbender"
+    "folder": "aang-airbender",
+    "behaviorManifest": {
+      "walk": { "row": 1 }
+    }
   },
   {
     "id": "ikun",
     "displayName": "鸡哥ikun",
-    "folder": "ikun"
+    "folder": "ikun",
+    "behaviorManifest": {
+      "walk": { "row": 1 },
+      "sleep": { "row": 5 }
+    }
   },
   {
     "id": "qitian-dasheng",
     "displayName": "齊天大聖",
-    "folder": "qitian-dasheng"
+    "folder": "qitian-dasheng",
+    "behaviorManifest": {
+      "walk": { "row": 1 }
+    }
   },
   {
     "id": "wolf-hood-cat",
     "displayName": "狼帽喵",
-    "folder": "wolf-hood-cat"
+    "folder": "wolf-hood-cat",
+    "behaviorManifest": {
+      "walk": { "row": 1 },
+      "sleep": { "row": 5 }
+    }
   }
 ]

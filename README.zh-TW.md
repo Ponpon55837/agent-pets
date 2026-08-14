@@ -14,6 +14,7 @@
 - **自訂寵物** — 匯入自己的精靈圖，或是像 [codex-pets.net](https://codex-pets.net) 這類網站的 `.codex-pet.zip` 素材包。
 - **桌面控制** — 系統匣選單、原生等待／完成通知、勿擾模式、音效控制，以及可選的登入時啟動。
 - **Mini／Edge 模式** — Mini 可隨時切換；Edge Peek 需由使用者在 Settings 或 Tray 開啟，拖到螢幕邊緣停留片刻會顯示專用 Liquid Glass handle，不會裁切寵物本體，且會依螢幕與 DPI 變更重新定位。
+- **可選 Shimeji 行為** — 在 Settings → Desktop → 桌面行為開啟後，寵物會以低頻率在閒置時走動、休息並回應游標。預設關閉；工作中、Permission、勿擾、Reduced Motion、背景或省電時會暫停，且只會在目前螢幕 work area 內移動。
 - **權限控制** — OpenCode 的 permission request 可直接在 Liquid Glass 寵物氣泡選擇只允許一次或拒絕；只有符合條件且顯示中的請求才會註冊全域快捷鍵。
 - **寵物成長** — 完成 session、受上限保護的觀察到的工作時間、每日首次完成與連續天數會產生持久 XP；Level 與 Evolution 由主行程 SQLite ledger 保存，重開後仍會恢復。
 - **成就圖鑑** — Growth chip 會顯示每隻寵物獨立的 10 個長期里程碑；成就只在主行程解鎖一次，完成時可播放獎勵動畫與一次性原生通知，也會標示 token 成就的精確／估算資料品質。可在 Growth 中獨立關閉追蹤，不會影響 XP、Permission 或事件接收。
@@ -108,6 +109,7 @@
 
 - **Mini mode** — 將寵物縮成 96px 左右的小型視圖，隨時可恢復 Normal。
 - **Edge peek** — 獨立選項，**預設關閉**。開啟後拖到任一螢幕邊緣停留約 650ms，會顯示專用 42px 厚、96px 長的 Liquid Glass handle；按下或 hover 會展開回 Normal，不會留下寵物裁切區塊。待處理的權限請求會自動恢復完整可操作視圖。
+- **Shimeji 行為** — 在 **Settings → Desktop → 桌面行為** 開啟自主行為。整個寵物視窗共用一個低頻排程；自訂素材沒有 Walk／Sleep manifest 時會安全回到 Idle，不會在 Mini／Edge 模式移動，也不會跨螢幕。
 - **Do Not Disturb** — 勿擾模式會抑制原生通知、寵物音效、額外動態效果與非必要氣泡，但不會停止事件接收。**預設關閉。**
 - **Notifications** — 等待核准、等待輸入、完成與錯誤的原生通知；同 session 的重複事件有冷卻時間，結束事件會批次合併。**預設開啟。**
 - **Sound** — 成功/失敗/等待核准時的短音效（用 Web Audio 即時合成，不需要音檔）。**預設關閉。**
@@ -239,7 +241,11 @@ Setup Wizard 會讀取 runtime Agent Adapter registry，並在你點擊按鈕時
 
 ### 精靈圖格式
 
-自訂寵物使用跟內建寵物相同的精靈圖格式：
+自訂寵物使用跟內建寵物相同的精靈圖格式。`pet.json` 可選擇宣告受限的 `behaviorManifest`，提供 `walk` 與／或 `sleep` 的 row；缺少定義時會安全回到 Idle：
+
+```json
+{"behaviorManifest":{"walk":{"row":1},"sleep":{"row":5}}}
+```
 
 - **格式**：`.webp`、`.png` 或 `.jpg`（內建寵物是用 `.webp` 出貨；三種格式匯入後都是原樣複製，讀取時是看內容而不是看副檔名）
 - **網格**：8 欄 × 11 列（目前只用到第 0–8 列；9、10 保留給未來的狀態用）

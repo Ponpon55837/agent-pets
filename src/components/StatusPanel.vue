@@ -853,6 +853,15 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
             />
           </Card>
 
+          <Card :title="t('desktopBehavior')">
+            <ToggleRow
+              :model-value="store.shimejiEnabled"
+              :label="t('shimejiBehavior')"
+              :help="t('shimejiBehaviorHelp')"
+              @update:model-value="store.setShimejiEnabled($event)"
+            />
+          </Card>
+
           <!-- Attention used to also carry Sound and Presentation MCP, which
                are not attention controls — they now sit in their own groups. -->
           <Card :title="t('attention')">

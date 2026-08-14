@@ -60,6 +60,8 @@
   "remove": "Remove",
   "desktopBehavior": "Desktop behavior",
   "desktopBehaviorHelp": "Choose which optional features stay active on the desktop.",
+  "shimejiBehavior": "Shimeji autonomous behavior",
+  "shimejiBehaviorHelp": "Let the pet walk, rest, and respond to the cursor at a low cadence; it pauses during work, Permission, DND, or power saving.",
   "windowModes": "Window modes",
   "miniMode": "Mini mode",
   "miniModeHelp": "Keep the pet compact; return to Normal at any time.",

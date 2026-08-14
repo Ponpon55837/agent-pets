@@ -5,6 +5,7 @@ import type { ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
+import type { PetBehaviorManifest } from '../src/types/pet'
 import type { PresentationIntent, PresentationStatusUpdate } from '../src/types/presentation'
 import type {
   ProjectMcpRegistrySnapshot,
@@ -48,6 +49,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   notifyPetHover: () => {
     ipcRenderer.send('pet-window-hover')
+  },
+
+  shimejiWalkStep: (deltaX: number) => {
+    if (!Number.isFinite(deltaX)) return
+    ipcRenderer.send('shimeji-walk-step', { deltaX })
   },
 
   setPetWindowMode: (mode: PetWindowMode): Promise<PetWindowModeState> => {
@@ -112,6 +118,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   setDesktopPreferences: (patch: DesktopPreferencesPatch): Promise<DesktopPreferences> => {
     return ipcRenderer.invoke('desktop-preferences-set', patch)
+  },
+
+  getPowerSaveState: (): Promise<boolean> => {
+    return ipcRenderer.invoke('power-save-state')
+  },
+
+  onPowerSaveStateUpdated: (callback: (powerSave: boolean) => void) => {
+    const handler = (_event: unknown, powerSave: boolean) => callback(powerSave)
+    ipcRenderer.on('power-save-state-updated', handler)
+    return () => {
+      ipcRenderer.removeListener('power-save-state-updated', handler)
+    }
   },
 
   initializeProgression: (petId?: string): Promise<ProgressionSnapshot | null> => {
@@ -294,7 +312,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('uninstall-integrations', target)
   },
 
-  loadPets: () => {
+  loadPets: (): Promise<Array<{
+    id: string
+    displayName: string
+    folder: string
+    builtIn: boolean
+    behaviorManifest?: PetBehaviorManifest
+  }>> => {
     return ipcRenderer.invoke('load-pets')
   },
 

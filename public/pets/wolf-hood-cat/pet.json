@@ -4,5 +4,9 @@
   "description": "披着灰狼毛绒套装、表情凶萌的灰白猫咪 Codex 动画宠物。",
   "spritesheetPath": "spritesheet.webp",
   "spriteVersionNumber": 2,
-  "kind": "animal"
+  "kind": "animal",
+  "behaviorManifest": {
+    "walk": { "row": 1 },
+    "sleep": { "row": 5 }
+  }
 }

@@ -113,6 +113,24 @@
   animation: pet-fidget 0.7s ease;
 }
 
+.pet-canvas.pet-cursor-look-left {
+  animation: pet-cursor-look-left 0.42s ease;
+}
+
+.pet-canvas.pet-cursor-look-right {
+  animation: pet-cursor-look-right 0.42s ease;
+}
+
+@keyframes pet-cursor-look-left {
+  0%, 100% { transform: translateX(0); }
+  45% { transform: translateX(-3px); }
+}
+
+@keyframes pet-cursor-look-right {
+  0%, 100% { transform: translateX(0); }
+  45% { transform: translateX(3px); }
+}
+
 @keyframes pet-fidget {
   0%, 100% { transform: rotate(0deg) translateY(0); }
   20% { transform: rotate(-4deg) translateY(-2px); }
@@ -166,6 +184,11 @@
   }
 
   .pet-canvas.pet-rewarding {
+    animation: none;
+  }
+
+  .pet-canvas.pet-cursor-look-left,
+  .pet-canvas.pet-cursor-look-right {
     animation: none;
   }
 }

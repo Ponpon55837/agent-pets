@@ -6,6 +6,7 @@ import type { ProgressionSnapshot } from '@/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '@/types/history'
 import type { PetWindowMode, PetWindowModeState } from '@/types/pet-window'
+import type { PetBehaviorManifest } from '@/types/pet'
 import type {
   AdapterDetection,
   AdapterRuntimeStatus,
@@ -35,6 +36,7 @@ declare global {
       startDrag: () => void
       notifyDragEnd: (moved: boolean) => void
       notifyPetHover: () => void
+      shimejiWalkStep: (deltaX: number) => void
       setPetWindowMode: (mode: PetWindowMode) => Promise<PetWindowModeState>
       initializePetWindowMode: () => Promise<PetWindowModeState>
       onPetWindowModeUpdated: (callback: (state: PetWindowModeState) => void) => () => void
@@ -48,6 +50,8 @@ declare global {
       onPanelOpenSettings: (callback: () => void) => () => void
       initializeDesktopPreferences: (legacySoundEnabled: boolean) => Promise<DesktopPreferences>
       setDesktopPreferences: (patch: DesktopPreferencesPatch) => Promise<DesktopPreferences>
+      getPowerSaveState: () => Promise<boolean>
+      onPowerSaveStateUpdated: (callback: (powerSave: boolean) => void) => () => void
       initializeProgression: (petId?: string) => Promise<ProgressionSnapshot | null>
       setProgressionPet: (petId: string) => Promise<ProgressionSnapshot | null>
       initializeAchievements: (petId?: string) => Promise<AchievementSnapshot | null>
@@ -121,7 +125,13 @@ declare global {
       removeProjectMcp: (projectPath: string) => Promise<ProjectMcpRemovalSummary>
       forgetProjectMcp: (projectPath: string) => Promise<{ ok: boolean; removed: boolean; error?: string }>
       uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => Promise<{ ok: boolean; error?: string }>
-      loadPets: () => Promise<Array<{ id: string; displayName: string; folder: string; builtIn: boolean }>>
+      loadPets: () => Promise<Array<{
+        id: string
+        displayName: string
+        folder: string
+        builtIn: boolean
+        behaviorManifest?: PetBehaviorManifest
+      }>>
       addCustomPet: (petData: { id: string; displayName: string }) => Promise<boolean>
       renameCustomPet: (petId: string, newName: string) => Promise<boolean>
       removeCustomPet: (petId: string) => Promise<boolean>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import type { AgentState } from '@/types/agent'
+import type { PetAutonomousBehavior, PetBehaviorManifest } from '@/types/pet'
 import { useAgentStore } from '@/stores/agentStore'
 
 const props = defineProps<{
@@ -8,6 +9,7 @@ const props = defineProps<{
   petId: string
   since?: number
   mood?: number
+  autonomousBehavior?: PetAutonomousBehavior
 }>()
 
 // Keep low mood close to the pet's original colors; most of the visible
@@ -54,7 +56,7 @@ const store = useAgentStore()
 const CELL_W = 192
 const CELL_H = 208
 
-type MotionName = 'idle' | 'waving' | 'jumping' | 'failed' | 'waiting' | 'running' | 'review'
+type MotionName = 'idle' | 'waving' | 'jumping' | 'failed' | 'waiting' | 'running' | 'review' | 'walk' | 'sleep'
 
 interface MotionDefinition {
   name: MotionName
@@ -83,6 +85,29 @@ const motions: Record<MotionName, MotionDefinition> = {
   waiting: { name: 'waiting', row: 6, frameDurations: [150, 150, 150, 150, 150, 260] },
   running: { name: 'running', row: 7, frameDurations: [120, 120, 120, 120, 120, 220] },
   review: { name: 'review', row: 8, frameDurations: [150, 150, 150, 150, 150, 280] },
+  // 這些 row 會由選用的 manifest 覆蓋；未宣告行為的自訂寵物安全回退至 Idle。
+  walk: { name: 'walk', row: 0, frameDurations: [180, 180, 180, 180, 220] },
+  sleep: { name: 'sleep', row: 0, frameDurations: [420, 420, 520, 620] },
+}
+
+const petBehaviorManifest = computed<PetBehaviorManifest | undefined>(() => (
+  store.pets.find(pet => pet.id === props.petId)?.behaviorManifest
+))
+
+function behaviorMotion(name: 'walk' | 'sleep'): MotionDefinition {
+  const definition = petBehaviorManifest.value?.[name]
+  if (!definition) return motions.idle
+  const imageFrames = imgRef.value?.naturalWidth
+    ? Math.floor(imgRef.value.naturalWidth / CELL_W)
+    : 6
+  const frameCount = Math.max(1, Math.min(16, definition.frames ?? imageFrames))
+  const frameDurations = definition.frameDurations?.slice(0, frameCount)
+    ?? Array.from({ length: frameCount }, (_, index) => index === frameCount - 1 ? 260 : 150)
+  return {
+    name,
+    row: definition.row,
+    frameDurations,
+  }
 }
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -127,7 +152,16 @@ function playReward() {
     rewardTimer = setTimeout(() => { isRewarding.value = false }, 900)
   })
 }
-defineExpose({ playReaction, playReward })
+
+const cursorLookDirection = ref<-1 | 0 | 1>(0)
+let cursorLookTimer: ReturnType<typeof setTimeout> | null = null
+function playCursorLook(direction: -1 | 1): void {
+  cursorLookDirection.value = direction
+  if (cursorLookTimer) clearTimeout(cursorLookTimer)
+  cursorLookTimer = setTimeout(() => { cursorLookDirection.value = 0 }, 420)
+}
+
+defineExpose({ playReaction, playReward, playCursorLook })
 
 // Idle fidgets: a periodic subtle sway (no new sprite frames needed, same
 // CSS-layer trick as the reaction bounce) so a long idle stretch doesn't
@@ -188,6 +222,14 @@ const urgencyLevel = computed(() => {
 })
 
 function motionPlanForState(): MotionPlan {
+  const canUseAutonomousMotion = props.state === 'idle' || props.state === 'offline'
+  if (canUseAutonomousMotion && (props.autonomousBehavior === 'walk' || props.autonomousBehavior === 'sleep')) {
+    return {
+      steps: [{ motion: behaviorMotion(props.autonomousBehavior), loops: Number.POSITIVE_INFINITY }],
+      repeat: false,
+    }
+  }
+
   // Stagger long-idle gestures between pets while keeping the sequence stable
   // for a given pet instead of choosing a new random delay every cycle.
   const idleLoops = 10 + [...props.petId].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 5
@@ -257,7 +299,7 @@ function motionPlanForState(): MotionPlan {
 
 function frameDelay(): number {
   let multiplier = 1
-  if (props.state === 'offline') multiplier = 2.4
+  if (props.state === 'offline' && props.autonomousBehavior !== 'walk' && props.autonomousBehavior !== 'sleep') multiplier = 2.4
   else if (props.state === 'idle') multiplier = 1.25
   else if (urgencyLevel.value === 2) multiplier = 0.6
   else if (urgencyLevel.value === 1) multiplier = 0.78
@@ -380,6 +422,9 @@ async function loadImage() {
     auraTintCache.set(targetId, auraTint)
     currentFrame = 0
     draw()
+    if (props.autonomousBehavior === 'walk' || props.autonomousBehavior === 'sleep') {
+      startAnimation()
+    }
   }
 }
 
@@ -485,6 +530,7 @@ watch(() => props.petId, () => {
 watch(() => store.petsLoaded, () => {
   currentFrame = 0
   loadImage()
+  startAnimation()
 })
 
 watch(() => props.state, (newState, oldState) => {
@@ -510,6 +556,11 @@ watch(urgencyLevel, (newLevel, oldLevel) => {
   }
 })
 
+watch(() => props.autonomousBehavior, (newBehavior, oldBehavior) => {
+  if (newBehavior === 'poke' && newBehavior !== oldBehavior) playReaction()
+  if (newBehavior !== 'cursor-look') startAnimation()
+})
+
 onMounted(() => {
   loadImage()
   startAnimation()
@@ -530,6 +581,9 @@ onUnmounted(() => {
   }
   if (rewardTimer !== null) {
     clearTimeout(rewardTimer)
+  }
+  if (cursorLookTimer !== null) {
+    clearTimeout(cursorLookTimer)
   }
   stopFidgetTimer()
   stopUrgencyTimer()
@@ -582,6 +636,8 @@ onUnmounted(() => {
         'pet-offline-ambient': props.state === 'offline',
         'pet-mood-happy': moodTier === 'happy',
         'pet-mood-low': moodTier === 'low',
+        'pet-cursor-look-left': cursorLookDirection === -1,
+        'pet-cursor-look-right': cursorLookDirection === 1,
       }"
     />
   </div>

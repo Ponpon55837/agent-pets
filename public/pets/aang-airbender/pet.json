@@ -4,5 +4,8 @@
   "description": "An animated Aang Codex companion mastering the four elements.",
   "spritesheetPath": "spritesheet.webp",
   "spriteVersionNumber": 2,
-  "kind": "person"
+  "kind": "person",
+  "behaviorManifest": {
+    "walk": { "row": 1 }
+  }
 }

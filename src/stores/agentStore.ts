@@ -16,6 +16,7 @@ import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement
 import { ACHIEVEMENT_DEFINITIONS } from '@/types/achievement'
 import type { PetWindowMode, PetWindowModeState } from '@/types/pet-window'
 import { normalizePetWindowModeState } from '@/types/pet-window'
+import type { PetBehaviorManifest } from '@/types/pet'
 import type { ProjectPetView } from '@/types/project-pet'
 import type {
   PresentationIntent,
@@ -37,6 +38,7 @@ export interface PetEntry {
   displayName: string
   folder: string
   builtIn: boolean
+  behaviorManifest?: PetBehaviorManifest
 }
 
 const SUCCESS_DISPLAY_MS = 4_000
@@ -337,6 +339,7 @@ export const useAgentStore = defineStore('agent', () => {
   const presentationMcpEnabled = ref(true)
   const achievementsEnabled = ref(true)
   const edgeModeEnabled = ref(false)
+  const shimejiEnabled = ref(false)
   const launchAtStartup = ref(false)
   const launchAtStartupSupported = ref(false)
   const desktopPreferencesReady = ref(false)
@@ -562,6 +565,7 @@ export const useAgentStore = defineStore('agent', () => {
     presentationMcpEnabled.value = preferences.presentationMcpEnabled
     achievementsEnabled.value = preferences.achievementsEnabled
     edgeModeEnabled.value = preferences.edgeModeEnabled
+    shimejiEnabled.value = preferences.shimejiEnabled
     soundEnabled.value = preferences.soundEnabled
     launchAtStartup.value = preferences.launchAtStartup
     launchAtStartupSupported.value = preferences.launchAtStartupSupported
@@ -623,6 +627,11 @@ export const useAgentStore = defineStore('agent', () => {
   function setEdgeModeEnabled(enabled: boolean) {
     edgeModeEnabled.value = enabled
     updateDesktopPreferences({ edgeModeEnabled: enabled })
+  }
+
+  function setShimejiEnabled(enabled: boolean) {
+    shimejiEnabled.value = enabled
+    updateDesktopPreferences({ shimejiEnabled: enabled })
   }
 
   function setLocalePreference(next: AppLocale) {
@@ -1501,6 +1510,7 @@ export const useAgentStore = defineStore('agent', () => {
     presentationMcpEnabled,
     achievementsEnabled,
     edgeModeEnabled,
+    shimejiEnabled,
     launchAtStartup,
     launchAtStartupSupported,
     desktopPreferencesReady,
@@ -1555,6 +1565,7 @@ export const useAgentStore = defineStore('agent', () => {
     setPet,
     setScale,
     setPetWindowModeState,
+    setShimejiEnabled,
     setPetMode,
     initializePetWindowMode,
     setSoundEnabled,

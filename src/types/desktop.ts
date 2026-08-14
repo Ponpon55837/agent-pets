@@ -7,6 +7,7 @@ export interface DesktopPreferences {
   presentationMcpEnabled: boolean
   achievementsEnabled: boolean
   edgeModeEnabled: boolean
+  shimejiEnabled: boolean
   soundEnabled: boolean
   launchAtStartup: boolean
   launchAtStartupSupported: boolean
@@ -21,6 +22,7 @@ export type DesktopPreferencesPatch = Partial<Pick<
   | 'presentationMcpEnabled'
   | 'achievementsEnabled'
   | 'edgeModeEnabled'
+  | 'shimejiEnabled'
   | 'soundEnabled'
   | 'launchAtStartup'
   | 'locale'

@@ -4,6 +4,13 @@ import { useAgentStore } from '@/stores/agentStore'
 import { STATE_LABELS_SHORT, STATE_COLORS } from '@/types/agent'
 import { locale, t, type TranslationKey } from '@/i18n'
 import type { AchievementUnlock } from '@/types/achievement'
+import {
+  canRunAutonomousBehavior,
+  ShimejiScheduler,
+  SHIMEJI_IDLE_DELAY_MS,
+  type PetAutonomousBehavior,
+  type ShimejiContext,
+} from '@/types/pet'
 import { quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
 import PetAnimation from '@/components/PetAnimation.vue'
 
@@ -13,6 +20,162 @@ const hasMoved = ref(false)
 let mouseDownTime = 0
 const petAnimRef = ref<InstanceType<typeof PetAnimation> | null>(null)
 const multiPetRefs = ref<InstanceType<typeof PetAnimation>[]>([])
+
+// --- Shimeji 行為排程 -------------------------------------------------------
+
+const shimejiBehavior = ref<PetAutonomousBehavior>('idle')
+const shimejiScheduler = new ShimejiScheduler()
+const shimejiReducedMotion = ref(false)
+const shimejiPowerSave = ref(false)
+let shimejiTimer: ReturnType<typeof setTimeout> | null = null
+let shimejiIdleSince = Date.now()
+let shimejiMediaQuery: MediaQueryList | null = null
+let cleanupShimejiPowerSave: (() => void) | null = null
+interface ShimejiBattery {
+  charging: boolean
+  level: number
+  addEventListener: (type: string, listener: () => void) => void
+  removeEventListener: (type: string, listener: () => void) => void
+}
+let shimejiBattery: ShimejiBattery | null = null
+
+function updateShimejiPowerSave(): void {
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection
+  shimejiPowerSave.value = Boolean(
+    connection?.saveData
+    || (shimejiBattery && !shimejiBattery.charging && shimejiBattery.level <= 0.2),
+  )
+}
+
+const shimejiManifestCapabilities = computed(() => {
+  const multiPetActive = store.multiPetEnabled && store.familyLines.length > 1
+  const petIds = multiPetActive
+    ? store.familyLines.map(line => line.petId)
+    : [store.activePetId]
+  const entries = petIds
+    .map(id => store.pets.find(pet => pet.id === id))
+    .filter((pet): pet is NonNullable<typeof pet> => Boolean(pet))
+  return {
+    canWalk: entries.length > 0 && entries.every(pet => Boolean(pet.behaviorManifest?.walk)),
+    canSleep: entries.length > 0 && entries.every(pet => Boolean(pet.behaviorManifest?.sleep)),
+  }
+})
+
+function shimejiContext(random?: number): ShimejiContext {
+  return {
+    enabled: store.shimejiEnabled,
+    reactionsEnabled: store.reactionsEnabled,
+    dndEnabled: store.dndEnabled,
+    reducedMotion: shimejiReducedMotion.value,
+    powerSave: shimejiPowerSave.value,
+    documentVisible: document.visibilityState === 'visible',
+    isDragging: store.isDragging,
+    windowMode: store.petWindowMode.mode,
+    currentState: store.currentState,
+    activeSessionCount: store.activeSessions.length,
+    pendingPermission: store.permissionRequests.length > 0,
+    canWalk: shimejiManifestCapabilities.value.canWalk,
+    canSleep: shimejiManifestCapabilities.value.canSleep,
+    idleMs: Math.max(0, Date.now() - shimejiIdleSince),
+    ...(random === undefined ? {} : { random }),
+  }
+}
+
+function stopShimejiTimer(): void {
+  if (shimejiTimer) clearTimeout(shimejiTimer)
+  shimejiTimer = null
+}
+
+function scheduleShimeji(delayMs: number = SHIMEJI_IDLE_DELAY_MS): void {
+  stopShimejiTimer()
+  if (!store.shimejiEnabled || !canRunAutonomousBehavior(shimejiContext())) return
+  shimejiTimer = setTimeout(runShimejiTick, Math.max(1_500, delayMs))
+}
+
+function runShimejiTick(): void {
+  shimejiTimer = null
+  const tick = shimejiScheduler.next(shimejiContext(Math.random()))
+  shimejiBehavior.value = tick.behavior
+  if (tick.walkDeltaX !== undefined && tick.behavior === 'walk') {
+    window.electronAPI?.shimejiWalkStep(tick.walkDeltaX)
+  }
+  scheduleShimeji(tick.delayMs)
+}
+
+function restartShimeji(): void {
+  stopShimejiTimer()
+  shimejiScheduler.reset()
+  shimejiBehavior.value = 'idle'
+  shimejiIdleSince = Date.now()
+  scheduleShimeji()
+}
+
+const shimejiGate = computed(() => [
+  store.shimejiEnabled,
+  store.reactionsEnabled,
+  store.dndEnabled,
+  store.currentState,
+  store.activeSessions.length,
+  store.permissionRequests.length,
+  store.petWindowMode.mode,
+  store.isDragging,
+  store.petsLoaded,
+  shimejiManifestCapabilities.value.canWalk,
+  shimejiManifestCapabilities.value.canSleep,
+  shimejiReducedMotion.value,
+  shimejiPowerSave.value,
+  document.visibilityState,
+].join('|'))
+
+watch(shimejiGate, restartShimeji)
+
+function onShimejiVisibilityChange(): void {
+  restartShimeji()
+}
+
+async function initializeShimejiEnvironment(): Promise<void> {
+  shimejiMediaQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)') ?? null
+  if (shimejiMediaQuery) {
+    shimejiReducedMotion.value = shimejiMediaQuery.matches
+    shimejiMediaQuery.addEventListener?.('change', restartShimeji)
+  }
+  document.addEventListener('visibilitychange', onShimejiVisibilityChange)
+
+  if (window.electronAPI?.getPowerSaveState) {
+    try {
+      shimejiPowerSave.value = await window.electronAPI.getPowerSaveState()
+    } catch {}
+  }
+  cleanupShimejiPowerSave = window.electronAPI?.onPowerSaveStateUpdated?.((powerSave) => {
+    shimejiPowerSave.value = powerSave
+  }) ?? null
+
+  const getBattery = (navigator as Navigator & {
+    getBattery?: () => Promise<ShimejiBattery>
+  }).getBattery
+  if (getBattery) {
+    try {
+      shimejiBattery = await getBattery()
+      shimejiBattery.addEventListener('chargingchange', updateShimejiPowerSave)
+      shimejiBattery.addEventListener('levelchange', updateShimejiPowerSave)
+      updateShimejiPowerSave()
+    } catch {
+      // Battery API 在 Electron 中可能不存在；仍保留 Reduced Motion 與 DND 閘門。
+    }
+  }
+}
+
+function disposeShimejiEnvironment(): void {
+  stopShimejiTimer()
+  document.removeEventListener('visibilitychange', onShimejiVisibilityChange)
+  shimejiMediaQuery?.removeEventListener?.('change', restartShimeji)
+  cleanupShimejiPowerSave?.()
+  cleanupShimejiPowerSave = null
+  shimejiBattery?.removeEventListener('chargingchange', updateShimejiPowerSave)
+  shimejiBattery?.removeEventListener('levelchange', updateShimejiPowerSave)
+  shimejiMediaQuery = null
+  shimejiBattery = null
+}
 
 // --- 狀態列與 Quota 顯示 ---------------------------------------------------
 
@@ -161,6 +324,7 @@ let contentObserver: ResizeObserver | null = null
 
 onMounted(() => {
   store.loadPets()
+  void initializeShimejiEnvironment()
 
   if (!clickAreaRef.value || !window.electronAPI?.reportContentHeight) return
   contentObserver = new ResizeObserver(([entry]) => {
@@ -172,9 +336,32 @@ onMounted(() => {
 onBeforeUnmount(() => {
   contentObserver?.disconnect()
   contentObserver = null
+  disposeShimejiEnvironment()
 })
 
 // --- 拖曳與點擊 --------------------------------------------------------------
+
+let lastCursorLookAt = 0
+let lastCursorLookDirection: -1 | 0 | 1 = 0
+function onPetMouseMove(e: MouseEvent): void {
+  if (!store.shimejiEnabled || !store.reactionsActive || store.currentState !== 'idle') return
+  if (store.petWindowMode.mode !== 'normal' || store.isDragging) return
+  const area = clickAreaRef.value
+  if (!area) return
+  const rect = area.getBoundingClientRect()
+  const offset = e.clientX - (rect.left + rect.width / 2)
+  const direction: -1 | 0 | 1 = offset < -12 ? -1 : offset > 12 ? 1 : 0
+  if (direction === 0 || direction === lastCursorLookDirection) return
+  const now = Date.now()
+  if (now - lastCursorLookAt < 350) return
+  lastCursorLookAt = now
+  lastCursorLookDirection = direction
+  if (isMultiPet.value) {
+    multiPetRefs.value.forEach(anim => anim?.playCursorLook(direction))
+  } else {
+    petAnimRef.value?.playCursorLook(direction)
+  }
+}
 
 function onMouseDown(e: MouseEvent) {
   if (e.button !== 0) return
@@ -291,6 +478,7 @@ watch(() => store.achievementUnlock, (unlock) => {
       class="pet-click-area"
       :class="{ dragging: store.isDragging }"
       @mousedown="onMouseDown"
+      @mousemove="onPetMouseMove"
       @click="onClick"
       @contextmenu.prevent
     >
@@ -432,6 +620,7 @@ watch(() => store.achievementUnlock, (unlock) => {
               :pet-id="line.petId"
               :since="line.since"
               :mood="store.moodVisualsEnabled ? store.mood : undefined"
+              :autonomous-behavior="shimejiBehavior"
             />
             <div
               class="status-line multi-pet-status-line"
@@ -490,6 +679,7 @@ watch(() => store.achievementUnlock, (unlock) => {
           :pet-id="store.activePetId"
           :since="store.highestPrioritySession?.lastSeenAt"
           :mood="store.moodVisualsEnabled ? store.mood : undefined"
+          :autonomous-behavior="shimejiBehavior"
         />
         <TransitionGroup tag="div" name="status-line" class="status-lines">
           <div

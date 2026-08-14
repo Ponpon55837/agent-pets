@@ -60,6 +60,8 @@
   "remove": "移除",
   "desktopBehavior": "桌面行為",
   "desktopBehaviorHelp": "選擇要在桌面上常駐的選用功能。",
+  "shimejiBehavior": "Shimeji 自主行為",
+  "shimejiBehaviorHelp": "讓寵物在閒置時低頻走動、休息與回應游標；工作、Permission、勿擾或省電時會暫停。",
   "windowModes": "視窗模式",
   "miniMode": "Mini 模式",
   "miniModeHelp": "保持寵物精簡顯示；隨時可以回到 Normal。",
