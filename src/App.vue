@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from 'vue'
-import { useAgentStore } from './stores/agentStore'
-import DesktopPet from './components/DesktopPet.vue'
-import StatusPanel from './components/StatusPanel.vue'
-import SetupWizard from './components/SetupWizard.vue'
-import ProjectMcpPanel from './components/ProjectMcpPanel.vue'
-import { playCue } from './utils/sound'
-import type { DesktopPreferences } from './types/desktop'
-import { setLocale as applyLocale } from './i18n'
+import { useAgentStore } from '@/stores/agentStore'
+import DesktopPet from '@/components/DesktopPet.vue'
+import StatusPanel from '@/components/StatusPanel.vue'
+import SetupWizard from '@/components/SetupWizard.vue'
+import ProjectMcpPanel from '@/components/ProjectMcpPanel.vue'
+import { playCue } from '@/utils/sound'
+import type { DesktopPreferences } from '@/types/desktop'
+import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
+import { setLocale as applyLocale } from '@/i18n'
 
 const store = useAgentStore()
 const isPanelWindow = window.location.hash === '#panel'
@@ -18,6 +19,8 @@ let cleanupPanelOpenSettings: (() => void) | null = null
 let cleanupDesktopPreferences: (() => void) | null = null
 let cleanupPetWindowMode: (() => void) | null = null
 let cleanupProgression: (() => void) | null = null
+let cleanupAchievements: (() => void) | null = null
+let cleanupAchievementUnlock: (() => void) | null = null
 let cleanupQuotaUpdated: (() => void) | null = null
 let cleanupPermissionRequests: (() => void) | null = null
 let cleanupPresentationIntent: (() => void) | null = null
@@ -158,6 +161,16 @@ onMounted(() => {
       store.setProgressionSnapshot(snapshot)
     })
   }
+  if (electronAPI?.onAchievementsUpdated) {
+    cleanupAchievements = electronAPI.onAchievementsUpdated((snapshot: AchievementSnapshot) => {
+      store.setAchievementsSnapshot(snapshot)
+    })
+  }
+  if (electronAPI?.onAchievementUnlocked) {
+    cleanupAchievementUnlock = electronAPI.onAchievementUnlocked((unlock: AchievementUnlock) => {
+      store.handleAchievementUnlocked(unlock)
+    })
+  }
   if (electronAPI?.onPermissionRequestsUpdated) {
     cleanupPermissionRequests = electronAPI.onPermissionRequestsUpdated((requests: unknown) => {
       store.setPermissionRequests(requests)
@@ -167,6 +180,7 @@ onMounted(() => {
   void store.initializeDesktopPreferences()
   void store.initializePetWindowMode()
   void store.initializeProgression()
+  void store.initializeAchievements()
   if (electronAPI?.onQuotaUsageUpdated) {
     cleanupQuotaUpdated = electronAPI.onQuotaUsageUpdated((usage: unknown) => {
       store.setQuotaUsage(usage)
@@ -256,6 +270,8 @@ onUnmounted(() => {
   cleanupDesktopPreferences?.()
   cleanupPetWindowMode?.()
   cleanupProgression?.()
+  cleanupAchievements?.()
+  cleanupAchievementUnlock?.()
   cleanupQuotaUpdated?.()
   cleanupPermissionRequests?.()
   cleanupPresentationIntent?.()

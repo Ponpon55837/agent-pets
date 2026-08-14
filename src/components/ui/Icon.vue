@@ -18,6 +18,10 @@ const paths: Record<string, string> = {
   pets: 'M8 9.2c2 0 3.4 1.2 3.4 2.7 0 1.2-1 2-2.3 1.7l-1.1-.3-1.1.3c-1.3.3-2.3-.5-2.3-1.7 0-1.5 1.4-2.7 3.4-2.7ZM4.4 5.6a1.2 1.5 0 1 0 0 3 1.2 1.5 0 0 0 0-3M11.6 5.6a1.2 1.5 0 1 0 0 3 1.2 1.5 0 0 0 0-3M6.6 2.4a1.1 1.4 0 1 0 0 2.8 1.1 1.4 0 0 0 0-2.8M9.4 2.4a1.1 1.4 0 1 0 0 2.8 1.1 1.4 0 0 0 0-2.8',
   // Growth — an ascending trend line.
   growth: 'M2 12.2 6 8l2.6 2.6L14 5M10.4 4.6H14v3.6',
+  // Trophy — a compact achievement mark for the Growth gallery.
+  trophy: 'M5 2.4h6v2.1a3 3 0 0 1-2.2 2.9v1.5h1.8v1.4H5.4V8.9h1.8V7.4A3 3 0 0 1 5 4.5V2.4ZM5 3.2H3.2v1.2a2 2 0 0 0 2 2M11 3.2h1.8v1.2a2 2 0 0 1-2 2M4.2 13.6h7.6',
+  // Lock — an unavailable achievement mark.
+  lock: 'M4.2 7V5.3a3.8 3.8 0 0 1 7.6 0V7M3 7h10v6H3zM8 9.2v1.6',
   // Advanced — sliders.
   advanced: 'M2.6 4.6h10.8M2.6 11.4h10.8M6.2 2.9v3.4M10.4 9.7v3.4',
   // Chrome / inline actions.

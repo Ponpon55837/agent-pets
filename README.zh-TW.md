@@ -16,6 +16,7 @@
 - **Mini／Edge 模式** — Mini 可隨時切換；Edge Peek 需由使用者在 Settings 或 Tray 開啟，拖到螢幕邊緣停留片刻會顯示專用 Liquid Glass handle，不會裁切寵物本體，且會依螢幕與 DPI 變更重新定位。
 - **權限控制** — OpenCode 的 permission request 可直接在 Liquid Glass 寵物氣泡選擇只允許一次或拒絕；只有符合條件且顯示中的請求才會註冊全域快捷鍵。
 - **寵物成長** — 完成 session、受上限保護的觀察到的工作時間、每日首次完成與連續天數會產生持久 XP；Level 與 Evolution 由主行程 SQLite ledger 保存，重開後仍會恢復。
+- **成就圖鑑** — Growth chip 會顯示每隻寵物獨立的 10 個長期里程碑；成就只在主行程解鎖一次，完成時可播放獎勵動畫與一次性原生通知，也會標示 token 成就的精確／估算資料品質。可在 Growth 中獨立關閉追蹤，不會影響 XP、Permission 或事件接收。
 - **Presentation MCP** — 本機、僅展示用途的 MCP bridge 提供 `pet_status`、`pet_react`、`pet_say`；不會執行命令、開啟檔案、批准權限或修改 XP。
 
 ---
@@ -124,6 +125,7 @@
 - **Mood** — 每天從低基準 10 開始；任務成功 +4、失敗 -6。長任務每完成 2 個工具會再 +1（每個任務最多 +8），每持續工作 5 分鐘也會 +1（每個任務最多 +4），因此完成獎勵之前的進度分數最多 +12。心情成長時，會以目前寵物影格生成貼合自身輪廓的動態能量層，並在 90 以上進入完整爆氣效果。點 **Reset** 只會回到 10，不會額外加分。
 - **Mood visuals** — 可關閉 mood 對寵物 aura、色彩與能量層的視覺影響；數值仍會持續追蹤，之後重新開啟即可恢復。
 - **XP／Level** — Growth chip 會顯示目前選取寵物的持久 XP、Level、Evolution 階段與目前 streak。XP 使用有版本的去重 ledger：每個 canonical session 完成 +20、每日首次完成 +10、每觀察到 30 分鐘 active coding +2（每個 session 最多 +10），延續前一天 streak +5。失敗或取消不會扣永久 XP；token milestone 等待精確 token event contract。
+- **Achievements／成就** — 同一個 Growth chip 內的圖鑑會顯示 10 個成就（首次完成、session／活躍日門檻、Night Owl、不同 Agent、連續天數、Level 與 token milestone）。解鎖資料寫入獨立的 `achievements.sqlite`，每隻寵物與版本各自去重；重播事件或重開 App 不會重複通知。關閉「啟用成就」只停止新的解鎖，既有成就與 XP 不會被清除。
 
 **Pets 分頁**
 

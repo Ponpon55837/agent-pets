@@ -1,10 +1,11 @@
-import type { AppLocale } from './locale'
+import type { AppLocale } from '@/types/locale'
 
 export interface DesktopPreferences {
   dndEnabled: boolean
   notificationsEnabled: boolean
   permissionBubbleEnabled: boolean
   presentationMcpEnabled: boolean
+  achievementsEnabled: boolean
   edgeModeEnabled: boolean
   soundEnabled: boolean
   launchAtStartup: boolean
@@ -18,6 +19,7 @@ export type DesktopPreferencesPatch = Partial<Pick<
   | 'notificationsEnabled'
   | 'permissionBubbleEnabled'
   | 'presentationMcpEnabled'
+  | 'achievementsEnabled'
   | 'edgeModeEnabled'
   | 'soundEnabled'
   | 'launchAtStartup'

@@ -1,4 +1,4 @@
-import type { AgentState } from './agent'
+import type { AgentState } from '@/types/agent'
 
 export type HistoryTokenQuality = 'none' | 'estimated' | 'exact'
 

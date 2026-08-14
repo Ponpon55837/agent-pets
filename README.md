@@ -16,6 +16,7 @@ Desktop pet that shows real-time status of your AI coding agents.
 - **Mini / Edge mode** — Mini is always opt-in; Edge Peek is a separate Settings/Tray toggle (off by default) that shows a dedicated Liquid Glass handle at the display edge instead of clipping the pet. Bounds are restored across display and DPI changes.
 - **Permission Control** — OpenCode permission requests can be allowed once or denied from a Liquid Glass pet bubble; scoped hotkeys are available only while an eligible request is visible.
 - **Pet progression** — Completed sessions, bounded observed active-time, first completions of the day, and consecutive-day streaks earn durable XP. Level and evolution are restored after restart from a main-process SQLite ledger.
+- **Achievement gallery** — The Growth chip shows ten pet-scoped long-term milestones. Unlocks are evaluated and persisted once in the main process, with a one-shot native notification and visual reward; token milestones show exact versus estimated quality. The Growth toggle can stop new unlocks without affecting XP, permissions, or event ingestion.
 - **Presentation MCP** — A local, presentation-only MCP bridge exposes `pet_status`, `pet_react`, and `pet_say`. It never runs commands, opens files, approves permissions, or changes XP.
 
 ---
@@ -124,6 +125,7 @@ The panel uses an extensible section navigator: **Language**, **Appearance**, **
 - **Mood** — Starts each day at a low baseline of 10. A successful task gives +4 and an error gives -6. Long tasks also earn +1 for every 2 completed tools (up to +8 per task) and +1 for every 5 minutes of work (up to +4 per task), so progress rewards are capped at +12 before the completion bonus. As mood grows, an animated energy layer built from the current pet frame intensifies around the pet's own silhouette, reaching overdrive at 90+. Click **Reset** to return to 10; it never grants extra mood.
 - **Mood visuals** — Turn off mood's aura, color, and energy-layer presentation without stopping mood tracking; re-enable it at any time.
 - **XP / Level** — The Growth chip shows the selected pet's durable XP, level, evolution stage, and current streak. XP uses a versioned, idempotent ledger: a canonical session completion is +20 XP, the first completion of a local day is +10, each observed 30 minutes of active coding is +2 (capped at +10 per session), and continuing yesterday's streak is +5. Failed or cancelled work grants no permanent XP; token milestones wait for an exact token event contract.
+- **Achievements** — The same Growth chip includes ten milestones (first completion, session/active-day thresholds, Night Owl, adapter breadth, streak, levels, and token usage). Unlocks live in a separate `achievements.sqlite`, are scoped per pet and registry version, and are idempotent across event replay and restart. Turning off **Enable achievements** stops new unlocks only; it does not erase existing achievements or XP.
 
 **Pets tab**
 

@@ -1,7 +1,7 @@
 import type { AgentStatusEvent } from './event-server'
 import { t } from '../src/i18n.ts'
 
-export type NotificationKind = 'waiting-permission' | 'waiting-input' | 'success' | 'error'
+export type NotificationKind = 'waiting-permission' | 'waiting-input' | 'success' | 'error' | 'achievement'
 
 export interface NotificationCandidate {
   key: string

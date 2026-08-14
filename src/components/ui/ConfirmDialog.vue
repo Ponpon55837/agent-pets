@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onUnmounted, ref, watch } from 'vue'
-import { t } from '../../i18n'
-import Button from './Button.vue'
+import { t } from '@/i18n'
+import Button from '@/components/ui/Button.vue'
 
 // Replaces window.confirm(). The native dialog steals focus from the panel,
 // which the main process reads as a blur and hides the panel out from under

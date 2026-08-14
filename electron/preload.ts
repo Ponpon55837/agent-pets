@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
 import type { PermissionDecisionValue, PermissionRequestView } from '../src/types/permission'
 import type { ProgressionSnapshot } from '../src/types/progression'
+import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 import type { PresentationIntent, PresentationStatusUpdate } from '../src/types/presentation'
@@ -119,6 +120,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   setProgressionPet: (petId: string): Promise<ProgressionSnapshot | null> => {
     return ipcRenderer.invoke('progression-set-pet', petId)
+  },
+
+  initializeAchievements: (petId?: string): Promise<AchievementSnapshot | null> => {
+    return ipcRenderer.invoke('achievements-init', petId)
+  },
+
+  onAchievementsUpdated: (callback: (snapshot: AchievementSnapshot) => void) => {
+    const handler = (_event: unknown, snapshot: AchievementSnapshot) => callback(snapshot)
+    ipcRenderer.on('achievements-updated', handler)
+    return () => {
+      ipcRenderer.removeListener('achievements-updated', handler)
+    }
+  },
+
+  onAchievementUnlocked: (callback: (unlock: AchievementUnlock) => void) => {
+    const handler = (_event: unknown, unlock: AchievementUnlock) => callback(unlock)
+    ipcRenderer.on('achievement-unlocked', handler)
+    return () => {
+      ipcRenderer.removeListener('achievement-unlocked', handler)
+    }
   },
 
   onProgressionUpdated: (callback: (snapshot: ProgressionSnapshot) => void) => {

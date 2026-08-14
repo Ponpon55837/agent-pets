@@ -25,6 +25,7 @@ import { DesktopTrayController } from './desktop-tray'
 import { PermissionBroker } from './permission-broker'
 import { appendPermissionAudit } from './permission-audit'
 import { ProgressionStore } from './progression'
+import { AchievementStore } from './achievements'
 import { HistoryStore } from './history'
 import { LocalUsageReader } from './local-usage'
 import {
@@ -45,6 +46,7 @@ import {
 import type { DesktopPreferences } from '../src/types/desktop'
 import { setLocale, t } from '../src/i18n'
 import type { ProgressionSnapshot } from '../src/types/progression'
+import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
 import type { PresentationIntent, PresentationStatusSnapshot } from '../src/types/presentation'
 import type { ProjectMcpRegistrySnapshot, ProjectMcpRemovalSummary } from '../src/types/project-mcp'
@@ -94,6 +96,7 @@ let permissionAdapterServer: Server | null = null
 let permissionBroker: PermissionBroker | null = null
 let permissionRelay: PermissionAdapterRelay | null = null
 let progressionStore: ProgressionStore | null = null
+let achievementStore: AchievementStore | null = null
 let historyStore: HistoryStore | null = null
 let localUsageReader: LocalUsageReader | null = null
 let localUsageScanTimer: ReturnType<typeof setInterval> | null = null
@@ -934,6 +937,7 @@ function currentDesktopPreferences(): DesktopPreferences {
       notificationsEnabled: true,
       permissionBubbleEnabled: true,
       presentationMcpEnabled: true,
+      achievementsEnabled: true,
       edgeModeEnabled: false,
       soundEnabled: false,
       launchAtStartup: false,
@@ -1029,6 +1033,27 @@ function broadcastProgression(snapshot?: ProgressionSnapshot): void {
   }
 }
 
+function broadcastAchievements(petId?: string): void {
+  const snapshot = achievementStore?.getSnapshot(
+    petId ?? progressionStore?.getActivePetId() ?? 'aang-airbender',
+  )
+  if (!snapshot) return
+  for (const window of [petWindow, panelWindow]) {
+    if (window && !window.isDestroyed()) window.webContents.send('achievements-updated', snapshot)
+  }
+}
+
+function broadcastAchievementUnlock(unlock: AchievementUnlock): void {
+  desktopNotifications?.showAchievement(unlock)
+  for (const window of [petWindow, panelWindow]) {
+    if (window && !window.isDestroyed()) window.webContents.send('achievement-unlocked', unlock)
+  }
+  // The unlock payload identifies the routed pet for the visual reward, but
+  // the gallery in each renderer must remain scoped to its currently selected
+  // pet rather than jumping to a background project pet.
+  broadcastAchievements()
+}
+
 function currentHistorySummary(projectId?: string): HistorySummary | null {
   if (!historyStore) return null
   return historyStore.getSummary(progressionStore?.getActivePetId() ?? 'aang-airbender', projectId)
@@ -1116,6 +1141,18 @@ function createProgressionServices(): void {
   }
 }
 
+function createAchievementServices(): void {
+  if (achievementStore) return
+  try {
+    achievementStore = new AchievementStore(join(app.getPath('userData'), 'achievements.sqlite'))
+  } catch (error) {
+    // Achievements are an additive feedback surface. A broken achievement
+    // database must never prevent XP, permissions, history, or event ingest.
+    console.error('Achievement storage is unavailable', error)
+    achievementStore = null
+  }
+}
+
 function createHistoryServices(): void {
   if (historyStore) return
   try {
@@ -1146,6 +1183,7 @@ function setActiveProgressionPet(petId: string): ProgressionSnapshot | null {
   if (!progressionStore) return null
   const snapshot = progressionStore.setActivePet(petId)
   broadcastProgression(snapshot)
+  broadcastAchievements(petId)
   return snapshot
 }
 
@@ -1387,6 +1425,7 @@ app.whenReady().then(() => {
   screen.on('display-metrics-changed', rehomePetWindowForDisplayChange)
   createPermissionServices(permissionToken)
   createProgressionServices()
+  createAchievementServices()
   createHistoryServices()
 
   eventServer = createEventServer(
@@ -1401,11 +1440,29 @@ app.whenReady().then(() => {
       } catch {
         console.error('Desktop notification handling failed')
       }
+      let progressionResult: ReturnType<ProgressionStore['handleEvent']> | undefined
       try {
-        const result = progressionStore?.handleEvent(event, event.routedPetId)
-        if (result) broadcastProgression(result.snapshot)
+        progressionResult = progressionStore?.handleEvent(event, event.routedPetId)
+        if (progressionResult) broadcastProgression(progressionResult.snapshot)
       } catch (error) {
         console.error('Progression event handling failed', error)
+      }
+      try {
+        // Achievement rules only depend on terminal completions and explicit
+        // token usage. Do not open the achievement SQLite transaction for the
+        // high-frequency thinking/tool-running heartbeat events that carry no
+        // new fact; this keeps the additive subsystem off the hot path.
+        if (
+          currentDesktopPreferences().achievementsEnabled
+          && achievementStore
+          && (event.state === 'success' || event.tokenUsage !== undefined)
+        ) {
+          const routedPetId = event.routedPetId ?? progressionResult?.snapshot.petId ?? progressionStore?.getActivePetId() ?? 'aang-airbender'
+          const unlocks = achievementStore.recordEvent(event, routedPetId, progressionResult?.snapshot)
+          unlocks.forEach(broadcastAchievementUnlock)
+        }
+      } catch (error) {
+        console.error('Achievement event handling failed', error)
       }
       try {
         const routedPetId = event.routedPetId ?? progressionStore?.getActivePetId() ?? 'aang-airbender'
@@ -1645,6 +1702,15 @@ app.whenReady().then(() => {
     assertTrustedIpcSender(event)
     if (!isProgressionPetId(petId)) return null
     return setActiveProgressionPet(petId)
+  })
+
+  ipcMain.handle('achievements-init', (event, petId?: unknown): AchievementSnapshot | null => {
+    assertTrustedIpcSender(event)
+    if (!achievementStore) return null
+    const selectedPet = petId === undefined
+      ? progressionStore?.getActivePetId() ?? 'aang-airbender'
+      : isProgressionPetId(petId) ? petId : null
+    return selectedPet ? achievementStore.getSnapshot(selectedPet) : null
   })
 
   ipcMain.handle('permission-requests-init', (event) => {
@@ -2279,6 +2345,8 @@ app.on('before-quit', () => {
   permissionBroker?.shutdown()
   progressionStore?.close()
   progressionStore = null
+  achievementStore?.close()
+  achievementStore = null
   historyStore?.close()
   historyStore = null
   projectRoutingStore?.close()

@@ -1,35 +1,36 @@
 import { defineStore } from 'pinia'
-import { t, translateBackendError } from '../i18n'
-import { ref, computed, watch } from 'vue'
+import { ref, shallowRef, computed, watch } from 'vue'
+import { t, translateBackendError, setLocale as applyLocale } from '@/i18n'
 import type {
   AgentSession,
   AgentSource,
   AgentState,
   AgentStatusEvent,
-} from '../types/agent'
-import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '../types/agent'
-import type { DesktopPreferences, DesktopPreferencesPatch } from '../types/desktop'
-import type { AppLocale } from '../types/locale'
-import { setLocale as applyLocale } from '../i18n'
-import type { PermissionDecisionValue, PermissionRequestView } from '../types/permission'
-import type { ProgressionSnapshot } from '../types/progression'
-import type { PetWindowMode, PetWindowModeState } from '../types/pet-window'
-import { normalizePetWindowModeState } from '../types/pet-window'
-import type { ProjectPetView } from '../types/project-pet'
+} from '@/types/agent'
+import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
+import type { DesktopPreferences, DesktopPreferencesPatch } from '@/types/desktop'
+import type { AppLocale } from '@/types/locale'
+import type { PermissionDecisionValue, PermissionRequestView } from '@/types/permission'
+import type { ProgressionSnapshot } from '@/types/progression'
+import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
+import { ACHIEVEMENT_DEFINITIONS } from '@/types/achievement'
+import type { PetWindowMode, PetWindowModeState } from '@/types/pet-window'
+import { normalizePetWindowModeState } from '@/types/pet-window'
+import type { ProjectPetView } from '@/types/project-pet'
 import type {
   PresentationIntent,
   PresentationMood,
   PresentationReaction,
   PresentationStatusUpdate,
-} from '../types/presentation'
-import { PRESENTATION_REACTIONS } from '../types/presentation'
-import { formatProject } from '../utils/format'
-import { isDesktopEffectActive } from '../utils/desktop-effects'
+} from '@/types/presentation'
+import { PRESENTATION_REACTIONS } from '@/types/presentation'
+import { formatProject } from '@/utils/format'
+import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import {
   createToastCountdown,
   getToastRemainingMs,
   type ToastCountdown,
-} from '../utils/toast-countdown'
+} from '@/utils/toast-countdown'
 
 export interface PetEntry {
   id: string
@@ -180,6 +181,7 @@ interface MoodTaskProgress {
 }
 
 export const useAgentStore = defineStore('agent', () => {
+  // --- 核心狀態 ----------------------------------------------------------
   const sessions = ref<Record<string, AgentSession>>({})
   const isDragging = ref(false)
   const petWindowMode = ref<PetWindowModeState>({ mode: 'normal' })
@@ -192,7 +194,10 @@ export const useAgentStore = defineStore('agent', () => {
   const projectPetsLoading = ref(false)
   const projectPetsError = ref('')
   const projectPetsEnabled = ref(true)
-  const quotaUsage = ref<QuotaUsage | null>(null)
+  // shallowRef: quotaUsage is always replaced wholesale (never mutated via a
+  // nested property write), so deep reactivity tracking on its providers/
+  // windows arrays would just be wasted work on every quota refresh.
+  const quotaUsage = shallowRef<QuotaUsage | null>(null)
   const quotaLoading = ref(false)
   const quotaError = ref('')
   // Bumped whenever a Codex/Claude session reaches a terminal state, i.e.
@@ -307,8 +312,13 @@ export const useAgentStore = defineStore('agent', () => {
 
   // Off by default — the completion toast / "what's it doing" bubble.
   const bubbleEnabled = ref(localStorage.getItem('agent-pet-bubble') === '1')
-  const permissionRequests = ref<PermissionRequestView[]>([])
-  const progression = ref<ProgressionSnapshot | null>(null)
+  // shallowRef: all three are always replaced wholesale (setPermissionRequests,
+  // setProgressionSnapshot, setAchievementsSnapshot each assign a fresh value),
+  // never mutated in place — see the comment on quotaUsage above.
+  const permissionRequests = shallowRef<PermissionRequestView[]>([])
+  const progression = shallowRef<ProgressionSnapshot | null>(null)
+  const achievements = shallowRef<AchievementSnapshot | null>(null)
+  const achievementUnlock = ref<AchievementUnlock | null>(null)
   const presentationQueue = ref<PresentationIntent[]>([])
   const presentationActive = ref<PresentationIntent | null>(null)
   const presentationReaction = ref<{
@@ -325,6 +335,7 @@ export const useAgentStore = defineStore('agent', () => {
   const notificationsEnabled = ref(true)
   const permissionBubbleEnabled = ref(true)
   const presentationMcpEnabled = ref(true)
+  const achievementsEnabled = ref(true)
   const edgeModeEnabled = ref(false)
   const launchAtStartup = ref(false)
   const launchAtStartupSupported = ref(false)
@@ -352,6 +363,8 @@ export const useAgentStore = defineStore('agent', () => {
     : null
   ))
 
+  // --- 心情（Mood） -------------------------------------------------------
+
   function clampMood(value: number): number {
     if (Number.isNaN(value)) return MOOD_BASELINE
     return Math.max(0, Math.min(100, value))
@@ -376,6 +389,8 @@ export const useAgentStore = defineStore('agent', () => {
     moodVisualsEnabled.value = enabled
     localStorage.setItem('agent-pet-mood-visuals', enabled ? '1' : '0')
   }
+
+  // --- Toast 提示 ----------------------------------------------------------
 
   function showToast(source: AgentSource, project: string | undefined, tone: 'success' | 'error') {
     const label = SOURCE_LABELS[source]
@@ -418,6 +433,8 @@ export const useAgentStore = defineStore('agent', () => {
       toastTimer = null
     }, getToastRemainingMs(countdown, startedAt))
   }
+
+  // --- Presentation MCP（本機 MCP client 的簡短反應/語音佇列） -----------------
 
   function clearPresentation(): void {
     if (presentationTimer) clearTimeout(presentationTimer)
@@ -535,12 +552,15 @@ export const useAgentStore = defineStore('agent', () => {
     updateDesktopPreferences({ soundEnabled: enabled })
   }
 
+  // --- 桌面偏好設定（同步自 Electron 主行程） -------------------------------
+
   function applyDesktopPreferences(preferences: DesktopPreferences) {
     applyLocale(preferences.locale)
     dndEnabled.value = preferences.dndEnabled
     notificationsEnabled.value = preferences.notificationsEnabled
     permissionBubbleEnabled.value = preferences.permissionBubbleEnabled
     presentationMcpEnabled.value = preferences.presentationMcpEnabled
+    achievementsEnabled.value = preferences.achievementsEnabled
     edgeModeEnabled.value = preferences.edgeModeEnabled
     soundEnabled.value = preferences.soundEnabled
     launchAtStartup.value = preferences.launchAtStartup
@@ -595,6 +615,11 @@ export const useAgentStore = defineStore('agent', () => {
     updateDesktopPreferences({ presentationMcpEnabled: enabled })
   }
 
+  function setAchievementsEnabled(enabled: boolean) {
+    achievementsEnabled.value = enabled
+    updateDesktopPreferences({ achievementsEnabled: enabled })
+  }
+
   function setEdgeModeEnabled(enabled: boolean) {
     edgeModeEnabled.value = enabled
     updateDesktopPreferences({ edgeModeEnabled: enabled })
@@ -625,6 +650,8 @@ export const useAgentStore = defineStore('agent', () => {
     bubbleEnabled.value = enabled
     localStorage.setItem('agent-pet-bubble', enabled ? '1' : '0')
   }
+
+  // --- 寵物選擇與視窗模式 -----------------------------------------------------
 
   function setPet(petId: string) {
     selectedPet.value = petId
@@ -659,11 +686,109 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  // --- 成長進度與成就 ---------------------------------------------------------
+
   function setProgressionSnapshot(value: unknown): boolean {
     const normalized = normalizeProgressionSnapshot(value)
     if (!normalized) return false
     progression.value = normalized
     return true
+  }
+
+  function setAchievementsSnapshot(value: unknown): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const raw = value as Partial<AchievementSnapshot>
+    const generatedAt = raw.generatedAt
+    const petId = raw.petId
+    if (
+      raw.schemaVersion !== 1
+      || typeof petId !== 'string'
+      || !/^[A-Za-z0-9._-]{1,128}$/.test(petId)
+      || !Number.isSafeInteger(generatedAt)
+      || !Array.isArray(raw.achievements)
+      || raw.achievements.length !== ACHIEVEMENT_DEFINITIONS.length
+    ) return false
+
+    const seen = new Set<string>()
+    const normalized = raw.achievements.map(candidate => {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null
+      const item = candidate as Partial<AchievementSnapshot['achievements'][number]>
+      const definition = ACHIEVEMENT_DEFINITIONS.find(entry => entry.id === item.id)
+      if (
+        !definition
+        || seen.has(definition.id)
+        || item.version !== definition.version
+        || item.titleKey !== definition.titleKey
+        || item.descriptionKey !== definition.descriptionKey
+        || item.visualReward !== definition.visualReward
+        || typeof item.unlocked !== 'boolean'
+        || (item.unlockedAt !== undefined && (!Number.isSafeInteger(item.unlockedAt) || item.unlockedAt < 0))
+        || (item.tokenQuality !== 'none' && item.tokenQuality !== 'estimated' && item.tokenQuality !== 'exact')
+      ) return null
+      seen.add(definition.id)
+      return {
+        id: definition.id,
+        version: definition.version,
+        titleKey: definition.titleKey,
+        descriptionKey: definition.descriptionKey,
+        visualReward: definition.visualReward,
+        unlocked: item.unlocked,
+        ...(item.unlockedAt === undefined ? {} : { unlockedAt: item.unlockedAt }),
+        tokenQuality: item.tokenQuality,
+      }
+    })
+    if (normalized.some(item => item === null)) return false
+    const safeAchievements = normalized as AchievementSnapshot['achievements']
+    achievements.value = {
+      schemaVersion: 1,
+      generatedAt: generatedAt as number,
+      petId,
+      totalUnlocked: safeAchievements.filter(item => item.unlocked).length,
+      achievements: safeAchievements,
+    }
+    return true
+  }
+
+  function handleAchievementUnlocked(value: unknown): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const raw = value as Partial<AchievementUnlock>
+    const definition = ACHIEVEMENT_DEFINITIONS.find(entry => entry.id === raw.achievementId)
+    const petId = raw.petId
+    const unlockedAt = raw.unlockedAt
+    const tokenQuality = raw.tokenQuality
+    if (
+      typeof petId !== 'string'
+      || !/^[A-Za-z0-9._-]{1,128}$/.test(petId)
+      || !definition
+      || raw.version !== definition.version
+      || raw.titleKey !== definition.titleKey
+      || raw.descriptionKey !== definition.descriptionKey
+      || raw.visualReward !== definition.visualReward
+      || typeof raw.achievementId !== 'string'
+      || !Number.isSafeInteger(unlockedAt)
+      || (unlockedAt as number) < 0
+      || (tokenQuality !== 'none' && tokenQuality !== 'estimated' && tokenQuality !== 'exact')
+    ) return false
+    achievementUnlock.value = {
+      petId,
+      achievementId: definition.id,
+      version: definition.version,
+      unlockedAt: unlockedAt as number,
+      titleKey: definition.titleKey,
+      descriptionKey: definition.descriptionKey,
+      visualReward: definition.visualReward,
+      tokenQuality: tokenQuality as AchievementUnlock['tokenQuality'],
+    }
+    return true
+  }
+
+  async function initializeAchievements(): Promise<void> {
+    try {
+      const snapshot = await window.electronAPI?.initializeAchievements(selectedPet.value)
+      if (snapshot) setAchievementsSnapshot(snapshot)
+    } catch {
+      achievements.value = null
+    }
   }
 
   async function initializeProgression(): Promise<void> {
@@ -680,10 +805,13 @@ export const useAgentStore = defineStore('agent', () => {
     try {
       const snapshot = await window.electronAPI?.setProgressionPet(petId)
       if (snapshot) setProgressionSnapshot(snapshot)
+      await initializeAchievements()
     } catch {
       // Main remains authoritative; a later broadcast restores the snapshot.
     }
   }
+
+  // --- Agent 事件處理與工作階段生命週期 ---------------------------------------
 
   function getSessionKey(source: AgentSource, sessionId: string): string {
     return `${source}:${sessionId}`
@@ -850,6 +978,8 @@ export const useAgentStore = defineStore('agent', () => {
       }
     }
   }
+
+  // --- Quota 與工作階段衍生狀態（computed） -----------------------------------
 
   const activeSessions = computed(() => {
     return Object.values(sessions.value).filter(
@@ -1060,6 +1190,8 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  // --- Permission 請求 ---------------------------------------------------------
+
   const permissionRequest = computed(() => permissionRequests.value[0] ?? null)
 
   // The broker's `agentId` is the literal AgentSource string for every
@@ -1133,6 +1265,8 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  // --- 控制面板視窗導覽 ---------------------------------------------------------
+
   // The panel lives in its own always-on-top window (see electron/main.ts),
   // so opening/closing/resizing it never touches the pet window's bounds.
   function togglePanel() {
@@ -1178,6 +1312,8 @@ export const useAgentStore = defineStore('agent', () => {
     showProjectMcpPanel.value = false
   }
 
+  // --- 寵物視窗尺寸同步 -----------------------------------------------------
+
   function resizePetWindow() {
     window.electronAPI?.resizeWindow(scaledW.value, scaledH.value)
   }
@@ -1186,6 +1322,8 @@ export const useAgentStore = defineStore('agent', () => {
   // changes — firing from either window's store instance is harmless, since
   // main process just re-applies the same bounds to the (single) pet window.
   watch([scaledW, scaledH], resizePetWindow, { immediate: true })
+
+  // --- 寵物清單與專案寵物綁定 -------------------------------------------------
 
   async function loadPets() {
     try {
@@ -1287,6 +1425,8 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  // --- 寵物重新命名／移除 -------------------------------------------------------
+
   async function renamePet(petId: string, newName: string) {
     const ok = await window.electronAPI?.renameCustomPet(petId, newName)
     if (ok) {
@@ -1359,6 +1499,7 @@ export const useAgentStore = defineStore('agent', () => {
     notificationsEnabled,
     permissionBubbleEnabled,
     presentationMcpEnabled,
+    achievementsEnabled,
     edgeModeEnabled,
     launchAtStartup,
     launchAtStartupSupported,
@@ -1388,8 +1529,13 @@ export const useAgentStore = defineStore('agent', () => {
     permissionRequests,
     permissionRequest,
     progression,
+    achievements,
+    achievementUnlock,
     setProgressionSnapshot,
+    setAchievementsSnapshot,
+    handleAchievementUnlocked,
     initializeProgression,
+    initializeAchievements,
     setProgressionPet,
     setPermissionRequests,
     initializePermissionRequests,
@@ -1418,6 +1564,7 @@ export const useAgentStore = defineStore('agent', () => {
     setNotificationsEnabled,
     setPermissionBubbleEnabled,
     setPresentationMcpEnabled,
+    setAchievementsEnabled,
     setEdgeModeEnabled,
     setLocalePreference,
     setLaunchAtStartup,

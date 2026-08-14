@@ -1,6 +1,8 @@
 import { Notification } from 'electron'
 import type { DesktopPreferences } from '../src/types/desktop'
+import type { AchievementUnlock } from '../src/types/achievement'
 import type { AgentStatusEvent } from './event-server'
+import { t } from '../src/i18n.ts'
 import { readBoundedJson, writeJsonAtomic } from './desktop-preferences'
 import {
   aggregateTerminalNotifications,
@@ -71,6 +73,24 @@ export class DesktopNotificationService {
     }
 
     this.deliver(candidate.title, candidate.body, candidate.kind, 1)
+  }
+
+  showAchievement(unlock: AchievementUnlock): void {
+    const quality = unlock.tokenQuality === 'exact'
+      ? t('achievementTokenExact')
+      : unlock.tokenQuality === 'estimated'
+        ? t('achievementTokenEstimated')
+        : ''
+    const description = t(unlock.descriptionKey)
+    const body = quality
+      ? `${description} · ${t('achievementTokenQuality', { quality })}`
+      : description
+    this.deliver(
+      `${t('achievementUnlocked')} · ${t(unlock.titleKey)}`,
+      body,
+      'achievement',
+      1,
+    )
   }
 
   clearAttention(): void {

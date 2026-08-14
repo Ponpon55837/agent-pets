@@ -1,23 +1,24 @@
 /// <reference types="vite/client" />
 
-import type { DesktopPreferences, DesktopPreferencesPatch } from './types/desktop'
-import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView } from './types/permission'
-import type { ProgressionSnapshot } from './types/progression'
-import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from './types/history'
-import type { PetWindowMode, PetWindowModeState } from './types/pet-window'
+import type { DesktopPreferences, DesktopPreferencesPatch } from '@/types/desktop'
+import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView } from '@/types/permission'
+import type { ProgressionSnapshot } from '@/types/progression'
+import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
+import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '@/types/history'
+import type { PetWindowMode, PetWindowModeState } from '@/types/pet-window'
 import type {
   AdapterDetection,
   AdapterRuntimeStatus,
   AgentAdapterId,
   DiagnosticReport,
-} from './types/agent-adapter'
-import type { PresentationIntent, PresentationStatusUpdate } from './types/presentation'
+} from '@/types/agent-adapter'
+import type { PresentationIntent, PresentationStatusUpdate } from '@/types/presentation'
 import type {
   ProjectMcpRegistrySnapshot,
   ProjectMcpRemovalSummary,
   ProjectMcpSetupSummary,
-} from './types/project-mcp'
-import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from './types/project-pet'
+} from '@/types/project-mcp'
+import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from '@/types/project-pet'
 
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
@@ -49,6 +50,9 @@ declare global {
       setDesktopPreferences: (patch: DesktopPreferencesPatch) => Promise<DesktopPreferences>
       initializeProgression: (petId?: string) => Promise<ProgressionSnapshot | null>
       setProgressionPet: (petId: string) => Promise<ProgressionSnapshot | null>
+      initializeAchievements: (petId?: string) => Promise<AchievementSnapshot | null>
+      onAchievementsUpdated: (callback: (snapshot: AchievementSnapshot) => void) => () => void
+      onAchievementUnlocked: (callback: (unlock: AchievementUnlock) => void) => () => void
       onProgressionUpdated: (callback: (snapshot: ProgressionSnapshot) => void) => () => void
       onDesktopPreferencesUpdated: (callback: (preferences: DesktopPreferences) => void) => () => void
       initializePermissionRequests: () => Promise<PermissionRequestView[]>

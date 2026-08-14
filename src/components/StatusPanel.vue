@@ -1,22 +1,25 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useAgentStore } from '../stores/agentStore'
-import { STATE_LABELS, SOURCE_LABELS, STATE_COLORS, STATE_PRIORITY, SOURCE_FAMILIES } from '../types/agent'
-import { formatProject } from '../utils/format'
-import { locale, t, translateBackendError } from '../i18n'
-import type { HistoryAgentStat, HistoryDailyStat, HistorySummary } from '../types/history'
-import Button from './ui/Button.vue'
-import Card from './ui/Card.vue'
-import ConfirmDialog from './ui/ConfirmDialog.vue'
-import Icon from './ui/Icon.vue'
-import ProgressTrack from './ui/ProgressTrack.vue'
-import Select from './ui/Select.vue'
-import ToggleRow from './ui/ToggleRow.vue'
+import { useAgentStore } from '@/stores/agentStore'
+import { STATE_LABELS, SOURCE_LABELS, STATE_COLORS, STATE_PRIORITY, SOURCE_FAMILIES } from '@/types/agent'
+import { formatProject, quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
+import { locale, t, translateBackendError, type TranslationKey } from '@/i18n'
+import type { HistoryAgentStat, HistoryDailyStat, HistorySummary } from '@/types/history'
+import type { AchievementTokenQuality, AchievementTranslationKey } from '@/types/achievement'
+import Button from '@/components/ui/Button.vue'
+import Card from '@/components/ui/Card.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import Icon from '@/components/ui/Icon.vue'
+import ProgressTrack from '@/components/ui/ProgressTrack.vue'
+import Select from '@/components/ui/Select.vue'
+import ToggleRow from '@/components/ui/ToggleRow.vue'
 
 const store = useAgentStore()
 const importing = ref(false)
 const editingPetId = ref<string | null>(null)
 const editName = ref('')
+
+// --- 設定分頁 ----------------------------------------------------------------
 
 type SettingsSection = 'language' | 'appearance' | 'desktop' | 'pets' | 'growth' | 'advanced'
 const settingsTab = ref<SettingsSection>('appearance')
@@ -29,6 +32,9 @@ const settingsSections = computed<Array<{ id: SettingsSection; icon: string; lab
   { id: 'advanced', icon: 'advanced', label: t('advanced'), hint: t('advancedHint') },
 ])
 const activeSettingsSection = computed(() => settingsSections.value.find(section => section.id === settingsTab.value))
+
+// --- 控制面板分頁（工作階段 / 用量 / 歷史）------------------------------------
+
 type DashboardTab = 'sessions' | 'usage' | 'history'
 const dashboardTab = ref<DashboardTab>('sessions')
 const dashboardTabs = computed<Array<{ id: DashboardTab; label: string }>>(() => [
@@ -47,6 +53,9 @@ function onTabKeydown(event: KeyboardEvent) {
   selectDashboardTab(next)
   ;(document.getElementById(`tab-${next}`) as HTMLElement | null)?.focus()
 }
+
+// --- 歷史／用量／成長 摘要狀態（各分頁共用）------------------------------------
+
 const historySummary = ref<HistorySummary | null>(null)
 const historyLoading = ref(false)
 const historyError = ref('')
@@ -131,6 +140,8 @@ async function refreshHistory(): Promise<void> {
   }
 }
 
+// --- History 格式化輔助函式 ---------------------------------------------------
+
 function historyDateLabel(value: string): string {
   const date = new Date(`${value}T12:00:00`)
   if (!Number.isFinite(date.getTime())) return value
@@ -151,10 +162,13 @@ function historyDuration(value: number): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
+const HISTORY_TOKEN_LABEL_KEYS: Partial<Record<HistorySummary['tokenQuality'], TranslationKey>> = {
+  exact: 'historyTokenExact',
+  estimated: 'historyTokenEstimated',
+}
+
 function historyTokenLabel(quality: HistorySummary['tokenQuality']): string {
-  if (quality === 'exact') return t('historyTokenExact')
-  if (quality === 'estimated') return t('historyTokenEstimated')
-  return t('historyTokenUnavailable')
+  return t(HISTORY_TOKEN_LABEL_KEYS[quality] ?? 'historyTokenUnavailable')
 }
 
 function historyAgentLabel(adapterId: string): string {
@@ -165,10 +179,14 @@ function historyAgentLabel(adapterId: string): string {
   return adapterId
 }
 
+const PROJECT_PET_STATUS_LABEL_KEYS: Record<'unbound' | 'bound' | 'missing-pet', TranslationKey> = {
+  unbound: 'projectPetUnbound',
+  bound: 'projectPetBound',
+  'missing-pet': 'projectPetMissing',
+}
+
 function projectPetStatusLabel(status: 'unbound' | 'bound' | 'missing-pet'): string {
-  if (status === 'bound') return t('projectPetBound')
-  if (status === 'missing-pet') return t('projectPetMissing')
-  return t('projectPetUnbound')
+  return t(PROJECT_PET_STATUS_LABEL_KEYS[status])
 }
 
 const historyMaxTokens = computed(() => Math.max(
@@ -224,6 +242,24 @@ function historyAgentBarPercent(agent: HistoryAgentStat): number {
   return Math.round((agent.activeMs / totalActiveMs) * 100)
 }
 
+// --- 成就 -------------------------------------------------------------------
+
+function achievementText(key: AchievementTranslationKey): string {
+  return t(key)
+}
+
+const ACHIEVEMENT_TOKEN_QUALITY_LABEL_KEYS: Partial<Record<AchievementTokenQuality, TranslationKey>> = {
+  exact: 'achievementTokenExact',
+  estimated: 'achievementTokenEstimated',
+}
+
+function achievementQualityLabel(quality: AchievementTokenQuality): string {
+  const key = ACHIEVEMENT_TOKEN_QUALITY_LABEL_KEYS[quality]
+  return key ? t(key) : ''
+}
+
+// --- History 匯出／清除 -------------------------------------------------------
+
 async function exportHistory(): Promise<void> {
   historyAction.value = ''
   try {
@@ -235,6 +271,8 @@ async function exportHistory(): Promise<void> {
     historyAction.value = t('historyActionFailed')
   }
 }
+
+// --- 共用確認對話框 -----------------------------------------------------------
 
 // One in-panel confirmation flow for every destructive action. A native
 // window.confirm() would steal focus, which the main process reads as a blur
@@ -280,16 +318,10 @@ async function performClearHistory(): Promise<void> {
   }
 }
 
-function formatRemaining(value: number): string {
-  const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10
-  return t('remainingPercent', { value: rounded })
-}
+// --- Quota 格式化輔助函式 -----------------------------------------------------
 
-function formatQuotaLabel(id: string, label: string): string {
-  const identity = `${id} ${label}`.toLowerCase()
-  if (identity.includes('session') || identity.includes('five_hour')) return t('fiveHourLimit')
-  if (identity.includes('weekly') || identity.includes('seven_day')) return t('weeklyLimit')
-  return label
+function formatRemaining(value: number): string {
+  return t('remainingPercent', { value: roundQuotaPercent(value) })
 }
 
 function formatReset(timestamp?: string): string {
@@ -323,6 +355,8 @@ function formatUpdated(timestamp: string): string {
   return new Date(timestamp).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
 }
 
+// --- 工作階段即時經過時間 -------------------------------------------------------
+
 const LIVE_STATES = new Set(['thinking', 'tool-running', 'waiting-permission', 'waiting-input'])
 
 function elapsedLabel(session: { state: string; lastSeenAt: number }): string | null {
@@ -330,6 +364,8 @@ function elapsedLabel(session: { state: string; lastSeenAt: number }): string | 
   const secs = Math.max(0, (nowTick.value - session.lastSeenAt) / 1000)
   return `${secs.toFixed(1)}s`
 }
+
+// --- 生命週期 ------------------------------------------------------------------
 
 // Pet + panel are separate windows with separate store instances now — this
 // window must load its own copy of the pets list rather than relying on the
@@ -347,6 +383,8 @@ onMounted(() => {
 onUnmounted(() => {
   cleanupHistoryUpdated?.()
 })
+
+// --- 寵物重新命名 --------------------------------------------------------------
 
 function startRename(pet: { id: string; displayName: string }) {
   editingPetId.value = pet.id
@@ -366,6 +404,8 @@ function cancelRename() {
   editingPetId.value = null
   editName.value = ''
 }
+
+// --- 工作階段清單與尺寸選項 -----------------------------------------------------
 
 const sessions = computed(() => {
   return Object.values(store.sessions).sort((a, b) => {
@@ -392,6 +432,8 @@ const scaleOptions = [
 function formatTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString(locale.value)
 }
+
+// --- 寵物匯入 ------------------------------------------------------------------
 
 async function importPet() {
   importing.value = true
@@ -420,6 +462,8 @@ async function importPetZip() {
   importingZip.value = false
 }
 
+// --- 應用程式生命週期操作 -------------------------------------------------------
+
 function quitApp() {
   window.electronAPI?.quitApp()
 }
@@ -427,6 +471,8 @@ function quitApp() {
 function restartApp() {
   window.electronAPI?.restartApp()
 }
+
+// --- 移除確認 ------------------------------------------------------------------
 
 function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boolean }) {
   askConfirm({
@@ -574,14 +620,14 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
               <div v-else class="quota-window-list">
                 <div v-for="quota in provider.windows" :key="quota.id" class="quota-window">
                   <div class="quota-copy">
-                    <span class="quota-label">{{ formatQuotaLabel(quota.id, quota.label) }}</span>
+                    <span class="quota-label">{{ quotaWindowLabel(quota.id, quota.label) }}</span>
                     <span class="quota-value">{{ formatRemaining(quota.remainingPercent) }}</span>
                   </div>
                   <ProgressTrack
                     class="quota-progress"
                     :value="quota.remainingPercent"
                     :tone="provider.id === 'claude' ? 'claude' : 'accent'"
-                    :aria-label="t('quotaRemainingAria', { provider: provider.name, quota: formatQuotaLabel(quota.id, quota.label) })"
+                    :aria-label="t('quotaRemainingAria', { provider: provider.name, quota: quotaWindowLabel(quota.id, quota.label) })"
                   />
                   <div class="quota-reset">
                     <span>{{ formatReset(quota.resetsAt) }}</span>
@@ -896,6 +942,46 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
           <div v-else class="growth-unavailable" role="status">
             {{ t('growthDataUnavailable') }}
           </div>
+
+          <Card :title="t('achievements')" tone="accent">
+            <template #heading>
+              <span class="stat-readout">
+                {{ store.achievements?.totalUnlocked ?? 0 }} / {{ store.achievements?.achievements.length ?? 0 }}
+              </span>
+            </template>
+            <ToggleRow
+              :model-value="store.achievementsEnabled"
+              :label="t('achievementsEnable')"
+              :help="t('achievementsEnableHelp')"
+              @update:model-value="store.setAchievementsEnabled($event)"
+            />
+            <div v-if="store.achievements" class="achievement-grid">
+              <article
+                v-for="achievement in store.achievements.achievements"
+                :key="`${achievement.id}:${achievement.version}`"
+                class="achievement-tile"
+                :class="{ unlocked: achievement.unlocked }"
+                :aria-label="`${achievementText(achievement.titleKey)} · ${achievement.unlocked ? t('achievementUnlocked') : t('achievementLocked')}`"
+              >
+                <span class="achievement-icon" :class="{ unlocked: achievement.unlocked }">
+                  <Icon :name="achievement.unlocked ? 'trophy' : 'lock'" :size="15" />
+                </span>
+                <span class="achievement-copy">
+                  <strong>{{ achievementText(achievement.titleKey) }}</strong>
+                  <span>{{ achievementText(achievement.descriptionKey) }}</span>
+                  <small v-if="achievement.tokenQuality !== 'none'">
+                    {{ t('achievementTokenQuality', { quality: achievementQualityLabel(achievement.tokenQuality) }) }}
+                  </small>
+                </span>
+                <span class="achievement-state">
+                  {{ achievement.unlocked ? t('achievementUnlocked') : t('achievementLocked') }}
+                </span>
+              </article>
+            </div>
+            <div v-else class="growth-unavailable" role="status">
+              {{ t('achievementGalleryEmpty') }}
+            </div>
+          </Card>
         </template>
 
         <template v-else-if="settingsTab === 'pets'">
@@ -1090,850 +1176,4 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
   </div>
 </template>
 
-<style scoped>
-/* Everything here reads from src/styles/tokens.css. No bare hex or rgba():
-   a literal colour in this file is a bug, because it cannot be themed or
-   audited. Buttons, cards, toggles, progress bars, selects and icons all
-   come from components/ui/ — do not re-style them locally. */
-
-.status-panel {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  /* A dark solid layer sits underneath the sheen/tint so text stays legible
-     no matter what's behind the window (bright desktop wallpaper, video,
-     etc.) — the glass look comes from the blur + highlight, not from
-     letting the backdrop show through at full strength. */
-  background: var(--surface-panel);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-strong);
-  color: var(--text-primary);
-  font-family: var(--font-ui);
-  font-size: var(--font-md);
-  text-shadow: var(--text-shadow-panel);
-  overflow: hidden;
-  backdrop-filter: var(--surface-blur);
-  -webkit-backdrop-filter: var(--surface-blur);
-  box-shadow: var(--shadow-panel);
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-}
-
-/* ── Header ──────────────────────────────────────────────────────────── */
-
-.panel-header {
-  position: relative;
-  display: flex;
-  flex-shrink: 0;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.panel-title {
-  flex: 1;
-  font-size: var(--font-md);
-  font-weight: var(--weight-medium);
-}
-
-.header-right {
-  display: flex;
-  gap: var(--space-1);
-}
-
-.panel-empty {
-  padding: var(--space-5) var(--space-3);
-  text-align: center;
-  color: var(--text-muted);
-  font-size: var(--font-sm);
-}
-
-/* ── Dashboard tabs ──────────────────────────────────────────────────── */
-
-.dashboard-tabs {
-  display: flex;
-  flex-shrink: 0;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3) var(--space-1);
-}
-
-.dashboard-tab {
-  padding: 5px var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pill);
-  background: var(--surface-raised);
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: var(--font-xs);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-  transition:
-    color var(--transition-fast),
-    background var(--transition-fast),
-    border-color var(--transition-fast);
-}
-
-.dashboard-tab:hover {
-  color: var(--text-primary);
-  background: var(--surface-raised-hover);
-  border-color: var(--border-strong);
-}
-
-.dashboard-tab.active {
-  color: var(--accent-bright);
-  background: var(--accent-soft);
-  border-color: var(--border-accent-strong);
-}
-
-.dashboard-tab:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring-color);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.tab-panel {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-}
-
-/* ── Sessions ────────────────────────────────────────────────────────── */
-
-.session-list {
-  min-height: 0;
-  flex: 1;
-  padding: var(--space-2);
-  overflow-y: auto;
-}
-
-.session-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 7px var(--space-2);
-  border-radius: var(--radius-sm);
-  transition: background var(--transition-fast);
-}
-
-.session-item:hover {
-  background: var(--surface-raised);
-}
-
-.session-source {
-  flex: 0 0 auto;
-  color: var(--text-secondary);
-  font-size: var(--font-xs);
-}
-
-.session-info {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.state-chip {
-  display: inline-flex;
-  align-items: center;
-  align-self: flex-start;
-  gap: 5px;
-  padding: 2px var(--space-2);
-  border: 1px solid;
-  border-radius: var(--radius-pill);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-medium);
-}
-
-.state-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: var(--radius-pill);
-}
-
-.state-chip.live .state-dot {
-  animation: state-pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes state-pulse {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 1; }
-}
-
-.state-elapsed {
-  font-variant-numeric: tabular-nums;
-  opacity: 0.75;
-}
-
-.session-project {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.session-time {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-.session-footer {
-  display: flex;
-  flex-shrink: 0;
-  justify-content: center;
-  padding: var(--space-2);
-  border-top: 1px solid var(--border-subtle);
-}
-
-/* ── Usage ───────────────────────────────────────────────────────────── */
-
-.usage-view {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-3) var(--space-3);
-  overflow-y: auto;
-}
-
-.usage-loading {
-  animation: usage-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes usage-pulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
-}
-
-.usage-error,
-.usage-provider-error {
-  color: var(--state-error-soft);
-}
-
-.quota-copy,
-.usage-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.usage-provider-name {
-  color: var(--text-primary);
-  font-size: var(--font-sm);
-  font-weight: var(--weight-medium);
-}
-
-.usage-plan {
-  padding: 2px 7px;
-  border-radius: var(--radius-pill);
-  background: var(--surface-raised-hover);
-  color: var(--text-secondary);
-  font-size: var(--font-xs);
-}
-
-.usage-provider-error {
-  padding-top: var(--space-2);
-  font-size: var(--font-xs);
-  line-height: 1.45;
-}
-
-.quota-window-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
-}
-
-.quota-label {
-  color: var(--text-secondary);
-  font-size: var(--font-xs);
-}
-
-.quota-value {
-  color: var(--text-bright);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-medium);
-  font-variant-numeric: tabular-nums;
-}
-
-.quota-progress {
-  margin-top: var(--space-1);
-}
-
-.quota-reset {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin-top: 3px;
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-}
-
-.quota-reset-at {
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.usage-footer {
-  padding: var(--space-2) 2px 0;
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-}
-
-/* ── History ─────────────────────────────────────────────────────────── */
-
-.history-view {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3) var(--space-3);
-  overflow-y: auto;
-}
-
-.history-hero,
-.history-level-row,
-.history-meta-row,
-.history-agent-heading,
-.history-stat-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.history-hero {
-  flex-wrap: wrap;
-  padding: var(--space-1) 2px;
-}
-
-.history-kicker {
-  color: var(--text-primary);
-  font-size: var(--font-md);
-  font-weight: var(--weight-bold);
-}
-
-.history-hero p {
-  max-width: 230px;
-  margin: 3px 0 0;
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  line-height: 1.4;
-}
-
-.history-actions {
-  display: flex;
-  flex: 0 0 auto;
-  gap: var(--space-1);
-}
-
-.history-project-filter {
-  flex: 0 1 150px;
-  margin-left: auto;
-}
-
-.history-grid {
-  display: grid;
-  gap: var(--space-2);
-  grid-template-columns: 1fr 1fr;
-}
-
-.history-muted {
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  line-height: 1.4;
-}
-
-.history-error {
-  color: var(--state-error-soft);
-}
-
-.history-level-row,
-.history-meta-row,
-.history-stat-row,
-.history-agent-heading {
-  font-size: var(--font-xs);
-}
-
-.history-stat-big {
-  color: var(--text-bright);
-  font-size: var(--font-xl);
-  font-weight: var(--weight-bold);
-  font-variant-numeric: tabular-nums;
-}
-
-.history-token-quality {
-  color: var(--state-info);
-  font-size: var(--font-xs);
-}
-
-.history-tracking-note {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: var(--space-1);
-  border-top: 1px solid var(--border-subtle);
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-}
-
-.history-tracking-note > :first-child {
-  color: var(--text-secondary);
-  font-weight: var(--weight-medium);
-}
-
-.history-tracking-explain {
-  line-height: 1.5;
-}
-
-.history-day-list,
-.history-agent-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.history-day-row {
-  display: grid;
-  align-items: center;
-  gap: var(--space-2);
-  /* Was 52px for the date label, which "Wed 8/13"-style formatting (weekday
-     + numeric date) overflows in both locales — it wrapped to two lines and
-     staggered every row under it. The label is now numeric-only ("8/13")
-     and both text columns are nowrap + a fixed min width so the row can
-     never wrap regardless of locale or content length. */
-  grid-template-columns: minmax(34px, auto) 1fr minmax(48px, auto);
-  font-size: var(--font-xs);
-}
-
-.history-day-label,
-.history-day-count {
-  white-space: nowrap;
-}
-
-.history-day-label {
-  color: var(--text-secondary);
-}
-
-.history-day-count {
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.history-agent-row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.history-action-status {
-  padding: var(--space-2);
-  border-radius: var(--radius-sm);
-  background: var(--surface-raised);
-  color: var(--text-secondary);
-  font-size: var(--font-xs);
-  text-align: center;
-}
-
-/* ── Settings ────────────────────────────────────────────────────────── */
-
-.settings-layout {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.settings-nav {
-  display: flex;
-  width: 132px;
-  flex: 0 0 132px;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-3) var(--space-2);
-  border-right: 1px solid var(--border-subtle);
-  background: var(--surface-sunken);
-  overflow-y: auto;
-}
-
-.settings-nav-heading {
-  padding: 0 7px var(--space-2);
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.settings-nav-item {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-height: 40px;
-  gap: var(--space-2);
-  padding: var(--space-1) 7px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    color var(--transition-fast),
-    background var(--transition-fast),
-    border-color var(--transition-fast);
-}
-
-.settings-nav-item:hover {
-  color: var(--text-primary);
-  background: var(--surface-raised);
-}
-
-.settings-nav-item.active {
-  color: var(--accent-bright);
-  border-color: var(--border-accent-strong);
-  background: var(--accent-soft);
-}
-
-.settings-nav-item:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring-color);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.settings-nav-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  color: inherit;
-}
-
-.settings-nav-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.settings-nav-copy strong {
-  font-size: var(--font-sm);
-  font-weight: var(--weight-medium);
-}
-
-.settings-nav-copy small {
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-}
-
-.settings-content {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  overflow-y: auto;
-}
-
-.settings-content-header {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.settings-kicker {
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.settings-content-header h2 {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: var(--font-lg);
-  font-weight: var(--weight-medium);
-}
-
-.section-copy {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  line-height: 1.5;
-}
-
-/* A labelled control sitting on one row — the settings equivalent of
-   ToggleRow, for anything that is not a switch. */
-.field-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.field-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.field-label {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: var(--font-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.field-help {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.field-control {
-  flex: 0 0 auto;
-  min-width: 128px;
-}
-
-.project-pet-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: var(--space-2);
-}
-
-.project-pet-list {
-  display: flex;
-  max-height: 220px;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin-top: var(--space-2);
-  overflow-y: auto;
-}
-
-.project-pet-controls {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-/* The remove button eats into the row's width budget that .field-control's
-   128px assumes elsewhere (a lone select); narrow it here so long project
-   names still get enough room to read before ellipsis kicks in. */
-.project-pet-controls .field-control {
-  min-width: 108px;
-}
-
-.project-pet-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding: var(--space-1) 0;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.project-pet-missing {
-  color: var(--accent-claude);
-}
-
-.project-pet-empty {
-  margin-top: var(--space-2);
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-}
-
-.scale-options {
-  display: flex;
-  gap: var(--space-1);
-}
-
-.scale-options > * {
-  flex: 1;
-}
-
-.stat-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  font-size: var(--font-xs);
-}
-
-.stat-row.muted {
-  color: var(--text-muted);
-}
-
-.stat-readout {
-  color: var(--text-secondary);
-  font-size: var(--font-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-.growth-unavailable {
-  padding: var(--space-4);
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-md);
-  color: var(--text-muted);
-  font-size: var(--font-sm);
-  text-align: center;
-}
-
-/* ── Pets ────────────────────────────────────────────────────────────── */
-
-.pet-list {
-  display: flex;
-  max-height: 168px;
-  flex-direction: column;
-  gap: 2px;
-  overflow-y: auto;
-}
-
-.pet-option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: var(--font-sm);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    color var(--transition-fast),
-    background var(--transition-fast),
-    border-color var(--transition-fast);
-}
-
-.pet-option:hover {
-  background: var(--surface-raised);
-  color: var(--text-primary);
-}
-
-.pet-option.active {
-  border-color: var(--border-accent-strong);
-  background: var(--accent-soft);
-  color: var(--accent-bright);
-}
-
-.pet-option:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring-color);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.pet-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pet-actions {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 2px;
-}
-
-.pet-rename-input {
-  width: 100%;
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border-accent-strong);
-  border-radius: var(--radius-sm);
-  outline: none;
-  background: var(--surface-raised-hover);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: var(--font-sm);
-}
-
-.import-row {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.import-row > * {
-  flex: 1;
-}
-
-.import-error {
-  color: var(--state-error-soft);
-  font-size: var(--font-xs);
-  line-height: 1.4;
-}
-
-.family-pet-name {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--text-primary);
-  font-size: var(--font-sm);
-}
-
-.family-pet-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-pill);
-  box-shadow: 0 0 6px currentColor;
-}
-
-/* Applied dynamically as `family-${family.key}`. */
-.family-pet-dot.family-codex {
-  color: var(--accent);
-  background: var(--accent);
-}
-
-.family-pet-dot.family-claude {
-  color: var(--accent-claude);
-  background: var(--accent-claude);
-}
-
-.family-pet-dot.family-opencode {
-  color: var(--state-success);
-  background: var(--state-success);
-}
-
-/* ── Advanced ────────────────────────────────────────────────────────── */
-
-.advanced-actions {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-/* ── Narrow panel ────────────────────────────────────────────────────
-   The panel can be resized down by the user; below this the two-column
-   history grid and the settings sidebar stop being readable. */
-@media (max-width: 420px) {
-  .history-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .settings-nav {
-    width: 112px;
-    flex-basis: 112px;
-  }
-
-  .settings-nav-copy small {
-    display: none;
-  }
-}
-</style>
+<style scoped src="@/components/StatusPanel.css"></style>

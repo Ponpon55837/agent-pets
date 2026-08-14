@@ -1,4 +1,4 @@
-import type { AgentState } from './agent'
+import type { AgentState } from '@/types/agent'
 
 export const PRESENTATION_REACTIONS = [
   'happy',

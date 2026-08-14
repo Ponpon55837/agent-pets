@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
-import type { AgentState } from '../types/agent'
-import { useAgentStore } from '../stores/agentStore'
+import type { AgentState } from '@/types/agent'
+import { useAgentStore } from '@/stores/agentStore'
 
 const props = defineProps<{
   state: AgentState
@@ -114,7 +114,20 @@ function playReaction() {
     reactionTimer = setTimeout(() => { isReacting.value = false }, 260)
   })
 }
-defineExpose({ playReaction })
+
+// Achievement unlocks use a separate visual hook so a new rule can reward the
+// pet without changing the state animation or granting any product ability.
+const isRewarding = ref(false)
+let rewardTimer: ReturnType<typeof setTimeout> | null = null
+function playReward() {
+  isRewarding.value = false
+  requestAnimationFrame(() => {
+    isRewarding.value = true
+    if (rewardTimer) clearTimeout(rewardTimer)
+    rewardTimer = setTimeout(() => { isRewarding.value = false }, 900)
+  })
+}
+defineExpose({ playReaction, playReward })
 
 // Idle fidgets: a periodic subtle sway (no new sprite frames needed, same
 // CSS-layer trick as the reaction bounce) so a long idle stretch doesn't
@@ -515,6 +528,9 @@ onUnmounted(() => {
   if (reactionTimer !== null) {
     clearTimeout(reactionTimer)
   }
+  if (rewardTimer !== null) {
+    clearTimeout(rewardTimer)
+  }
   stopFidgetTimer()
   stopUrgencyTimer()
 })
@@ -562,6 +578,7 @@ onUnmounted(() => {
         'pet-thinking-ambient': store.reactionsActive && props.state === 'thinking' && !isReacting,
         'pet-tool-ambient': store.reactionsActive && props.state === 'tool-running' && !isReacting,
         'pet-waiting-input': store.reactionsActive && props.state === 'waiting-input' && !isReacting && urgencyLevel === 0,
+        'pet-rewarding': store.reactionsActive && isRewarding,
         'pet-offline-ambient': props.state === 'offline',
         'pet-mood-happy': moodTier === 'happy',
         'pet-mood-low': moodTier === 'low',
@@ -570,160 +587,4 @@ onUnmounted(() => {
   </div>
 </template>
 
-<style scoped>
-.pet-visual {
-  position: relative;
-  flex: none;
-  isolation: isolate;
-  pointer-events: none;
-}
-
-.pet-aura-canvas {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  display: block;
-  image-rendering: pixelated;
-  transform-origin: 50% 72%;
-  mix-blend-mode: screen;
-  will-change: transform, filter, opacity;
-  pointer-events: none;
-}
-
-.pet-aura-inner {
-  opacity: var(--aura-inner-opacity);
-  filter: brightness(var(--aura-brightness)) blur(var(--aura-blur));
-  animation: silhouette-aura-inner var(--aura-speed) ease-in-out infinite;
-}
-
-.pet-aura-outer {
-  opacity: var(--aura-outer-opacity);
-  filter: brightness(var(--aura-brightness)) blur(var(--aura-blur-wide));
-  animation: silhouette-aura-outer var(--aura-speed-fast) ease-in-out -0.4s infinite;
-}
-
-@keyframes silhouette-aura-inner {
-  0%, 100% { transform: translateY(0) scale(var(--aura-inner-scale)); }
-  50% { transform: translateY(-1px) scale(var(--aura-inner-peak)); }
-}
-
-@keyframes silhouette-aura-outer {
-  0%, 100% { transform: translateY(0) scale(var(--aura-outer-scale)); }
-  50% { transform: translateY(-2px) scale(var(--aura-outer-peak)); }
-}
-
-.pet-canvas {
-  position: relative;
-  z-index: 2;
-  display: block;
-  pointer-events: auto;
-  image-rendering: pixelated;
-  transform-origin: 50% 100%;
-}
-
-.pet-canvas.pet-offline-ambient {
-  animation: pet-offline-breathe 3.8s ease-in-out infinite;
-}
-
-/* Ambient behavior is deliberately subtle and only enabled with the
-   reactions setting. The spritesheet remains responsible for the main pose;
-   these small loops keep long-running states from feeling frozen. */
-.pet-canvas.pet-idle-ambient {
-  animation: pet-breathe 3.8s ease-in-out infinite;
-}
-
-.pet-canvas.pet-thinking-ambient {
-  animation: pet-think 2.8s ease-in-out infinite;
-}
-
-.pet-canvas.pet-tool-ambient {
-  animation: pet-tool-pulse 1.15s ease-in-out infinite;
-}
-
-.pet-canvas.pet-waiting-input {
-  animation: pet-listen 2.4s ease-in-out infinite;
-}
-
-@keyframes pet-breathe {
-  0%, 100% { transform: scale(1, 1); }
-  50% { transform: scale(1.012, 0.992); }
-}
-
-@keyframes pet-offline-breathe {
-  0%, 100% { transform: translateY(0) scale(1, 1); opacity: 0.86; }
-  50% { transform: translateY(-2px) scale(1.018, 0.988); opacity: 1; }
-}
-
-@keyframes pet-think {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-2px); }
-}
-
-@keyframes pet-tool-pulse {
-  0%, 100% { transform: translateY(0) scale(1); }
-  45% { transform: translateY(-1px) scale(1.008); }
-  70% { transform: translateY(0) scale(1); }
-}
-
-@keyframes pet-listen {
-  0%, 100% { transform: rotate(0deg); }
-  35% { transform: rotate(-1.5deg); }
-  65% { transform: rotate(1deg); }
-}
-
-.pet-canvas.pet-reacting {
-  animation: pet-bounce 0.26s ease;
-}
-
-@keyframes pet-bounce {
-  0% { transform: scale(1, 1); }
-  30% { transform: scale(1.16, 0.85); }
-  60% { transform: scale(0.92, 1.1); }
-  100% { transform: scale(1, 1); }
-}
-
-.pet-canvas.pet-fidgeting {
-  animation: pet-fidget 0.7s ease;
-}
-
-@keyframes pet-fidget {
-  0%, 100% { transform: rotate(0deg) translateY(0); }
-  20% { transform: rotate(-4deg) translateY(-2px); }
-  40% { transform: rotate(3deg) translateY(0); }
-  60% { transform: rotate(-2deg) translateY(-1px); }
-  80% { transform: rotate(1deg) translateY(0); }
-}
-
-.pet-canvas.pet-urgent-1 {
-  animation: pet-shake-1 0.6s ease-in-out infinite;
-}
-
-.pet-canvas.pet-urgent-2 {
-  animation: pet-shake-2 0.35s ease-in-out infinite;
-}
-
-@keyframes pet-shake-1 {
-  0%, 100% { transform: translateX(0) rotate(0deg); }
-  50% { transform: translateX(2px) rotate(1deg); }
-}
-
-@keyframes pet-shake-2 {
-  0%, 100% { transform: translateX(0) rotate(0deg); }
-  25% { transform: translateX(-3px) rotate(-2deg); }
-  75% { transform: translateX(3px) rotate(2deg); }
-}
-
-.pet-canvas.pet-mood-happy {
-  filter: saturate(1.08) brightness(1.03);
-}
-
-.pet-canvas.pet-mood-low {
-  filter: saturate(0.96) brightness(1);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pet-aura-canvas {
-    animation: none;
-  }
-}
-</style>
+<style scoped src="@/components/PetAnimation.css"></style>
