@@ -31,8 +31,8 @@ const model = defineModel<boolean>({ required: true })
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-1) 0;
+  gap: var(--organic-space-3, var(--space-3));
+  padding: var(--organic-space-1, var(--space-1)) 0;
   cursor: pointer;
 }
 
@@ -50,13 +50,14 @@ const model = defineModel<boolean>({ required: true })
 
 .label {
   color: var(--text-primary);
-  font-size: var(--font-sm);
+  font-size: var(--font-body-lg, var(--font-sm));
+  font-weight: var(--weight-medium);
 }
 
 .help {
   color: var(--text-muted);
-  font-size: var(--font-xs);
-  line-height: 1.4;
+  font-size: var(--font-body-sm, var(--font-xs));
+  line-height: 1.5;
 }
 
 .switch {
@@ -77,30 +78,31 @@ const model = defineModel<boolean>({ required: true })
 .track {
   display: inline-flex;
   align-items: center;
-  width: 34px;
-  height: 20px;
-  padding: 2px;
-  border: 1px solid var(--border-strong);
+  width: 46px;
+  height: 28px;
+  padding: 3px;
+  border: 0;
   border-radius: var(--radius-pill);
-  background: var(--surface-raised);
+  background: var(--toggle-off, var(--surface-raised));
   transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 
 .thumb {
-  width: 14px;
-  height: 14px;
+  width: 22px;
+  height: 22px;
   border-radius: var(--radius-pill);
-  background: var(--text-secondary);
+  background: var(--surface-raised);
+  box-shadow: var(--toggle-thumb-shadow, none);
   transition: transform var(--transition-fast), background var(--transition-fast);
 }
 
 .switch input:checked + .track {
-  border-color: var(--border-accent-strong);
-  background: var(--accent-soft);
+  border-color: var(--accent);
+  background: var(--accent);
 }
 
 .switch input:checked + .track .thumb {
-  transform: translateX(14px);
+  transform: translateX(18px);
   background: var(--accent-bright);
 }
 

@@ -1291,26 +1291,37 @@ export const useAgentStore = defineStore('agent', () => {
   function openSettings() {
     panelView.value = 'settings'
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(420)
+    window.electronAPI?.resizePanel(720, 460)
+  }
+
+  function openSetupWizard() {
+    showWizard.value = true
+    showProjectMcpPanel.value = false
+    window.electronAPI?.resizePanel(520, 680)
+  }
+
+  function closeSetupWizard() {
+    showWizard.value = false
+    window.electronAPI?.resizePanel(panelView.value === 'settings' ? 720 : 560, 460)
   }
 
   function openProjectMcpPanel() {
     panelView.value = 'settings'
     showWizard.value = false
     showProjectMcpPanel.value = true
-    window.electronAPI?.resizePanel(720, 680)
+    window.electronAPI?.resizePanel(560, 720)
   }
 
   function closeProjectMcpPanel() {
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(420, 380)
+    window.electronAPI?.resizePanel(720, 460)
   }
 
   function backToSessions() {
     panelView.value = 'sessions'
     showWizard.value = false
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(380)
+    window.electronAPI?.resizePanel(560, 460)
   }
 
   // Called by electron/main.ts whenever the panel window transitions from
@@ -1558,6 +1569,8 @@ export const useAgentStore = defineStore('agent', () => {
     togglePanel,
     closePanel,
     openSettings,
+    openSetupWizard,
+    closeSetupWizard,
     openProjectMcpPanel,
     closeProjectMcpPanel,
     backToSessions,

@@ -112,6 +112,62 @@
   --transition-fast: 0.15s ease;
   --transition-base: 0.2s ease;
   --transition-slow: 0.35s ease;
+
+  /* ── Organic panel theme ──────────────────────────────────────────────
+     The desktop pet keeps the original dark presentation layer. The panel
+     and its modal surfaces opt into this warm, opaque theme locally so a
+     bright wallpaper can never reduce text contrast behind the controls. */
+  --organic-bg: #f5ead8;
+  --organic-surface: #f9f4ed;
+  --organic-surface-2: #eee7db;
+  --organic-surface-warm: #ffe1d0;
+  --organic-surface-sage: #e1eecc;
+  --organic-surface-sage-soft: #f0fae1;
+  --organic-surface-off: #dcd3c4;
+  --organic-accent: #c67139;
+  --organic-accent-hover: #b2622d;
+  --organic-accent-text: #8c491a;
+  --organic-accent-contrast: #fff2eb;
+  --organic-sage: #7a8a5e;
+  --organic-sage-deep: #56633f;
+  --organic-sage-dark: #3d472b;
+  --organic-text: #201e1d;
+  --organic-text-secondary: #645c50;
+  --organic-text-muted: #82796a;
+  --organic-text-faint: #a19786;
+  --organic-border: rgba(32, 30, 29, 0.16);
+  --organic-border-soft: rgba(32, 30, 29, 0.1);
+  --organic-border-on-accent: rgba(255, 242, 235, 0.55);
+  --organic-sage-track: rgba(61, 71, 43, 0.16);
+  --organic-accent-track: rgba(32, 30, 29, 0.08);
+  --organic-accent-glow: rgba(198, 113, 57, 0.2);
+  --organic-accent-on-hover: rgba(32, 30, 29, 0.05);
+  --organic-scrim: rgba(46, 43, 37, 0.42);
+  --organic-panel-shadow: 0 12px 32px rgba(46, 43, 37, 0.32);
+  --organic-card-shadow: 0 1px 2px rgba(46, 43, 37, 0.14);
+  --organic-hero-shadow: 0 3px 10px rgba(46, 43, 37, 0.16);
+  --organic-thumb-shadow: 0 1px 2px rgba(46, 43, 37, 0.24);
+  --organic-font-heading: 'Caprasimo', Georgia, serif;
+  --organic-font-body: 'Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  --organic-space-1: 4.4px;
+  --organic-space-2: 8.8px;
+  --organic-space-3: 13.2px;
+  --organic-space-4: 17.6px;
+  --organic-space-5: 26.4px;
+  --organic-space-6: 35.2px;
+  --organic-radius-sm: 8px;
+  --organic-radius-md: 16px;
+  --organic-radius-lg: 28px;
+  --organic-font-label: 11.5px;
+  --organic-font-body-sm: 12.5px;
+  --organic-font-body-md: 13.5px;
+  --organic-font-body-lg: 14.5px;
+  --organic-font-heading-sm: 16px;
+  --organic-font-heading-md: 17px;
+  --organic-font-panel-title: 19px;
+  --organic-font-display-sm: 22px;
+  --organic-font-display-md: 26px;
 }
 
 /* Honour the OS "reduce motion" setting in one place rather than auditing

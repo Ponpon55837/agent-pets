@@ -91,9 +91,9 @@ function projectStatusLabel(status: ProjectMcpProjectStatus): string {
   return t(PROJECT_STATUS_LABEL_KEYS[status] ?? 'checkFailed')
 }
 
-// Drives both the status pill colour and each Card's left accent bar (tone),
-// so the same "this connection needs attention" signal reads the same way
-// whether you're scanning pills or cards.
+// Drives both the status pill colour and each Card's semantic tone, so the
+// same "this connection needs attention" signal reads the same way whether
+// you're scanning pills or cards.
 const PROJECT_STATUS_TONE: Partial<Record<ProjectMcpProjectStatus, 'success' | 'warn' | 'neutral'>> = {
   connected: 'success',
   partial: 'warn',
@@ -183,12 +183,14 @@ onMounted(() => {
       </div>
 
       <div class="mcp-toolbar">
-        <Button variant="primary" size="sm" block :disabled="settingUp" @click="setupProject">
-          {{ settingUp ? t('installing') : t('setupMcpForProject') }}
+        <Button variant="primary" :disabled="settingUp" @click="setupProject">
+          <Icon name="plus" :size="17" />
+          {{ settingUp ? t('installing') : t('chooseProjectPet') }}
         </Button>
-        <Button variant="secondary" size="sm" :disabled="loadingProjects" @click="refreshProjects">
+        <Button variant="secondary" :disabled="loadingProjects" @click="refreshProjects">
           {{ loadingProjects ? t('checking') : t('refresh') }}
         </Button>
+        <span class="mcp-count" aria-live="polite">{{ projects.length }}</span>
       </div>
 
       <div v-if="setupError" class="error-msg" role="alert">{{ setupError }}</div>
@@ -213,7 +215,6 @@ onMounted(() => {
           <h3>{{ t('connectedProjects') }}</h3>
           <p>{{ t('connectedProjectsHelp') }}</p>
         </div>
-        <span class="mcp-count" aria-live="polite">{{ projects.length }}</span>
       </div>
 
       <div v-if="listError" class="error-msg mcp-list-error" role="alert">{{ listError }}</div>
@@ -223,6 +224,7 @@ onMounted(() => {
         <Card
           v-for="project in projects"
           :key="project.projectPath"
+          :class="[`mcp-project-card`, `project-${project.status}`]"
           :tone="projectStatusTone(project.status)"
           role="listitem"
         >
@@ -261,10 +263,7 @@ onMounted(() => {
         </Card>
       </div>
 
-      <details class="wizard-note">
-        <summary>{{ t('projectMcpSafetyNote') }}</summary>
-        <div class="wizard-note-content">{{ t('projectMcpSafetyNote') }}</div>
-      </details>
+      <p class="wizard-note">{{ t('projectMcpSafetyNote') }}</p>
 
       <div class="wizard-actions">
         <Button variant="secondary" size="sm" block @click="emit('close')">{{ t('projectMcpClose') }}</Button>

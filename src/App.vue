@@ -289,7 +289,7 @@ onUnmounted(() => {
     <template v-if="isPanelWindow">
       <StatusPanel />
       <Transition name="wizard">
-        <SetupWizard v-if="store.showWizard" @close="store.showWizard = false" />
+        <SetupWizard v-if="store.showWizard" @close="store.closeSetupWizard()" />
       </Transition>
       <Transition name="wizard">
         <ProjectMcpPanel v-if="store.showProjectMcpPanel" @close="store.closeProjectMcpPanel()" />

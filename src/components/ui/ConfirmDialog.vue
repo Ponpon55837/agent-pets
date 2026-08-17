@@ -113,10 +113,10 @@ onUnmounted(() => {
   width: 100%;
   max-width: 300px;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
+  gap: var(--organic-space-2, var(--space-2));
+  padding: var(--organic-space-4, var(--space-4));
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
+  border-radius: var(--organic-radius-md, var(--radius-md));
   background: var(--surface-overlay);
   box-shadow: var(--shadow-panel);
 }
@@ -124,14 +124,15 @@ onUnmounted(() => {
 .title {
   margin: 0;
   color: var(--text-primary);
-  font-size: var(--font-md);
+  font-family: var(--font-heading, var(--font-ui));
+  font-size: var(--font-heading-sm, var(--font-md));
   font-weight: var(--weight-medium);
 }
 
 .message {
   margin: 0;
   color: var(--text-secondary);
-  font-size: var(--font-sm);
+  font-size: var(--font-body-sm, var(--font-sm));
   line-height: 1.5;
 }
 

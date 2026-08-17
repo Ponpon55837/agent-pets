@@ -7,6 +7,9 @@ import type {
 } from '@/types/agent-adapter'
 import type { AgentSource } from '@/types/agent'
 import { locale, t, translateBackendError, type TranslationKey } from '@/i18n'
+import Button from '@/components/ui/Button.vue'
+import Card from '@/components/ui/Card.vue'
+import Icon from '@/components/ui/Icon.vue'
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -161,8 +164,13 @@ onUnmounted(() => {
   <div class="setup-overlay" @click.self="emit('close')">
     <div class="setup-wizard">
       <div class="wizard-header">
-        <h2>{{ t('setupWizardTitle') }}</h2>
-        <button class="close-btn" @click="emit('close')">&times;</button>
+        <div class="wizard-title-copy">
+          <h2>{{ t('setupWizardTitle') }}</h2>
+          <p>{{ t('setupWizardHelp') }}</p>
+        </div>
+        <Button variant="ghost" icon-only :aria-label="t('close')" @click="emit('close')">
+          <Icon name="close" />
+        </Button>
       </div>
 
       <div v-if="loading" class="loading">
@@ -175,45 +183,52 @@ onUnmounted(() => {
 
       <div v-else-if="error" class="error-msg">
         {{ error }}
-        <button class="retry-btn" @click="detectTools">{{ t('retry') }}</button>
+        <Button variant="secondary" size="sm" @click="detectTools">{{ t('retry') }}</Button>
       </div>
 
       <div v-else class="tools-list">
-        <div
+        <Card
           v-for="tool in tools"
           :key="tool.id"
           class="tool-item"
-          :class="{ connected: tool.health === 'ready', detected: tool.health !== 'ready' && tool.health !== 'error' }"
+          :class="[`health-${tool.health}`, { connected: tool.health === 'ready', detected: tool.health !== 'ready' && tool.health !== 'error' }]"
+          :tone="tool.health === 'ready' ? 'success' : tool.health === 'needs_install' ? 'accent' : 'neutral'"
         >
           <div class="tool-status">
             <span class="status-dot" :class="{ green: tool.health === 'ready', yellow: tool.health !== 'ready' && tool.health !== 'error', red: tool.health === 'error' }" />
             <span class="tool-name">{{ tool.displayName }}</span>
             <span class="tool-health">{{ healthLabel(tool) }}</span>
             <div class="tool-actions">
-              <button
-                class="test-btn"
+              <Button
+                variant="secondary"
+                size="sm"
+                class="tool-action test-btn"
                 v-if="tool.testSource"
                 :disabled="!tool.installed || installing !== null || testing !== null || diagnosing !== null"
                 :title="t('testReceiverTitle')"
                 @click="testIntegration(tool)"
               >
                 {{ testing === tool.testSource ? t('testing') : t('test') }}
-              </button>
-              <button
-                class="test-btn"
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                class="tool-action test-btn"
                 :disabled="installing !== null || testing !== null || diagnosing !== null"
                 @click="diagnoseAdapter(tool)"
               >
                 {{ diagnosing === tool.id ? t('diagnosing') : t('diagnose') }}
-              </button>
-              <button
-                class="install-btn"
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                class="tool-action install-action install-btn"
                 v-if="tool.installable && tool.installTarget"
                 :disabled="installing !== null || testing !== null || diagnosing !== null"
                 @click="install(tool.id)"
               >
                 {{ installing === tool.id ? t('installing') : tool.installed ? t('reinstall') : t('install') }}
-              </button>
+              </Button>
             </div>
           </div>
           <div class="tool-desc">{{ tool.message }}</div>
@@ -229,27 +244,25 @@ onUnmounted(() => {
           <div v-else-if="tool.testError" class="test-result failed">{{ tool.testError }}</div>
           <div v-if="tool.diagnosis" class="diagnosis-list">
             <div v-for="check in tool.diagnosis.checks" :key="check.id" class="diagnosis-row" :class="`diagnosis-${check.status}`">
-              <span aria-hidden="true">{{ check.status === 'pass' ? '✓' : check.status === 'warn' ? '!' : '×' }}</span>
+              <Icon
+                :name="check.status === 'pass' ? 'check' : check.status === 'warn' ? 'warning' : 'close'"
+                :size="14"
+              />
               <span>{{ check.message }}</span>
             </div>
           </div>
-        </div>
+        </Card>
       </div>
 
-      <details class="wizard-note">
-        <summary>{{ t('aboutAdapters') }}</summary>
-        <div class="wizard-note-content">
-          {{ t('adapterNote') }}
-        </div>
-      </details>
+      <p class="wizard-note">{{ t('adapterNote') }}</p>
 
       <div v-if="installError" class="error-msg">{{ installError }}</div>
 
       <div class="wizard-actions">
-        <button class="action-btn" @click="detectTools">{{ t('refresh') }}</button>
-        <button class="action-btn primary" :disabled="installing !== null" @click="install()">
+        <Button variant="secondary" @click="detectTools">{{ t('refresh') }}</Button>
+        <Button variant="primary" :disabled="installing !== null" @click="install()">
           {{ installing === 'all' ? t('installing') : t('installAll') }}
-        </button>
+        </Button>
       </div>
     </div>
   </div>

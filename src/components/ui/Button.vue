@@ -50,6 +50,7 @@ withDefaults(defineProps<{
   border-radius: var(--radius-sm);
   background: transparent;
   font: inherit;
+  font-family: var(--font-heading, var(--font-ui));
   font-weight: var(--weight-medium);
   line-height: 1;
   cursor: pointer;
@@ -65,18 +66,18 @@ withDefaults(defineProps<{
 }
 
 .size-md {
-  padding: 7px 12px;
-  font-size: var(--font-sm);
+  padding: 9px 15px;
+  font-size: var(--font-body-md, var(--font-sm));
 }
 
 .size-sm {
-  padding: 5px 9px;
-  font-size: var(--font-xs);
+  padding: 7px 13.2px;
+  font-size: var(--font-label, var(--font-xs));
 }
 
 .icon-only {
-  width: 26px;
-  height: 26px;
+  width: 38px;
+  height: 38px;
   padding: 0;
   border-radius: var(--radius-pill);
   font-size: var(--font-lg);
@@ -94,40 +95,41 @@ withDefaults(defineProps<{
 
 /* ── primary ─────────────────────────────────────────────────────────── */
 .variant-primary {
-  border-color: var(--border-accent-strong);
-  background: var(--accent-soft);
+  border-color: var(--accent);
+  background: var(--accent);
   color: var(--accent-bright);
 }
 
 .variant-primary:hover:not(:disabled) {
-  background: var(--accent-strong);
+  border-color: var(--accent-hover, var(--accent));
+  background: var(--accent-hover, var(--accent-strong));
   color: var(--text-bright);
 }
 
 /* ── secondary ───────────────────────────────────────────────────────── */
 .variant-secondary {
   border-color: var(--border-strong);
-  background: var(--surface-raised);
-  color: var(--text-secondary);
+  background: transparent;
+  color: var(--text-primary);
 }
 
 .variant-secondary:hover:not(:disabled) {
   background: var(--surface-raised-hover);
-  border-color: var(--border-accent-strong);
+  border-color: var(--border-strong);
   color: var(--text-primary);
 }
 
 /* ── danger ──────────────────────────────────────────────────────────── */
 .variant-danger {
-  border-color: var(--border-strong);
-  background: var(--surface-raised);
-  color: var(--state-error-soft);
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent-text, var(--state-error-soft));
 }
 
 .variant-danger:hover:not(:disabled) {
-  border-color: var(--state-error);
-  background: var(--surface-raised-hover);
-  color: var(--state-error);
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent-text, var(--state-error));
 }
 
 /* ── ghost ───────────────────────────────────────────────────────────── */
@@ -138,13 +140,13 @@ withDefaults(defineProps<{
 .variant-ghost:hover:not(:disabled) {
   background: var(--surface-raised-hover);
   border-color: var(--border-strong);
-  color: var(--text-bright);
+  color: var(--text-primary);
 }
 
 /* Selected state for segmented controls (pet size, tabs). */
 .btn.active {
-  border-color: var(--border-accent-strong);
-  background: var(--accent-soft);
+  border-color: var(--accent);
+  background: var(--accent);
   color: var(--accent-bright);
 }
 </style>

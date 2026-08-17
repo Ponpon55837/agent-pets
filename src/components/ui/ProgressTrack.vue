@@ -8,9 +8,11 @@ const props = withDefaults(defineProps<{
   tone?: 'accent' | 'success' | 'warn' | 'error' | 'claude'
   ariaLabel?: string
   decorative?: boolean
+  size?: 'sm' | 'md'
 }>(), {
   tone: 'accent',
   decorative: false,
+  size: 'md',
 })
 
 const clamped = () => Math.max(0, Math.min(100, props.value))
@@ -19,7 +21,7 @@ const clamped = () => Math.max(0, Math.min(100, props.value))
 <template>
   <div
     class="track"
-    :class="`tone-${tone}`"
+    :class="[`tone-${tone}`, `size-${size}`]"
     :role="decorative ? undefined : 'progressbar'"
     :aria-label="decorative ? undefined : ariaLabel"
     :aria-valuemin="decorative ? undefined : 0"
@@ -33,10 +35,14 @@ const clamped = () => Math.max(0, Math.min(100, props.value))
 <style scoped>
 .track {
   width: 100%;
-  height: 6px;
+  height: 10px;
   overflow: hidden;
   border-radius: var(--radius-pill);
   background: var(--surface-raised-hover);
+}
+
+.track.size-sm {
+  height: 6px;
 }
 
 .fill {

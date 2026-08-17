@@ -33,62 +33,32 @@ withDefaults(defineProps<{
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-3) var(--space-3) calc(var(--space-3) + 3px);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  gap: var(--organic-space-2, var(--space-2));
+  padding: var(--organic-space-4, var(--space-4));
+  border: 0;
+  border-radius: var(--organic-radius-md, var(--radius-md));
   background: var(--surface-raised);
   box-shadow: var(--shadow-raised);
 }
 
-/* A 3px identity bar on the leading edge rather than a tinted fill across
-   the whole card — enough to read as "this card is about growth/tokens/
-   sessions" at a glance without competing with the content on top of it. */
 .card::before {
-  content: '';
-  position: absolute;
-  top: var(--space-2);
-  bottom: var(--space-2);
-  left: 0;
-  width: 3px;
-  border-radius: var(--radius-pill);
-  background: transparent;
+  display: none;
 }
 
 .tone-accent {
-  border-color: var(--border-accent);
-  background: var(--accent-wash);
-}
-
-.tone-accent::before {
-  background: var(--accent);
+  background: var(--surface-raised);
 }
 
 .tone-success {
-  border-color: color-mix(in srgb, var(--state-success) 28%, transparent);
-  background: color-mix(in srgb, var(--state-success) 6%, transparent);
-}
-
-.tone-success::before {
-  background: var(--state-success);
+  background: var(--surface-raised);
 }
 
 .tone-claude {
-  border-color: var(--border-claude);
-  background: var(--surface-claude);
-}
-
-.tone-claude::before {
-  background: var(--accent-claude);
+  background: var(--surface-raised);
 }
 
 .tone-warn {
-  border-color: color-mix(in srgb, var(--state-warn-bright) 28%, transparent);
-  background: color-mix(in srgb, var(--state-warn-bright) 6%, transparent);
-}
-
-.tone-warn::before {
-  background: var(--state-warn-bright);
+  background: var(--surface-raised);
 }
 
 .card-heading {
@@ -101,14 +71,14 @@ withDefaults(defineProps<{
 .card-title {
   margin: 0;
   color: var(--text-secondary);
-  font-size: var(--font-xs);
+  font-family: var(--font-heading, var(--font-ui));
+  font-size: var(--font-heading-sm, var(--font-xs));
   font-weight: var(--weight-bold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  line-height: 1.2;
 }
 
 .tone-accent .card-title {
-  color: var(--accent-bright);
+  color: var(--accent-text, var(--accent-bright));
 }
 
 .tone-success .card-title {
@@ -120,6 +90,6 @@ withDefaults(defineProps<{
 }
 
 .tone-warn .card-title {
-  color: var(--state-warn-bright);
+  color: var(--accent-text, var(--state-warn-bright));
 }
 </style>

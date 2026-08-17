@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
-import { STATE_LABELS, SOURCE_LABELS, STATE_COLORS, STATE_PRIORITY, SOURCE_FAMILIES } from '@/types/agent'
+import { STATE_LABELS, STATE_LABELS_SHORT, SOURCE_LABELS, STATE_COLORS, STATE_PRIORITY, SOURCE_FAMILIES } from '@/types/agent'
 import { formatProject, quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
 import { locale, t, translateBackendError, type TranslationKey } from '@/i18n'
 import type { HistoryAgentStat, HistoryDailyStat, HistorySummary } from '@/types/history'
@@ -10,6 +10,8 @@ import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Icon from '@/components/ui/Icon.vue'
+import InlinePermissionCard from '@/components/ui/InlinePermissionCard.vue'
+import PetAnimation from '@/components/PetAnimation.vue'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
 import Select from '@/components/ui/Select.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
@@ -54,6 +56,16 @@ function onTabKeydown(event: KeyboardEvent) {
   ;(document.getElementById(`tab-${next}`) as HTMLElement | null)?.focus()
 }
 
+function onSettingsKeydown(event: KeyboardEvent) {
+  const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+  if (!step) return
+  event.preventDefault()
+  const ids = settingsSections.value.map(section => section.id)
+  const next = ids[(ids.indexOf(settingsTab.value) + step + ids.length) % ids.length]
+  settingsTab.value = next
+  document.getElementById(`settings-tab-${next}`)?.focus()
+}
+
 // --- 歷史／用量／成長 摘要狀態（各分頁共用）------------------------------------
 
 const historySummary = ref<HistorySummary | null>(null)
@@ -87,6 +99,25 @@ const moodStage = computed(() => {
   return t('moodResting')
 })
 
+const activePetName = computed(() => (
+  store.pets.find(pet => pet.id === store.activePetId)?.displayName ?? t('appName')
+))
+
+const panelPetSubtitle = computed(() => {
+  if (!progression.value) return t('petProgressLoading')
+  const level = t('historyLevel', { level: progression.value.level })
+  const streak = t('dayStreak', { days: progression.value.currentStreak })
+  return `${level} · ${evolutionLabel.value} · ${streak}`
+})
+
+const quotaStripFamilies = computed(() => (
+  (['codex', 'claude'] as const).flatMap((id) => {
+    const quota = store.quotaByFamily[id]
+    if (!quota) return []
+    return [{ id, ...quota, label: id === 'codex' ? 'Codex' : 'Claude' }]
+  })
+))
+
 watch(() => store.panelView, (view) => {
   if (view === 'settings') settingsTab.value = 'appearance'
 })
@@ -115,7 +146,7 @@ async function refreshQuota(force = false) {
 
 function selectDashboardTab(tab: 'sessions' | 'usage' | 'history') {
   dashboardTab.value = tab
-  if (tab === 'usage' && !quotaUsage.value) void refreshQuota()
+  if ((tab === 'sessions' || tab === 'usage') && !quotaUsage.value) void refreshQuota()
   if (tab === 'history' && !historySummary.value) void refreshHistory()
 }
 
@@ -201,6 +232,11 @@ function historyDayTokenPercent(day: HistoryDailyStat): number {
   return Math.round((total / historyMaxTokens.value) * 100)
 }
 
+function historyDayBarHeight(day: HistoryDailyStat): number {
+  const total = historyDayTokenTotal(day)
+  return total > 0 ? Math.max(4, historyDayTokenPercent(day)) : 0
+}
+
 function historyDayTokenTotal(day: HistoryDailyStat): number {
   return day.tokenInput + day.tokenOutput
 }
@@ -217,14 +253,12 @@ function formatCompactNumber(value: number): string {
   return compactNumberFormatter.value.format(value)
 }
 
-function historyTrackingSinceLabel(): string {
+function historyTrackingDateLabel(): string {
   const since = historySummary.value?.tokenTrackingSince
   if (!since) return ''
   const date = new Date(since)
   if (!Number.isFinite(date.getTime())) return ''
-  return t('historyTrackingSince', {
-    date: date.toLocaleDateString(locale.value, { year: 'numeric', month: '2-digit', day: '2-digit' }),
-  })
+  return date.toLocaleDateString(locale.value, { year: 'numeric', month: '2-digit', day: '2-digit' })
 }
 
 function historyAgentTokenTotal(agent: HistoryAgentStat): number {
@@ -320,8 +354,8 @@ async function performClearHistory(): Promise<void> {
 
 // --- Quota 格式化輔助函式 -----------------------------------------------------
 
-function formatRemaining(value: number): string {
-  return t('remainingPercent', { value: roundQuotaPercent(value) })
+function quotaPercent(value: number): string {
+  return `${roundQuotaPercent(value)}%`
 }
 
 function formatReset(timestamp?: string): string {
@@ -373,6 +407,7 @@ function elapsedLabel(session: { state: string; lastSeenAt: number }): string | 
 onMounted(() => {
   store.loadPets()
   void store.refreshProjectPets()
+  void refreshQuota()
   if (window.electronAPI?.onHistoryUpdated) {
     cleanupHistoryUpdated = window.electronAPI.onHistoryUpdated(() => {
       if (dashboardTab.value === 'history') void refreshHistory()
@@ -419,7 +454,26 @@ const sessions = computed(() => {
   })
 })
 
-const hasOffline = computed(() => sessions.value.some((s) => s.state === 'offline'))
+const activeSessionList = computed(() => sessions.value.filter(session => session.state !== 'offline'))
+const offlineSessionList = computed(() => sessions.value.filter(session => session.state === 'offline'))
+const hasOffline = computed(() => offlineSessionList.value.length > 0)
+const activeToolFamilyCount = computed(() => new Set(
+  activeSessionList.value.map(session => SOURCE_FAMILIES.find(family => family.sources.includes(session.source))?.key ?? session.source),
+).size)
+
+function sessionDetail(session: (typeof sessions.value)[number]): string {
+  if (session.state === 'waiting-permission') {
+    if (store.permissionRequest?.sessionId === session.sessionId) return t('permissionInlineHint')
+    return t('returnToTerminal')
+  }
+  if (session.toolName) return `${STATE_LABELS[session.state]} · ${session.toolName}`
+  if (session.state === 'success') return `${STATE_LABELS[session.state]} · ${formatTime(session.lastSeenAt)}`
+  return STATE_LABELS[session.state]
+}
+
+function permissionSourceLabel(agentId: string): string {
+  return SOURCE_LABELS[agentId as keyof typeof SOURCE_LABELS] ?? agentId
+}
 
 const scaleOptions = [
   { value: 0.6, label: 'S' },
@@ -508,9 +562,22 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
       >
         <Icon name="back" />
       </Button>
-      <span class="panel-title">
-        {{ store.panelView === 'sessions' ? t('appName') : t('settings') }}
-      </span>
+      <template v-if="store.panelView === 'sessions'">
+        <div class="panel-pet-avatar" aria-hidden="true">
+          <PetAnimation
+            class="panel-pet-animation"
+            :state="store.currentState"
+            :pet-id="store.activePetId"
+            :since="store.highestPrioritySession?.lastSeenAt"
+            :mood="store.mood"
+          />
+        </div>
+        <div class="panel-title-group">
+          <span class="panel-title">{{ activePetName }}</span>
+          <span class="panel-subtitle">{{ panelPetSubtitle }}</span>
+        </div>
+      </template>
+      <span v-else class="panel-title settings-panel-title">{{ t('settings') }}</span>
       <div class="header-right">
         <Button
           v-if="store.panelView === 'sessions'"
@@ -535,10 +602,31 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
     </div>
 
     <template v-if="store.panelView === 'sessions'">
+      <InlinePermissionCard
+        v-if="store.permissionRequest"
+        class="panel-inline-permission"
+        :request="store.permissionRequest"
+        :title="`${permissionSourceLabel(store.permissionRequest.agentId)} · ${t('permissionInlineTitle')}`"
+        :project-label="store.permissionRequest.projectId || t('projectUnknown')"
+        :elapsed-label="elapsedLabel({ state: 'waiting-permission', lastSeenAt: store.permissionRequest.receivedAt }) || '0.0s'"
+        :allow-label="t('permissionAllowOnce')"
+        :deny-label="t('permissionDeny')"
+        :warning-label="t('permissionWarning')"
+        @decide="store.decidePermission(store.permissionRequest.requestId, $event)"
+      />
+      <div v-else-if="store.permissionNotice" class="inline-permission-notice" role="status">
+        <Icon name="warning" :size="18" />
+        <span>
+          <strong>{{ store.permissionNotice.title }}</strong>
+          <small>{{ store.permissionNotice.detail }}</small>
+        </span>
+      </div>
       <div class="dashboard-tabs" role="tablist" :aria-label="t('dashboardSections')">
-        <button
+        <Button
           v-for="tab in dashboardTabs"
           :key="tab.id"
+          variant="ghost"
+          size="sm"
           class="dashboard-tab"
           :class="{ active: dashboardTab === tab.id }"
           role="tab"
@@ -550,49 +638,85 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
           @keydown="onTabKeydown"
         >
           {{ tab.label }}
-        </button>
+        </Button>
       </div>
 
       <template v-if="dashboardTab === 'sessions'">
         <div id="panel-sessions" role="tabpanel" aria-labelledby="tab-sessions" class="tab-panel">
-        <div v-if="sessions.length === 0" class="panel-empty">
-          {{ t('noActiveSessions') }}
-        </div>
-        <template v-else>
-          <div class="session-list">
-            <div
-              v-for="session in sessions"
-              :key="session.key"
-              class="session-item"
-            >
-              <div class="session-source">
-                {{ SOURCE_LABELS[session.source] }}
-              </div>
-              <div class="session-info">
-                <span
-                  class="state-chip"
-                  :class="{ live: LIVE_STATES.has(session.state) }"
-                  :style="{ color: STATE_COLORS[session.state], borderColor: STATE_COLORS[session.state] + '40', background: STATE_COLORS[session.state] + '1a' }"
+          <div class="session-scroll">
+            <div v-if="activeSessionList.length === 0 && offlineSessionList.length === 0" class="panel-empty">
+              {{ t('noActiveSessions') }}
+            </div>
+
+            <template v-else>
+              <section v-if="activeSessionList.length > 0" class="session-group">
+                <div class="session-group-heading">
+                  <span>{{ t('activeSessions') }}</span>
+                  <small>{{ t('activeToolFamilies', { count: activeToolFamilyCount }) }}</small>
+                </div>
+                <Card class="session-card">
+                  <div
+                    v-for="(session, index) in activeSessionList"
+                    :key="session.key"
+                    class="session-item"
+                    :class="{ 'is-last': index === activeSessionList.length - 1 }"
+                  >
+                    <span
+                      class="session-status-dot"
+                      :class="{ live: LIVE_STATES.has(session.state) }"
+                      :style="{ '--status-color': STATE_COLORS[session.state] }"
+                      aria-hidden="true"
+                    />
+                    <div class="session-info">
+                      <span class="session-title-line">
+                        {{ SOURCE_LABELS[session.source] }}<template v-if="session.project"> · {{ formatProject(session.project) }}</template>
+                      </span>
+                      <span class="session-detail">{{ sessionDetail(session) }}</span>
+                    </div>
+                    <div class="session-state-column">
+                      <span
+                        class="state-chip"
+                        :class="[`state-${session.state}`, { live: LIVE_STATES.has(session.state) }]"
+                        :style="{ '--status-color': STATE_COLORS[session.state] }"
+                      >
+                        {{ STATE_LABELS_SHORT[session.state] }}
+                      </span>
+                      <span class="session-time">{{ elapsedLabel(session) || formatTime(session.lastSeenAt) }}</span>
+                    </div>
+                  </div>
+                </Card>
+              </section>
+
+              <section v-if="hasOffline" class="offline-group">
+                <div class="session-group-heading offline-heading">
+                  <span>{{ t('offlineSessions') }}</span>
+                  <Button variant="danger" size="sm" @click="store.clearOfflineSessions()">
+                    {{ t('clearShort') }}
+                  </Button>
+                </div>
+                <div
+                  v-for="session in offlineSessionList"
+                  :key="session.key"
+                  class="offline-session-item"
                 >
-                  <span class="state-dot" :style="{ background: STATE_COLORS[session.state] }" />
-                  {{ STATE_LABELS[session.state] }}
-                  <span v-if="elapsedLabel(session)" class="state-elapsed">{{ elapsedLabel(session) }}</span>
-                </span>
-                <span v-if="session.project" class="session-project">
-                  {{ formatProject(session.project) }}
-                </span>
+                  <span class="session-status-dot" aria-hidden="true" />
+                  <span class="session-title-line">{{ SOURCE_LABELS[session.source] }}<template v-if="session.project"> · {{ formatProject(session.project) }}</template></span>
+                  <span class="session-time">{{ formatTime(session.lastSeenAt) }}</span>
+                </div>
+              </section>
+            </template>
+          </div>
+
+          <div v-if="quotaStripFamilies.length > 0" class="quota-strip" :aria-label="t('quotaStripLabel')">
+            <div v-for="family in quotaStripFamilies" :key="family.id" class="quota-strip-column">
+              <div class="quota-strip-heading">
+                <span>{{ family.label }}</span>
+                <strong>{{ quotaPercent(family.remainingPercent) }}</strong>
               </div>
-              <div class="session-time">
-                {{ formatTime(session.lastSeenAt) }}
-              </div>
+              <ProgressTrack :value="family.remainingPercent" tone="success" size="sm" decorative />
+              <span class="quota-strip-reset">{{ formatReset(family.resetsAt) }}</span>
             </div>
           </div>
-          <div v-if="hasOffline" class="session-footer">
-            <Button variant="secondary" size="sm" @click="store.clearOfflineSessions()">
-              {{ t('clearOffline') }}
-            </Button>
-          </div>
-        </template>
         </div>
       </template>
 
@@ -608,11 +732,13 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
             <Card
               v-for="provider in quotaUsage.providers"
               :key="provider.id"
+              class="usage-provider-card"
               :tone="provider.id === 'claude' ? 'claude' : 'accent'"
             >
               <template #heading>
                 <span class="usage-provider-name">{{ provider.name }}</span>
-                <span v-if="provider.plan" class="usage-plan">{{ provider.plan }}</span>
+                <span v-if="provider.plan" class="usage-plan" :class="`plan-${provider.id}`">{{ provider.plan }}</span>
+                <span class="usage-updated">{{ t('updated', { time: formatUpdated(quotaUsage.updatedAt) }) }}</span>
               </template>
               <div v-if="provider.error" class="usage-provider-error">
                 {{ translateBackendError(provider.error) }}
@@ -621,7 +747,7 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
                 <div v-for="quota in provider.windows" :key="quota.id" class="quota-window">
                   <div class="quota-copy">
                     <span class="quota-label">{{ quotaWindowLabel(quota.id, quota.label) }}</span>
-                    <span class="quota-value">{{ formatRemaining(quota.remainingPercent) }}</span>
+                    <span class="quota-value">{{ quotaPercent(quota.remainingPercent) }}</span>
                   </div>
                   <ProgressTrack
                     class="quota-progress"
@@ -639,7 +765,7 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
               </div>
             </Card>
             <div class="usage-footer">
-              <span>{{ t('updated', { time: formatUpdated(quotaUsage.updatedAt) }) }}</span>
+              <span>{{ t('quotaLocalLoginNote') }}</span>
               <Button variant="secondary" size="sm" :disabled="quotaLoading" @click="refreshQuota(true)">
                 {{ quotaLoading ? t('refreshing') : t('refresh') }}
               </Button>
@@ -667,89 +793,73 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
                 {{ project.displayName }}
               </option>
             </Select>
-            <div class="history-actions">
-              <Button variant="secondary" size="sm" @click="exportHistory">{{ t('historyExport') }}</Button>
-              <Button variant="danger" size="sm" @click="clearHistory">{{ t('historyClear') }}</Button>
-            </div>
           </div>
 
           <div v-if="historyLoading && !historySummary" class="panel-empty">{{ t('checking') }}</div>
           <div v-else-if="historyError && !historySummary" class="panel-empty history-error">{{ historyError }}</div>
           <template v-else-if="historySummary">
-            <div class="history-grid history-overview-grid">
-              <Card :title="t('historyPetProgression')">
-                <template v-if="progression">
-                  <div class="history-level-row">
-                    <strong>{{ t('historyLevel', { level: progression.level }) }}</strong>
-                    <span>{{ evolutionLabel }}</span>
-                  </div>
-                  <ProgressTrack :value="progressionPercent" :aria-label="t('growth')" />
-                  <div class="history-meta-row">
-                    <span>{{ progression.xpIntoLevel }} / {{ progression.xpToNext }} XP</span>
-                    <span>{{ moodStage }}</span>
-                  </div>
-                </template>
-                <span v-else class="history-muted">{{ t('growthDataUnavailable') }}</span>
+            <div class="history-stat-grid">
+              <Card class="history-stat-tile history-stat-token" tone="accent">
+                <span class="history-stat-label">{{ t('historyTokens') }}</span>
+                <strong class="history-stat-number">{{ formatCompactNumber(historySummary.totals.tokenInput + historySummary.totals.tokenOutput) }}</strong>
+                <span class="history-stat-meta">{{ historyTokenLabel(historySummary.tokenQuality) }}</span>
               </Card>
-              <Card :title="t('historyStreakTitle')" tone="success">
-                <strong>{{ t('historyStreak', { days: progression?.currentStreak ?? 0 }) }}</strong>
-                <span class="history-muted">{{ t('historyLongestStreak', { days: progression?.longestStreak ?? 0 }) }}</span>
-                <span class="history-muted">{{ t('historyRetention', { days: historySummary.retentionDays }) }}</span>
+              <Card class="history-stat-tile history-stat-sessions" tone="success">
+                <span class="history-stat-label">{{ t('historyCompleted') }}</span>
+                <strong class="history-stat-number">{{ historySummary.totals.sessionsCompleted }}</strong>
+                <span class="history-stat-meta">{{ t('historySessions') }}</span>
+              </Card>
+              <Card class="history-stat-tile history-stat-time">
+                <span class="history-stat-label">{{ t('historyActiveTime') }}</span>
+                <strong class="history-stat-number">{{ historyDuration(historySummary.totals.activeMs) }}</strong>
+                <span class="history-stat-meta">{{ t('historyRetention', { days: historySummary.retentionDays }) }}</span>
               </Card>
             </div>
 
-            <Card :title="t('historyTokenTrend')" tone="accent">
+            <div v-if="progression" class="history-growth-line">
+              <span>{{ t('historyLevel', { level: progression.level }) }} · {{ evolutionLabel }} · {{ moodStage }}</span>
+              <span>{{ t('historyStreak', { days: progression.currentStreak }) }}</span>
+            </div>
+
+            <Card class="history-chart-card" :title="t('historyTokenTrend')" tone="accent">
               <template #heading>
                 <span class="history-muted">{{ t('historyUpdated', { time: formatUpdated(new Date(historySummary.generatedAt).toISOString()) }) }}</span>
               </template>
-              <div class="history-day-list">
+              <div class="history-bar-chart">
                 <div
                   v-for="day in historySummary.days"
                   :key="day.localDate"
-                  class="history-day-row"
+                  class="history-bar-column"
                   :title="`${day.sessionsCompleted}${t('historyCompleted')} · ${day.sessionsFailed}${t('historyFailed')}`"
                 >
-                  <span class="history-day-label">{{ historyDayLabel(day) }}</span>
-                  <ProgressTrack
-                    class="history-day-track"
-                    :value="historyDayTokenPercent(day)"
-                    tone="accent"
-                    :aria-label="`${historyDayLabel(day)} ${historyDayTokenTotal(day)} tokens`"
-                  />
-                  <span class="history-day-count">{{ formatCompactNumber(historyDayTokenTotal(day)) }}</span>
+                  <span class="history-bar-value">{{ formatCompactNumber(historyDayTokenTotal(day)) }}</span>
+                  <div class="history-bar-track" role="img" :aria-label="`${historyDayLabel(day)} ${historyDayTokenTotal(day)} tokens`">
+                    <div class="history-bar-fill" :style="{ height: `${historyDayBarHeight(day)}%` }" />
+                  </div>
+                  <span class="history-bar-label">{{ historyDayLabel(day) }}</span>
                 </div>
               </div>
             </Card>
 
-            <div class="history-grid history-detail-grid">
-              <Card :title="t('historySessions')" tone="success">
-                <div class="history-stat-big">{{ historySummary.totals.sessionsCompleted + historySummary.totals.sessionsFailed }}</div>
-                <div class="history-stat-row"><span>{{ t('historyCompleted') }}</span><strong>{{ historySummary.totals.sessionsCompleted }}</strong></div>
-                <div class="history-stat-row"><span>{{ t('historyFailed') }}</span><strong>{{ historySummary.totals.sessionsFailed }}</strong></div>
-                <div class="history-stat-row"><span>{{ t('historyActiveTime') }}</span><strong>{{ historyDuration(historySummary.totals.activeMs) }}</strong></div>
-              </Card>
-              <Card :title="t('historyTokens')" tone="accent">
-                <div class="history-stat-big">{{ (historySummary.totals.tokenInput + historySummary.totals.tokenOutput).toLocaleString(locale) }}</div>
-                <div class="history-token-quality">{{ historyTokenLabel(historySummary.tokenQuality) }}</div>
-                <div class="history-muted">{{ historySummary.totals.tokenInput.toLocaleString(locale) }} in · {{ historySummary.totals.tokenOutput.toLocaleString(locale) }} out</div>
-                <div class="history-tracking-note">
-                  <span>{{ historyTrackingSinceLabel() }}</span>
-                  <span class="history-tracking-explain">{{ t('historyTrackingExplain') }}</span>
-                </div>
-              </Card>
-            </div>
-
-            <Card :title="t('historyAgentDistribution')">
+            <Card class="history-agent-card" :title="t('historyAgentDistribution')">
               <div v-if="historySummary.agents.length === 0" class="history-muted">{{ t('historyNoData') }}</div>
               <div v-else class="history-agent-list">
                 <div v-for="agent in historySummary.agents" :key="agent.adapterId" class="history-agent-row">
                   <div class="history-agent-heading"><span>{{ historyAgentLabel(agent.adapterId) }}</span><strong>{{ historyAgentTokenTotal(agent).toLocaleString(locale) }}</strong></div>
-                  <ProgressTrack :value="historyAgentBarPercent(agent)" decorative />
+                  <ProgressTrack :value="historyAgentBarPercent(agent)" tone="success" decorative />
                   <div class="history-muted">{{ agent.tokenInput.toLocaleString(locale) }} {{ t('historyTokenIn') }} · {{ agent.tokenOutput.toLocaleString(locale) }} {{ t('historyTokenOut') }} · {{ historyTokenLabel(agent.tokenQuality) }}</div>
                   <div class="history-muted">{{ historyDuration(agent.activeMs) }} · {{ agent.sessionsCompleted }}✓ {{ agent.sessionsFailed }}!</div>
                 </div>
               </div>
             </Card>
+
+            <div class="history-footer">
+              <span>{{ t('historyCompactDisclosure', { date: historyTrackingDateLabel() }) }}</span>
+              <div class="history-actions">
+                <Button variant="secondary" size="sm" @click="exportHistory">{{ t('historyExportShort') }}</Button>
+                <Button variant="danger" size="sm" @click="clearHistory">{{ t('historyClearShort') }}</Button>
+              </div>
+            </div>
 
           </template>
           <div v-if="historyAction" class="history-action-status" role="status" aria-live="polite">{{ historyAction }}</div>
@@ -759,29 +869,62 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
 
     <template v-else>
       <div class="settings-layout">
-        <nav class="settings-nav" :aria-label="t('settingsSections')">
-          <div class="settings-nav-heading">{{ t('preferences') }}</div>
-          <button
+        <div class="settings-content">
+        <nav class="settings-nav" role="tablist" :aria-label="t('settingsSections')">
+          <Button
             v-for="section in settingsSections"
             :key="section.id"
+            variant="ghost"
+            size="sm"
             class="settings-nav-item"
             :class="{ active: settingsTab === section.id }"
             role="tab"
+            :id="`settings-tab-${section.id}`"
             :aria-selected="settingsTab === section.id"
+            :tabindex="settingsTab === section.id ? 0 : -1"
             @click="settingsTab = section.id"
+            @keydown="onSettingsKeydown"
           >
-            <span class="settings-nav-icon" aria-hidden="true"><Icon :name="section.icon" :size="15" /></span>
-            <span class="settings-nav-copy">
-              <strong>{{ section.label }}</strong>
-              <small>{{ section.hint }}</small>
-            </span>
-          </button>
+            {{ section.label }}
+          </Button>
         </nav>
 
-        <div class="settings-content">
         <div class="settings-content-header">
           <span class="settings-kicker">{{ t('workspacePreferences') }}</span>
           <h2>{{ activeSettingsSection?.label }}</h2>
+        </div>
+
+        <div class="settings-quick-toggles" role="group" :aria-label="t('quickSettings')">
+          <Button
+            variant="ghost"
+            class="quick-toggle"
+            :class="{ active: store.notificationsEnabled }"
+            :aria-label="`${t('notifications')} ${store.notificationsEnabled ? t('enabledShort') : t('disabledShort')}`"
+            @click="store.setNotificationsEnabled(!store.notificationsEnabled)"
+          >
+            <Icon name="bell" :size="20" />
+            <span>{{ t('notifications') }} {{ store.notificationsEnabled ? t('enabledShort') : t('disabledShort') }}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            class="quick-toggle"
+            :class="{ active: store.dndEnabled }"
+            :aria-label="`${t('dnd')} ${store.dndEnabled ? t('enabledShort') : t('disabledShort')}`"
+            @click="store.setDndEnabled(!store.dndEnabled)"
+          >
+            <Icon name="moon" :size="20" />
+            <span>{{ t('dnd') }} {{ store.dndEnabled ? t('enabledShort') : t('disabledShort') }}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            class="quick-toggle"
+            :class="{ active: store.soundEnabled }"
+            :aria-label="`${t('sound')} ${store.soundEnabled ? t('enabledShort') : t('disabledShort')}`"
+            @click="store.setSoundEnabled(!store.soundEnabled)"
+          >
+            <Icon name="volume-off" :size="20" />
+            <span>{{ t('sound') }} {{ store.soundEnabled ? t('enabledShort') : t('disabledShort') }}</span>
+          </Button>
         </div>
 
         <template v-if="settingsTab === 'language'">
@@ -860,37 +1003,11 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
               :help="t('shimejiBehaviorHelp')"
               @update:model-value="store.setShimejiEnabled($event)"
             />
-          </Card>
-
-          <!-- Attention used to also carry Sound and Presentation MCP, which
-               are not attention controls — they now sit in their own groups. -->
-          <Card :title="t('attention')">
-            <ToggleRow
-              :model-value="store.dndEnabled"
-              :label="t('dnd')"
-              :help="t('dndHelp')"
-              @update:model-value="store.setDndEnabled($event)"
-            />
-            <ToggleRow
-              :model-value="store.notificationsEnabled"
-              :label="t('notifications')"
-              :help="t('notificationsHelp')"
-              @update:model-value="store.setNotificationsEnabled($event)"
-            />
             <ToggleRow
               :model-value="store.permissionBubbleEnabled"
               :label="t('permissionBubble')"
               :help="t('permissionBubbleHelp')"
               @update:model-value="store.setPermissionBubbleEnabled($event)"
-            />
-          </Card>
-
-          <Card :title="t('sound')">
-            <ToggleRow
-              :model-value="store.soundEnabled"
-              :label="t('sound')"
-              :help="t('soundHelp')"
-              @update:model-value="store.setSoundEnabled($event)"
             />
           </Card>
 
@@ -1164,7 +1281,7 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
           <Card :title="t('keepControl')">
             <p class="section-copy">{{ t('keepControlHelp') }}</p>
             <div class="advanced-actions">
-              <Button variant="primary" size="sm" block @click="store.showWizard = true">{{ t('setupWizard') }}</Button>
+              <Button variant="primary" size="sm" block @click="store.openSetupWizard()">{{ t('setupWizard') }}</Button>
               <Button variant="secondary" size="sm" block @click="restartApp">{{ t('restartPet') }}</Button>
               <Button variant="danger" size="sm" block @click="quitApp">{{ t('quit') }}</Button>
             </div>

@@ -155,7 +155,7 @@ if (!hasSingleInstanceLock) {
   })
 }
 
-const PANEL_WIDTH = 380
+const PANEL_WIDTH = 460
 const PANEL_MIN_WIDTH = 340
 const PANEL_MAX_WIDTH = 760
 const PANEL_GAP = 6
@@ -795,7 +795,7 @@ function createPetWindow() {
 function createPanelWindow() {
   panelWindow = new BrowserWindow({
     width: PANEL_WIDTH,
-    height: 380,
+    height: 560,
     show: false,
     frame: false,
     transparent: true,
@@ -927,7 +927,7 @@ function showPanelWindow(view: 'sessions' | 'settings' = 'sessions'): void {
   if (!ensureDesktopWindows() || !panelWindow) return
   if (petWindowMode === 'edge') applyNormalPetBounds()
   showPetWindow()
-  panelWindow.setBounds(computePanelBounds(view === 'settings' ? 470 : 380))
+  panelWindow.setBounds(computePanelBounds(view === 'settings' ? 720 : 560))
   panelWindow.show()
   panelWindow.focus()
   desktopNotifications?.clearAttention()
