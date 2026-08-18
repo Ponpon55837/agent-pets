@@ -225,6 +225,12 @@ function sameStdioServer(existing: unknown, expected: JsonRecord): boolean {
   return existing.type === expected.type
 }
 
+function legacyOpenCodeServer(expected: JsonRecord): JsonRecord {
+  const legacy = { ...expected }
+  delete legacy.enabled
+  return legacy
+}
+
 function installJsonServer(
   projectPath: string,
   client: 'claude' | 'opencode',
@@ -257,13 +263,8 @@ function installJsonServer(
       return { client, status: 'conflict', configPath: filePath, message: '專案的 mcp 值不是物件，因此未修改。' }
     }
     const mcp = root.mcp
-    if (mcp.servers === undefined) mcp.servers = {}
-    if (!isRecord(mcp.servers)) {
-      return { client, status: 'conflict', configPath: filePath, message: '專案的 mcp.servers 值不是物件，因此未修改。' }
-    }
-    const servers = mcp.servers
-    if (servers[SERVER_NAME] !== undefined) {
-      const configured = sameStdioServer(servers[SERVER_NAME], expected)
+    if (mcp[SERVER_NAME] !== undefined) {
+      const configured = sameStdioServer(mcp[SERVER_NAME], expected)
       return {
         client,
         status: configured ? 'already_configured' : 'conflict',
@@ -273,7 +274,20 @@ function installJsonServer(
           : '專案已有不同的 agent-pets server，因此未修改。',
       }
     }
-    servers[SERVER_NAME] = expected
+    if (mcp.servers !== undefined) {
+      if (!isRecord(mcp.servers)) {
+        return { client, status: 'conflict', configPath: filePath, message: '專案的 mcp.servers 值不是物件，因此未修改。' }
+      }
+      const legacyServers = mcp.servers
+      if (legacyServers[SERVER_NAME] !== undefined) {
+        if (!sameStdioServer(legacyServers[SERVER_NAME], legacyOpenCodeServer(expected))) {
+          return { client, status: 'conflict', configPath: filePath, message: '專案已有不同的 agent-pets server，因此未修改。' }
+        }
+        delete legacyServers[SERVER_NAME]
+        if (Object.keys(legacyServers).length === 0) delete mcp.servers
+      }
+    }
+    mcp[SERVER_NAME] = expected
   }
 
   writeTextAtomic(filePath, `${JSON.stringify(root, null, 2)}\n`)
@@ -292,10 +306,22 @@ function jsonServerResult(
 ): ProjectMcpInstallResult {
   const filePath = configPath(projectPath, client)
   const root = readJsonRoot(filePath)
-  const parent = client === 'claude' ? root.mcpServers : (
-    isRecord(root.mcp) ? root.mcp.servers : undefined
-  )
+  const parent = client === 'claude' ? root.mcpServers : root.mcp
   if (!isRecord(parent) || parent[SERVER_NAME] === undefined) {
+    if (client === 'opencode' && isRecord(root.mcp) && isRecord(root.mcp.servers)) {
+      const legacyServer = root.mcp.servers[SERVER_NAME]
+      if (legacyServer !== undefined) {
+        const configured = sameStdioServer(legacyServer, legacyOpenCodeServer(expected))
+        return {
+          client,
+          status: 'conflict',
+          configPath: filePath,
+          message: configured
+            ? 'OpenCode 專案 MCP 使用舊格式，請重新設定。'
+            : '專案已有不同的 agent-pets server，因此未修改。',
+        }
+      }
+    }
     return {
       client,
       status: 'not_configured',
@@ -326,6 +352,7 @@ function installOpenCode(projectPath: string, options: ProjectMcpInstallOptions)
   return installJsonServer(projectPath, 'opencode', {
     type: 'local',
     command: [options.nodeExecutable, options.bridgePath],
+    enabled: true,
   })
 }
 
@@ -344,6 +371,7 @@ function expectedForClient(
     return {
       type: 'local',
       command: [options.nodeExecutable, options.bridgePath],
+      enabled: true,
     }
   }
   return null
@@ -439,10 +467,21 @@ function removeJsonServer(
     return removalResult(client, 'already_absent', filePath, '專案 MCP 不存在。')
   }
   const root = readJsonRoot(filePath)
-  const parent = client === 'claude' ? root.mcpServers : (
-    isRecord(root.mcp) ? root.mcp.servers : undefined
-  )
+  const parent = client === 'claude' ? root.mcpServers : root.mcp
   if (!isRecord(parent) || parent[SERVER_NAME] === undefined) {
+    if (client === 'opencode' && isRecord(root.mcp) && isRecord(root.mcp.servers)) {
+      const legacyServers = root.mcp.servers
+      if (legacyServers[SERVER_NAME] !== undefined) {
+        const expected = expectedForClient(client, options)
+        if (!expected || !sameStdioServer(legacyServers[SERVER_NAME], legacyOpenCodeServer(expected))) {
+          return removalResult(client, 'conflict', filePath, '專案 MCP 設定已變更，因此未移除。')
+        }
+        delete legacyServers[SERVER_NAME]
+        if (Object.keys(legacyServers).length === 0) delete root.mcp.servers
+        writeTextAtomic(filePath, `${JSON.stringify(root, null, 2)}\n`)
+        return removalResult(client, 'removed', filePath, 'Agent Pets 專案 MCP 設定已移除。')
+      }
+    }
     return removalResult(client, 'already_absent', filePath, '專案 MCP 不存在。')
   }
   const expected = expectedForClient(client, options)

@@ -37,11 +37,13 @@ test('installs all supported project MCP configs and is idempotent', () => {
     assert.deepEqual(claude.mcpServers['agent-pets'].args, [options(projectPath).bridgePath])
 
     const opencode = JSON.parse(fs.readFileSync(path.join(projectPath, 'opencode.json'), 'utf8'))
-    assert.equal(opencode.mcp.servers['agent-pets'].type, 'local')
-    assert.deepEqual(opencode.mcp.servers['agent-pets'].command, [
+    assert.equal(opencode.mcp['agent-pets'].type, 'local')
+    assert.deepEqual(opencode.mcp['agent-pets'].command, [
       options(projectPath).nodeExecutable,
       options(projectPath).bridgePath,
     ])
+    assert.equal(opencode.mcp['agent-pets'].enabled, true)
+    assert.equal(opencode.mcp.servers, undefined)
 
     const codex = fs.readFileSync(path.join(projectPath, '.codex', 'config.toml'), 'utf8')
     assert.match(codex, /\[mcp_servers\.agent-pets\]/)
@@ -54,6 +56,72 @@ test('installs all supported project MCP configs and is idempotent', () => {
       'already_configured',
       'already_configured',
     ])
+  } finally {
+    cleanup(projectPath)
+  }
+})
+
+test('migrates the legacy Agent Pets OpenCode wrapper without touching other servers', () => {
+  const projectPath = createProject()
+  try {
+    const configPath = path.join(projectPath, 'opencode.json')
+    const originalDce = {
+      type: 'local',
+      command: ['node', 'dce-mcp.mjs'],
+      enabled: true,
+    }
+    fs.writeFileSync(configPath, `${JSON.stringify({
+      mcp: {
+        dce: originalDce,
+        servers: {
+          'agent-pets': {
+            type: 'local',
+            command: [options(projectPath).nodeExecutable, options(projectPath).bridgePath],
+          },
+        },
+      },
+    }, null, 2)}\n`, 'utf8')
+
+    const result = installProjectMcp(projectPath, options(projectPath))
+    const opencodeResult = result.results.find(item => item.client === 'opencode')
+    const repaired = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+
+    assert.equal(result.ok, true)
+    assert.equal(opencodeResult?.status, 'installed')
+    assert.deepEqual(repaired.mcp.dce, originalDce)
+    assert.equal(repaired.mcp.servers, undefined)
+    assert.equal(repaired.mcp['agent-pets'].enabled, true)
+    assert.deepEqual(repaired.mcp['agent-pets'].command, [
+      options(projectPath).nodeExecutable,
+      options(projectPath).bridgePath,
+    ])
+  } finally {
+    cleanup(projectPath)
+  }
+})
+
+test('does not overwrite a conflicting legacy OpenCode server', () => {
+  const projectPath = createProject()
+  try {
+    const configPath = path.join(projectPath, 'opencode.json')
+    const original = {
+      mcp: {
+        servers: {
+          'agent-pets': {
+            type: 'local',
+            command: ['some-other-node', 'some-other-server.mjs'],
+          },
+        },
+      },
+    }
+    fs.writeFileSync(configPath, `${JSON.stringify(original, null, 2)}\n`, 'utf8')
+
+    const result = installProjectMcp(projectPath, options(projectPath))
+    const opencodeResult = result.results.find(item => item.client === 'opencode')
+
+    assert.equal(result.ok, false)
+    assert.equal(opencodeResult?.status, 'conflict')
+    assert.deepEqual(JSON.parse(fs.readFileSync(configPath, 'utf8')), original)
   } finally {
     cleanup(projectPath)
   }
