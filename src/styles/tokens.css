@@ -147,6 +147,28 @@
   --organic-card-shadow: 0 1px 2px rgba(46, 43, 37, 0.14);
   --organic-hero-shadow: 0 3px 10px rgba(46, 43, 37, 0.16);
   --organic-thumb-shadow: 0 1px 2px rgba(46, 43, 37, 0.24);
+  /* Compact desktop-pet status pills use the same Organic palette while
+     retaining an opaque dark presentation layer for arbitrary wallpapers. */
+  --organic-status-surface: rgba(46, 43, 37, 0.88);
+  --organic-status-surface-fallback: #241d16;
+  --organic-status-border: rgba(255, 225, 208, 0.14);
+  --organic-status-text: #f2eee8;
+  --organic-status-tooltip-surface: rgba(46, 43, 37, 0.94);
+  --organic-status-tooltip-border: rgba(198, 113, 57, 0.36);
+  --organic-status-tooltip-text: #f4ede6;
+  --organic-status-tooltip-muted: rgba(246, 237, 226, 0.8);
+  --organic-status-track: rgba(20, 16, 12, 0.38);
+  --organic-status-grid: rgba(7, 10, 12, 0.42);
+  --organic-status-flash: rgba(255, 255, 255, 0.92);
+  --organic-status-sheen: rgba(255, 255, 255, 0.72);
+  --organic-status-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --organic-status-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  --organic-status-tooltip-shadow: 0 5px 16px rgba(0, 0, 0, 0.38);
+  --organic-status-radius: 14px;
+  --organic-status-tooltip-radius: 12px;
+  --organic-quota-warning: #e3b64f;
+  --organic-quota-error: #d64a3a;
+  --organic-quota-sage: #8fa073;
   --organic-font-heading: 'Caprasimo', Georgia, serif;
   --organic-font-body: 'Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 

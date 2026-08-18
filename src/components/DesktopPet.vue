@@ -195,9 +195,9 @@ const isMultiPet = computed(() => store.isMultiPet)
 function quotaColor(familyKey: string): string {
   const quota = store.quotaByFamily[familyKey]
   if (!quota) return 'transparent'
-  if (quota.remainingPercent < 20) return 'var(--state-error)'
-  if (quota.remainingPercent < 50) return '#e3b64f'
-  return familyKey === 'claude' ? '#d97757' : '#65c89b'
+  if (quota.remainingPercent < 20) return 'var(--organic-quota-error)'
+  if (quota.remainingPercent < 50) return 'var(--organic-quota-warning)'
+  return familyKey === 'claude' ? 'var(--organic-accent)' : 'var(--organic-quota-sage)'
 }
 
 function quotaLineStyle(familyKey: string): Record<string, string> {
