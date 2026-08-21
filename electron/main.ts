@@ -992,6 +992,7 @@ function broadcastPowerSaveState(): void {
 
 function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   if (!desktopPreferences) throw new Error('Desktop preferences are not ready')
+  const achievementsWereEnabled = desktopPreferences.get().achievementsEnabled
   const preferences = desktopPreferences.update(patch)
   setLocale(preferences.locale)
   if (!preferences.edgeModeEnabled && petWindowMode === 'edge') applyNormalPetBounds()
@@ -1001,6 +1002,9 @@ function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   desktopTray?.rebuild()
   broadcastDesktopPreferences(preferences)
   schedulePermissionUiSync()
+  if (!achievementsWereEnabled && preferences.achievementsEnabled) {
+    reconcileAchievementsFromHistory()
+  }
   return preferences
 }
 
@@ -1193,6 +1197,7 @@ function createAchievementServices(): void {
     // already came back null; push the real snapshot now so the gallery
     // recovers without requiring a manual reload.
     broadcastAchievements()
+    reconcileAchievementsFromHistory()
   } catch (error) {
     // Achievements are an additive feedback surface. A broken achievement
     // database must never prevent XP, permissions, history, or event ingest.
@@ -1236,6 +1241,7 @@ function createHistoryServices(): void {
     localUsageScanTimer = setInterval(() => {
       void refreshLocalUsage()
     }, 60_000)
+    reconcileAchievementsFromHistory()
     void refreshLocalUsage()
   } catch (error) {
     // History is an additive HUD feature. A broken history database must not
@@ -1243,6 +1249,24 @@ function createHistoryServices(): void {
     console.error('History storage is unavailable', error)
     historyStore = null
     localUsageReader = null
+  }
+}
+
+function reconcileAchievementsFromHistory(): void {
+  if (
+    !achievementStore
+    || !historyStore
+    || !currentDesktopPreferences().achievementsEnabled
+  ) return
+  try {
+    const unlocks = achievementStore.reconcileCompletedSessions(
+      historyStore.getAchievementCompletedSessions(),
+      petId => progressionStore?.getSnapshot(petId),
+    )
+    unlocks.forEach(broadcastAchievementUnlock)
+  } catch (error) {
+    console.error('Achievement history reconciliation failed', error)
+    logAchievementDiagnostic('history-reconcile', error)
   }
 }
 

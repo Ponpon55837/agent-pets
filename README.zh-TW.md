@@ -127,7 +127,7 @@
 - **Mood** — 每天從低基準 10 開始；任務成功 +4、失敗 -6。長任務每完成 2 個工具會再 +1（每個任務最多 +8），每持續工作 5 分鐘也會 +1（每個任務最多 +4），因此完成獎勵之前的進度分數最多 +12。心情成長時，會以目前寵物影格生成貼合自身輪廓的動態能量層，並在 90 以上進入完整爆氣效果。點 **Reset** 只會回到 10，不會額外加分。
 - **Mood visuals** — 可關閉 mood 對寵物 aura、色彩與能量層的視覺影響；數值仍會持續追蹤，之後重新開啟即可恢復。
 - **XP／Level** — Growth chip 會顯示目前選取寵物的持久 XP、Level、Evolution 階段與目前 streak。XP 使用有版本的去重 ledger：每個 canonical session 完成 +20、每日首次完成 +10、每觀察到 30 分鐘 active coding +2（每個 session 最多 +10），延續前一天 streak +5。失敗或取消不會扣永久 XP；token milestone 等待精確 token event contract。
-- **Achievements／成就** — 同一個 Growth chip 內的圖鑑會顯示 10 個成就（首次完成、session／活躍日門檻、Night Owl、不同 Agent、連續天數、Level 與 token milestone）。解鎖資料寫入獨立的 `achievements.sqlite`，每隻寵物與版本各自去重；重播事件或重開 App 不會重複通知。關閉「啟用成就」只停止新的解鎖，既有成就與 XP 不會被清除。
+- **Achievements／成就** — 同一個 Growth chip 內的圖鑑會顯示 10 個成就（首次完成、session／活躍日門檻、Night Owl、不同 Agent、連續天數、Level 與 token milestone）。解鎖資料寫入獨立的 `achievements.sqlite`，每隻寵物與版本各自去重；啟用成就時，App 會在啟動與重新開啟追蹤時，把 History 保留且已驗證的不重複完成 session 安全回填到成就 ledger，重播回填不會重複解鎖或通知。關閉「啟用成就」只停止新的解鎖與回填，既有成就與 XP 不會被清除。
 
 **Pets 分頁**
 
@@ -163,7 +163,7 @@ macOS/Linux: ~/.desktop-pet/presentation-mcp.mjs
 
 ### History HUD（歷史儀表板）
 
-主面板的 **History** 分頁會讀取由 main process 管理的本機彙總：近七天每日工作量、完成／失敗工作階段、觀察到的工作時間、Agent 分布、最近 Quota 快照，以及精確／估算的 token 品質。History 也會由 main process 唯讀掃描固定的本機 session log 路徑：`%USERPROFILE%\.codex\sessions`、`%USERPROFILE%\.claude\projects` 與 `%USERPROFILE%\.claude\transcripts`。Codex 的 `token_count` 會使用累積的 `total_token_usage`，只匯入單調增加的差值；重複的 context／rate-limit 快照，以及沒有累積 counter 的紀錄會忽略。Claude assistant 的 `usage` 會以精確來源解析；cache 欄位會併入 input，只有在沒有 output 時才使用 reasoning。掃描器限制檔案／行大小、拒絕逃出根目錄的連結、只接受白名單 usage 形狀、去重串流紀錄，並只保存雜湊後的 session／檔案身分。原始事件只保存受限制的中繼資料與雜湊後的專案／session 身分；HUD 不保存 prompt、工具參數、憑證或完整專案路徑。**匯出摘要**會將清理後的彙總寫入使用者選擇的 JSON 檔案。**清除歷史**只清除歷史與 Quota 快照，並建立新的本機 log cutoff，不會重設寵物 XP、等級、進化、心情或成就。原始事件有固定保留期限，長期每日彙總則可持續保留。
+主面板的 **History** 分頁會讀取由 main process 管理的本機彙總：近七天每日工作量、不重複的完成／失敗工作階段、觀察到的工作時間、Agent 分布、最近 Quota 快照，以及精確／估算的 token 品質。同一隻寵物、來源、session 與專案身分重複送出的 success 只算一個完成 session，與成就 ledger 使用相同定義。History 也會由 main process 唯讀掃描固定的本機 session log 路徑：`%USERPROFILE%\.codex\sessions`、`%USERPROFILE%\.claude\projects` 與 `%USERPROFILE%\.claude\transcripts`。Codex 的 `token_count` 會使用累積的 `total_token_usage`，只匯入單調增加的差值；重複的 context／rate-limit 快照，以及沒有累積 counter 的紀錄會忽略。Claude assistant 的 `usage` 會以精確來源解析；cache 欄位會併入 input，只有在沒有 output 時才使用 reasoning。掃描器限制檔案／行大小、拒絕逃出根目錄的連結、只接受白名單 usage 形狀、去重串流紀錄，並只保存雜湊後的 session／檔案身分。原始事件只保存受限制的中繼資料與雜湊後的專案／session 身分；HUD 不保存 prompt、工具參數、憑證或完整專案路徑。**匯出摘要**會將清理後的彙總寫入使用者選擇的 JSON 檔案。**清除歷史**只清除歷史與 Quota 快照，並建立新的本機 log cutoff，不會重設寵物 XP、等級、進化、心情或成就。原始事件有固定保留期限，長期每日彙總則可持續保留。
 
 History 上方的 **專案篩選**可以只查看某一個專案的近七日統計，其中的 token 用量也會依偵測到的專案（透過 Claude Code／Codex 本機紀錄的工作目錄）正確歸屬，而不是只顯示全域總量。專案寵物則在 **Settings → Pets → 專案寵物** 管理：卡片最上方的開關可以整個停用專案路由（停用後所有 session 都沿用目前選取的寵物，但已記錄的專案與綁定不會被刪除）；按下 **加入專案** 使用原生資料夾選擇器，接著選擇要綁定的寵物；選擇「使用目前選取的寵物」即可解除綁定；每個專案旁的移除鈕可以把它從清單拿掉（之後收到該專案的事件會自動重新加入）。未綁定的專案不會改變原本行為。若綁定的自訂寵物被移除，Agent Pets 會先使用永遠存在的預設寵物，並在設定頁標示「缺少的寵物」，重新加入或選擇其他寵物後即可修復。專案身份會以本機 salt 雜湊保存，資料庫與通知不保存完整專案路徑。
 

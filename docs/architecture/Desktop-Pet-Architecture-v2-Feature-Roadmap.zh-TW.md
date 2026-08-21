@@ -1291,6 +1291,8 @@ Phase 8 實作補充：`electron/project-routing.ts` 是 main-owned 的本機 SQ
 **依賴：** Phase 3 progression、Phase 7 aggregates、Phase 8 可選 project context。
 **主要風險：** 規則回算、通知疲勞、資料品質、成就過多。
 
+Phase 9 資料一致性補充：History 與 Achievement 對完成 session 使用相同的 pet／source／session／project 去重身分；不同 event id 的重複 success 不得增加完成數。History schema migration v4 會保留 active time 與 token aggregate，只以既有 session/event truth 重建完成／失敗計數。成就啟用時，main process 會在 History 與 Achievement Store 都可用後，以 bounded、main-only 的 sanitized completion facts 回填 `completed_sessions`；原有唯一鍵負責去重，重啟、重跑 migration 或重新啟用追蹤不得重複解鎖與通知。停用成就時不執行回填，也不刪除既有 ledger。
+
 ### Phase 10 — Shimeji Behavior Engine
 
 **目的：** 最後補上桌寵的自主生命感，不讓物理/動畫先拖慢核心產品。

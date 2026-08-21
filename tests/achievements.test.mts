@@ -191,3 +191,22 @@ test('adapter, busy-day, streak, and active-day rules use pet-scoped aggregates'
     assert.equal(store.getSnapshot('busy-pet').totalUnlocked, 2)
   })
 })
+
+test('history reconciliation backfills unique sessions without duplicate unlocks', () => {
+  withStore((store) => {
+    const existing = event('success', BASE_TIME, 'session-0', { projectId: 'a'.repeat(32) })
+    assert.equal(store.recordEvent(existing, 'wolf').some(unlock => unlock.achievementId === 'hello_world'), true)
+    const facts = Array.from({ length: 100 }, (_, index) => ({
+      petId: 'wolf',
+      source: 'codex',
+      sessionId: `session-${index}`,
+      projectId: 'a'.repeat(32),
+      adapterId: 'codex',
+      completedAt: BASE_TIME + index * 1_000,
+    }))
+    const unlocks = store.reconcileCompletedSessions(facts)
+    assert.equal(unlocks.some(unlock => unlock.achievementId === 'getting_serious'), true)
+    assert.equal(store.getSnapshot('wolf').achievements.find(item => item.id === 'getting_serious')?.unlocked, true)
+    assert.equal(store.reconcileCompletedSessions(facts).length, 0)
+  })
+})

@@ -36,6 +36,15 @@ export interface AchievementStoreOptions {
   localHour?: (timestamp: number) => number
 }
 
+export interface AchievementCompletedSessionFact {
+  petId: string
+  source: string
+  sessionId: string
+  projectId?: string
+  adapterId: string
+  completedAt: number
+}
+
 const DEFAULT_PET_ID = 'aang-airbender'
 const PET_ID = /^[A-Za-z0-9._-]{1,128}$/
 const PROJECT_ID = /^[a-f0-9]{32}$/
@@ -104,14 +113,23 @@ function eventAdapterId(event: AgentStatusEvent): string {
   return safeAdapterId(event.adapterId ?? event.source)
 }
 
-function eventSessionKey(event: AgentStatusEvent, petId: string): string {
+function completedSessionKey(
+  source: string,
+  sessionId: string,
+  projectId: string,
+  petId: string,
+): string {
   return digest([
     'session-v1',
     petId,
-    event.source,
-    event.sessionId.slice(0, MAX_EVENT_ID_LENGTH),
-    eventProjectId(event),
+    source,
+    sessionId.slice(0, MAX_EVENT_ID_LENGTH),
+    projectId,
   ].join(':'))
+}
+
+function eventSessionKey(event: AgentStatusEvent, petId: string): string {
+  return completedSessionKey(event.source, event.sessionId, eventProjectId(event), petId)
 }
 
 function eventTokenKey(event: AgentStatusEvent, petId: string): string {
@@ -234,6 +252,68 @@ export class AchievementStore {
 
       if (!completed && !tokenRecorded && event.state !== 'success') return []
       return this.evaluateAndUnlock(petId, occurredAt, nightOwlCompletion, progression)
+    })
+  }
+
+  reconcileCompletedSessions(
+    facts: readonly AchievementCompletedSessionFact[],
+    progressionForPet?: (petId: string) => ProgressionSnapshot | undefined,
+  ): AchievementUnlock[] {
+    return this.transaction(() => {
+      const touchedPets = new Map<string, { occurredAt: number; nightOwlCompletion: boolean }>()
+      for (const fact of facts) {
+        const petId = safePetId(fact.petId)
+        const source = safeAdapterId(fact.source)
+        const sessionId = safeEventId(fact.sessionId)
+        const adapterId = safeAdapterId(fact.adapterId)
+        const completedAt = Number.isFinite(fact.completedAt) ? fact.completedAt : this.now()
+        if (!sessionId) continue
+        const projectId = typeof fact.projectId === 'string' && PROJECT_ID.test(fact.projectId)
+          ? fact.projectId
+          : 'unbound'
+        const sessionKey = completedSessionKey(source, sessionId, projectId, petId)
+        const inserted = changedCount(this.database.prepare(`
+          INSERT OR IGNORE INTO completed_sessions(
+            session_key, pet_id, local_date, adapter_id, completed_at
+          ) VALUES (?, ?, ?, ?, ?)
+        `).run(
+          sessionKey,
+          petId,
+          this.localDate(completedAt),
+          adapterId,
+          completedAt,
+        )) > 0
+        if (!inserted) continue
+        this.database.prepare(`
+          INSERT INTO daily_completions(pet_id, local_date, sessions_completed)
+          VALUES (?, ?, 1)
+          ON CONFLICT(pet_id, local_date) DO UPDATE SET
+            sessions_completed = daily_completions.sessions_completed + 1
+        `).run(petId, this.localDate(completedAt))
+        this.database.prepare(
+          'INSERT OR IGNORE INTO active_days(pet_id, local_date) VALUES (?, ?)',
+        ).run(petId, this.localDate(completedAt))
+        this.database.prepare(
+          'INSERT OR IGNORE INTO adapter_usage(pet_id, adapter_id) VALUES (?, ?)',
+        ).run(petId, adapterId)
+        const previous = touchedPets.get(petId)
+        touchedPets.set(petId, {
+          occurredAt: Math.max(previous?.occurredAt ?? 0, completedAt),
+          nightOwlCompletion: Boolean(previous?.nightOwlCompletion)
+            || (this.localHour(completedAt) >= 0 && this.localHour(completedAt) < 5),
+        })
+      }
+
+      const unlocks: AchievementUnlock[] = []
+      for (const [petId, context] of touchedPets) {
+        unlocks.push(...this.evaluateAndUnlock(
+          petId,
+          context.occurredAt,
+          context.nightOwlCompletion,
+          progressionForPet?.(petId),
+        ))
+      }
+      return unlocks
     })
   }
 

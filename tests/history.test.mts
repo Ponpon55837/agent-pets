@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import test from 'node:test'
 import { HistoryStore } from '../electron/history.ts'
 import type { AgentStatusEvent } from '../src/types/agent.ts'
@@ -151,4 +152,75 @@ test('history filters by project and keeps identical session IDs isolated', (t) 
   assert.equal(allSummary.totals.sessionsCompleted, 2)
   assert.equal(allSummary.totals.tokenInput, 107)
   assert.equal(allSummary.totals.tokenOutput, 23)
+})
+
+test('history counts each terminal session once across distinct completion events', (t) => {
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => now })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+
+  assert.equal(store.recordEvent(event({ eventId: 'success-1', state: 'success', timestamp: now })), true)
+  assert.equal(store.recordEvent(event({ eventId: 'success-2', state: 'success', timestamp: now + 1_000 })), true)
+  assert.equal(store.getSummary().totals.sessionsCompleted, 1)
+  assert.equal(store.getAchievementCompletedSessions().length, 1)
+
+  assert.equal(store.recordEvent(event({
+    sessionId: 'failed-session',
+    eventId: 'error-1',
+    state: 'error',
+    timestamp: now + 2_000,
+  })), true)
+  assert.equal(store.recordEvent(event({
+    sessionId: 'failed-session',
+    eventId: 'success-after-error',
+    state: 'success',
+    timestamp: now + 3_000,
+  })), true)
+  const summary = store.getSummary()
+  assert.equal(summary.totals.sessionsCompleted, 2)
+  assert.equal(summary.totals.sessionsFailed, 0)
+  assert.equal(store.getAchievementCompletedSessions().length, 2)
+
+  assert.equal(store.recordEvent(event({
+    adapterId: 'generic-http',
+    eventId: 'same-session-other-adapter',
+    state: 'success',
+    timestamp: now + 4_000,
+  })), true)
+  assert.equal(store.getSummary().totals.sessionsCompleted, 2)
+  assert.equal(store.getAchievementCompletedSessions().length, 2)
+})
+
+test('history v4 migration repairs inflated completion aggregates from unique sessions', (t) => {
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const first = new HistoryStore(database.filePath, { now: () => now })
+  assert.equal(first.recordEvent(event({
+    eventId: 'finish',
+    state: 'success',
+    timestamp: now,
+    tokenUsage: { input: 10, output: 5, quality: 'exact' },
+  })), true)
+  first.close()
+
+  const moduleRequire = createRequire(import.meta.url)
+  const { DatabaseSync } = moduleRequire('node:sqlite') as {
+    DatabaseSync: new (filePath: string) => {
+      exec(sql: string): void
+      close(): void
+    }
+  }
+  const raw = new DatabaseSync(database.filePath)
+  raw.exec(`
+    UPDATE daily_stats SET sessions_completed = 9;
+    DELETE FROM schema_migrations WHERE version = 4;
+  `)
+  raw.close()
+
+  const repaired = new HistoryStore(database.filePath, { now: () => now })
+  t.after(() => { repaired.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  assert.equal(repaired.getSummary().totals.sessionsCompleted, 1)
+  assert.equal(repaired.getSummary().totals.tokenInput, 10)
+  assert.equal(repaired.getSummary().totals.tokenOutput, 5)
 })

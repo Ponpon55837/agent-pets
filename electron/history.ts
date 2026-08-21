@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname } from 'node:path'
 import type { AgentStatusEvent, AgentState } from '../src/types/agent.ts'
+import type { AchievementCompletedSessionFact } from './achievements.ts'
 import {
   HISTORY_TERMINAL_STATES,
   type HistoryAgentStat,
@@ -49,6 +50,7 @@ const MAX_QUOTA_SNAPSHOTS = 100
 const MAX_QUOTA_PROVIDERS = 8
 const MAX_QUOTA_WINDOWS = 32
 const MAX_ACTIVE_GAP_MS = 5 * 60 * 1000
+const MAX_ACHIEVEMENT_BACKFILL_EVENTS = 100_000
 const LOCAL_USAGE_CUTOFF_KEY = 'local_usage_cutoff_at'
 const ACTIVE_STATES = new Set<AgentState>(['thinking', 'tool-running'])
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,256}$/
@@ -81,6 +83,14 @@ function safePetId(value: string | undefined): string {
 
 function digest(value: string, length = 24): string {
   return createHash('sha256').update(value).digest('hex').slice(0, length)
+}
+
+function historySessionHash(adapterId: string, agentId: string, sessionId: string, projectId: string): string {
+  return digest(`${adapterId}:${agentId}:${sessionId}:${projectId}`)
+}
+
+function historySessionPk(adapterId: string, agentId: string, sessionId: string, projectId: string): string {
+  return `${adapterId}:${agentId}:${historySessionHash(adapterId, agentId, sessionId, projectId)}`
 }
 
 function localDateKey(timestamp: number): string {
@@ -236,7 +246,8 @@ export class HistoryStore {
     // A CLI may reuse a session ID in different workspaces. Keep their
     // active-time and completion aggregates isolated once project routing is
     // enabled, while the empty project ID preserves the legacy key shape.
-    const sessionIdHash = digest(`${adapterId}:${agentId}:${externalId}:${projectId}`)
+    const sessionIdHash = historySessionHash(adapterId, agentId, externalId, projectId)
+    const sessionPk = `${adapterId}:${agentId}:${sessionIdHash}`
     const occurredAt = Number.isFinite(event.timestamp) ? Math.min(event.timestamp, receivedAt) : receivedAt
     const safeReceivedAt = Number.isFinite(receivedAt) ? receivedAt : this.now()
     const state = event.state
@@ -246,7 +257,6 @@ export class HistoryStore {
       : digest(`${adapterId}:${agentId}:${externalId}:${state}:${occurredAt}:${projectId}:${event.originalEvent ?? ''}`)
     const sourceEventId = typeof event.sourceEventId === 'string' ? safeText(event.sourceEventId) : null
     const localDate = this.localDate(occurredAt)
-    const sessionPk = `${adapterId}:${agentId}:${sessionIdHash}`
     const completionKind = state === 'success' || state === 'error' ? state : null
 
     return this.transaction(() => {
@@ -256,6 +266,20 @@ export class HistoryStore {
                token_quality, last_state, last_seen_at
         FROM sessions WHERE session_pk = ?
       `).get(sessionPk))
+      const successAlreadyRecorded = completionKind === 'success' && Boolean(this.database.prepare(`
+        SELECT event_id FROM events
+        WHERE agent_id = ? AND session_id = ? AND project_id = ? AND pet_id = ? AND state = 'success'
+        LIMIT 1
+      `).get(agentId, externalId, projectId, safePet))
+      // A later success is the durable outcome for a session that previously
+      // emitted an error. Once successful, later terminal noise cannot demote
+      // or recount the session.
+      const sessionTerminalTransition = completionKind === 'success'
+        ? previous?.terminalState === 'success' ? null : 'success'
+        : completionKind === 'error' && !previous?.terminalState ? 'error' : null
+      const aggregateTerminalTransition = completionKind === 'success'
+        ? successAlreadyRecorded ? null : 'success'
+        : sessionTerminalTransition
       const activeDeltaMs = previous && isActiveState(previous.lastState) && occurredAt > previous.lastSeenAt
         ? Math.min(occurredAt - previous.lastSeenAt, MAX_ACTIVE_GAP_MS)
         : 0
@@ -279,7 +303,7 @@ export class HistoryStore {
         safeReceivedAt,
         state,
         activeDeltaMs,
-        completionKind,
+        aggregateTerminalTransition,
         usage.input,
         usage.output,
         usage.quality,
@@ -306,8 +330,8 @@ export class HistoryStore {
           projectId,
           safePet,
           occurredAt,
-          completionKind ? occurredAt : null,
-          completionKind,
+          sessionTerminalTransition ? occurredAt : null,
+          sessionTerminalTransition,
           nextActiveMs,
           nextInput,
           nextOutput,
@@ -324,10 +348,10 @@ export class HistoryStore {
               last_state = ?, last_seen_at = MAX(last_seen_at, ?)
           WHERE session_pk = ?
         `).run(
-          completionKind,
+          sessionTerminalTransition,
           occurredAt,
-          completionKind,
-          completionKind,
+          sessionTerminalTransition,
+          sessionTerminalTransition,
           nextActiveMs,
           nextInput,
           nextOutput,
@@ -338,12 +362,27 @@ export class HistoryStore {
         )
       }
 
+      if (
+        previous?.terminalState === 'error'
+        && sessionTerminalTransition === 'success'
+        && previous.endedAt !== null
+      ) {
+        this.adjustDailyCompletion(
+          this.localDate(previous.endedAt),
+          previous.petId,
+          previous.projectId,
+          previous.adapterId,
+          0,
+          -1,
+        )
+      }
+
       this.updateDailyStat(
         localDate,
         safePet,
         projectId,
         adapterId,
-        completionKind,
+        aggregateTerminalTransition,
         activeDeltaMs,
         usage.input ?? 0,
         usage.output ?? 0,
@@ -590,6 +629,39 @@ export class HistoryStore {
     }
   }
 
+  getAchievementCompletedSessions(): AchievementCompletedSessionFact[] {
+    const rows = this.database.prepare(`
+      SELECT event_id, adapter_id, agent_id, session_id, project_id, pet_id, occurred_at, state
+      FROM events
+      WHERE state = 'success' AND session_id IS NOT NULL
+      ORDER BY occurred_at ASC, event_id ASC
+      LIMIT ?
+    `).all(MAX_ACHIEVEMENT_BACKFILL_EVENTS)
+    const successfulSessions = new Set<string>()
+    const completed: AchievementCompletedSessionFact[] = []
+    for (const row of rows) {
+      const adapterId = safeText(row.adapter_id)
+      const source = safeText(row.agent_id)
+      const sessionId = safeText(row.session_id)
+      const projectId = safeText(row.project_id)
+      if (!adapterId || !source || !sessionId) continue
+      const petId = safePetId(typeof row.pet_id === 'string' ? row.pet_id : undefined)
+      const achievementProjectId = PROJECT_ID.test(projectId) ? projectId : 'unbound'
+      const identity = digest(`${petId}:${source}:${sessionId}:${achievementProjectId}`)
+      if (successfulSessions.has(identity)) continue
+      successfulSessions.add(identity)
+      completed.push({
+        petId,
+        source,
+        sessionId,
+        ...(achievementProjectId !== 'unbound' ? { projectId: achievementProjectId } : {}),
+        adapterId,
+        completedAt: Math.max(0, asInteger(row.occurred_at)),
+      })
+    }
+    return completed
+  }
+
   clear(): void {
     this.transaction(() => {
       this.database.exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM daily_stats; DELETE FROM quota_snapshots;')
@@ -607,24 +679,8 @@ export class HistoryStore {
   rebuildDailyStats(): void {
     this.transaction(() => {
       this.database.exec('DELETE FROM daily_stats')
-      const rows = this.database.prepare(`
-        SELECT local_date, pet_id, project_id, adapter_id, completion_kind,
-               active_delta_ms, token_input, token_output, token_quality
-        FROM events ORDER BY occurred_at ASC, event_id ASC
-      `).all()
-      for (const row of rows) {
-        this.updateDailyStat(
-          safeText(row.local_date),
-          safePetId(typeof row.pet_id === 'string' ? row.pet_id : undefined),
-          safeText(row.project_id),
-          safeText(row.adapter_id, 'unknown'),
-          row.completion_kind === 'success' || row.completion_kind === 'error' ? row.completion_kind : null,
-          Math.max(0, asInteger(row.active_delta_ms)),
-          Math.max(0, asInteger(row.token_input)),
-          Math.max(0, asInteger(row.token_output)),
-          isTokenQuality(row.token_quality) ? row.token_quality : 'none',
-        )
-      }
+      this.rebuildEventDailyStats()
+      this.rebuildSessionCompletions()
     })
   }
 
@@ -788,11 +844,116 @@ export class HistoryStore {
         UPDATE events SET pet_id = '${LOCAL_USAGE_PET_ID}' WHERE type = 'agent.token_usage';
         DELETE FROM daily_stats;
       `)
+      this.rebuildEventDailyStats()
       this.database.prepare(`
         INSERT INTO schema_migrations(version, name, applied_at, checksum)
         VALUES (3, 'history-global-local-usage', ?, 'history-global-local-usage')
       `).run(this.now())
     })
+    const hasV4 = Boolean(this.database.prepare('SELECT version FROM schema_migrations WHERE version = 4').get())
+    if (!hasV4) this.transaction(() => {
+      this.database.exec(`
+        CREATE INDEX IF NOT EXISTS idx_history_events_completion_identity
+          ON events(agent_id, session_id, project_id, pet_id, state);
+      `)
+      this.repairSuccessfulSessionOutcomes()
+      this.database.exec(`
+        UPDATE daily_stats SET sessions_completed = 0, sessions_failed = 0;
+      `)
+      this.rebuildSessionCompletions()
+      this.database.prepare(`
+        INSERT INTO schema_migrations(version, name, applied_at, checksum)
+        VALUES (4, 'history-unique-terminal-sessions', ?, 'history-unique-terminal-sessions')
+      `).run(this.now())
+    })
+  }
+
+  private rebuildEventDailyStats(): void {
+    const rows = this.database.prepare(`
+      SELECT local_date, pet_id, project_id, adapter_id,
+             active_delta_ms, token_input, token_output, token_quality
+      FROM events ORDER BY occurred_at ASC, event_id ASC
+    `).all()
+    for (const row of rows) {
+      this.updateDailyStat(
+        safeText(row.local_date),
+        safePetId(typeof row.pet_id === 'string' ? row.pet_id : undefined),
+        safeText(row.project_id),
+        safeText(row.adapter_id, 'unknown'),
+        null,
+        Math.max(0, asInteger(row.active_delta_ms)),
+        Math.max(0, asInteger(row.token_input)),
+        Math.max(0, asInteger(row.token_output)),
+        isTokenQuality(row.token_quality) ? row.token_quality : 'none',
+      )
+    }
+  }
+
+  private repairSuccessfulSessionOutcomes(): void {
+    for (const fact of this.getAchievementCompletedSessions()) {
+      const projectId = fact.projectId ?? ''
+      this.database.prepare(`
+        UPDATE sessions
+        SET ended_at = ?, terminal_state = 'success', pet_id = ?
+        WHERE session_pk = ?
+      `).run(
+        fact.completedAt,
+        fact.petId,
+        historySessionPk(fact.adapterId, fact.source, fact.sessionId, projectId),
+      )
+    }
+  }
+
+  private adjustDailyCompletion(
+    localDate: string,
+    petId: string,
+    projectId: string,
+    adapterId: string,
+    completedDelta: number,
+    failedDelta: number,
+  ): void {
+    this.database.prepare(`
+      UPDATE daily_stats
+      SET sessions_completed = MAX(0, sessions_completed + ?),
+          sessions_failed = MAX(0, sessions_failed + ?)
+      WHERE local_date = ? AND pet_id = ? AND project_id = ? AND adapter_id = ?
+    `).run(completedDelta, failedDelta, localDate, petId, projectId, adapterId)
+  }
+
+  private rebuildSessionCompletions(): void {
+    for (const fact of this.getAchievementCompletedSessions()) {
+      this.updateDailyStat(
+        this.localDate(fact.completedAt),
+        fact.petId,
+        fact.projectId ?? '',
+        fact.adapterId,
+        'success',
+        0,
+        0,
+        0,
+        'none',
+      )
+    }
+    const rows = this.database.prepare(`
+      SELECT pet_id, project_id, adapter_id, ended_at, terminal_state
+      FROM sessions
+      WHERE ended_at IS NOT NULL AND terminal_state = 'error'
+      ORDER BY ended_at ASC, session_pk ASC
+    `).all()
+    for (const row of rows) {
+      const endedAt = Math.max(0, asInteger(row.ended_at))
+      this.updateDailyStat(
+        this.localDate(endedAt),
+        safePetId(typeof row.pet_id === 'string' ? row.pet_id : undefined),
+        safeText(row.project_id),
+        safeText(row.adapter_id, 'unknown'),
+        row.terminal_state === 'success' || row.terminal_state === 'error' ? row.terminal_state : null,
+        0,
+        0,
+        0,
+        'none',
+      )
+    }
   }
 
   private transaction<T>(work: () => T): T {
