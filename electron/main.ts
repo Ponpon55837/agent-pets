@@ -99,6 +99,8 @@ let permissionBroker: PermissionBroker | null = null
 let permissionRelay: PermissionAdapterRelay | null = null
 let progressionStore: ProgressionStore | null = null
 let achievementStore: AchievementStore | null = null
+let achievementStoreRetryTimer: ReturnType<typeof setTimeout> | null = null
+let achievementStoreRetryAttempt = 0
 let historyStore: HistoryStore | null = null
 let localUsageReader: LocalUsageReader | null = null
 let localUsageScanTimer: ReturnType<typeof setInterval> | null = null
@@ -1173,16 +1175,53 @@ function createProgressionServices(): void {
   }
 }
 
+// Init can fail transiently (e.g. antivirus/cloud-sync briefly holding the
+// file at startup); retry a few times with backoff instead of disabling
+// achievements silently for the rest of the session.
+const ACHIEVEMENT_STORE_RETRY_DELAYS_MS = [3_000, 10_000, 30_000]
+
 function createAchievementServices(): void {
   if (achievementStore) return
   try {
     achievementStore = new AchievementStore(join(app.getPath('userData'), 'achievements.sqlite'))
+    achievementStoreRetryAttempt = 0
+    if (achievementStoreRetryTimer) {
+      clearTimeout(achievementStoreRetryTimer)
+      achievementStoreRetryTimer = null
+    }
+    // A retry can succeed after the renderer's initial achievements-init call
+    // already came back null; push the real snapshot now so the gallery
+    // recovers without requiring a manual reload.
+    broadcastAchievements()
   } catch (error) {
     // Achievements are an additive feedback surface. A broken achievement
     // database must never prevent XP, permissions, history, or event ingest.
     console.error('Achievement storage is unavailable', error)
+    logAchievementDiagnostic('init', error)
     achievementStore = null
+    scheduleAchievementStoreRetry()
   }
+}
+
+function logAchievementDiagnostic(label: string, error: unknown, extra?: unknown): void {
+  try {
+    fs.appendFileSync(
+      join(app.getPath('userData'), 'achievements-init-error.log'),
+      `${new Date().toISOString()} [${label}] ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`
+        + `${extra !== undefined ? ` extra=${JSON.stringify(extra)}` : ''}\n`,
+    )
+  } catch {}
+}
+
+function scheduleAchievementStoreRetry(): void {
+  if (achievementStoreRetryTimer) return
+  const delay = ACHIEVEMENT_STORE_RETRY_DELAYS_MS[achievementStoreRetryAttempt]
+  if (delay === undefined) return
+  achievementStoreRetryAttempt += 1
+  achievementStoreRetryTimer = setTimeout(() => {
+    achievementStoreRetryTimer = null
+    createAchievementServices()
+  }, delay)
 }
 
 function createHistoryServices(): void {
@@ -1498,6 +1537,7 @@ app.whenReady().then(() => {
         }
       } catch (error) {
         console.error('Achievement event handling failed', error)
+        logAchievementDiagnostic('recordEvent', error, event)
       }
       try {
         const routedPetId = event.routedPetId ?? progressionStore?.getActivePetId() ?? 'aang-airbender'
@@ -2436,6 +2476,8 @@ app.on('before-quit', () => {
   permissionBroker?.shutdown()
   progressionStore?.close()
   progressionStore = null
+  if (achievementStoreRetryTimer) clearTimeout(achievementStoreRetryTimer)
+  achievementStoreRetryTimer = null
   achievementStore?.close()
   achievementStore = null
   historyStore?.close()
