@@ -3,6 +3,8 @@ dist
 dist-electron
 release
 *.log
+.env.local
+.env.*.local
 .DS_Store
 .mcp.json
 opencode.json

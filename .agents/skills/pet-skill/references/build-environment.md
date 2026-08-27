@@ -14,6 +14,12 @@
 
 ## pnpm 與依賴修復
 
+### Windows dev GPU fallback
+
+- `vite-plugin-electron@1.1.1` 的預設 `startup()` 參數包含 `--no-sandbox`。`vite.config.mts` 必須為 main 與 preload 的 `onstart` 都明確傳入 `['.']`；simple plugin 的首次啟動可能由 preload build 觸發，只改 main 不足以覆蓋預設值。
+- 硬體加速預設開啟。有問題的 Windows 機器在 Git 忽略的 `.env.local` 設定 `AGENT_PETS_DISABLE_GPU=1`；Vite config 只把這個值傳給 Electron child process，不使用 `VITE_` 前綴，也不暴露給 renderer。
+- Electron main process 只在 `win32`、未打包、有 `VITE_DEV_SERVER_URL` 且明確收到該 opt-in 時，於 `ready` 前呼叫 `app.disableHardwareAcceleration()`。不要把此 workaround 擴大到其他 Windows 機器、packaged build、macOS／Linux 或直接執行的 `electron .`；也不要用 `--no-sandbox` 當 GPU 修正。
+
 - 專案固定使用 `pnpm@11.16.0` 與 `pnpm-lock.yaml`；不可新增 `package-lock.json`。
 - 依賴安裝要保留 devDependencies、scripts 與 electron-builder 設定。不可用 production-only 安裝、prune 或其他會把 `package.json`／lockfile 縮成 runtime-only 的流程修復開發環境。
 - Windows 若需要離線重建，優先使用使用者層級 store（目前環境為 `C:\\Users\\dgh\\AppData\\Local\\pnpm\\store\\v11`）：

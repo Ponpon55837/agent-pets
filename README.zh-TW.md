@@ -372,6 +372,8 @@ pnpm install
 pnpm dev
 ```
 
+開發模式預設保留硬體加速。若某台 Windows 電腦會發生 Chromium GPU process 崩潰，請在該機器建立不提交 Git 的 `.env.local`，內容為 `AGENT_PETS_DISABLE_GPU=1`；之後該機器執行 `pnpm dev` 時會使用軟體繪製，其他電腦與打包版本仍保留硬體加速。Vite 啟動器也會維持 Chromium sandbox，不再附加 `--no-sandbox`。
+
 ### 建置
 
 ```bash

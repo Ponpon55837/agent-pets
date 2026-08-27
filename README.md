@@ -371,6 +371,8 @@ pnpm install
 pnpm dev
 ```
 
+Development mode preserves hardware acceleration by default. On a Windows machine affected by a Chromium GPU-process crash, create a machine-local `.env.local` containing `AGENT_PETS_DISABLE_GPU=1`; subsequent `pnpm dev` runs use software rendering on that machine only. Packaged builds and other machines retain hardware acceleration. The Vite launcher also preserves Chromium sandboxing instead of adding `--no-sandbox`.
+
 ### Build
 
 ```bash
