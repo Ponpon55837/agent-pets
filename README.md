@@ -371,6 +371,14 @@ pnpm install
 pnpm dev
 ```
 
+On a Windows machine where Chromium's GPU process crashes during development, use the built-in safe mode instead of creating a local environment file:
+
+```bash
+pnpm dev:safe
+```
+
+Safe mode keeps Chromium sandboxing enabled and uses software rendering only for that Windows Vite development session. Normal development, packaged builds, macOS, and Linux retain hardware acceleration.
+
 ### Build
 
 ```bash

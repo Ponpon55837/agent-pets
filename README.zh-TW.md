@@ -372,6 +372,14 @@ pnpm install
 pnpm dev
 ```
 
+若特定 Windows 電腦在開發模式遇到 Chromium GPU process 崩潰，請直接使用內建安全模式，不需要建立本機環境檔案：
+
+```bash
+pnpm dev:safe
+```
+
+安全模式仍會啟用 Chromium sandbox，並只在該次 Windows Vite 開發執行改用軟體繪製；一般開發、正式打包版本、macOS 與 Linux 仍保留硬體加速。
+
 ### 建置
 
 ```bash

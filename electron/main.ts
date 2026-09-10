@@ -80,6 +80,7 @@ import {
 } from './setup'
 import { installProjectMcp, removeProjectMcp } from './project-mcp-setup'
 import { parsePetBehaviorManifest, type SanitizedPetBehaviorManifest } from './pet-behavior-manifest'
+import { shouldDisableDevHardwareAcceleration } from './dev-runtime'
 
 let petWindow: BrowserWindow | null = null
 let panelWindow: BrowserWindow | null = null
@@ -136,6 +137,18 @@ const PERMISSION_DENY_HOTKEY = 'CommandOrControl+Shift+N'
 // Enforce Chromium's renderer sandbox even if a future BrowserWindow option
 // accidentally regresses. This must be called before app readiness.
 app.enableSandbox()
+// Chromium's GPU process can access-violate on some Windows desktop drivers
+// while serving the Vite renderer. Safe mode is explicit and development-only;
+// packaged builds and other platforms retain hardware acceleration.
+if (shouldDisableDevHardwareAcceleration(
+  process.platform,
+  app.isPackaged,
+  process.env.VITE_DEV_SERVER_URL,
+  process.env.AGENT_PETS_GPU_SAFE_MODE,
+)) {
+  app.disableHardwareAcceleration()
+  console.info('Hardware acceleration disabled for Windows development safe mode')
+}
 // Phase 3 uses Node's built-in SQLite driver. Electron exposes it behind the
 // same experimental switch as the bundled Node runtime; keeping the switch in
 // the main process avoids renderer access to the database or its handles.

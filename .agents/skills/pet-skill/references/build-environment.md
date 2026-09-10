@@ -14,6 +14,12 @@
 
 ## pnpm 與依賴修復
 
+### Windows 開發版 GPU 安全模式
+
+- `vite-plugin-electron@1.1.1` 的預設 `startup()` 參數包含 `--no-sandbox`。`vite.config.mts` 必須為 main 與 preload 的 `onstart` 都明確傳入 `['.']`；simple plugin 的首次啟動可能由任一 build 完成後觸發，只改其中一個入口不足以固定啟動參數。
+- 硬體加速預設開啟。受 Chromium GPU process crash 影響的 Windows 電腦直接執行 `pnpm dev:safe`；不可要求使用者建立 `.env.local`，也不可把 safe mode 擴大到一般 `pnpm dev`、正式打包版本、macOS 或 Linux。
+- safe mode 由 Vite mode 選擇，只把內部偏好傳給 Electron child process，不使用 `VITE_` 前綴且不暴露給 renderer。Electron main process 必須同時確認 `win32`、未打包、存在 `VITE_DEV_SERVER_URL` 與明確 safe-mode 偏好，才可在 `ready` 前呼叫 `app.disableHardwareAcceleration()`。
+
 - 專案固定使用 `pnpm@11.16.0` 與 `pnpm-lock.yaml`；不可新增 `package-lock.json`。
 - 依賴安裝要保留 devDependencies、scripts 與 electron-builder 設定。不可用 production-only 安裝、prune 或其他會把 `package.json`／lockfile 縮成 runtime-only 的流程修復開發環境。
 - Windows 若需要離線重建，優先使用使用者層級 store（目前環境為 `C:\\Users\\dgh\\AppData\\Local\\pnpm\\store\\v11`）：
