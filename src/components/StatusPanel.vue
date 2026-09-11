@@ -1004,6 +1004,30 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
               @update:model-value="store.setShimejiEnabled($event)"
             />
             <ToggleRow
+              :model-value="store.captureExclusionEnabled"
+              :label="t('captureExclusion')"
+              :help="store.desktopVisibilityCapabilities.captureExclusion.supported
+                ? t('captureExclusionHelp')
+                : t('captureExclusionUnavailable')"
+              :disabled="!store.desktopVisibilityCapabilities.captureExclusion.supported"
+              @update:model-value="store.setCaptureExclusionEnabled($event)"
+            />
+            <ToggleRow
+              :model-value="store.fullscreenAutoHideEnabled"
+              :label="t('fullscreenAutoHide')"
+              :help="store.desktopVisibilityCapabilities.fullscreenAutoHide.supported
+                ? t('fullscreenAutoHideHelp')
+                : t('fullscreenAutoHideUnavailable')"
+              :disabled="!store.desktopVisibilityCapabilities.fullscreenAutoHide.supported"
+              @update:model-value="store.setFullscreenAutoHideEnabled($event)"
+            />
+            <ToggleRow
+              :model-value="store.rightClickHideEnabled"
+              :label="t('rightClickHide')"
+              :help="t('rightClickHideHelp')"
+              @update:model-value="store.setRightClickHideEnabled($event)"
+            />
+            <ToggleRow
               :model-value="store.permissionBubbleEnabled"
               :label="t('permissionBubble')"
               :help="t('permissionBubbleHelp')"

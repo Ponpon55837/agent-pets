@@ -430,6 +430,18 @@ function onClick(e: MouseEvent) {
   store.togglePanel()
 }
 
+function onPetContextMenu(e: MouseEvent): void {
+  if (!store.rightClickHideEnabled) return
+  const target = e.target instanceof Element ? e.target : null
+  if (!target) return
+  // Only the actual sprite and its compact Edge representation are hide
+  // targets. Permission cards, status lines, toasts, and other controls do not
+  // inherit this shortcut.
+  const isPetSurface = Boolean(target.closest('[data-pet-context-target="hide"]'))
+  if (!isPetSurface) return
+  window.electronAPI?.requestPetHide()
+}
+
 // --- Presentation 與成就回饋動畫 ---------------------------------------------
 
 watch(() => store.presentationReaction, (reaction) => {
@@ -480,7 +492,7 @@ watch(() => store.achievementUnlock, (unlock) => {
       @mousedown="onMouseDown"
       @mousemove="onPetMouseMove"
       @click="onClick"
-      @contextmenu.prevent
+      @contextmenu.prevent="onPetContextMenu"
     >
       <div
         v-if="store.petWindowMode.mode === 'edge'"
@@ -489,6 +501,7 @@ watch(() => store.achievementUnlock, (unlock) => {
         tabindex="0"
         :aria-label="t('expandFromEdge')"
         data-pet-hit-target="solid"
+        data-pet-context-target="hide"
         @mousedown.stop="onEdgeMouseDown"
         @click.stop="store.setPetMode('normal')"
         @keydown.enter.prevent="store.setPetMode('normal')"

@@ -84,6 +84,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('pet-mouse-passthrough', { ignore })
   },
 
+  requestPetHide: () => {
+    ipcRenderer.send('pet-hide-request')
+  },
+
   togglePanel: () => {
     ipcRenderer.send('panel-toggle')
   },

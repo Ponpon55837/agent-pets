@@ -4,7 +4,7 @@
 > 語言：繁體中文
 > 適用產品：Agent Pets 桌面應用程式
 > 架構目標：在不一次重寫既有系統的前提下，將現有桌寵從「Agent 狀態看板」演進為安全、可擴充、可長期常駐的「本機 Agent 伴侶」
-> Roadmap 順序：Tray → Permission → XP → Mini → Adapter SDK → MCP → History/HUD → Project Pet → Achievements → Shimeji
+> Roadmap 順序：Tray → Permission → XP → Mini → Adapter SDK → MCP → History/HUD → Project Pet → Achievements → Shimeji → Desktop Visibility
 
 ---
 
@@ -1316,6 +1316,32 @@ Phase 9 資料一致性補充：History 與 Achievement 對完成 session 使用
 **依賴：** Phase 4 window geometry、Phase 5 canonical state、sprite manifest。
 **主要風險：** 功能範圍膨脹、物理/DPI、多 pet 效能、美術資產。
 
+### Phase 11 — Desktop Visibility
+
+**目的：** 把桌面寵物的擷取保護、全螢幕顯示政策、右鍵隱藏與平台能力限制集中到 main process，讓設定與原生視窗不會宣稱無法可靠完成的能力。
+
+**交付：**
+
+- `BrowserWindow.setContentProtection(true)` 的 pet-only capture exclusion。Windows 使用系統 API；macOS 明確標示 best-effort／legacy 限制；panel 不納入排除；
+- macOS `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false })` 的原生 Space policy，套用到 pet 與 panel；避免在第三方 fullscreen 中以 focus/show 把視窗拉回前景；
+- persisted desktop preference、能力 projection、繁中／英文設定、Tray 文案與安全 IPC；舊設定檔中的 unsupported `true` 必須在 main projection 中變成 `false`；
+- right-click hide 只接受可信任 pet renderer 的無 payload IPC，main 再次檢查設定；只有 pet sprite 與取代寵物的 Edge Peek handle 是有效目標，permission card、status line、toast 與其他互動控制不得被誤判。
+
+**平台能力邊界：**
+
+- Windows：本 Phase 不實作跨程式 fullscreen detector。Electron 的 `BrowserWindow`／`screen` API 只能描述本 App 視窗與顯示器幾何；不能以 blur/focus、標題關鍵字、PowerShell、WMI、輪詢或本 App 的 fullscreen event 假裝偵測其他程式。`fullscreenAutoHide` capability 必須是 `unsupported`、設定 disabled，並在 README／phase report 誠實說明。後續若要支援，另立 native detector/security gate phase，需 Windows 實機與 packaged 驗證。
+- macOS：fullscreen auto-hide 是原生 Spaces exclusion，不宣稱能辨識影片或錄影開始／結束。`isVisible()` 不能用來推斷第三方 fullscreen Space；從 Tray 開啟時應使用 `showInactive()` 或保留 native exclusion，避免切換 Space。
+- Capture exclusion：Windows 的 `WDA_EXCLUDEFROMCAPTURE` 只涵蓋支援的系統擷取且有 OS 版本限制；macOS `NSWindowSharingNone`／Electron content protection 是有限且可能被 ScreenCaptureKit 忽略的保護，不是 DRM、不是錄影偵測，也不保護 panel、DWM／硬體擷取或相機。
+
+**Acceptance criteria：**
+
+- Windows capability projection 明確為 unsupported，舊檔 true 不會投影到 renderer 或呼叫 detector／capture side effect；macOS capability 為 native Space mode；Linux 不宣稱 fullscreen／capture 支援；
+- capture toggle 只套 pet window；right-click IPC 有 sender、無 payload 與 persisted preference 雙重驗證；renderer reload／window recreate 會重新套用目前原生政策；
+- pure tests 涵蓋 capability projection 與 stale preference；實機驗收記錄 Windows capture、macOS Spaces／capture caveat 與未測項。
+
+**依賴：** Phase 1 desktop preferences／Tray、Phase 4 window geometry、Phase 10 Shimeji、Electron 43 window API。
+**主要風險：** 第三方 fullscreen 的跨平台 native 差異、capture API 不保證性、Space／DPI／多螢幕行為、後續 Windows native detector 的新安全邊界。
+
 ---
 
 ## 18. Migration Plan：從現況逐步切到 v2
@@ -1399,6 +1425,12 @@ Phase 9 資料一致性補充：History 與 Achievement 對完成 session 使用
 - Shimeji 只填補沒有高優先級狀態的時間；
 - 每個 sprite 透過 manifest 宣告能力並可回退。
 
+### Step 10 — Desktop Visibility 以 capability 與原生 policy 導入
+
+- 以平台 capability gate 接入 capture protection 與 macOS Spaces policy；Windows 外部 fullscreen 維持 disabled，直到另立 native detector phase；
+- 先完成 capability／preference／IPC negative tests，再做 packaged Windows capture 與 macOS Space 的人工驗收；
+- 若後續加入 Windows native helper，必須新增 security boundary、lifecycle、packaging、實機矩陣與獨立 rollback gate，不可直接擴充本 Phase 的 unsupported path。
+
 ### 18.1 每步共同遷移規則
 
 - 每個 migration PR/commit 僅處理一個責任邊界；
@@ -1412,7 +1444,7 @@ Phase 9 資料一致性補充：History 與 Achievement 對完成 session 使用
 
 ## 19. 明確不做事項（Non-goals）
 
-Architecture v2 與 Phase 1–10 明確不包含：
+Architecture v2 與 Phase 1–11 明確不包含：
 
 - 雲端排行榜；
 - 帳號系統、GitHub login 或任何強制登入；

@@ -2,6 +2,10 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
 import { DEFAULT_LOCALE, isAppLocale } from '../src/types/locale.ts'
+import {
+  UNSUPPORTED_DESKTOP_VISIBILITY_CAPABILITIES,
+  type DesktopVisibilityCapabilities,
+} from '../src/types/desktop-visibility.ts'
 
 export function readBoundedJson(filePath: string, maxBytes = 64 * 1024): unknown | null {
   try {
@@ -37,7 +41,17 @@ export function writeJsonAtomic(filePath: string, value: unknown): void {
   }
 }
 
-type StoredDesktopPreferences = Omit<DesktopPreferences, 'launchAtStartupSupported'>
+type StoredDesktopPreferences = Omit<DesktopPreferences, 'launchAtStartupSupported' | 'visibilityCapabilities'>
+
+function supportedVisibilityPreference(
+  enabled: boolean | undefined,
+  supported: boolean,
+): boolean {
+  // A preference file can outlive the platform/runtime that wrote it. Never
+  // project a stale `true` into the renderer or native side effects when the
+  // current platform does not expose the capability.
+  return supported && enabled === true
+}
 
 export interface LoginItemAdapter {
   supported: boolean
@@ -72,6 +86,9 @@ const BOOLEAN_KEYS = [
   'achievementsEnabled',
   'edgeModeEnabled',
   'shimejiEnabled',
+  'captureExclusionEnabled',
+  'fullscreenAutoHideEnabled',
+  'rightClickHideEnabled',
   'soundEnabled',
   'launchAtStartup',
 ] as const
@@ -84,6 +101,9 @@ const DEFAULTS: StoredDesktopPreferences = {
   achievementsEnabled: true,
   edgeModeEnabled: false,
   shimejiEnabled: false,
+  captureExclusionEnabled: false,
+  fullscreenAutoHideEnabled: false,
+  rightClickHideEnabled: false,
   soundEnabled: false,
   launchAtStartup: false,
   locale: DEFAULT_LOCALE,
@@ -124,11 +144,17 @@ export function parseDesktopPreferencesPatch(value: unknown): DesktopPreferences
 export class DesktopPreferencesStore {
   private readonly filePath: string
   private readonly loginItem: LoginItemAdapter
+  private readonly visibilityCapabilities: DesktopVisibilityCapabilities
   private stored: Partial<StoredDesktopPreferences> | null = null
 
-  constructor(filePath: string, loginItem: LoginItemAdapter) {
+  constructor(
+    filePath: string,
+    loginItem: LoginItemAdapter,
+    visibilityCapabilities: DesktopVisibilityCapabilities = UNSUPPORTED_DESKTOP_VISIBILITY_CAPABILITIES,
+  ) {
     this.filePath = filePath
     this.loginItem = loginItem
+    this.visibilityCapabilities = visibilityCapabilities
   }
 
   private load(): Partial<StoredDesktopPreferences> {
@@ -152,8 +178,17 @@ export class DesktopPreferencesStore {
     return {
       ...DEFAULTS,
       ...stored,
+      captureExclusionEnabled: supportedVisibilityPreference(
+        stored.captureExclusionEnabled,
+        this.visibilityCapabilities.captureExclusion.supported,
+      ),
+      fullscreenAutoHideEnabled: supportedVisibilityPreference(
+        stored.fullscreenAutoHideEnabled,
+        this.visibilityCapabilities.fullscreenAutoHide.supported,
+      ),
       launchAtStartup: this.currentLaunchAtStartup(stored),
       launchAtStartupSupported: this.loginItem.supported,
+      visibilityCapabilities: this.visibilityCapabilities,
     }
   }
 
@@ -171,6 +206,19 @@ export class DesktopPreferencesStore {
     const current = this.get()
     const next: DesktopPreferences = { ...current, ...patch }
 
+    // Keep unsupported values disabled even when an old settings file or a
+    // forged renderer request asks to enable them. The response is the
+    // effective projection, so the renderer cannot display a disabled
+    // capability as enabled and no main-process side effect can observe it.
+    next.captureExclusionEnabled = supportedVisibilityPreference(
+      next.captureExclusionEnabled,
+      this.visibilityCapabilities.captureExclusion.supported,
+    )
+    next.fullscreenAutoHideEnabled = supportedVisibilityPreference(
+      next.fullscreenAutoHideEnabled,
+      this.visibilityCapabilities.fullscreenAutoHide.supported,
+    )
+
     if (typeof patch.launchAtStartup === 'boolean') {
       if (this.loginItem.supported) {
         next.launchAtStartup = this.loginItem.setOpenAtLogin(patch.launchAtStartup)
@@ -187,6 +235,9 @@ export class DesktopPreferencesStore {
       achievementsEnabled: next.achievementsEnabled,
       edgeModeEnabled: next.edgeModeEnabled,
       shimejiEnabled: next.shimejiEnabled,
+      captureExclusionEnabled: next.captureExclusionEnabled,
+      fullscreenAutoHideEnabled: next.fullscreenAutoHideEnabled,
+      rightClickHideEnabled: next.rightClickHideEnabled,
       soundEnabled: next.soundEnabled,
       launchAtStartup: next.launchAtStartup,
       locale: next.locale,
@@ -204,6 +255,9 @@ export class DesktopPreferencesStore {
       achievementsEnabled: preferences.achievementsEnabled,
       edgeModeEnabled: preferences.edgeModeEnabled,
       shimejiEnabled: preferences.shimejiEnabled,
+      captureExclusionEnabled: preferences.captureExclusionEnabled,
+      fullscreenAutoHideEnabled: preferences.fullscreenAutoHideEnabled,
+      rightClickHideEnabled: preferences.rightClickHideEnabled,
       soundEnabled: preferences.soundEnabled,
       launchAtStartup: preferences.launchAtStartup,
       locale: preferences.locale,

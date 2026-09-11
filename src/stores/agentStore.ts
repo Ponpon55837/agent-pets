@@ -9,6 +9,7 @@ import type {
 } from '@/types/agent'
 import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '@/types/desktop'
+import type { DesktopVisibilityCapabilities } from '@/types/desktop-visibility'
 import type { AppLocale } from '@/types/locale'
 import type { PermissionDecisionValue, PermissionRequestView } from '@/types/permission'
 import type { ProgressionSnapshot } from '@/types/progression'
@@ -340,6 +341,13 @@ export const useAgentStore = defineStore('agent', () => {
   const achievementsEnabled = ref(true)
   const edgeModeEnabled = ref(false)
   const shimejiEnabled = ref(false)
+  const captureExclusionEnabled = ref(false)
+  const fullscreenAutoHideEnabled = ref(false)
+  const rightClickHideEnabled = ref(false)
+  const desktopVisibilityCapabilities = ref<DesktopVisibilityCapabilities>({
+    captureExclusion: { supported: false, mode: 'unsupported' },
+    fullscreenAutoHide: { supported: false, mode: 'unsupported' },
+  })
   const launchAtStartup = ref(false)
   const launchAtStartupSupported = ref(false)
   const desktopPreferencesReady = ref(false)
@@ -566,6 +574,10 @@ export const useAgentStore = defineStore('agent', () => {
     achievementsEnabled.value = preferences.achievementsEnabled
     edgeModeEnabled.value = preferences.edgeModeEnabled
     shimejiEnabled.value = preferences.shimejiEnabled
+    captureExclusionEnabled.value = preferences.captureExclusionEnabled
+    fullscreenAutoHideEnabled.value = preferences.fullscreenAutoHideEnabled
+    rightClickHideEnabled.value = preferences.rightClickHideEnabled
+    desktopVisibilityCapabilities.value = preferences.visibilityCapabilities
     soundEnabled.value = preferences.soundEnabled
     launchAtStartup.value = preferences.launchAtStartup
     launchAtStartupSupported.value = preferences.launchAtStartupSupported
@@ -632,6 +644,23 @@ export const useAgentStore = defineStore('agent', () => {
   function setShimejiEnabled(enabled: boolean) {
     shimejiEnabled.value = enabled
     updateDesktopPreferences({ shimejiEnabled: enabled })
+  }
+
+  function setCaptureExclusionEnabled(enabled: boolean) {
+    if (!desktopVisibilityCapabilities.value.captureExclusion.supported) return
+    captureExclusionEnabled.value = enabled
+    updateDesktopPreferences({ captureExclusionEnabled: enabled })
+  }
+
+  function setFullscreenAutoHideEnabled(enabled: boolean) {
+    if (!desktopVisibilityCapabilities.value.fullscreenAutoHide.supported) return
+    fullscreenAutoHideEnabled.value = enabled
+    updateDesktopPreferences({ fullscreenAutoHideEnabled: enabled })
+  }
+
+  function setRightClickHideEnabled(enabled: boolean) {
+    rightClickHideEnabled.value = enabled
+    updateDesktopPreferences({ rightClickHideEnabled: enabled })
   }
 
   function setLocalePreference(next: AppLocale) {
@@ -1522,6 +1551,10 @@ export const useAgentStore = defineStore('agent', () => {
     achievementsEnabled,
     edgeModeEnabled,
     shimejiEnabled,
+    captureExclusionEnabled,
+    fullscreenAutoHideEnabled,
+    rightClickHideEnabled,
+    desktopVisibilityCapabilities,
     launchAtStartup,
     launchAtStartupSupported,
     desktopPreferencesReady,
@@ -1590,6 +1623,9 @@ export const useAgentStore = defineStore('agent', () => {
     setPresentationMcpEnabled,
     setAchievementsEnabled,
     setEdgeModeEnabled,
+    setCaptureExclusionEnabled,
+    setFullscreenAutoHideEnabled,
+    setRightClickHideEnabled,
     setLocalePreference,
     setLaunchAtStartup,
     setMultiPetEnabled,

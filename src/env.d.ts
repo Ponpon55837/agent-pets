@@ -43,6 +43,7 @@ declare global {
       resizeWindow: (width: number, height: number) => void
       reportContentHeight: (height: number) => void
       setMousePassthrough: (ignore: boolean) => void
+      requestPetHide: () => void
       togglePanel: () => void
       resizePanel: (height: number, width?: number) => void
       hidePanel: () => void

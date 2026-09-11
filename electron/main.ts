@@ -22,6 +22,7 @@ import { getQuotaUsage } from './quota'
 import { DesktopPreferencesStore, resolveLoginItemExecutable, writeJsonAtomic } from './desktop-preferences'
 import { DesktopNotificationService } from './desktop-notifications'
 import { DesktopTrayController } from './desktop-tray'
+import { desktopVisibilityCapabilitiesForPlatform } from './desktop-visibility'
 import { PermissionBroker } from './permission-broker'
 import { appendPermissionAudit } from './permission-audit'
 import { ProgressionStore } from './progression'
@@ -118,6 +119,7 @@ let presentationStatusProjection: PresentationStatusSnapshot = {
 let desktopPreferences: DesktopPreferencesStore | null = null
 let desktopNotifications: DesktopNotificationService | null = null
 let desktopTray: DesktopTrayController | null = null
+let petCaptureProtectionApplied: boolean | null = null
 let petWindowMode: PetWindowMode = 'normal'
 let petWindowEdge: PetEdge | null = null
 let normalPetBounds: WindowBounds | null = null
@@ -669,6 +671,50 @@ function rehomePetWindowForDisplayChange(): void {
   broadcastPetWindowMode()
 }
 
+function applyPetCaptureProtection(): void {
+  if (!petWindow || petWindow.isDestroyed()) return
+  const preferences = currentDesktopPreferences()
+  if (!preferences.visibilityCapabilities.captureExclusion.supported) {
+    petCaptureProtectionApplied = null
+    return
+  }
+  if (typeof petWindow.setContentProtection !== 'function') return
+  const enabled = preferences.captureExclusionEnabled
+  // A newly-created window is unprotected by default. Avoid a redundant
+  // `setContentProtection(false)` call when the preference is already off;
+  // disabling still calls the native API once after an earlier enable.
+  if (petCaptureProtectionApplied === enabled
+    || (petCaptureProtectionApplied === null && !enabled)) return
+  try {
+    // Only the pet window is excluded. The settings/panel window remains
+    // capturable so users can include their configuration or status view.
+    petWindow.setContentProtection(enabled)
+    petCaptureProtectionApplied = enabled
+  } catch (error) {
+    console.error('Failed to apply pet capture protection', error)
+  }
+}
+
+function applyMacFullscreenVisibilityPolicy(): void {
+  const preferences = currentDesktopPreferences()
+  if (!preferences.visibilityCapabilities.fullscreenAutoHide.supported) return
+  const visibleOnFullScreen = !preferences.fullscreenAutoHideEnabled
+  for (const window of [petWindow, panelWindow]) {
+    if (!window || window.isDestroyed()) continue
+    try {
+      // macOS Spaces owns the transition for another app's fullscreen window;
+      // Electron has no trustworthy cross-app fullscreen event to proxy here.
+      // Keep Electron's default process-type handling. skipTransformProcessType
+      // is only safe when the app is already known to be an UIElement app;
+      // Agent Pets is not configured that way, and the original window path
+      // relied on Electron performing the required transform.
+      window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen })
+    } catch (error) {
+      console.error('Failed to apply macOS fullscreen visibility policy', error)
+    }
+  }
+}
+
 function createPetWindow() {
   const primaryWorkArea = screen.getPrimaryDisplay().workArea
   const rawScale = parseFloat(process.env.PET_SCALE || '1')
@@ -748,6 +794,7 @@ function createPetWindow() {
       devTools: !app.isPackaged,
     },
   })
+  petCaptureProtectionApplied = null
 
   secureRendererWindow(petWindow)
 
@@ -757,9 +804,8 @@ function createPetWindow() {
   // alwaysOnTop alone does not make it follow you across a Space switch.
   // No Windows equivalent: virtual-desktop pinning there is a per-window
   // right-click toggle in Task View, not something Electron can set for us.
-  if (IS_MAC) {
-    petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  }
+  applyPetCaptureProtection()
+  applyMacFullscreenVisibilityPolicy()
 
   if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) {
     petWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
@@ -787,6 +833,7 @@ function createPetWindow() {
 
   petWindow.on('closed', () => {
     petWindow = null
+    petCaptureProtectionApplied = null
     anchorBottomCenter = null
     normalPetBounds = null
     edgeRestoreBounds = null
@@ -830,9 +877,7 @@ function createPanelWindow() {
 
   secureRendererWindow(panelWindow)
 
-  if (IS_MAC) {
-    panelWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  }
+  applyMacFullscreenVisibilityPolicy()
 
   if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) {
     panelWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#panel`)
@@ -927,8 +972,14 @@ function ensureDesktopWindows(): boolean {
 function showPetWindow(): void {
   if (!ensureDesktopWindows() || !petWindow) return
   if (petWindow.isMinimized()) petWindow.restore()
-  petWindow.show()
-  petWindow.focus()
+  // With fullscreen exclusion enabled, showing the pet from the Tray must not
+  // steal focus or pull another app's fullscreen Space away on macOS.
+  if (IS_MAC && currentDesktopPreferences().fullscreenAutoHideEnabled) {
+    petWindow.showInactive()
+  } else {
+    petWindow.show()
+    petWindow.focus()
+  }
   desktopTray?.rebuild()
 }
 
@@ -943,6 +994,10 @@ function showPanelWindow(view: 'sessions' | 'settings' = 'sessions'): void {
   if (petWindowMode === 'edge') applyNormalPetBounds()
   showPetWindow()
   panelWindow.setBounds(computePanelBounds(view === 'settings' ? 720 : 560))
+  // Opening a panel is an explicit user action (Tray item, notification, or
+  // pet click), so it must remain keyboard-usable even when fullscreen
+  // exclusion is enabled. The macOS Space collection policy still decides
+  // which Space the window may occupy.
   panelWindow.show()
   panelWindow.focus()
   desktopNotifications?.clearAttention()
@@ -969,10 +1024,17 @@ function currentDesktopPreferences(): DesktopPreferences {
       achievementsEnabled: true,
       edgeModeEnabled: false,
       shimejiEnabled: false,
+      captureExclusionEnabled: false,
+      fullscreenAutoHideEnabled: false,
+      rightClickHideEnabled: false,
       soundEnabled: false,
       launchAtStartup: false,
       launchAtStartupSupported: false,
       locale: 'zh-TW',
+      visibilityCapabilities: desktopVisibilityCapabilitiesForPlatform(
+        process.platform,
+        typeof BrowserWindow.prototype.setContentProtection === 'function',
+      ),
     }
   }
   return desktopPreferences.get()
@@ -1009,6 +1071,8 @@ function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   const preferences = desktopPreferences.update(patch)
   setLocale(preferences.locale)
   if (!preferences.edgeModeEnabled && petWindowMode === 'edge') applyNormalPetBounds()
+  applyPetCaptureProtection()
+  applyMacFullscreenVisibilityPolicy()
   if (!preferences.presentationMcpEnabled || preferences.dndEnabled) {
     presentationController?.clear()
   }
@@ -1373,6 +1437,10 @@ function createDesktopServices(): void {
         return app.getLoginItemSettings({ path: loginItemExecutable }).openAtLogin
       },
     },
+    desktopVisibilityCapabilitiesForPlatform(
+      process.platform,
+      typeof BrowserWindow.prototype.setContentProtection === 'function',
+    ),
   )
   setLocale(currentDesktopPreferences().locale)
 
@@ -1706,6 +1774,15 @@ app.whenReady().then(() => {
     } else {
       petWindow.setIgnoreMouseEvents(false)
     }
+  })
+
+  // This channel intentionally has no payload. The renderer only reports the
+  // gesture; main re-checks both the trusted sender and the persisted switch
+  // before changing manual visibility.
+  ipcMain.on('pet-hide-request', (event) => {
+    if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
+    if (!currentDesktopPreferences().rightClickHideEnabled) return
+    hidePetWindow()
   })
 
   ipcMain.on('panel-toggle', (event) => {

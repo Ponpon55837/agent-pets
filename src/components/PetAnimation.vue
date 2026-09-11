@@ -597,6 +597,7 @@ onUnmounted(() => {
     :style="[{ width: canvasW + 'px', height: canvasH + 'px' }, moodAuraStyle]"
     :data-mood="moodValue"
     :data-mood-energy="moodEnergyTier"
+    data-pet-context-target="hide"
   >
     <canvas
       ref="auraOuterRef"

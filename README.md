@@ -15,6 +15,7 @@ Desktop pet that shows real-time status of your AI coding agents.
 - **Desktop controls** — Tray menu, native waiting/completion notifications, Do Not Disturb, sound control, and optional launch at startup.
 - **Mini / Edge mode** — Mini is always opt-in; Edge Peek is a separate Settings/Tray toggle (off by default) that shows a dedicated Liquid Glass handle at the display edge instead of clipping the pet. Bounds are restored across display and DPI changes.
 - **Optional Shimeji behavior** — A separate Settings toggle enables low-cadence idle walking, sleep, and cursor reactions. It is off by default and pauses for active work, Permission, DND, reduced motion, background, or power saving; walking is clamped to the current display work area.
+- **Desktop visibility controls** — Optionally exclude the pet window from supported capture APIs, hide it while another app owns a macOS fullscreen Space, or enable right-click hide. Capture protection covers the pet only; macOS capture exclusion is best effort, and Windows external-fullscreen detection is intentionally unavailable and disabled until a dedicated native detector is shipped.
 - **Permission Control** — OpenCode permission requests can be allowed once or denied from a Liquid Glass pet bubble; scoped hotkeys are available only while an eligible request is visible.
 - **Pet progression** — Completed sessions, bounded observed active-time, first completions of the day, and consecutive-day streaks earn durable XP. Level and evolution are restored after restart from a main-process SQLite ledger.
 - **Achievement gallery** — The Growth chip shows ten pet-scoped long-term milestones. Unlocks are evaluated and persisted once in the main process, with a one-shot native notification and visual reward; token milestones show exact versus estimated quality. The Growth toggle can stop new unlocks without affecting XP, permissions, or event ingestion.
@@ -61,7 +62,7 @@ Download `Agent Pets.dmg`, open it, and drag the app to your Applications folder
 |--------|--------|
 | **Left-click** the pet | Open the control panel (opens as its own window, next to the pet — the pet itself never moves) |
 | **Drag** the pet | Move it to a new position (remembered across restarts) |
-| **Right-click** | Nothing (disabled) |
+| **Right-click** | Hide the pet when enabled in Settings (permission controls remain interactive) |
 
 The system Tray menu can show or hide the pets, open the panel or Settings, toggle Mini / Edge Peek mode, Do Not Disturb, sound and notifications, configure launch at startup in packaged builds, mark pending attention on the Tray icon, and quit the app. Closing or hiding the pet window keeps hooks and background status running until **Quit** is selected.
 
@@ -110,6 +111,9 @@ The panel uses an extensible section navigator: **Language**, **Appearance**, **
 - **Mini mode** — Shrinks the pet to a compact 96px surface and can be turned off at any time.
 - **Edge peek** — A separate, **off-by-default** preference. When enabled, dragging to a display edge and holding for about 650ms shows a dedicated 42px-thick × 96px-long Liquid Glass handle; click or hover expands back to Normal without leaving a clipped pet fragment. Pending permission requests always restore the normal interactive surface.
 - **Shimeji behavior** — Enable it under **Settings → Desktop → Desktop behavior** when you want autonomous idle movement. The scheduler uses one low-frequency timer for the whole pet window, falls back to Idle when a sprite manifest lacks Walk/Sleep rows, and never moves Mini/Edge or crosses a monitor boundary.
+- **Capture exclusion** — Excludes the pet window from supported screenshots and recordings when enabled. Windows uses the system capture-exclusion API; macOS uses a limited native sharing policy that newer capture tools may ignore. The control panel is not excluded.
+- **Fullscreen auto-hide** — On macOS, the pet and panel use native Spaces policy to stay out of another app's fullscreen Space. Windows does not advertise this option: Electron has no safe cross-application fullscreen detector, so the toggle is disabled rather than approximated with focus, title, or polling heuristics. This is not video-content recognition.
+- **Right-click hide** — Enable this to hide the pet by right-clicking its sprite or the Edge Peek handle. Permission cards, status lines, toasts, and other interactive controls are exempt; the app and its hooks continue running.
 - **Do Not Disturb** — Suppresses native notifications, pet sounds, extra motion, and nonessential bubbles without stopping event ingestion. **Off by default.**
 - **Notifications** — Native alerts for waiting-permission, waiting-input, completion, and errors. Repeats use a per-session cooldown and terminal events are batched. **On by default.**
 - **Sound** — Short synthesized cues (Web Audio, no audio files) for success/error/waiting-permission. **Off by default.**
@@ -341,7 +345,7 @@ Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that r
 - **Memory bounds** — Agent sessions are capped and stale/offline entries are evicted to prevent unbounded renderer memory growth.
 - **Path sanitization** — Project paths are reduced to their basename, and filesystem destinations are constrained to their expected root.
 - **Desktop notifications** — Notification text is built only from the normalized Agent name and bounded project basename; prompt text, tool arguments, session identifiers, and credentials are never shown or logged. Diagnostic notification history is bounded and stores only event class/outcome metadata.
-- **Desktop preference IPC** — The main process owns Tray/DND/notification/permission-bubble/startup preferences. Renderer requests accept only an allowlist of boolean fields from validated first-party frames, and preference writes use bounded reads plus atomic replacement.
+- **Desktop visibility and preference IPC** — The main process owns capture protection, fullscreen capability projection, right-click hide authorization, and desktop preferences. Renderer requests accept only an allowlist of boolean fields from validated first-party frames; right-click hide re-checks the trusted pet sender and persisted preference. Preference writes use bounded reads plus atomic replacement. Windows external-fullscreen detection is not implemented or claimed.
 - **Presentation MCP** — The MCP bridge is loopback-only, uses a separate per-install token, rejects browser origins, limits JSON body size and request rate, validates a fixed three-tool surface, strips control/markup characters, bounds message length/TTL/queue depth, and removes a disconnected client's pending intents. It has no command, file, permission, progression, quota, or achievement authority.
 - **Permission Broker** — Permission responses use a separate loopback port and per-install token, never the generic event endpoint. The main process enforces TTL, one-shot state transitions, anti-replay, bounded records, Adapter-owned opaque handles, scoped hotkeys, external-resolution reconciliation, and a bounded redacted audit. Only `allow_once` and `deny` are exposed; permanent approval is intentionally unavailable.
 - **Progression storage** — XP is awarded only in the Electron main process. SQLite migrations, transactionally coupled `pet_progress`/`xp_ledger` writes, unique idempotency keys, bounded session activity, and sanitized snapshots prevent renderer or duplicate-event writes from inflating progression. The database stays local and is never uploaded.
@@ -443,6 +447,7 @@ agent-pets/
 │   ├── project-mcp-setup.ts # Safe project-local MCP configuration installer
 │   ├── project-mcp-registry.ts # Local connected-project registry and status checks
 │   ├── pet-window-mode.ts   # Bounded Mini/Edge geometry and dwell constants
+│   ├── desktop-visibility.ts # Platform capability projection (no fake detector)
 │   ├── desktop-preferences.ts # Main-owned desktop preferences
 │   ├── desktop-notifications.ts # Native notification delivery and bounded log
 │   ├── desktop-tray.ts      # Tray lifecycle and menu
@@ -469,6 +474,7 @@ agent-pets/
 │   │   ├── agent.ts         # Agent event types
 │   │   ├── agent-adapter.ts  # Adapter capabilities/status contracts
 │   │   ├── desktop.ts       # Desktop preference IPC types
+│   │   ├── desktop-visibility.ts # Visibility capability types
 │   │   └── presentation.ts  # Presentation intent/status contract
 │   └── utils/
 │       ├── format.ts        # Shared formatting helpers
