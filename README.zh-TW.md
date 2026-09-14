@@ -15,7 +15,7 @@
 - **桌面控制** — 系統匣選單、原生等待／完成通知、勿擾模式、音效控制，以及可選的登入時啟動。
 - **Mini／Edge 模式** — Mini 可隨時切換；Edge Peek 需由使用者在 Settings 或 Tray 開啟，拖到螢幕邊緣停留片刻會顯示專用 Liquid Glass handle，不會裁切寵物本體，且會依螢幕與 DPI 變更重新定位。
 - **可選 Shimeji 行為** — 在 Settings → Desktop → 桌面行為開啟後，寵物會以低頻率在閒置時走動、休息並回應游標。預設關閉；工作中、Permission、勿擾、Reduced Motion、背景或省電時會暫停，且只會在目前螢幕 work area 內移動。
-- **桌面顯示控制** — 可選擇將寵物視窗排除在支援的擷取 API 外、在 macOS 其他 App 全螢幕 Space 中隱藏，或開啟右鍵隱藏。擷取保護只套用寵物；macOS 的擷取排除是最佳努力，而 Windows 外部全螢幕偵測尚未具備安全原生邊界，因此刻意停用，不以假偵測代替。
+- **桌面顯示控制** — 可選擇將寵物視窗排除在支援的擷取 API 外、在 macOS 其他 App 全螢幕 Space 或支援的 Windows 無框全螢幕顯示器中隱藏，或開啟右鍵隱藏。擷取保護只套用寵物；macOS 的擷取排除是最佳努力，而 Windows 偵測採保守規則，原生執行環境不可用時會停用。
 - **權限控制** — OpenCode 的 permission request 可直接在 Liquid Glass 寵物氣泡選擇只允許一次或拒絕；只有符合條件且顯示中的請求才會註冊全域快捷鍵。
 - **寵物成長** — 完成 session、受上限保護的觀察到的工作時間、每日首次完成與連續天數會產生持久 XP；Level 與 Evolution 由主行程 SQLite ledger 保存，重開後仍會恢復。
 - **成就圖鑑** — Growth chip 會顯示每隻寵物獨立的 10 個長期里程碑；成就只在主行程解鎖一次，完成時可播放獎勵動畫與一次性原生通知，也會標示 token 成就的精確／估算資料品質。可在 Growth 中獨立關閉追蹤，不會影響 XP、Permission 或事件接收。
@@ -112,7 +112,7 @@
 - **Edge peek** — 獨立選項，**預設關閉**。開啟後拖到任一螢幕邊緣停留約 650ms，會顯示專用 42px 厚、96px 長的 Liquid Glass handle；按下或 hover 會展開回 Normal，不會留下寵物裁切區塊。待處理的權限請求會自動恢復完整可操作視圖。
 - **Shimeji 行為** — 在 **Settings → Desktop → 桌面行為** 開啟自主行為。整個寵物視窗共用一個低頻排程；自訂素材沒有 Walk／Sleep manifest 時會安全回到 Idle，不會在 Mini／Edge 模式移動，也不會跨螢幕。
 - **擷取排除** — 開啟後，將寵物視窗從支援的截圖／錄影 API 排除。Windows 使用系統擷取排除；macOS 使用有限的原生 sharing policy，較新的擷取工具可能忽略。控制面板不會被排除。
-- **全螢幕自動隱藏** — macOS 以原生 Spaces policy 讓寵物與面板離開其他 App 的全螢幕 Space。Windows 不提供此選項：Electron 沒有安全的跨程式全螢幕偵測，因此開關會停用，不使用焦點、標題或輪詢猜測；這不是影片內容辨識。
+- **全螢幕自動隱藏** — macOS 以原生 Spaces policy 讓寵物與面板離開其他 App 的全螢幕 Space。Windows 使用原生 Win32 event detector：只有其他程式擁有可見、頂層、無框，且覆蓋完整螢幕的視窗時，才隱藏位於該螢幕的 Agent Pets 視窗；一般最大化視窗會忽略。原生執行環境不可用時會 fail closed 並停用；這不是影片內容辨識。
 - **右鍵隱藏** — 開啟後，在寵物圖像或 Edge Peek handle 上按右鍵即可隱藏。Permission 卡片、狀態列、提示與其他互動控制項會排除；App 與 hooks 仍會繼續執行。
 - **Do Not Disturb** — 勿擾模式會抑制原生通知、寵物音效、額外動態效果與非必要氣泡，但不會停止事件接收。**預設關閉。**
 - **Notifications** — 等待核准、等待輸入、完成與錯誤的原生通知；同 session 的重複事件有冷卻時間，結束事件會批次合併。**預設開啟。**
@@ -346,7 +346,7 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 - **路徑清理** — 專案路徑只保留 basename，檔案寫入目的地也會限制在預期根目錄內。
 - **專案寵物路由** — main process 只保存每次安裝 salt 產生的 project hash、basename 與 pet binding；symlink／junction 會先 canonicalize，renderer、通知與 MCP status 都不會收到完整路徑。缺少綁定寵物時只回退到預設寵物，不會自動允許或改變權限。
 - **桌面通知** — 通知只會使用正規化後的 Agent 名稱與長度受限的專案 basename，不會顯示或記錄 prompt、工具參數、session identifier 或憑證；診斷紀錄有固定上限，而且只保存事件類別與結果。
-- **桌面顯示與偏好 IPC** — 擷取保護、全螢幕 capability 投影、右鍵隱藏授權與桌面偏好都由 main process 擁有。Renderer 只能從已驗證的第一方 frame 傳送白名單 boolean 欄位；右鍵隱藏會再次檢查可信任的 pet sender 與持久化開關。設定檔採長度受限讀取與原子替換。Windows 外部全螢幕偵測沒有實作，也不宣稱支援。
+- **桌面顯示與偏好 IPC** — 擷取保護、全螢幕 capability 投影、Windows Win32 event detector、右鍵隱藏授權與桌面偏好都由 main process 擁有。Renderer 只能從已驗證的第一方 frame 傳送白名單 boolean 欄位；右鍵隱藏會再次檢查可信任的 pet sender 與持久化開關。設定檔採長度受限讀取與原子替換。Windows detector 只使用前景 HWND、DWM frame bounds、螢幕 bounds、可見性／style 檢查與 event hook，不使用焦點／標題猜測、PowerShell、WMI 或無上限輪詢；原生失效時 fail closed。
 - **Presentation MCP** — MCP bridge 只監聽 loopback，使用獨立的每次安裝 token，拒絕瀏覽器來源，限制 JSON body／請求速率，固定三個工具，清理控制字元與 markup，限制訊息長度／TTL／queue，並在 client disconnect 時移除 pending intent；它沒有命令、檔案、權限、XP、quota 或成就權限。
 - **Permission Broker** — 權限回覆使用獨立 loopback port 與專用的每次安裝 token，不會經過一般事件端點。Main process 強制 TTL、一次性狀態轉換、anti-replay、資料上限、Adapter-owned opaque handle、限時快捷鍵、Agent 端解決對帳，以及內容去識別且有上限的本機 audit；只提供 `allow_once` 與 `deny`，刻意不提供永久允許。
 - **Progression 儲存** — XP 只在 Electron 主行程發放。SQLite migration、同一 transaction 的 `pet_progress`／`xp_ledger` 更新、唯一 idempotency key、受上限保護的 session active-time 與 sanitized snapshot，避免 renderer 或重送事件灌高 XP。資料庫只留在本機，不會上傳。
@@ -448,7 +448,8 @@ agent-pets/
 │   ├── project-mcp-setup.ts # 安全的專案本機 MCP 設定安裝器
 │   ├── project-mcp-registry.ts # 本機已連接專案清單與狀態檢查
 │   ├── pet-window-mode.ts   # Mini／Edge 幾何與 dwell 常數
-│   ├── desktop-visibility.ts # 平台 capability 投影（不使用假偵測）
+│   ├── desktop-visibility.ts # 平台 capability 投影
+│   ├── windows-fullscreen-detector.ts # Windows 原生全螢幕 event detector
 │   ├── desktop-preferences.ts # Main 擁有的桌面偏好
 │   ├── desktop-notifications.ts # 原生通知與有上限的診斷紀錄
 │   ├── desktop-tray.ts      # 系統匣生命週期與選單

@@ -2,6 +2,7 @@ allowBuilds:
   electron: true
   electron-winstaller: false
   esbuild: true
+  koffi: true
   vue-demi: true
 overrides:
   brace-expansion@^1.0.0: 1.1.18

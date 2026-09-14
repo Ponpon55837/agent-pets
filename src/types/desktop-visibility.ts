@@ -3,7 +3,7 @@
  * platform limits instead of presenting an action that cannot work.
  */
 export type CaptureExclusionMode = 'system' | 'limited' | 'unsupported'
-export type FullscreenAutoHideMode = 'macos-native' | 'unsupported'
+export type FullscreenAutoHideMode = 'macos-native' | 'windows-native' | 'unsupported'
 
 export interface DesktopVisibilityCapabilities {
   captureExclusion: {
@@ -26,4 +26,3 @@ export const UNSUPPORTED_DESKTOP_VISIBILITY_CAPABILITIES: DesktopVisibilityCapab
     mode: 'unsupported',
   },
 }
-

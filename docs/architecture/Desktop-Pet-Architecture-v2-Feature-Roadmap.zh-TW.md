@@ -1324,23 +1324,25 @@ Phase 9 資料一致性補充：History 與 Achievement 對完成 session 使用
 
 - `BrowserWindow.setContentProtection(true)` 的 pet-only capture exclusion。Windows 使用系統 API；macOS 明確標示 best-effort／legacy 限制；panel 不納入排除；
 - macOS `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false })` 的原生 Space policy，套用到 pet 與 panel；避免在第三方 fullscreen 中以 focus/show 把視窗拉回前景；
+- Windows 使用範圍固定的 Win32 native detector：以 foreground HWND、DWM extended frame bounds、monitor bounds、visibility/style 與 out-of-context event hooks 判定外部頂層無框全螢幕；依 pet／panel 所在螢幕個別隱藏，原生失效時 capability fail closed；
 - persisted desktop preference、能力 projection、繁中／英文設定、Tray 文案與安全 IPC；舊設定檔中的 unsupported `true` 必須在 main projection 中變成 `false`；
 - right-click hide 只接受可信任 pet renderer 的無 payload IPC，main 再次檢查設定；只有 pet sprite 與取代寵物的 Edge Peek handle 是有效目標，permission card、status line、toast 與其他互動控制不得被誤判。
 
 **平台能力邊界：**
 
-- Windows：本 Phase 不實作跨程式 fullscreen detector。Electron 的 `BrowserWindow`／`screen` API 只能描述本 App 視窗與顯示器幾何；不能以 blur/focus、標題關鍵字、PowerShell、WMI、輪詢或本 App 的 fullscreen event 假裝偵測其他程式。`fullscreenAutoHide` capability 必須是 `unsupported`、設定 disabled，並在 README／phase report 誠實說明。後續若要支援，另立 native detector/security gate phase，需 Windows 實機與 packaged 驗證。
+- Windows：本 Phase 以 Koffi 載入 `user32.dll`／`dwmapi.dll`，註冊 `SetWinEventHook` 的 foreground、move/size、minimize、show/hide/location 事件；只接受不同 process 的可見、非 minimized／非 cloaked、頂層、無 caption／resize frame，且 DWM extended frame bounds 與完整 monitor bounds 相符的視窗。不能以 blur/focus、標題關鍵字、PowerShell、WMI 或無上限輪詢猜測。若 Koffi、Win32 hook 或 evaluation 失效，capability 與 persisted toggle 都回到 disabled，並恢復曾自動隱藏的視窗；需要 Windows 實機與 packaged 驗證。
 - macOS：fullscreen auto-hide 是原生 Spaces exclusion，不宣稱能辨識影片或錄影開始／結束。`isVisible()` 不能用來推斷第三方 fullscreen Space；從 Tray 開啟時應使用 `showInactive()` 或保留 native exclusion，避免切換 Space。
 - Capture exclusion：Windows 的 `WDA_EXCLUDEFROMCAPTURE` 只涵蓋支援的系統擷取且有 OS 版本限制；macOS `NSWindowSharingNone`／Electron content protection 是有限且可能被 ScreenCaptureKit 忽略的保護，不是 DRM、不是錄影偵測，也不保護 panel、DWM／硬體擷取或相機。
 
 **Acceptance criteria：**
 
-- Windows capability projection 明確為 unsupported，舊檔 true 不會投影到 renderer 或呼叫 detector／capture side effect；macOS capability 為 native Space mode；Linux 不宣稱 fullscreen／capture 支援；
+- Windows 在 native detector 可啟動時 capability 為 `windows-native`，無法啟動時為 `unsupported`；舊檔 true 不會越過 capability projection；macOS capability 為 native Space mode；Linux 不宣稱 fullscreen／capture 支援；
+- Windows 只在外部完整 monitor borderless 視窗符合規則時，依同一 monitor 隱藏 pet／panel；一般最大化視窗、自己的視窗、cloaked／minimized／child window 不得觸發；事件 hook 停止或 evaluation 失效時必須 fail open 顯示並 fail closed 停用能力；
 - capture toggle 只套 pet window；right-click IPC 有 sender、無 payload 與 persisted preference 雙重驗證；renderer reload／window recreate 會重新套用目前原生政策；
 - pure tests 涵蓋 capability projection 與 stale preference；實機驗收記錄 Windows capture、macOS Spaces／capture caveat 與未測項。
 
-**依賴：** Phase 1 desktop preferences／Tray、Phase 4 window geometry、Phase 10 Shimeji、Electron 43 window API。
-**主要風險：** 第三方 fullscreen 的跨平台 native 差異、capture API 不保證性、Space／DPI／多螢幕行為、後續 Windows native detector 的新安全邊界。
+**依賴：** Phase 1 desktop preferences／Tray、Phase 4 window geometry、Phase 10 Shimeji、Electron 43 window API、Koffi 3.2 Win32 FFI。
+**主要風險：** 第三方 fullscreen 的跨平台 native 差異、Windows DWM／多螢幕 DPI 與 event hook 生命周期、capture API 不保證性、Space 行為與原生依賴打包／供應鏈。
 
 ---
 
@@ -1427,9 +1429,9 @@ Phase 9 資料一致性補充：History 與 Achievement 對完成 session 使用
 
 ### Step 10 — Desktop Visibility 以 capability 與原生 policy 導入
 
-- 以平台 capability gate 接入 capture protection 與 macOS Spaces policy；Windows 外部 fullscreen 維持 disabled，直到另立 native detector phase；
+- 以平台 capability gate 接入 capture protection、macOS Spaces policy 與 Windows Win32 detector；Windows detector 只有 native runtime 成功啟動後才開放設定；
 - 先完成 capability／preference／IPC negative tests，再做 packaged Windows capture 與 macOS Space 的人工驗收；
-- 若後續加入 Windows native helper，必須新增 security boundary、lifecycle、packaging、實機矩陣與獨立 rollback gate，不可直接擴充本 Phase 的 unsupported path。
+- Windows detector 的 native/security boundary 必須有 lifecycle、packaging、實機矩陣與獨立 rollback gate；不能用 static type、mock 或成功載入套件代替 Windows 行為驗收。
 
 ### 18.1 每步共同遷移規則
 

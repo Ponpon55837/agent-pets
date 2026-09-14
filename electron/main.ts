@@ -82,6 +82,12 @@ import {
 import { installProjectMcp, removeProjectMcp } from './project-mcp-setup'
 import { parsePetBehaviorManifest, type SanitizedPetBehaviorManifest } from './pet-behavior-manifest'
 import { shouldDisableDevHardwareAcceleration } from './dev-runtime'
+import {
+  createWindowsFullscreenDetector,
+  nativeWindowHandleToPointer,
+  type WindowsFullscreenDetector,
+  type WindowsFullscreenState,
+} from './windows-fullscreen-detector'
 
 let petWindow: BrowserWindow | null = null
 let panelWindow: BrowserWindow | null = null
@@ -119,6 +125,15 @@ let presentationStatusProjection: PresentationStatusSnapshot = {
 let desktopPreferences: DesktopPreferencesStore | null = null
 let desktopNotifications: DesktopNotificationService | null = null
 let desktopTray: DesktopTrayController | null = null
+let windowsFullscreenDetector: WindowsFullscreenDetector | null = null
+let windowsFullscreenState: WindowsFullscreenState = {
+  fullscreen: false,
+  petDisplayFullscreen: false,
+  panelDisplayFullscreen: false,
+}
+let windowsFullscreenAutoHiddenPet = false
+let windowsFullscreenAutoHiddenPanel = false
+let panelBlurHideHandle: ReturnType<typeof setTimeout> | null = null
 let petCaptureProtectionApplied: boolean | null = null
 let petWindowMode: PetWindowMode = 'normal'
 let petWindowEdge: PetEdge | null = null
@@ -696,6 +711,7 @@ function applyPetCaptureProtection(): void {
 }
 
 function applyMacFullscreenVisibilityPolicy(): void {
+  if (!IS_MAC) return
   const preferences = currentDesktopPreferences()
   if (!preferences.visibilityCapabilities.fullscreenAutoHide.supported) return
   const visibleOnFullScreen = !preferences.fullscreenAutoHideEnabled
@@ -833,6 +849,7 @@ function createPetWindow() {
 
   petWindow.on('closed', () => {
     petWindow = null
+    windowsFullscreenAutoHiddenPet = false
     petCaptureProtectionApplied = null
     anchorBottomCenter = null
     normalPetBounds = null
@@ -848,7 +865,10 @@ function createPetWindow() {
       resizeAnimHandle = null
     }
     panelWindow?.close()
+    syncWindowsFullscreenTargets()
   })
+
+  syncWindowsFullscreenTargets()
 }
 
 // The panel is a separate always-on-top window rather than sharing the pet's
@@ -893,12 +913,18 @@ function createPanelWindow() {
     // and clicking the pet could never close the panel). Let the toggle
     // handler own that case; blur-hide is only for genuine click-outside.
     if (petWindow?.isFocused()) return
-    panelWindow?.hide()
+    schedulePanelBlurHide()
   })
 
   panelWindow.on('closed', () => {
+    if (panelBlurHideHandle) clearTimeout(panelBlurHideHandle)
+    panelBlurHideHandle = null
     panelWindow = null
+    windowsFullscreenAutoHiddenPanel = false
+    syncWindowsFullscreenTargets()
   })
+
+  syncWindowsFullscreenTargets()
 }
 
 function computePanelBounds(height: number, width = PANEL_WIDTH) {
@@ -971,6 +997,7 @@ function ensureDesktopWindows(): boolean {
 
 function showPetWindow(): void {
   if (!ensureDesktopWindows() || !petWindow) return
+  windowsFullscreenAutoHiddenPet = false
   if (petWindow.isMinimized()) petWindow.restore()
   // With fullscreen exclusion enabled, showing the pet from the Tray must not
   // steal focus or pull another app's fullscreen Space away on macOS.
@@ -984,6 +1011,10 @@ function showPetWindow(): void {
 }
 
 function hidePetWindow(): void {
+  if (panelBlurHideHandle) clearTimeout(panelBlurHideHandle)
+  panelBlurHideHandle = null
+  windowsFullscreenAutoHiddenPet = false
+  windowsFullscreenAutoHiddenPanel = false
   panelWindow?.hide()
   petWindow?.hide()
   desktopTray?.rebuild()
@@ -991,6 +1022,9 @@ function hidePetWindow(): void {
 
 function showPanelWindow(view: 'sessions' | 'settings' = 'sessions'): void {
   if (!ensureDesktopWindows() || !panelWindow) return
+  if (panelBlurHideHandle) clearTimeout(panelBlurHideHandle)
+  panelBlurHideHandle = null
+  windowsFullscreenAutoHiddenPanel = false
   if (petWindowMode === 'edge') applyNormalPetBounds()
   showPetWindow()
   panelWindow.setBounds(computePanelBounds(view === 'settings' ? 720 : 560))
@@ -1031,10 +1065,7 @@ function currentDesktopPreferences(): DesktopPreferences {
       launchAtStartup: false,
       launchAtStartupSupported: false,
       locale: 'zh-TW',
-      visibilityCapabilities: desktopVisibilityCapabilitiesForPlatform(
-        process.platform,
-        typeof BrowserWindow.prototype.setContentProtection === 'function',
-      ),
+      visibilityCapabilities: currentDesktopVisibilityCapabilities(),
     }
   }
   return desktopPreferences.get()
@@ -1065,6 +1096,135 @@ function broadcastPowerSaveState(): void {
   }
 }
 
+function currentDesktopVisibilityCapabilities() {
+  return desktopVisibilityCapabilitiesForPlatform(
+    process.platform,
+    typeof BrowserWindow.prototype.setContentProtection === 'function',
+    windowsFullscreenDetector?.available === true,
+  )
+}
+
+function sameDesktopVisibilityCapabilities(
+  left: ReturnType<typeof currentDesktopVisibilityCapabilities>,
+  right: ReturnType<typeof currentDesktopVisibilityCapabilities>,
+): boolean {
+  return left.captureExclusion.supported === right.captureExclusion.supported
+    && left.captureExclusion.mode === right.captureExclusion.mode
+    && left.fullscreenAutoHide.supported === right.fullscreenAutoHide.supported
+    && left.fullscreenAutoHide.mode === right.fullscreenAutoHide.mode
+}
+
+function syncDesktopVisibilityCapabilities(): DesktopPreferences | null {
+  if (!desktopPreferences) return null
+  const current = desktopPreferences.get()
+  const capabilities = currentDesktopVisibilityCapabilities()
+  if (sameDesktopVisibilityCapabilities(current.visibilityCapabilities, capabilities)) {
+    return current
+  }
+  const next = desktopPreferences.setVisibilityCapabilities(capabilities)
+  setLocale(next.locale)
+  broadcastDesktopPreferences(next)
+  schedulePermissionUiSync()
+  return next
+}
+
+function nativeWindowHandleFor(window: BrowserWindow | null): bigint | null {
+  if (!window || window.isDestroyed()) return null
+  try {
+    return nativeWindowHandleToPointer(window.getNativeWindowHandle())
+  } catch (error) {
+    console.error('Failed to read a Windows native window handle', error)
+    return null
+  }
+}
+
+function syncWindowsFullscreenTargets(): void {
+  if (!windowsFullscreenDetector) return
+  windowsFullscreenDetector.setTargetWindows({
+    pet: nativeWindowHandleFor(petWindow),
+    panel: nativeWindowHandleFor(panelWindow),
+  })
+}
+
+function restoreWindowsHiddenByFullscreen(): void {
+  if (windowsFullscreenAutoHiddenPet) {
+    windowsFullscreenAutoHiddenPet = false
+    if (petWindow && !petWindow.isDestroyed() && !petWindow.isVisible()) {
+      petWindow.showInactive()
+    }
+  }
+  if (windowsFullscreenAutoHiddenPanel) {
+    windowsFullscreenAutoHiddenPanel = false
+    if (panelWindow && !panelWindow.isDestroyed() && !panelWindow.isVisible()) {
+      panelWindow.showInactive()
+    }
+  }
+}
+
+function schedulePanelBlurHide(): void {
+  if (panelBlurHideHandle) clearTimeout(panelBlurHideHandle)
+  panelBlurHideHandle = setTimeout(() => {
+    panelBlurHideHandle = null
+    if (!panelWindow || panelWindow.isDestroyed() || panelWindow.isFocused() || !panelWindow.isVisible()) {
+      return
+    }
+    // Give the Win32 detector's event-driven refresh a chance to classify an
+    // external fullscreen transition before treating the blur as a manual
+    // click-away. This preserves the marker needed to restore an open panel.
+    if (process.platform === 'win32' && windowsFullscreenState.panelDisplayFullscreen) return
+    windowsFullscreenAutoHiddenPanel = false
+    panelWindow.hide()
+  }, 100)
+}
+
+function applyWindowsFullscreenAutoHideState(state: WindowsFullscreenState): void {
+  windowsFullscreenState = state
+  if (process.platform !== 'win32') return
+
+  const preferences = syncDesktopVisibilityCapabilities() ?? currentDesktopPreferences()
+  if (
+    !preferences.visibilityCapabilities.fullscreenAutoHide.supported
+    || !preferences.fullscreenAutoHideEnabled
+    || (permissionBroker?.listRequests().length ?? 0) > 0
+  ) {
+    restoreWindowsHiddenByFullscreen()
+    return
+  }
+
+  if (state.petDisplayFullscreen) {
+    if (petWindow && !petWindow.isDestroyed() && petWindow.isVisible()) {
+      windowsFullscreenAutoHiddenPet = true
+      petWindow.hide()
+    }
+  } else if (windowsFullscreenAutoHiddenPet) {
+    windowsFullscreenAutoHiddenPet = false
+    if (petWindow && !petWindow.isDestroyed() && !petWindow.isVisible()) {
+      petWindow.showInactive()
+    }
+  }
+
+  if (state.panelDisplayFullscreen) {
+    if (panelWindow && !panelWindow.isDestroyed() && panelWindow.isVisible()) {
+      windowsFullscreenAutoHiddenPanel = true
+      panelWindow.hide()
+    }
+  } else if (windowsFullscreenAutoHiddenPanel) {
+    windowsFullscreenAutoHiddenPanel = false
+    if (panelWindow && !panelWindow.isDestroyed() && !panelWindow.isVisible()) {
+      panelWindow.showInactive()
+    }
+  }
+}
+
+function createWindowsFullscreenServices(): void {
+  if (process.platform !== 'win32' || windowsFullscreenDetector) return
+  const detector = createWindowsFullscreenDetector(applyWindowsFullscreenAutoHideState)
+  windowsFullscreenDetector = detector
+  if (!detector.start()) {
+    console.warn('Windows fullscreen auto-hide is unavailable; keeping the setting disabled')
+  }
+}
+
 function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   if (!desktopPreferences) throw new Error('Desktop preferences are not ready')
   const achievementsWereEnabled = desktopPreferences.get().achievementsEnabled
@@ -1073,6 +1233,8 @@ function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   if (!preferences.edgeModeEnabled && petWindowMode === 'edge') applyNormalPetBounds()
   applyPetCaptureProtection()
   applyMacFullscreenVisibilityPolicy()
+  applyWindowsFullscreenAutoHideState(windowsFullscreenState)
+  windowsFullscreenDetector?.refresh()
   if (!preferences.presentationMcpEnabled || preferences.dndEnabled) {
     presentationController?.clear()
   }
@@ -1437,10 +1599,7 @@ function createDesktopServices(): void {
         return app.getLoginItemSettings({ path: loginItemExecutable }).openAtLogin
       },
     },
-    desktopVisibilityCapabilitiesForPlatform(
-      process.platform,
-      typeof BrowserWindow.prototype.setContentProtection === 'function',
-    ),
+    currentDesktopVisibilityCapabilities(),
   )
   setLocale(currentDesktopPreferences().locale)
 
@@ -1592,9 +1751,12 @@ app.whenReady().then(() => {
   const permissionToken = ensurePermissionToken()
   const presentationToken = ensurePresentationToken()
   configureSecureProtocol()
+  createWindowsFullscreenServices()
   createDesktopServices()
   createPetWindow()
   createPanelWindow()
+  syncWindowsFullscreenTargets()
+  windowsFullscreenDetector?.refresh()
   powerMonitor.on('on-battery', broadcastPowerSaveState)
   powerMonitor.on('on-ac', broadcastPowerSaveState)
   broadcastPowerSaveState()
@@ -1788,6 +1950,7 @@ app.whenReady().then(() => {
   ipcMain.on('panel-toggle', (event) => {
     if (!panelWindow || !isTrustedIpcSender(event, petWindow)) return
     if (panelWindow.isVisible()) {
+      windowsFullscreenAutoHiddenPanel = false
       panelWindow.hide()
       return
     }
@@ -1808,6 +1971,7 @@ app.whenReady().then(() => {
 
   ipcMain.on('panel-hide', (event) => {
     if (!isTrustedIpcSender(event, panelWindow)) return
+    windowsFullscreenAutoHiddenPanel = false
     panelWindow?.hide()
   })
 
@@ -2582,6 +2746,12 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  windowsFullscreenDetector?.stop()
+  windowsFullscreenDetector = null
+  if (panelBlurHideHandle) clearTimeout(panelBlurHideHandle)
+  panelBlurHideHandle = null
+  windowsFullscreenAutoHiddenPet = false
+  windowsFullscreenAutoHiddenPanel = false
   if (localUsageScanTimer) clearInterval(localUsageScanTimer)
   localUsageScanTimer = null
   localUsageReader = null

@@ -144,7 +144,7 @@ export function parseDesktopPreferencesPatch(value: unknown): DesktopPreferences
 export class DesktopPreferencesStore {
   private readonly filePath: string
   private readonly loginItem: LoginItemAdapter
-  private readonly visibilityCapabilities: DesktopVisibilityCapabilities
+  private visibilityCapabilities: DesktopVisibilityCapabilities
   private stored: Partial<StoredDesktopPreferences> | null = null
 
   constructor(
@@ -155,6 +155,36 @@ export class DesktopPreferencesStore {
     this.filePath = filePath
     this.loginItem = loginItem
     this.visibilityCapabilities = visibilityCapabilities
+  }
+
+  /**
+   * A native capability can become unavailable after startup (for example if
+   * a platform API rejects an event hook). Update the projection and clear any
+   * persisted toggle that can no longer be honoured.
+   */
+  setVisibilityCapabilities(
+    visibilityCapabilities: DesktopVisibilityCapabilities,
+  ): DesktopPreferences {
+    this.visibilityCapabilities = visibilityCapabilities
+    const stored = this.load()
+    const captureExclusionEnabled = supportedVisibilityPreference(
+      stored.captureExclusionEnabled,
+      visibilityCapabilities.captureExclusion.supported,
+    )
+    const fullscreenAutoHideEnabled = supportedVisibilityPreference(
+      stored.fullscreenAutoHideEnabled,
+      visibilityCapabilities.fullscreenAutoHide.supported,
+    )
+    if (stored.captureExclusionEnabled !== captureExclusionEnabled
+      || stored.fullscreenAutoHideEnabled !== fullscreenAutoHideEnabled) {
+      this.stored = {
+        ...stored,
+        captureExclusionEnabled,
+        fullscreenAutoHideEnabled,
+      }
+      this.persist(this.get())
+    }
+    return this.get()
   }
 
   private load(): Partial<StoredDesktopPreferences> {

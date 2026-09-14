@@ -143,6 +143,28 @@ test('projects stale visibility toggles to false on an unsupported runtime', (t)
   assert.equal(persisted.fullscreenAutoHideEnabled, false)
 })
 
+test('clears visibility toggles when a native capability becomes unavailable', (t) => {
+  const filePath = tempPreferencesFile(t)
+  const store = new DesktopPreferencesStore(filePath, {
+    supported: false,
+    getOpenAtLogin: () => false,
+    setOpenAtLogin: () => false,
+  }, TEST_VISIBILITY_CAPABILITIES)
+  store.update({ captureExclusionEnabled: true, fullscreenAutoHideEnabled: true })
+
+  const updated = store.setVisibilityCapabilities({
+    captureExclusion: { supported: true, mode: 'system' },
+    fullscreenAutoHide: { supported: false, mode: 'unsupported' },
+  })
+  assert.equal(updated.captureExclusionEnabled, true)
+  assert.equal(updated.fullscreenAutoHideEnabled, false)
+  assert.equal(updated.visibilityCapabilities.fullscreenAutoHide.supported, false)
+
+  const persisted = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, unknown>
+  assert.equal(persisted.captureExclusionEnabled, true)
+  assert.equal(persisted.fullscreenAutoHideEnabled, false)
+})
+
 test('uses only the original regular portable executable for Windows startup', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-portable-'))
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }))

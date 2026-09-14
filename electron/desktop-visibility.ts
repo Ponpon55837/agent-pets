@@ -10,6 +10,7 @@ import { UNSUPPORTED_DESKTOP_VISIBILITY_CAPABILITIES } from '../src/types/deskto
 export function desktopVisibilityCapabilitiesForPlatform(
   platform: NodeJS.Platform,
   contentProtectionAvailable: boolean,
+  windowsFullscreenDetectorAvailable = false,
 ): DesktopVisibilityCapabilities {
   const capture = platform === 'win32' && contentProtectionAvailable
     ? { supported: true, mode: 'system' as const }
@@ -21,6 +22,8 @@ export function desktopVisibilityCapabilitiesForPlatform(
     captureExclusion: capture,
     fullscreenAutoHide: platform === 'darwin'
       ? { supported: true, mode: 'macos-native' }
-      : { ...UNSUPPORTED_DESKTOP_VISIBILITY_CAPABILITIES.fullscreenAutoHide },
+      : platform === 'win32' && windowsFullscreenDetectorAvailable
+        ? { supported: true, mode: 'windows-native' }
+        : { ...UNSUPPORTED_DESKTOP_VISIBILITY_CAPABILITIES.fullscreenAutoHide },
   }
 }
