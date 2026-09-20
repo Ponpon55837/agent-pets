@@ -25,11 +25,11 @@
 
 ## 支援的工具
 
-| 工具 | CLI | Desktop |
-|-------|-----|---------|
-| OpenCode | ✅ | ✅ |
-| Codex | ✅ | ✅ |
-| Claude Code | ✅ | ✅ |
+| 工具        | CLI | Desktop |
+| ----------- | --- | ------- |
+| OpenCode    | ✅  | ✅      |
+| Codex       | ✅  | ✅      |
+| Claude Code | ✅  | ✅      |
 
 **Generic HTTP** Adapter 可供本機整合透過經驗證的 `/v1/events` 使用；它永遠是 observe-only，不具備回覆權限的能力。
 
@@ -58,11 +58,11 @@
 
 ### 與寵物互動
 
-| 動作 | 效果 |
-|--------|--------|
+| 動作             | 效果                                                             |
+| ---------------- | ---------------------------------------------------------------- |
 | **左鍵點擊**寵物 | 打開控制面板（面板是獨立視窗，出現在寵物旁邊——寵物本身不會移動） |
-| **拖曳**寵物 | 移動到新位置（重開 app 後會保留） |
-| **右鍵點擊** | 在 Settings 開啟後可隱藏寵物（Permission 控制項仍可互動） |
+| **拖曳**寵物     | 移動到新位置（重開 app 後會保留）                                |
+| **右鍵點擊**     | 在 Settings 開啟後可隱藏寵物（Permission 控制項仍可互動）        |
 
 系統匣選單可以顯示／隱藏寵物、開啟面板或 Settings、切換 Mini／Edge Peek 模式／勿擾模式／音效／通知、在打包版本設定登入時啟動、以系統匣圖示標示待處理狀態，以及結束 app。關閉或隱藏寵物視窗後，hooks 與背景狀態仍會運作，直到選擇 **Quit**。
 
@@ -122,6 +122,7 @@
 - **Presentation MCP** — 本機 MCP 展示管道開關。開啟後 client 只能送出受限制的反應或純文字話語；勿擾模式與 waiting／error／permission 狀態優先。**預設開啟。**
 
 **Advanced 分區**
+
 - **Setup Wizard** — 重新偵測工具，或安裝/重新安裝 hooks。
 - **Restart Pet** — 寵物或動畫卡住時，完整重新啟動 Agent Pets。
 - **Quit** — 結束 Agent Pets。
@@ -248,7 +249,7 @@ Setup Wizard 會讀取 runtime Agent Adapter registry，並在你點擊按鈕時
 自訂寵物使用跟內建寵物相同的精靈圖格式。`pet.json` 可選擇宣告受限的 `behaviorManifest`，提供 `walk` 與／或 `sleep` 的 row；缺少定義時會安全回到 Idle：
 
 ```json
-{"behaviorManifest":{"walk":{"row":1},"sleep":{"row":5}}}
+{ "behaviorManifest": { "walk": { "row": 1 }, "sleep": { "row": 5 } } }
 ```
 
 - **格式**：`.webp`、`.png` 或 `.jpg`（內建寵物是用 `.webp` 出貨；三種格式匯入後都是原樣複製，讀取時是看內容而不是看副檔名）
@@ -257,13 +258,13 @@ Setup Wizard 會讀取 runtime Agent Adapter registry，並在你點擊按鈕時
 
 每一列對應一種狀態：
 
-| 列 | 狀態 |
-|-----|-------|
-| 0 | Idle / Offline |
-| 5 | Error |
-| 6 | Waiting Permission / Waiting Input |
-| 7 | Thinking / Tool Running |
-| 8 | Success |
+| 列  | 狀態                               |
+| --- | ---------------------------------- |
+| 0   | Idle / Offline                     |
+| 5   | Error                              |
+| 6   | Waiting Permission / Waiting Input |
+| 7   | Thinking / Tool Running            |
+| 8   | Success                            |
 
 ### 如何匯入
 
@@ -322,15 +323,15 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 
 **欄位說明：**
 
-| 欄位 | 型別 | 必填 | 說明 |
-|-------|------|----------|-------------|
-| `source` | string | 是 | `opencode-cli`、`opencode-desktop`、`codex`、`codex-desktop`、`claude`、`claude-desktop`（也接受 `opencode`，會自動正規化成 `opencode-cli`） |
-| `sessionId` | string | 是 | 唯一的 session 識別碼（最長 256 字元） |
-| `state` | string | 是 | `idle`、`thinking`、`tool-running`、`waiting-permission`、`waiting-input`、`success`、`error`、`offline`（也接受 `waiting`，會自動正規化成 `waiting-permission`） |
-| `timestamp` | number | 是 | 事件發生時間的 Unix 毫秒時間戳 |
-| `project` | string | 否 | 專案路徑（UI 只會顯示 basename） |
-| `originalEvent` | string | 否 | 觸發這筆事件的原始 hook/事件名稱，方便除錯 |
-| `toolName` | string | 否 | 工具名稱，`tool-running` 時會顯示在活動氣泡裡 |
+| 欄位            | 型別   | 必填 | 說明                                                                                                                                                              |
+| --------------- | ------ | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `source`        | string | 是   | `opencode-cli`、`opencode-desktop`、`codex`、`codex-desktop`、`claude`、`claude-desktop`（也接受 `opencode`，會自動正規化成 `opencode-cli`）                      |
+| `sessionId`     | string | 是   | 唯一的 session 識別碼（最長 256 字元）                                                                                                                            |
+| `state`         | string | 是   | `idle`、`thinking`、`tool-running`、`waiting-permission`、`waiting-input`、`success`、`error`、`offline`（也接受 `waiting`，會自動正規化成 `waiting-permission`） |
+| `timestamp`     | number | 是   | 事件發生時間的 Unix 毫秒時間戳                                                                                                                                    |
+| `project`       | string | 否   | 專案路徑（UI 只會顯示 basename）                                                                                                                                  |
+| `originalEvent` | string | 否   | 觸發這筆事件的原始 hook/事件名稱，方便除錯                                                                                                                        |
+| `toolName`      | string | 否   | 工具名稱，`tool-running` 時會顯示在活動氣泡裡                                                                                                                     |
 
 ---
 
