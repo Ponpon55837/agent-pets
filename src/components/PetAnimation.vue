@@ -10,6 +10,7 @@ const props = defineProps<{
   since?: number
   mood?: number
   autonomousBehavior?: PetAutonomousBehavior
+  freeze?: boolean
 }>()
 
 // Keep low mood close to the pet's original colors; most of the visible
@@ -481,6 +482,7 @@ function startAnimation() {
   motionPlan = motionPlanForState()
   selectStep(0)
   draw()
+  if (props.freeze) return
 
   function tick() {
     if (currentFrame < activeMotion.frameDurations.length - 1) {
@@ -535,10 +537,10 @@ watch(() => store.petsLoaded, () => {
 
 watch(() => props.state, (newState, oldState) => {
   startAnimation()
-  if (oldState !== undefined && newState !== oldState) {
+  if (!props.freeze && oldState !== undefined && newState !== oldState) {
     playReaction()
   }
-  if (newState === 'idle') {
+  if (newState === 'idle' && !props.freeze) {
     scheduleFidget()
   } else {
     stopFidgetTimer()
@@ -557,14 +559,20 @@ watch(urgencyLevel, (newLevel, oldLevel) => {
 })
 
 watch(() => props.autonomousBehavior, (newBehavior, oldBehavior) => {
-  if (newBehavior === 'poke' && newBehavior !== oldBehavior) playReaction()
+  if (!props.freeze && newBehavior === 'poke' && newBehavior !== oldBehavior) playReaction()
   if (newBehavior !== 'cursor-look') startAnimation()
+})
+
+watch(() => props.freeze, (freeze) => {
+  startAnimation()
+  if (freeze) stopFidgetTimer()
+  else if (props.state === 'idle') scheduleFidget()
 })
 
 onMounted(() => {
   loadImage()
   startAnimation()
-  if (props.state === 'idle') {
+  if (props.state === 'idle' && !props.freeze) {
     scheduleFidget()
   }
   if (isWaiting.value) {
@@ -639,6 +647,7 @@ onUnmounted(() => {
         'pet-mood-low': moodTier === 'low',
         'pet-cursor-look-left': cursorLookDirection === -1,
         'pet-cursor-look-right': cursorLookDirection === 1,
+        'pet-frozen': props.freeze,
       }"
     />
   </div>

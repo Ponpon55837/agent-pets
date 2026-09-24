@@ -52,6 +52,10 @@
   animation: pet-offline-breathe 3.8s ease-in-out infinite;
 }
 
+.pet-canvas.pet-frozen {
+  animation: none !important;
+}
+
 /* Ambient behavior is deliberately subtle and only enabled with the
    reactions setting. The spritesheet remains responsible for the main pose;
    these small loops keep long-running states from feeling frozen. */

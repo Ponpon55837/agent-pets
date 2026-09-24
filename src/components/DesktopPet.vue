@@ -507,11 +507,20 @@ watch(() => store.achievementUnlock, (unlock) => {
         @keydown.enter.prevent="store.setPetMode('normal')"
         @keydown.space.prevent="store.setPetMode('normal')"
       >
-        <span class="edge-peek-orb" aria-hidden="true"><span /></span>
-        <span class="edge-peek-chevron" aria-hidden="true">
-          {{ store.petWindowMode.edge === 'left' ? '›' : store.petWindowMode.edge === 'right' ? '‹' : store.petWindowMode.edge === 'top' ? '⌄' : '⌃' }}
+        <span
+          class="edge-peek-avatar"
+          aria-hidden="true"
+          :style="{ '--edge-peek-avatar-scale': 0.5 / store.petScale }"
+        >
+          <PetAnimation
+            :state="store.currentState"
+            :pet-id="store.activePetId"
+            :since="store.highestPrioritySession?.lastSeenAt"
+            autonomous-behavior="idle"
+            :freeze="shimejiReducedMotion"
+          />
         </span>
-        <span class="edge-peek-label">{{ t('open') }}</span>
+        <span class="edge-peek-grip" aria-hidden="true" />
       </div>
 
       <template v-else>

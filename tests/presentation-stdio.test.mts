@@ -46,7 +46,7 @@ test('stdio presentation bridge speaks MCP and disconnects its client', async t 
   assert.ok(address && typeof address === 'object')
   const port = address.port
 
-  const child = spawn('node.exe', ['integrations/presentation-mcp.mjs'], {
+  const child = spawn(process.execPath, ['integrations/presentation-mcp.mjs'], {
     cwd: process.cwd(),
     env: {
       ...process.env,
