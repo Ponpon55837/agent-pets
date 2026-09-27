@@ -340,10 +340,12 @@ Agent Pets 會在本機啟動一個 HTTP 伺服器 `http://127.0.0.1:17373/v1/ev
 - **Renderer 隔離** — Renderer 啟用 Chromium sandbox 與 context isolation、停用 Node.js integration，使用安全的自訂 `agent-pets://` protocol 取代高權限 `file://` 頁面，並以嚴格 CSP、禁止彈窗／外部導頁、拒絕權限請求及 IPC 主 frame 來源驗證縮小攻擊面。
 - **本機事件伺服器** — 只監聽 `127.0.0.1`，每個 hook 請求都必須通過每次安裝專用 secret 驗證；同時拒絕瀏覽器來源與非 JSON 請求、限制事件速率，且只接受長度受限的白名單欄位。
 - **用量查詢** — Quota 功能只允許連線到指定的 Codex 與 Anthropic HTTPS quota／驗證端點，拒絕轉址、過大回應、過多 window 與格式錯誤的 renderer IPC payload。OAuth 憑證只存在 Electron 主行程，不會傳給 renderer 或出現在命令列參數。
-- **本機用量讀取器** — Token 歷史由 main process 唯讀管理，只掃描固定的 Codex／Claude JSONL 路徑，限制檔案與行大小，拒絕逃出根目錄的 symlink／reparse path，解析白名單欄位並雜湊來源身分；不保存原始 log、prompt 或工具內容。
+- **本機用量讀取器** — Token 歷史由 main process 唯讀管理，只掃描固定的 Codex／Claude JSONL 路徑，限制檔案與行大小，拒絕逃出根目錄的 symlink／reparse path，解析白名單欄位並雜湊來源身分；不保存原始 log、prompt 或工具內容。每行先以子字串預篩再 `JSON.parse`、每行最多解析一次，且每個檔案以單一 SQLite transaction 匯入（2 萬筆測試資料約快 10 倍）。
 - **憑證更新** — OAuth token 過期時會更新，並安全合併回原本的 Codex auth 檔或 Claude 憑證儲存區，避免 CLI 登入失效；檔案寫入會做帳號／變更檢查、限制檔案權限，並盡可能採原子替換。
 - **寵物匯入** — 寫入前會驗證 ZIP 項目數、壓縮／解壓縮大小、JSON 大小，以及圖片大小與實際格式。
-- **記憶體上限** — Agent session 數量有上限，會優先淘汰離線／最舊項目，避免 renderer 記憶體無限成長。
+- **記憶體上限** — Agent session 數量有上限，會以單次線性掃描（O(n)）優先淘汰離線／最舊項目，避免 renderer 記憶體無限成長。
+- **本機伺服器** — 事件轉送會略過已銷毀的視窗，避免面板關閉時通知／XP／歷史處理被整個跳過；並設定較短的 header／request 逾時，限制慢速 loopback 連線佔用。
+- **SQLite 效能** — History、Progression、成就與專案路由 store 共用 prepared statement 快取，不再於每個 hook 事件重新編譯 SQL；專案路徑快取改為真正的 LRU。
 - **路徑清理** — 專案路徑只保留 basename，檔案寫入目的地也會限制在預期根目錄內。
 - **專案寵物路由** — main process 只保存每次安裝 salt 產生的 project hash、basename 與 pet binding；symlink／junction 會先 canonicalize，renderer、通知與 MCP status 都不會收到完整路徑。缺少綁定寵物時只回退到預設寵物，不會自動允許或改變權限。
 - **桌面通知** — 通知只會使用正規化後的 Agent 名稱與長度受限的專案 basename，不會顯示或記錄 prompt、工具參數、session identifier 或憑證；診斷紀錄有固定上限，而且只保存事件類別與結果。
@@ -457,6 +459,7 @@ agent-pets/
 │   ├── notification-policy.ts # 純通知分類／冷卻規則
 │   ├── quota.ts             # Codex／Claude 剩餘用量讀取
 │   ├── local-usage.ts       # 受限制的 Codex／Claude session log token 讀取
+│   ├── sqlite-statements.ts # SQLite store 共用的 prepared statement 快取
 │   └── setup.ts             # 跨平台路徑與安裝邏輯
 ├── integrations/
 │   ├── install.mjs          # 獨立的 CLI hook 安裝程式

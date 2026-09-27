@@ -207,9 +207,7 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
       }
       const decision = options.relay.poll(record.relayKey)
       if (!decision) {
-        const stillActive = options.broker.listRequests()
-          .some((request) => request.requestId === record.brokerRequestId)
-        if (!stillActive) {
+        if (!options.broker.isRequestActive(record.brokerRequestId)) {
           sendJson(response, 410, { error: 'resolved' })
           return
         }

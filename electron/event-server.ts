@@ -117,6 +117,10 @@ export function createEventServer(
     })
   })
 
+  // 本機 hook 的請求都很小；縮短逾時，避免慢速連線長時間佔用 socket。
+  server.headersTimeout = 10_000
+  server.requestTimeout = 15_000
+
   server.on('error', (err: NodeJS.ErrnoException) => {
     // An unhandled 'error' on a net.Server throws and kills the whole process
     // by default — e.g. a second app instance launched while one is already

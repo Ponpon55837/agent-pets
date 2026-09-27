@@ -6,6 +6,7 @@ import type {
   ProjectPetBindingStatus,
   ProjectPetView,
 } from '../src/types/project-pet.ts'
+import { StatementCache } from './sqlite-statements.ts'
 
 type SqliteRow = Record<string, unknown>
 
@@ -150,6 +151,7 @@ function changedCount(result: { changes: number | bigint }): number {
 
 export class ProjectRoutingStore {
   private readonly database: SqliteDatabase
+  private readonly statements: StatementCache<SqliteStatement>
   private readonly now: () => number
   private readonly defaultPetId: string
   private readonly salt: string
@@ -162,14 +164,15 @@ export class ProjectRoutingStore {
     mkdirSync(dirname(filePath), { recursive: true })
     const DatabaseSync = databaseConstructor()
     this.database = new DatabaseSync(filePath)
+    this.statements = new StatementCache(sql => this.database.prepare(sql))
     this.now = options.now ?? Date.now
     this.defaultPetId = safePetId(options.defaultPetId) ?? DEFAULT_PET_ID
     try {
       this.migrate()
-      const salt = this.database.prepare('SELECT value FROM metadata WHERE key = ?').get('salt')?.value
+      const salt = this.statement('SELECT value FROM metadata WHERE key = ?').get('salt')?.value
       if (typeof salt !== 'string' || salt.length < 16) throw new Error('Project routing salt is invalid')
       this.salt = salt
-      this.enabled = this.database.prepare('SELECT value FROM metadata WHERE key = ?').get('enabled')?.value !== '0'
+      this.enabled = this.statement('SELECT value FROM metadata WHERE key = ?').get('enabled')?.value !== '0'
     } catch (error) {
       this.database.close()
       throw error
@@ -182,7 +185,7 @@ export class ProjectRoutingStore {
 
   setEnabled(value: boolean): void {
     this.enabled = value
-    this.database.prepare(`
+    this.statement(`
       INSERT INTO metadata(key, value) VALUES ('enabled', ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `).run(value ? '1' : '0')
@@ -193,7 +196,13 @@ export class ProjectRoutingStore {
     if (typeof value !== 'string') return this.resolvePathUncached(value)
 
     const cached = this.pathCache.get(value)
-    if (cached !== undefined) return cached
+    if (cached !== undefined) {
+      // 命中時移到 Map 尾端，讓插入順序等同最近使用順序（LRU），常用的
+      // 工作區路徑不會因為偶發的新路徑而被擠出快取、重新觸發 fs 呼叫。
+      this.pathCache.delete(value)
+      this.pathCache.set(value, cached)
+      return cached
+    }
 
     const canonical = canonicalizeProjectPathVerbose(value)
     const identity = canonical ? identityForPath(canonical.path, this.salt) : null
@@ -201,8 +210,7 @@ export class ProjectRoutingStore {
     // cache. An unverified miss (directory not reachable right now) must be
     // retried on every call so it can self-heal once the path exists again.
     if (canonical?.verified || identity === null) {
-      // Insertion order stands in for recency; evicting the oldest entry keeps
-      // this a cheap, allocation-free LRU approximation instead of a real one.
+      // 插入順序即最近使用順序，淘汰 Map 第一個 key 即為 O(1) LRU。
       if (this.pathCache.size >= MAX_PATH_CACHE) {
         const oldest = this.pathCache.keys().next().value
         if (oldest !== undefined) this.pathCache.delete(oldest)
@@ -248,7 +256,7 @@ export class ProjectRoutingStore {
 
   private upsertProject(identity: ProjectIdentity, seenAt: number): void {
     this.transaction(() => {
-      this.database.prepare(`
+      this.statement(`
         INSERT INTO projects(project_id, display_name, created_at, last_seen_at, archived_at)
         VALUES (?, ?, ?, ?, NULL)
         ON CONFLICT(project_id) DO UPDATE SET
@@ -261,7 +269,7 @@ export class ProjectRoutingStore {
   }
 
   listProjects(availablePetIds: ReadonlySet<string>): ProjectPetView[] {
-    return this.database.prepare(`
+    return this.statement(`
       SELECT projects.project_id, projects.display_name, projects.last_seen_at,
              project_pet_bindings.pet_id
       FROM projects
@@ -275,7 +283,7 @@ export class ProjectRoutingStore {
   getProject(projectId: string, availablePetIds: ReadonlySet<string> = new Set<string>()): ProjectPetView | null {
     const safeId = safeProjectId(projectId)
     if (!safeId) return null
-    const row = this.database.prepare(`
+    const row = this.statement(`
       SELECT projects.project_id, projects.display_name, projects.last_seen_at,
              project_pet_bindings.pet_id
       FROM projects
@@ -293,10 +301,10 @@ export class ProjectRoutingStore {
     if (!project) return null
     this.transaction(() => {
       if (petId === null) {
-        this.database.prepare('DELETE FROM project_pet_bindings WHERE project_id = ?').run(safeProject)
+        this.statement('DELETE FROM project_pet_bindings WHERE project_id = ?').run(safeProject)
       } else {
         const timestamp = this.now()
-        this.database.prepare(`
+        this.statement(`
           INSERT INTO project_pet_bindings(project_id, pet_id, created_at, updated_at)
           VALUES (?, ?, ?, ?)
           ON CONFLICT(project_id) DO UPDATE SET pet_id = excluded.pet_id, updated_at = excluded.updated_at
@@ -309,7 +317,7 @@ export class ProjectRoutingStore {
   route(projectId: string | undefined, availablePetIds: ReadonlySet<string>): ProjectRoute {
     const safeProject = safeProjectId(projectId)
     if (!safeProject) return { fallback: false }
-    const petId = safePetId(this.database.prepare(
+    const petId = safePetId(this.statement(
       'SELECT pet_id FROM project_pet_bindings WHERE project_id = ?',
     ).get(safeProject)?.pet_id)
     if (!petId) return { fallback: false }
@@ -320,7 +328,7 @@ export class ProjectRoutingStore {
   archiveProject(projectId: string): boolean {
     const safeProject = safeProjectId(projectId)
     if (!safeProject) return false
-    return changedCount(this.database.prepare(
+    return changedCount(this.statement(
       'UPDATE projects SET archived_at = ? WHERE project_id = ? AND archived_at IS NULL',
     ).run(this.now(), safeProject)) > 0
   }
@@ -328,6 +336,7 @@ export class ProjectRoutingStore {
   close(): void {
     if (this.closed) return
     this.closed = true
+    this.statements.clear()
     this.database.close()
   }
 
@@ -375,22 +384,26 @@ export class ProjectRoutingStore {
         updated_at INTEGER NOT NULL
       );
     `)
-    const existingSalt = this.database.prepare('SELECT value FROM metadata WHERE key = ?').get('salt')?.value
+    const existingSalt = this.statement('SELECT value FROM metadata WHERE key = ?').get('salt')?.value
     if (typeof existingSalt !== 'string' || existingSalt.length < 16) {
       this.transaction(() => {
-        this.database.prepare(`
+        this.statement(`
           INSERT INTO metadata(key, value) VALUES ('salt', ?)
           ON CONFLICT(key) DO NOTHING
         `).run(randomBytes(16).toString('hex'))
       })
     }
-    const hasV1 = Boolean(this.database.prepare('SELECT version FROM schema_migrations WHERE version = 1').get())
+    const hasV1 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 1').get())
     if (!hasV1) this.transaction(() => {
-      this.database.prepare(`
+      this.statement(`
         INSERT INTO schema_migrations(version, name, applied_at, checksum)
         VALUES (1, 'project-routing-v1', ?, 'project-routing-v1')
       `).run(this.now())
     })
+  }
+
+  private statement(sql: string): SqliteStatement {
+    return this.statements.get(sql)
   }
 
   private transaction<T>(work: () => T): T {

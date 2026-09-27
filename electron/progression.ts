@@ -12,6 +12,7 @@ import {
   type ProgressionEventResult,
   type ProgressionSnapshot,
 } from '../src/types/progression.ts'
+import { StatementCache } from './sqlite-statements.ts'
 
 type SqliteRow = Record<string, unknown>
 
@@ -110,6 +111,7 @@ function changedCount(result: { changes: number | bigint }): number {
 
 export class ProgressionStore {
   private readonly database: SqliteDatabase
+  private readonly statements: StatementCache<SqliteStatement>
   private readonly now: () => number
   private readonly localDate: (timestamp: number) => string
   private readonly defaultPetId: string
@@ -120,6 +122,7 @@ export class ProgressionStore {
     mkdirSync(dirname(filePath), { recursive: true })
     const DatabaseSync = databaseConstructor()
     this.database = new DatabaseSync(filePath)
+    this.statements = new StatementCache(sql => this.database.prepare(sql))
     this.now = options.now ?? Date.now
     this.localDate = options.localDate ?? localDateKey
     this.defaultPetId = normalizePetId(options.defaultPetId, DEFAULT_PET_ID)
@@ -196,6 +199,7 @@ export class ProgressionStore {
   close(): void {
     if (this.closed) return
     this.closed = true
+    this.statements.clear()
     this.database.close()
   }
 
@@ -212,7 +216,7 @@ export class ProgressionStore {
       );
     `)
 
-    const migration = this.database.prepare('SELECT version FROM schema_migrations WHERE version = 1').get()
+    const migration = this.statement('SELECT version FROM schema_migrations WHERE version = 1').get()
     if (!migration) this.transaction(() => {
       this.database.exec(`
         CREATE TABLE IF NOT EXISTS pets (
@@ -252,29 +256,33 @@ export class ProgressionStore {
           last_seen_at INTEGER NOT NULL
         );
       `)
-      this.database.prepare(
+      this.statement(
         `INSERT OR IGNORE INTO schema_migrations(version, name, applied_at, checksum)
          VALUES (1, 'progression-v1', ?, ?)`,
       ).run(this.now(), XP_POLICY_VERSION)
-      this.database.prepare(
+      this.statement(
         `UPDATE schema_migrations SET applied_at = ?, checksum = ? WHERE version = 1`,
       ).run(this.now(), XP_POLICY_VERSION)
     })
 
     // v2 scopes idempotency to each pet. Without this, a first completion on
     // one routed project consumes the same daily reward for every other pet.
-    const hasV2 = Boolean(this.database.prepare('SELECT version FROM schema_migrations WHERE version = 2').get())
+    const hasV2 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 2').get())
     if (!hasV2) this.transaction(() => {
-      this.database.prepare(`
+      this.statement(`
         UPDATE xp_ledger
         SET idempotency_key = pet_id || ':' || idempotency_key
         WHERE idempotency_key NOT LIKE pet_id || ':%'
       `).run()
-      this.database.prepare(
+      this.statement(
         `INSERT INTO schema_migrations(version, name, applied_at, checksum)
          VALUES (2, 'progression-pet-idempotency', ?, ?)`,
       ).run(this.now(), `${XP_POLICY_VERSION}-pet-idempotency`)
     })
+  }
+
+  private statement(sql: string): SqliteStatement {
+    return this.statements.get(sql)
   }
 
   private transaction<T>(work: () => T): T {
@@ -291,18 +299,18 @@ export class ProgressionStore {
 
   private ensurePet(petId: string): void {
     const now = this.now()
-    this.database.prepare(`
+    this.statement(`
       INSERT OR IGNORE INTO pets(pet_id, name, sprite_id, created_at, is_default)
       VALUES (?, ?, ?, ?, ?)
     `).run(petId, petId, petId, now, petId === this.defaultPetId ? 1 : 0)
-    this.database.prepare(`
+    this.statement(`
       INSERT OR IGNORE INTO pet_progress(pet_id, updated_at)
       VALUES (?, ?)
     `).run(petId, now)
   }
 
   private readProgress(petId: string): ProgressRow {
-    const row = this.database.prepare(`
+    const row = this.statement(`
       SELECT pet_id, total_xp, current_streak, longest_streak, last_active_local_date, updated_at
       FROM pet_progress WHERE pet_id = ?
     `).get(petId)
@@ -328,7 +336,7 @@ export class ProgressionStore {
   }
 
   private readActivity(sessionKey: string): ActivityRow | null {
-    const row = this.database.prepare(`
+    const row = this.statement(`
       SELECT active_ms, awarded_points, last_state, last_seen_at
       FROM xp_session_activity WHERE session_key = ?
     `).get(sessionKey)
@@ -342,7 +350,7 @@ export class ProgressionStore {
   }
 
   private writeActivity(sessionKey: string, activity: ActivityRow): void {
-    this.database.prepare(`
+    this.statement(`
       INSERT INTO xp_session_activity(session_key, active_ms, awarded_points, last_state, last_seen_at)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(session_key) DO UPDATE SET
@@ -381,7 +389,7 @@ export class ProgressionStore {
       }
     }
     if (awardedPoints !== alreadyAwarded) {
-      this.database.prepare(
+      this.statement(
         'UPDATE xp_session_activity SET awarded_points = ? WHERE session_key = ?',
       ).run(awardedPoints, sessionKey)
     }
@@ -416,7 +424,7 @@ export class ProgressionStore {
     if (continued && this.insertAward(petId, streakRule, `streak:${date}`, XP_RULES.dailyStreak, occurredAt, event.source, { date })) {
       awards.push({ ruleId: streakRule, amount: XP_RULES.dailyStreak })
     }
-    this.database.prepare(`
+    this.statement(`
       UPDATE pet_progress
       SET current_streak = ?,
           longest_streak = MAX(longest_streak, ?),
@@ -436,7 +444,7 @@ export class ProgressionStore {
     metadata?: Record<string, unknown>,
   ): boolean {
     const scopedIdempotencyKey = `${petId}:${idempotencyKey}`
-    const inserted = changedCount(this.database.prepare(`
+    const inserted = changedCount(this.statement(`
       INSERT OR IGNORE INTO xp_ledger(
         ledger_id, pet_id, event_id, rule_id, idempotency_key, amount, occurred_at, local_date, metadata_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -453,7 +461,7 @@ export class ProgressionStore {
     ))
     if (inserted === 0) return false
 
-    this.database.prepare(`
+    this.statement(`
       UPDATE pet_progress
       SET total_xp = total_xp + ?, updated_at = ?
       WHERE pet_id = ?

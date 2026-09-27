@@ -16,6 +16,7 @@ import {
   type HistoryTokenUsageRecord,
   type HistoryTokenQuality,
 } from '../src/types/history.ts'
+import { StatementCache } from './sqlite-statements.ts'
 
 type SqliteRow = Record<string, unknown>
 
@@ -201,19 +202,22 @@ export class HistoryStore {
   private readonly now: () => number
   private readonly localDate: (timestamp: number) => string
   private readonly retentionDays: number
+  private readonly statements: StatementCache<SqliteStatement>
+  private transactionDepth = 0
   private closed = false
 
   constructor(filePath: string, options: HistoryStoreOptions = {}) {
     mkdirSync(dirname(filePath), { recursive: true })
     const DatabaseSync = databaseConstructor()
     this.database = new DatabaseSync(filePath)
+    this.statements = new StatementCache(sql => this.database.prepare(sql))
     this.now = options.now ?? Date.now
     this.localDate = options.localDate ?? localDateKey
     this.retentionDays = Math.min(MAX_RETENTION_DAYS, Math.max(1, Math.floor(options.retentionDays ?? DEFAULT_RETENTION_DAYS)))
     try {
       this.migrate()
       this.pruneEvents()
-      const count = asInteger(this.database.prepare('SELECT COUNT(*) AS count FROM daily_stats').get()?.count)
+      const count = asInteger(this.statement('SELECT COUNT(*) AS count FROM daily_stats').get()?.count)
       if (count === 0) this.rebuildDailyStats()
     } catch (error) {
       this.database.close()
@@ -226,7 +230,7 @@ export class HistoryStore {
   }
 
   getLocalUsageCutoff(): number {
-    const value = this.database.prepare(
+    const value = this.statement(
       'SELECT value FROM history_metadata WHERE key = ?',
     ).get(LOCAL_USAGE_CUTOFF_KEY)?.value
     const cutoff = Number(value)
@@ -260,13 +264,13 @@ export class HistoryStore {
     const completionKind = state === 'success' || state === 'error' ? state : null
 
     return this.transaction(() => {
-      const previous = readSession(this.database.prepare(`
+      const previous = readSession(this.statement(`
         SELECT session_pk, adapter_id, agent_id, external_session_id, project_id, pet_id,
                started_at, ended_at, terminal_state, active_ms, token_input, token_output,
                token_quality, last_state, last_seen_at
         FROM sessions WHERE session_pk = ?
       `).get(sessionPk))
-      const successAlreadyRecorded = completionKind === 'success' && Boolean(this.database.prepare(`
+      const successAlreadyRecorded = completionKind === 'success' && Boolean(this.statement(`
         SELECT event_id FROM events
         WHERE agent_id = ? AND session_id = ? AND project_id = ? AND pet_id = ? AND state = 'success'
         LIMIT 1
@@ -283,7 +287,7 @@ export class HistoryStore {
       const activeDeltaMs = previous && isActiveState(previous.lastState) && occurredAt > previous.lastSeenAt
         ? Math.min(occurredAt - previous.lastSeenAt, MAX_ACTIVE_GAP_MS)
         : 0
-      const inserted = changedCount(this.database.prepare(`
+      const inserted = changedCount(this.statement(`
         INSERT OR IGNORE INTO events(
           event_id, source_event_id, schema_version, type, trust, adapter_id, agent_id,
           session_id, project_id, pet_id, local_date, occurred_at, received_at, state,
@@ -316,7 +320,7 @@ export class HistoryStore {
       const nextOutput = (previous?.tokenOutput ?? 0) + (usage.output ?? 0)
       const nextQuality = mergeTokenQuality(previous?.tokenQuality ?? 'none', usage.quality)
       if (!previous) {
-        this.database.prepare(`
+        this.statement(`
           INSERT INTO sessions(
             session_pk, adapter_id, agent_id, external_session_id, project_id, pet_id,
             started_at, ended_at, terminal_state, active_ms, token_input, token_output,
@@ -340,7 +344,7 @@ export class HistoryStore {
           occurredAt,
         )
       } else {
-        this.database.prepare(`
+        this.statement(`
           UPDATE sessions
           SET ended_at = CASE WHEN ? IS NOT NULL THEN ? ELSE ended_at END,
               terminal_state = CASE WHEN ? IS NOT NULL THEN ? ELSE terminal_state END,
@@ -420,7 +424,7 @@ export class HistoryStore {
     const eventId = digest(`local-usage:${adapterId}:${sourceEventId}`)
 
     return this.transaction(() => {
-      const existing = this.database.prepare(`
+      const existing = this.statement(`
         SELECT event_id, local_date, project_id, token_input, token_output, token_quality, occurred_at
         FROM events WHERE adapter_id = ? AND source_event_id = ?
       `).get(adapterId, sourceEventId)
@@ -442,7 +446,7 @@ export class HistoryStore {
           && previousQuality === record.quality
         ) return false
 
-        this.database.prepare(`
+        this.statement(`
           UPDATE events
           SET session_id = ?, local_date = ?, project_id = ?, occurred_at = ?, received_at = ?,
               token_input = ?, token_output = ?, token_quality = ?
@@ -483,7 +487,7 @@ export class HistoryStore {
         return true
       }
 
-      const inserted = changedCount(this.database.prepare(`
+      const inserted = changedCount(this.statement(`
         INSERT OR IGNORE INTO events(
           event_id, source_event_id, schema_version, type, trust, adapter_id, agent_id,
           session_id, project_id, pet_id, local_date, occurred_at, received_at, state,
@@ -524,11 +528,11 @@ export class HistoryStore {
     const snapshot = normalizeQuotaSnapshot(value)
     if (!snapshot) return false
     const snapshotId = digest(`${snapshot.updatedAt}:${JSON.stringify(snapshot.providers)}`)
-    this.database.prepare(`
+    this.statement(`
       INSERT OR REPLACE INTO quota_snapshots(snapshot_id, updated_at, payload_json)
       VALUES (?, ?, ?)
     `).run(snapshotId, snapshot.updatedAt, JSON.stringify(snapshot))
-    this.database.prepare(`
+    this.statement(`
       DELETE FROM quota_snapshots
       WHERE snapshot_id NOT IN (
         SELECT snapshot_id FROM quota_snapshots ORDER BY updated_at DESC LIMIT ?
@@ -552,7 +556,7 @@ export class HistoryStore {
     const summaryParams = safeProject
       ? [safePet, LOCAL_USAGE_PET_ID, safeProject, ...dates]
       : [safePet, LOCAL_USAGE_PET_ID, ...dates]
-    const rows = this.database.prepare(`
+    const rows = this.statement(`
       SELECT local_date, sessions_completed, sessions_failed, active_ms,
              token_input, token_output, token_quality
       FROM daily_stats
@@ -574,7 +578,7 @@ export class HistoryStore {
     const agentParams = safeProject
       ? [safePet, LOCAL_USAGE_PET_ID, safeProject, ...dates]
       : [safePet, LOCAL_USAGE_PET_ID, ...dates]
-    const agents = this.database.prepare(`
+    const agents = this.statement(`
       SELECT adapter_id,
              SUM(sessions_completed) AS sessions_completed,
              SUM(sessions_failed) AS sessions_failed,
@@ -597,7 +601,7 @@ export class HistoryStore {
         ? 'exact'
         : asInteger(row.token_quality_rank) >= 1 ? 'estimated' : 'none',
     } satisfies HistoryAgentStat))
-    const quotaRow = this.database.prepare(
+    const quotaRow = this.statement(
       'SELECT payload_json FROM quota_snapshots ORDER BY updated_at DESC LIMIT 1',
     ).get()
     const quota = parseQuotaSnapshot(quotaRow?.payload_json)
@@ -630,7 +634,7 @@ export class HistoryStore {
   }
 
   getAchievementCompletedSessions(): AchievementCompletedSessionFact[] {
-    const rows = this.database.prepare(`
+    const rows = this.statement(`
       SELECT event_id, adapter_id, agent_id, session_id, project_id, pet_id, occurred_at, state
       FROM events
       WHERE state = 'success' AND session_id IS NOT NULL
@@ -665,7 +669,7 @@ export class HistoryStore {
   clear(): void {
     this.transaction(() => {
       this.database.exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM daily_stats; DELETE FROM quota_snapshots;')
-      this.database.prepare(`
+      this.statement(`
         INSERT INTO history_metadata(key, value) VALUES (?, ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
       `).run(LOCAL_USAGE_CUTOFF_KEY, String(this.now()))
@@ -687,12 +691,13 @@ export class HistoryStore {
   close(): void {
     if (this.closed) return
     this.closed = true
+    this.statements.clear()
     this.database.close()
   }
 
   private pruneEvents(): number {
     const cutoff = this.now() - this.retentionDays * 24 * 60 * 60 * 1000
-    return changedCount(this.database.prepare('DELETE FROM events WHERE occurred_at < ?').run(cutoff))
+    return changedCount(this.statement('DELETE FROM events WHERE occurred_at < ?').run(cutoff))
   }
 
   private updateDailyStat(
@@ -706,12 +711,12 @@ export class HistoryStore {
     tokenOutput: number,
     tokenQuality: HistoryTokenQuality,
   ): void {
-    const existing = this.database.prepare(`
+    const existing = this.statement(`
       SELECT sessions_completed, sessions_failed, active_ms, token_input, token_output, token_quality
       FROM daily_stats WHERE local_date = ? AND pet_id = ? AND project_id = ? AND adapter_id = ?
     `).get(localDate, petId, projectId, adapterId)
     const currentQuality = isTokenQuality(existing?.token_quality) ? existing!.token_quality as HistoryTokenQuality : 'none'
-    this.database.prepare(`
+    this.statement(`
       INSERT INTO daily_stats(
         local_date, pet_id, project_id, adapter_id, sessions_completed, sessions_failed,
         active_ms, token_input, token_output, token_quality
@@ -749,7 +754,7 @@ export class HistoryStore {
         checksum TEXT NOT NULL
       );
     `)
-    const hasV1 = Boolean(this.database.prepare('SELECT version FROM schema_migrations WHERE version = 1').get())
+    const hasV1 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 1').get())
     if (!hasV1) this.transaction(() => {
       this.database.exec(`
         CREATE TABLE IF NOT EXISTS events (
@@ -813,12 +818,12 @@ export class HistoryStore {
           payload_json TEXT NOT NULL
         );
       `)
-      this.database.prepare(`
+      this.statement(`
         INSERT INTO schema_migrations(version, name, applied_at, checksum)
         VALUES (1, 'history-v1', ?, 'history-v1')
       `).run(this.now())
     })
-    const hasV2 = Boolean(this.database.prepare('SELECT version FROM schema_migrations WHERE version = 2').get())
+    const hasV2 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 2').get())
     if (!hasV2) this.transaction(() => {
       this.database.exec(`
         CREATE TABLE IF NOT EXISTS history_metadata (
@@ -826,16 +831,16 @@ export class HistoryStore {
           value TEXT NOT NULL
         );
       `)
-      this.database.prepare(`
+      this.statement(`
         INSERT INTO history_metadata(key, value) VALUES (?, ?)
         ON CONFLICT(key) DO NOTHING
       `).run(LOCAL_USAGE_CUTOFF_KEY, '0')
-      this.database.prepare(`
+      this.statement(`
         INSERT INTO schema_migrations(version, name, applied_at, checksum)
         VALUES (2, 'history-local-usage-cutoff', ?, 'history-local-usage-cutoff')
       `).run(this.now())
     })
-    const hasV3 = Boolean(this.database.prepare('SELECT version FROM schema_migrations WHERE version = 3').get())
+    const hasV3 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 3').get())
     if (!hasV3) this.transaction(() => {
       // v2 stored local log rows under the selected/default pet. Move only
       // local-usage events and rebuild aggregates so existing totals remain
@@ -845,12 +850,12 @@ export class HistoryStore {
         DELETE FROM daily_stats;
       `)
       this.rebuildEventDailyStats()
-      this.database.prepare(`
+      this.statement(`
         INSERT INTO schema_migrations(version, name, applied_at, checksum)
         VALUES (3, 'history-global-local-usage', ?, 'history-global-local-usage')
       `).run(this.now())
     })
-    const hasV4 = Boolean(this.database.prepare('SELECT version FROM schema_migrations WHERE version = 4').get())
+    const hasV4 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 4').get())
     if (!hasV4) this.transaction(() => {
       this.database.exec(`
         CREATE INDEX IF NOT EXISTS idx_history_events_completion_identity
@@ -861,7 +866,7 @@ export class HistoryStore {
         UPDATE daily_stats SET sessions_completed = 0, sessions_failed = 0;
       `)
       this.rebuildSessionCompletions()
-      this.database.prepare(`
+      this.statement(`
         INSERT INTO schema_migrations(version, name, applied_at, checksum)
         VALUES (4, 'history-unique-terminal-sessions', ?, 'history-unique-terminal-sessions')
       `).run(this.now())
@@ -869,7 +874,7 @@ export class HistoryStore {
   }
 
   private rebuildEventDailyStats(): void {
-    const rows = this.database.prepare(`
+    const rows = this.statement(`
       SELECT local_date, pet_id, project_id, adapter_id,
              active_delta_ms, token_input, token_output, token_quality
       FROM events ORDER BY occurred_at ASC, event_id ASC
@@ -892,7 +897,7 @@ export class HistoryStore {
   private repairSuccessfulSessionOutcomes(): void {
     for (const fact of this.getAchievementCompletedSessions()) {
       const projectId = fact.projectId ?? ''
-      this.database.prepare(`
+      this.statement(`
         UPDATE sessions
         SET ended_at = ?, terminal_state = 'success', pet_id = ?
         WHERE session_pk = ?
@@ -912,7 +917,7 @@ export class HistoryStore {
     completedDelta: number,
     failedDelta: number,
   ): void {
-    this.database.prepare(`
+    this.statement(`
       UPDATE daily_stats
       SET sessions_completed = MAX(0, sessions_completed + ?),
           sessions_failed = MAX(0, sessions_failed + ?)
@@ -934,7 +939,7 @@ export class HistoryStore {
         'none',
       )
     }
-    const rows = this.database.prepare(`
+    const rows = this.statement(`
       SELECT pet_id, project_id, adapter_id, ended_at, terminal_state
       FROM sessions
       WHERE ended_at IS NOT NULL AND terminal_state = 'error'
@@ -956,8 +961,28 @@ export class HistoryStore {
     }
   }
 
+  // 將多筆寫入合併成單一交易（例如本機 usage 掃描一次匯入上千筆），避免每筆
+  // 紀錄各自 BEGIN/COMMIT 造成的 WAL fsync 開銷。
+  batch<T>(work: () => T): T {
+    return this.transaction(work)
+  }
+
+  private statement(sql: string): SqliteStatement {
+    return this.statements.get(sql)
+  }
+
+  // 可重入：外層已開啟交易時，內層直接併入外層，失敗由最外層統一 ROLLBACK。
   private transaction<T>(work: () => T): T {
+    if (this.transactionDepth > 0) {
+      this.transactionDepth += 1
+      try {
+        return work()
+      } finally {
+        this.transactionDepth -= 1
+      }
+    }
     this.database.exec('BEGIN IMMEDIATE')
+    this.transactionDepth = 1
     try {
       const result = work()
       this.database.exec('COMMIT')
@@ -965,6 +990,8 @@ export class HistoryStore {
     } catch (error) {
       try { this.database.exec('ROLLBACK') } catch {}
       throw error
+    } finally {
+      this.transactionDepth = 0
     }
   }
 }

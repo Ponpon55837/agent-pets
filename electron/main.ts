@@ -624,7 +624,7 @@ function setPetWindowMode(mode: PetWindowMode): void {
   // A permission bubble must remain fully usable. The Broker remains the
   // authority, so a compact/partially hidden window is never allowed while a
   // request is pending.
-  if (mode !== 'normal' && (permissionBroker?.listRequests().length ?? 0) > 0) {
+  if (mode !== 'normal' && (permissionBroker?.hasActiveRequests() ?? false)) {
     applyNormalPetBounds()
     return
   }
@@ -1185,7 +1185,7 @@ function applyWindowsFullscreenAutoHideState(state: WindowsFullscreenState): voi
   if (
     !preferences.visibilityCapabilities.fullscreenAutoHide.supported
     || !preferences.fullscreenAutoHideEnabled
-    || (permissionBroker?.listRequests().length ?? 0) > 0
+    || (permissionBroker?.hasActiveRequests() ?? false)
   ) {
     restoreWindowsHiddenByFullscreen()
     return
@@ -1770,7 +1770,9 @@ app.whenReady().then(() => {
   createHistoryServices()
 
   eventServer = createEventServer(
-    () => [petWindow, panelWindow].filter((w): w is BrowserWindow => w !== null),
+    // 視窗關閉後變數可能尚未歸零；對已銷毀的 webContents send 會拋錯，導致
+    // 事件回 400 且 onEvent（通知、XP、歷史）整個被跳過。
+    () => [petWindow, panelWindow].filter((w): w is BrowserWindow => w !== null && !w.isDestroyed()),
     eventToken,
     (event) => {
       if (event.originalEvent === 'AgentPetsIntegrationTest') {
@@ -1906,7 +1908,7 @@ app.whenReady().then(() => {
     if (typeof rawDelta !== 'number' || !Number.isFinite(rawDelta)) return
     const preferences = currentDesktopPreferences()
     if (!preferences.shimejiEnabled || preferences.dndEnabled) return
-    if (petWindowMode !== 'normal' || dragPollHandle || (permissionBroker?.listRequests().length ?? 0) > 0) return
+    if (petWindowMode !== 'normal' || dragPollHandle || (permissionBroker?.hasActiveRequests() ?? false)) return
     // 電池模式是 native 的省電訊號；跳過自主移動，避免與使用者目前的
     // 工作負載競爭資源。
     if (currentPowerSaveState()) return

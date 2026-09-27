@@ -13,6 +13,7 @@ import {
   type AchievementTokenQuality,
   type AchievementUnlock,
 } from '../src/types/achievement.ts'
+import { StatementCache } from './sqlite-statements.ts'
 
 type SqliteRow = Record<string, unknown>
 
@@ -165,6 +166,7 @@ function rowQuality(row: SqliteRow | undefined): AchievementTokenQuality {
 
 export class AchievementStore {
   private readonly database: SqliteDatabase
+  private readonly statements: StatementCache<SqliteStatement>
   private readonly now: () => number
   private readonly localDate: (timestamp: number) => string
   private readonly localHour: (timestamp: number) => number
@@ -174,6 +176,7 @@ export class AchievementStore {
     mkdirSync(dirname(filePath), { recursive: true })
     const DatabaseSync = databaseConstructor()
     this.database = new DatabaseSync(filePath)
+    this.statements = new StatementCache(sql => this.database.prepare(sql))
     this.now = options.now ?? Date.now
     this.localDate = options.localDate ?? defaultLocalDate
     this.localHour = options.localHour ?? defaultLocalHour
@@ -202,7 +205,7 @@ export class AchievementStore {
 
       if (event.state === 'success') {
         const sessionKey = eventSessionKey(event, petId)
-        completed = changedCount(this.database.prepare(`
+        completed = changedCount(this.statement(`
           INSERT OR IGNORE INTO completed_sessions(
             session_key, pet_id, local_date, adapter_id, completed_at
           ) VALUES (?, ?, ?, ?, ?)
@@ -215,16 +218,16 @@ export class AchievementStore {
         )) > 0
 
         if (completed) {
-          this.database.prepare(`
+          this.statement(`
             INSERT INTO daily_completions(pet_id, local_date, sessions_completed)
             VALUES (?, ?, 1)
             ON CONFLICT(pet_id, local_date) DO UPDATE SET
               sessions_completed = daily_completions.sessions_completed + 1
           `).run(petId, this.localDate(occurredAt))
-          this.database.prepare(
+          this.statement(
             'INSERT OR IGNORE INTO active_days(pet_id, local_date) VALUES (?, ?)',
           ).run(petId, this.localDate(occurredAt))
-          this.database.prepare(
+          this.statement(
             'INSERT OR IGNORE INTO adapter_usage(pet_id, adapter_id) VALUES (?, ?)',
           ).run(petId, eventAdapterId(event))
         }
@@ -235,7 +238,7 @@ export class AchievementStore {
       const quality = safeQuality(event.tokenUsage?.quality)
       if (quality) {
         const tokenUsage = event.tokenUsage
-        tokenRecorded = changedCount(this.database.prepare(`
+        tokenRecorded = changedCount(this.statement(`
           INSERT OR IGNORE INTO token_usage(
             token_event_id, pet_id, adapter_id, occurred_at, input_tokens, output_tokens, quality
           ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -272,7 +275,7 @@ export class AchievementStore {
           ? fact.projectId
           : 'unbound'
         const sessionKey = completedSessionKey(source, sessionId, projectId, petId)
-        const inserted = changedCount(this.database.prepare(`
+        const inserted = changedCount(this.statement(`
           INSERT OR IGNORE INTO completed_sessions(
             session_key, pet_id, local_date, adapter_id, completed_at
           ) VALUES (?, ?, ?, ?, ?)
@@ -284,16 +287,16 @@ export class AchievementStore {
           completedAt,
         )) > 0
         if (!inserted) continue
-        this.database.prepare(`
+        this.statement(`
           INSERT INTO daily_completions(pet_id, local_date, sessions_completed)
           VALUES (?, ?, 1)
           ON CONFLICT(pet_id, local_date) DO UPDATE SET
             sessions_completed = daily_completions.sessions_completed + 1
         `).run(petId, this.localDate(completedAt))
-        this.database.prepare(
+        this.statement(
           'INSERT OR IGNORE INTO active_days(pet_id, local_date) VALUES (?, ?)',
         ).run(petId, this.localDate(completedAt))
-        this.database.prepare(
+        this.statement(
           'INSERT OR IGNORE INTO adapter_usage(pet_id, adapter_id) VALUES (?, ?)',
         ).run(petId, adapterId)
         const previous = touchedPets.get(petId)
@@ -319,7 +322,7 @@ export class AchievementStore {
 
   getSnapshot(petIdValue: string): AchievementSnapshot {
     const petId = safePetId(petIdValue)
-    const rows = this.database.prepare(`
+    const rows = this.statement(`
       SELECT achievement_id, version, unlocked_at, token_quality
       FROM achievement_unlocks
       WHERE pet_id = ?
@@ -358,6 +361,7 @@ export class AchievementStore {
   close(): void {
     if (this.closed) return
     this.closed = true
+    this.statements.clear()
     this.database.close()
   }
 
@@ -374,7 +378,7 @@ export class AchievementStore {
       if (!definition) continue
       const tokenQuality = evaluation.tokenQuality ?? 'none'
       const unlockedAt = this.now()
-      const inserted = changedCount(this.database.prepare(`
+      const inserted = changedCount(this.statement(`
         INSERT OR IGNORE INTO achievement_unlocks(
           pet_id, achievement_id, version, unlocked_at, token_quality, notified_at
         ) VALUES (?, ?, ?, ?, ?, ?)
@@ -407,24 +411,24 @@ export class AchievementStore {
     nightOwlCompletion: boolean,
     progression?: ProgressionSnapshot,
   ): AchievementEvaluationContext {
-    const completed = this.database.prepare(
+    const completed = this.statement(
       'SELECT COUNT(*) AS total FROM completed_sessions WHERE pet_id = ?',
     ).get(petId)
-    const today = this.database.prepare(
+    const today = this.statement(
       'SELECT sessions_completed FROM daily_completions WHERE pet_id = ? AND local_date = ?',
     ).get(petId, localDate)
-    const token = this.database.prepare(`
+    const token = this.statement(`
       SELECT COUNT(*) AS total, SUM(CASE WHEN quality = 'estimated' THEN 1 ELSE 0 END) AS estimated
       FROM token_usage WHERE pet_id = ?
     `).get(petId)
-    const tokenTotals = this.database.prepare(`
+    const tokenTotals = this.statement(`
       SELECT COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0) AS total
       FROM token_usage WHERE pet_id = ?
     `).get(petId)
-    const adapters = this.database.prepare(
+    const adapters = this.statement(
       'SELECT COUNT(*) AS total FROM adapter_usage WHERE pet_id = ?',
     ).get(petId)
-    const activeDays = this.database.prepare(
+    const activeDays = this.statement(
       'SELECT COUNT(*) AS total FROM active_days WHERE pet_id = ?',
     ).get(petId)
     return {
@@ -495,15 +499,19 @@ export class AchievementStore {
       CREATE INDEX IF NOT EXISTS idx_achievement_unlocks_pet
         ON achievement_unlocks(pet_id, unlocked_at);
     `)
-    const hasV1 = Boolean(this.database.prepare(
+    const hasV1 = Boolean(this.statement(
       'SELECT version FROM schema_migrations WHERE version = 1',
     ).get())
     if (!hasV1) this.transaction(() => {
-      this.database.prepare(`
+      this.statement(`
         INSERT INTO schema_migrations(version, name, applied_at, checksum)
         VALUES (1, 'achievements-v1', ?, 'achievements-v1')
       `).run(this.now())
     })
+  }
+
+  private statement(sql: string): SqliteStatement {
+    return this.statements.get(sql)
   }
 
   private transaction<T>(work: () => T): T {

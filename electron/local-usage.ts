@@ -108,6 +108,22 @@ function timestamp(value: unknown, fallback: number): number {
   return fallback
 }
 
+// UTF-8 位元組數介於 UTF-16 長度的 1～3 倍之間，只有落在灰色地帶時才需要
+// 真正走一遍 Buffer.byteLength（O(n)），絕大多數短行可 O(1) 判定。
+function lineTooLong(line: string, maxLineBytes: number): boolean {
+  if (line.length > maxLineBytes) return true
+  if (line.length * 3 <= maxLineBytes) return false
+  return Buffer.byteLength(line, 'utf8') > maxLineBytes
+}
+
+function parseObject(line: string): Record<string, unknown> | null {
+  try {
+    return asObject(JSON.parse(line))
+  } catch {
+    return null
+  }
+}
+
 function usageId(provider: UsageProvider, stableKey: string): string {
   return digest(`agent-pets:${provider}:${stableKey}`)
 }
@@ -222,16 +238,14 @@ export function parseLocalUsageLine(
   lineNumber: number,
   fallbackAt: number,
 ): ParsedUsage | null {
-  let value: unknown
-  try {
-    value = JSON.parse(line)
-  } catch {
-    return null
-  }
-  const record = asObject(value)
+  if (provider !== 'claude-code') return null
+  // 逐字預篩：transcript 大多是 user/tool 紀錄，先用 O(n) 子字串比對排除
+  // 不可能是 assistant usage 的行，省下昂貴的 JSON.parse。
+  if (!line.includes('"assistant"') || !line.includes('"usage"')) return null
+  const record = parseObject(line)
   if (!record) return null
 
-  if (provider === 'claude-code' && record.type === 'assistant') {
+  if (record.type === 'assistant') {
     const message = asObject(record.message)
     const usage = asObject(message?.usage)
     if (!message || !usage) return null
@@ -241,8 +255,14 @@ export function parseLocalUsageLine(
   return null
 }
 
-function filesUnder(root: string, maxFiles: number): string[] {
-  const files: string[] = []
+interface UsageFile {
+  path: string
+  size: number
+  mtimeMs: number
+}
+
+function filesUnder(root: string, maxFiles: number): UsageFile[] {
+  const files: UsageFile[] = []
   let realRoot: string
   try {
     const rootStat = lstatSync(root)
@@ -277,7 +297,7 @@ function filesUnder(root: string, maxFiles: number): string[] {
       if (stat.isDirectory()) {
         visit(candidate, depth + 1)
       } else if (stat.isFile() && extname(entry.name).toLowerCase() === '.jsonl') {
-        files.push(realCandidate)
+        files.push({ path: realCandidate, size: stat.size, mtimeMs: stat.mtimeMs })
       }
     }
   }
@@ -303,9 +323,14 @@ function parseUsageFile(
     let codexCwd: string | undefined
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index]
-      if (!line || Buffer.byteLength(line, 'utf8') > maxLineBytes) continue
-      if (codexCwd === undefined) codexCwd = codexSessionCwd(line) ?? codexCwd
-      const result = parseCodexUsageLine(line, fileKey, index + 1, fallbackAt, previousCodexTotal, codexCwd)
+      if (!line || lineTooLong(line, maxLineBytes)) continue
+      const wantsCwd = codexCwd === undefined && line.includes('"session_meta"')
+      if (!wantsCwd && !line.includes('"token_count"')) continue
+      // 每行只 JSON.parse 一次，同時供 session_meta 與 token_count 判斷使用。
+      const record = parseObject(line)
+      if (!record) continue
+      if (wantsCwd) codexCwd = codexSessionCwd(record) ?? codexCwd
+      const result = parseCodexUsageRecord(record, fileKey, index + 1, fallbackAt, previousCodexTotal, codexCwd)
       if (!result) continue
       // Rebase the running baseline even when this event produced no
       // importable record (first sighting, repeat, or a reset) - otherwise a
@@ -319,7 +344,7 @@ function parseUsageFile(
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
-    if (!line || Buffer.byteLength(line, 'utf8') > maxLineBytes) continue
+    if (!line || lineTooLong(line, maxLineBytes)) continue
     const parsed = parseLocalUsageLine(provider, line, fileKey, index + 1, fallbackAt)
     if (!parsed) continue
     // Claude streaming records may repeat the same message id with cumulative
@@ -329,27 +354,21 @@ function parseUsageFile(
   return [...records.values()]
 }
 
-function codexSessionCwd(line: string): string | undefined {
-  let value: unknown
-  try { value = JSON.parse(line) } catch { return undefined }
-  const record = asObject(value)
-  if (!record || record.type !== 'session_meta') return undefined
+function codexSessionCwd(record: Record<string, unknown>): string | undefined {
+  if (record.type !== 'session_meta') return undefined
   const payload = asObject(record.payload)
   return payload ? text(payload.cwd) : undefined
 }
 
-function parseCodexUsageLine(
-  line: string,
+function parseCodexUsageRecord(
+  record: Record<string, unknown>,
   fileKey: string,
   lineNumber: number,
   fallbackAt: number,
   previousTotal: TokenCounters | null,
   fileCwd: string | undefined,
 ): CodexUsageResult | null {
-  let value: unknown
-  try { value = JSON.parse(line) } catch { return null }
-  const record = asObject(value)
-  if (!record || record.type !== 'event_msg') return null
+  if (record.type !== 'event_msg') return null
   const payload = asObject(record.payload)
   if (!payload || payload.type !== 'token_count') return null
   const info = asObject(payload.info)
@@ -407,9 +426,7 @@ export class LocalUsageReader {
       if (remainingFiles <= 0) break
       const files = filesUnder(root.directory, remainingFiles)
       remainingFiles -= files.length
-      for (const filePath of files) {
-        let stat
-        try { stat = lstatSync(filePath) } catch { result.filesSkipped += 1; continue }
+      for (const { path: filePath, ...stat } of files) {
         if (stat.size > this.maxFileBytes || stat.size > remainingBytes) {
           result.filesSkipped += 1
           continue
@@ -425,19 +442,26 @@ export class LocalUsageReader {
         const fileKey = digest(`${root.provider}:${filePath}`)
         const records = parseUsageFile(root.provider, fileKey, content, stat.mtimeMs, this.maxLineBytes)
         result.recordsParsed += records.length
-        for (const record of records) {
-          if (record.occurredAt <= cutoff) continue
-          // trackSeen (not a read-only resolve) so a project whose only
-          // evidence is this log file still gets a row in the project list -
-          // otherwise its token totals would be correctly computed but
-          // permanently unreachable from the History project filter.
-          const projectId = record.cwd
-            ? this.projectRouting?.trackSeen(record.cwd, record.occurredAt)?.projectId
-            : undefined
-          if (this.history.recordTokenUsage({ ...record, projectId })) result.recordsImported += 1
-        }
+        // 同一檔案的所有紀錄合併成單一 SQLite 交易寫入。
+        result.recordsImported += this.history.batch(() => this.importRecords(records, cutoff))
       }
     }
     return result
+  }
+
+  private importRecords(records: ParsedUsage[], cutoff: number): number {
+    let imported = 0
+    for (const record of records) {
+      if (record.occurredAt <= cutoff) continue
+      // trackSeen (not a read-only resolve) so a project whose only
+      // evidence is this log file still gets a row in the project list -
+      // otherwise its token totals would be correctly computed but
+      // permanently unreachable from the History project filter.
+      const projectId = record.cwd
+        ? this.projectRouting?.trackSeen(record.cwd, record.occurredAt)?.projectId
+        : undefined
+      if (this.history.recordTokenUsage({ ...record, projectId })) imported += 1
+    }
+    return imported
   }
 }

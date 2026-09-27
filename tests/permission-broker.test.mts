@@ -236,3 +236,25 @@ test('audit records omit action, description, and response handles', async () =>
   assert.equal(serialized.includes('secret description'), false)
   assert.equal(serialized.includes('secret response handle'), false)
 })
+
+test('active request helpers match listRequests and keep queue order without sorting', async () => {
+  const broker = new PermissionBroker({ now: () => 1_000 })
+  broker.registerAdapter(respondPort(async () => 'delivered'))
+  assert.equal(broker.hasActiveRequests(), false)
+
+  const first = broker.createRequest('opencode-desktop', request())
+  const second = broker.createRequest('opencode-desktop', request({ requestId: 'request-2' }))
+  assert.equal(first.ok && first.request.queuePosition, 1)
+  assert.equal(second.ok && second.request.queuePosition, 2)
+  assert.equal(second.ok && second.request.queueSize, 2)
+  assert.deepEqual(broker.listRequests().map(item => item.requestId), ['request-1', 'request-2'])
+  assert.equal(broker.hasActiveRequests(), true)
+  assert.equal(broker.isRequestActive('request-1'), true)
+
+  await broker.decide('request-1', 'deny', 'bubble')
+  assert.equal(broker.isRequestActive('request-1'), false)
+  assert.equal(broker.isRequestActive('missing'), false)
+  const third = broker.createRequest('opencode-desktop', request({ requestId: 'request-3' }))
+  assert.equal(third.ok && third.request.queuePosition, 2)
+  assert.deepEqual(broker.listRequests().map(item => item.requestId), ['request-2', 'request-3'])
+})
