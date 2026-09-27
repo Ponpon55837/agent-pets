@@ -45,6 +45,7 @@ export interface PetEntry {
 const SUCCESS_DISPLAY_MS = 4_000
 const SESSION_STALE_MS = 15 * 60_000
 const MAX_SESSION_COUNT = 200
+const ACHIEVEMENT_DEFINITION_BY_ID = new Map(ACHIEVEMENT_DEFINITIONS.map(entry => [entry.id, entry]))
 // Kept at/below the main process' quota cache TTL so a poll that arrives on
 // schedule actually reaches the usage API instead of being answered from a
 // still-warm cache — otherwise the two throttles stack and the meter lags by
@@ -222,7 +223,10 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
   const hiddenBuiltinIds = ref<string[]>(loadHiddenBuiltins())
-  const visiblePets = computed(() => pets.value.filter(p => !hiddenBuiltinIds.value.includes(p.id)))
+  const visiblePets = computed(() => {
+    const hidden = new Set(hiddenBuiltinIds.value)
+    return pets.value.filter(p => !hidden.has(p.id))
+  })
 
   // Per-family skin overrides (e.g. Codex looks like the cat, Claude looks
   // like the monkey king) — a family with no entry here just falls back to
@@ -751,7 +755,7 @@ export const useAgentStore = defineStore('agent', () => {
     const normalized = raw.achievements.map(candidate => {
       if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null
       const item = candidate as Partial<AchievementSnapshot['achievements'][number]>
-      const definition = ACHIEVEMENT_DEFINITIONS.find(entry => entry.id === item.id)
+      const definition = (typeof item.id === 'string' ? ACHIEVEMENT_DEFINITION_BY_ID.get(item.id) : undefined)
       if (
         !definition
         || seen.has(definition.id)
@@ -790,7 +794,7 @@ export const useAgentStore = defineStore('agent', () => {
   function handleAchievementUnlocked(value: unknown): boolean {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false
     const raw = value as Partial<AchievementUnlock>
-    const definition = ACHIEVEMENT_DEFINITIONS.find(entry => entry.id === raw.achievementId)
+    const definition = (typeof raw.achievementId === 'string' ? ACHIEVEMENT_DEFINITION_BY_ID.get(raw.achievementId) : undefined)
     const petId = raw.petId
     const unlockedAt = raw.unlockedAt
     const tokenQuality = raw.tokenQuality
@@ -936,11 +940,15 @@ export const useAgentStore = defineStore('agent', () => {
     } else {
       const allSessions = Object.values(sessions.value)
       if (allSessions.length >= MAX_SESSION_COUNT) {
-        const evictionCandidate = allSessions
-          .sort((a, b) => {
-            const offlineDelta = Number(a.state !== 'offline') - Number(b.state !== 'offline')
-            return offlineDelta || a.lastSeenAt - b.lastSeenAt
-          })[0]
+        // 只需要最小值：單次線性掃描 O(n) 取代整體排序 O(n log n)。
+        // 優先淘汰 offline，其次是最久未更新的 session。
+        let evictionCandidate = allSessions[0]
+        for (const candidate of allSessions) {
+          const offlineDelta = Number(candidate.state !== 'offline') - Number(evictionCandidate.state !== 'offline')
+          if (offlineDelta < 0 || (offlineDelta === 0 && candidate.lastSeenAt < evictionCandidate.lastSeenAt)) {
+            evictionCandidate = candidate
+          }
+        }
         if (evictionCandidate) removeSession(evictionCandidate.key)
       }
       sessions.value[key] = {

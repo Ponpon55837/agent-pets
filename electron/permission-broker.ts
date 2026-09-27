@@ -292,15 +292,31 @@ export class PermissionBroker {
     this.requests.set(request.requestId, request)
     this.scheduleExpiry(request)
     this.emitChanged()
-    const active = this.activeRequests()
-    const queuePosition = active.findIndex((item) => item.requestId === request.requestId) + 1
-    return { ok: true, request: this.toView(request, queuePosition, active.length) }
+    // 新請求的 order 最大，必定排在佇列最後，不需要再線性搜尋一次。
+    const queueSize = this.activeRequests().length
+    return { ok: true, request: this.toView(request, queueSize, queueSize) }
   }
 
   listRequests(): PermissionRequestView[] {
     this.expireDue()
     const active = this.activeRequests()
     return active.map((request, index) => this.toView(request, index + 1, active.length))
+  }
+
+  // 只需要布林判斷的呼叫端（例如拖曳輪詢、adapter decision 輪詢）不必為每個
+  // 請求建立 view 物件。
+  hasActiveRequests(): boolean {
+    this.expireDue()
+    for (const request of this.requests.values()) {
+      if (!isTerminal(request.status)) return true
+    }
+    return false
+  }
+
+  isRequestActive(requestId: string): boolean {
+    this.expireDue()
+    const request = this.requests.get(requestId)
+    return Boolean(request && !isTerminal(request.status))
   }
 
   async decide(
@@ -485,10 +501,14 @@ export class PermissionBroker {
     }
   }
 
+  // Map 依插入順序迭代，而 order 在插入時單調遞增且紀錄不會重新插入，
+  // 因此迭代順序即為佇列順序，省去 O(n log n) 排序。
   private activeRequests(): InternalPermissionRequest[] {
-    return [...this.requests.values()]
-      .filter((request) => !isTerminal(request.status))
-      .sort((left, right) => left.order - right.order)
+    const active: InternalPermissionRequest[] = []
+    for (const request of this.requests.values()) {
+      if (!isTerminal(request.status)) active.push(request)
+    }
+    return active
   }
 
   private scheduleExpiry(request: InternalPermissionRequest): void {

@@ -339,10 +339,12 @@ Agent Pets runs a local HTTP server on `http://127.0.0.1:17373/v1/events` that r
 - **Renderer isolation** — Renderer processes run with Chromium sandboxing, context isolation, no Node.js integration, a restrictive CSP, a secure custom `agent-pets://` protocol instead of privileged `file://` pages, blocked popups/navigation, denied permissions, and validated main-frame IPC senders.
 - **Local event server** — The event server listens on `127.0.0.1` only, authenticates every hook request with a per-install secret, rejects browser-originated and non-JSON requests, rate-limits events, and accepts only bounded, whitelisted fields.
 - **Quota requests** — The quota feature connects only to the exact HTTPS Codex and Anthropic quota/auth endpoints. Redirects, oversized responses, excessive window counts, and malformed renderer IPC payloads are rejected. OAuth credentials stay in the Electron main process and are never exposed to the renderer or command-line arguments.
-- **Local usage reader** — Token history is read-only and main-process-owned. It scans only the known Codex/Claude JSONL roots, caps files and line sizes, rejects symlinks/reparse paths that escape those roots, parses an allowlisted usage shape, hashes source identities, and never persists raw log lines or prompt content.
+- **Local usage reader** — Token history is read-only and main-process-owned. It scans only the known Codex/Claude JSONL roots, caps files and line sizes, rejects symlinks/reparse paths that escape those roots, parses an allowlisted usage shape, hashes source identities, and never persists raw log lines or prompt content. Lines are pre-filtered by substring before `JSON.parse`, each line is parsed at most once, and every file is imported in a single SQLite transaction (roughly 10× faster on a 20k-record fixture).
 - **Credential refresh** — Expired OAuth tokens are refreshed and merged back into the original Codex auth file or Claude credential store so the CLIs keep working. Writes use account/change guards, restrictive file permissions, and atomic replacement where applicable.
 - **Pet imports** — ZIP entry count, compressed/uncompressed sizes, JSON size, and image size/type are validated before imported files are stored.
-- **Memory bounds** — Agent sessions are capped and stale/offline entries are evicted to prevent unbounded renderer memory growth.
+- **Memory bounds** — Agent sessions are capped and stale/offline entries are evicted (single-pass O(n) selection) to prevent unbounded renderer memory growth.
+- **Local servers** — Event ingress skips destroyed windows so a closing panel cannot drop notification/XP/history processing, and uses short header/request timeouts to bound slow loopback connections.
+- **SQLite performance** — History, progression, achievement, and project-routing stores reuse cached prepared statements instead of recompiling SQL on every hook event; the project path cache is a true LRU.
 - **Path sanitization** — Project paths are reduced to their basename, and filesystem destinations are constrained to their expected root.
 - **Desktop notifications** — Notification text is built only from the normalized Agent name and bounded project basename; prompt text, tool arguments, session identifiers, and credentials are never shown or logged. Diagnostic notification history is bounded and stores only event class/outcome metadata.
 - **Desktop visibility and preference IPC** — The main process owns capture protection, fullscreen capability projection, the Windows Win32 event detector, right-click hide authorization, and desktop preferences. Renderer requests accept only an allowlist of boolean fields from validated first-party frames; right-click hide re-checks the trusted pet sender and persisted preference. Preference writes use bounded reads plus atomic replacement. The Windows detector uses foreground HWND, DWM frame bounds, monitor bounds, visibility/style checks, and event hooks only; it does not use focus/title heuristics, PowerShell, WMI, or an unbounded polling loop, and native failures fail closed.
@@ -455,6 +457,7 @@ agent-pets/
 │   ├── notification-policy.ts # Pure notification classification/cooldown
 │   ├── quota.ts             # Codex / Claude quota readers
 │   ├── local-usage.ts       # Bounded Codex / Claude session-log token reader
+│   ├── sqlite-statements.ts # Shared prepared-statement cache for SQLite stores
 │   └── setup.ts             # Platform-aware paths & setup
 ├── integrations/
 │   ├── install.mjs          # Standalone CLI hook installer
