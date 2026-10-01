@@ -3,7 +3,7 @@
 ## Runtime and tooling
 
 - Stack: Electron 43, Vue 3, Pinia, TypeScript, Vite, electron-builder.
-- Package manager: `pnpm@11.16.0`; authoritative lockfile: `pnpm-lock.yaml`.
+- Package manager: `pnpm@12.8.1`; authoritative lockfile: `pnpm-lock.yaml`.
 - Current baseline when this reference was written: `0.5.7`. Always re-read `package.json` because this value will change.
 - Renderer entry: `src/main.ts` and `src/App.vue`.
 - Electron composition root: `electron/main.ts`.
