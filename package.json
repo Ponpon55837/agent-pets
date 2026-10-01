@@ -4,7 +4,7 @@
   "description": "Desktop pet that shows the status of AI coding agents",
   "author": "Upfloor5",
   "license": "MIT",
-  "packageManager": "pnpm@11.16.0",
+  "packageManager": "pnpm@12.8.1",
   "engines": {
     "node": ">=22.12.0"
   },
