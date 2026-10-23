@@ -83,3 +83,58 @@ P12.4 亦執行 staged diff check。P12.1–P12.4 各 checkpoint commit 均推�
 ## 文件同步
 
 本階段未更新兩份 README：插件安裝、執行與設定 UI 尚未實作或啟用，Phase 12 的契約已有 `docs/architecture/Plugin-System-Plan.zh-TW.md` 與 handoff 規格記載；README 目前沒有向使用者宣稱插件宿主已可用。本報告記錄本階段的實作與限制。
+
+## 複檢修正
+
+複檢清單 R1–R8 已依序完成；每個 checkpoint 的必要檢查均通過，commit 已推送到 `origin/feat/plugin-host`。本節補充複檢修正結果，歷史 checkpoint 與初次驗收記錄仍保留原樣。
+
+### R1–R8 對照
+
+| 項目 | 修正內容 | Commit SHA | 新增或更新的測試 |
+|---|---|---|---|
+| R1 | 拒絕最後 label 為數字或 `0x` 十六進位的主機名稱；以 WHATWG URL 正規化結果完全相同比對作第二層防護，萬用字元只比對其網域部分。 | `bc96ed8f5da5907c777eff5efd61b6ab0eaf4b90` | 擴充 manifest network host 測試：拒絕 `0x7f.1`、`127.1`、`1.0x7f000001`、IPv4、`foo.123`、`a.0x10`、`*.0x7f.1`，仍接受一般 DNS 名稱。 |
+| R2 | 寵物重新可見時，以保留的 TTL 從恢復時間重新計時；仍須通過 `canDisplay`。 | `67850b2b086c9ea8bbea5c637d86ea73226e38ee` | 測試原 TTL 過期後恢復會重新顯示；隱藏 60 秒並送出多則時，只恢復最新一則且使用新 TTL。 |
+| R3 | DND 通知送入通知中心並標為未讀，不送泡泡、不消耗速率額度；DND 結束不補顯示。 | `dd861d38c140d0edd0338bb4b1bd9ffaaae4b2b7` | `DND notifications stay unread in the center without bubbles, rate use, or replay`。 |
+| R4 | 偏好檔忽略未知欄位，只丟棄損壞的單一插件項目；根層級欄位各自套用預設值；壞 JSON 或超限檔案在首次寫入前備份為 `.corrupt-<timestamp>`；patch 輸入仍嚴格驗證。 | `5a22ca894117be8f116b39a88278d74ca59ad855` | 測試未知欄位忽略、單筆錯誤不影響其他插件、損壞及超限檔案先備份、symlink fail closed；既有 patch 嚴格驗證測試維持。 |
+| R5 | archive guard 增加 `strict`／`compat` 模式；寵物匯入用 `compat`，不安全路徑、不支援副檔名、重複路徑及 `__MACOSX/`、`._` 中繼檔依規則略過，略過項目仍計入上限。 | `b56275020b171e9d5b6a8075ff4f62982fabf67f` | 測試 strict 拒絕與 compat 略過、保留第一個重複檔案、跳過 macOS 中繼檔並仍計算檔案數與大小限制。 |
+| R6 | 仲裁順序修正為 `presentation-say` 高於 `agent-toast`，符合複檢答覆指定的既有可見行為。 | `275799504c9787ccc33601b6ceaf5c8cdc824eac` | 優先順序矩陣驗證 `presentation-say takes precedence over agent-toast`。 |
+| R7 | 將 `agent-toast` 和 `activity` 放回同一個 `<Transition mode="out-in">` 分支，分支位於 `presentation-say` 之後。 | `4570e14b683ca0e73a9a2992cb2f6171480a0a83` | 新增 DesktopPet template contract 測試，驗證 toast/activity 共用 out-in Transition 且位於 presentation say 之後。 |
+| R8 | 從 `BubbleCandidates` 移除未使用的 `bubbleEnabled` 欄位。 | `7abdb4abdd431f551597ccf82131852b5ada5940` | 測試候選型別不再宣告 `bubbleEnabled`，且 plugin feed 仍只由 plugin-side controls 決定。 |
+
+### §0.4 檢查結果
+
+R1–R7 每個 checkpoint 均執行 `pnpm exec vue-tsc --noEmit`、`pnpm test:unit`、`pnpm exec vite build`、`git diff --check`，四項皆通過。R8 的 vue-tsc、單元測試與 diff check 通過；建置 gate 的實際執行補充如下。
+
+| Checkpoint | `vue-tsc` | `test:unit` | `vite build` | `git diff --check` |
+|---|---|---:|---|---|
+| R1 | 通過 | 185/185 | 通過 | 通過 |
+| R2 | 通過 | 186/186 | 通過 | 通過 |
+| R3 | 通過 | 187/187 | 通過 | 通過 |
+| R4 | 通過 | 189/189 | 通過 | 通過 |
+| R5 | 通過 | 190/190 | 通過 | 通過 |
+| R6 | 通過 | 190/190 | 通過 | 通過 |
+| R7 | 通過 | 191/191 | 通過 | 通過 |
+| R8 | 通過 | 192/192 | 通過（見下方執行紀錄） | 通過 |
+
+R8 commit 前的建置 gate 誤執行 `pnpm build`；該腳本內的 `vue-tsc --noEmit && vite build` 通過，preflight 回報沒有正在執行的 Agent Pets 程序，並產生本機 macOS x64 封裝輸出。沒有發布或提交封裝產物。其後另直接執行指定的 `pnpm exec vite build` 並通過，結果為 renderer 84 modules、Electron main 86 modules、preload 2 modules。這些 `release/` 產物為本機 ignored 檔案。
+
+### main 合併狀態
+
+未合併 `origin/main`。複檢時 `origin/main` 最新五筆尚未包含 PR #13，且 `origin/main:package.json` 的 Vue 仍為 `^3.4.21`，因此略過 merge。
+
+> PR #13 尚未合併，依賴弱點待之後 merge main
+
+### 仍未驗證項目：Electron 手動驗收
+
+以下由複檢者在 `pnpm dev` 下執行；目前仍標記為「未驗證」，沒有以單元測試或 build 結果代替：
+
+1. 匯入一般寵物 ZIP（`pet.json` 與 spritesheet），確認可匯入並顯示。
+2. 匯入 macOS「壓縮」建立、含 `__MACOSX` 的寵物 ZIP，確認可匯入且外觀正確。
+3. 讓 Agent 完成一次工作，確認完成 toast 出現，倒數後切換 activity 文字時有淡出淡入。
+4. toast 顯示期間透過 Presentation MCP 送出 `pet_say`，確認 `presentation-say` 先顯示。
+5. 觸發權限請求，確認權限泡泡優先於其他泡泡。
+
+### 待決問題
+
+1. `origin/main` 尚未合入 Vue 3.5.44 的 PR #13；既有 `source-map-js` 與 `@vue/server-renderer` High 依賴弱點待之後 merge main 處理。
+2. 上列五項 Electron 手動驗收待複檢者執行；執行前仍未驗證。
