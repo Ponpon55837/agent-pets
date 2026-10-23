@@ -43,7 +43,7 @@ Download and run `Agent Pets.exe` from the [Releases](https://github.com/Ponpon5
 
 ### Install (macOS)
 
-Download `Agent Pets.dmg`, open it, and drag the app to your Applications folder.
+Download `AgentPets-<version>-arm64.dmg` (Apple Silicon) or `AgentPets-<version>-x64.dmg` (Intel) from the [Releases](https://github.com/Ponpon55837/agent-pets/releases) page, open it, and drag the app to your Applications folder.
 
 ### First Run
 
@@ -392,6 +392,10 @@ pnpm build
 ```
 
 The output will be in `release/`.
+
+### Release
+
+Releases are automated by `.github/workflows/release.yml`. When a commit that changes the `version` in `package.json` lands on `main` and no `v<version>` tag exists yet, GitHub Actions runs type-check and unit tests, builds the macOS (arm64 + x64 `.dmg`) and Windows (portable `.exe`) packages, then creates the `v<version>` tag and a GitHub Release with generated notes and both packages attached. No manual tagging or local packaging is needed. The workflow can also be re-run from the Actions tab (**Run workflow**); it skips versions that are already tagged. Builds are currently unsigned.
 
 ### Unit Tests
 

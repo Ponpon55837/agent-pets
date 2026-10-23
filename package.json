@@ -84,7 +84,7 @@
       "artifactName": "AgentPets-${version}.exe"
     },
     "dmg": {
-      "artifactName": "AgentPets-${version}.dmg"
+      "artifactName": "AgentPets-${version}-${arch}.dmg"
     }
   }
 }
