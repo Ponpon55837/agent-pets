@@ -124,3 +124,21 @@ export default {
 ## 其他觀察（不需修）
 
 - 啟動時 log 有 `Error occurred in handler for 'project-pets-get-enabled': Unauthorized IPC sender`：寵物視窗呼叫了只允許面板的 handler。這是 Phase 13 之前就存在的行為（handler 來自 `3641fb1`），不屬於本分支範圍，另案處理。
+
+## 修正複檢結果（2026-10-23）
+
+- 複檢對象：`7ef6837..9cdc3ae`（`aa7df60` 程式修正、`9cdc3ae` 報告）。
+- 重跑檢查：`vue-tsc` 通過、`pnpm test:unit` 233/233、`vite build` 通過、`git diff --check` 通過、`pnpm audit --prod` 無弱點。
+- 程式審查：partition 協定只服務隨機權杖路徑與 `_host` 資產；MessagePort 改由 `window.postMessage` 傳遞並檢查 `source`／`origin`／訊息且只收第一次；bootstrap 在載入插件前沿原型鏈移除 `indexedDB`、`caches`、`BroadcastChannel`、`Worker`、`SharedWorker`、`WebSocket`、`EventSource`、`XMLHttpRequest`、`fetch`、`postMessage`，移除失敗即拒絕啟動；RPC 成功回傳值、失敗 reject 帶 `code` 的 `Error`。
+- **Electron 實機（未修補的 `9cdc3ae` 建置、隔離 `HOME`／userData）**：
+
+| 項目 | 結果 |
+|---|---|
+| B1／B2 | 啟用插件後 Host 頁面與 Worker 正常執行 ✅ |
+| H1 `ok-notify` | 通知為「Plugin ready / Storage round-trip passed.」✅ |
+| H2 `evil-escape` | fetch（https／loopback／app）、跨插件 import、巢狀 Worker、BroadcastChannel、indexedDB、原型鏈 RPC 全部 blocked；storage round-trip 回 `{found:true,value:1}` ✅ |
+| B4 `evil-loop` | 啟用 105 秒後狀態 `disabled_crashed`、偏好 `enabled:false`、通知中心出現「連續崩潰後已停用」；Host CPU 回到 0% ✅ |
+| B3 | 對 Host 頁面送 `Page.crash` 後 Host 以新 target 重建，`ok-notify` 再次啟動 ✅ |
+
+- 結論：**B1–B4、H1–H3、M1–M2 修正確認，Phase 13 通過**，可進 Phase 14。
+- 未驗證（沿用 Codex 報告）：Windows、正式打包後的行為、連續三次真實協定載入失敗（僅單元測試覆蓋）。`project-pets-get-enabled` 未授權 IPC 記錄為既有問題，另案處理。
