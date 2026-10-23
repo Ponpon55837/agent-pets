@@ -12,6 +12,7 @@ import {
   type ShimejiContext,
 } from '@/types/pet'
 import { quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
+import { selectBubble } from '@/utils/feed-arbiter'
 import PetAnimation from '@/components/PetAnimation.vue'
 
 const store = useAgentStore()
@@ -191,6 +192,21 @@ const displayLines = computed(() => {
 // toggle on — showing a single pet forces picking a "winner", so instead
 // show one small pet per family, side by side.
 const isMultiPet = computed(() => store.isMultiPet)
+
+const bubbleSelection = computed(() => {
+  const permissionRequest = Boolean(store.permissionBubbleActive && store.permissionRequest)
+  const permissionNotice = Boolean(store.permissionBubbleActive && store.permissionNotice)
+  const agentBubbleEnabled = !store.permissionRequest && !store.permissionNotice && store.bubbleActive
+
+  return selectBubble({
+    permissionRequest,
+    permissionNotice,
+    agentToast: Boolean(agentBubbleEnabled && store.toast),
+    presentationSay: Boolean(store.presentationSay),
+    activity: Boolean(agentBubbleEnabled && !store.toast && !isMultiPet.value && store.activityText),
+    pluginFeed: null,
+  })
+})
 
 function quotaColor(familyKey: string): string {
   const quota = store.quotaByFamily[familyKey]
@@ -524,7 +540,7 @@ watch(() => store.achievementUnlock, (unlock) => {
       </div>
 
       <template v-else>
-      <Transition v-if="store.permissionBubbleActive && store.permissionRequest" name="toast" mode="out-in">
+      <Transition v-if="bubbleSelection === 'permission-request' && store.permissionBubbleActive && store.permissionRequest" name="toast" mode="out-in">
         <section
           :key="`permission-${store.permissionRequest.requestId}`"
           class="permission-request"
@@ -577,7 +593,7 @@ watch(() => store.achievementUnlock, (unlock) => {
         </section>
       </Transition>
 
-      <Transition v-else-if="store.permissionBubbleActive && store.permissionNotice" name="toast" mode="out-in">
+      <Transition v-else-if="bubbleSelection === 'permission-notice' && store.permissionBubbleActive && store.permissionNotice" name="toast" mode="out-in">
         <div
           key="permission"
           class="pet-toast permission-notice"
@@ -593,20 +609,7 @@ watch(() => store.achievementUnlock, (unlock) => {
         </div>
       </Transition>
 
-      <Transition v-else-if="store.presentationSay" name="toast" mode="out-in">
-        <div
-          key="presentation-say"
-          class="pet-toast presentation-say"
-          role="status"
-          aria-live="polite"
-          data-pet-hit-target="solid"
-        >
-          <span class="presentation-say-icon" aria-hidden="true">✦</span>
-          <span>{{ store.presentationSay.message }}</span>
-        </div>
-      </Transition>
-
-      <Transition v-else-if="!store.permissionRequest && !store.permissionNotice && store.bubbleActive" name="toast" mode="out-in">
+      <Transition v-else-if="bubbleSelection === 'agent-toast'" name="toast" mode="out-in">
         <div
           v-if="store.toast"
           :key="`toast-${store.toast.id}`"
@@ -628,7 +631,23 @@ watch(() => store.achievementUnlock, (unlock) => {
           </span>
           <span class="sr-only">{{ t('permissionCountdown') }}</span>
         </div>
-        <div v-else-if="!isMultiPet && store.activityText" key="activity" class="pet-toast activity" data-pet-hit-target="solid">
+      </Transition>
+
+      <Transition v-else-if="bubbleSelection === 'presentation-say' && store.presentationSay" name="toast" mode="out-in">
+        <div
+          key="presentation-say"
+          class="pet-toast presentation-say"
+          role="status"
+          aria-live="polite"
+          data-pet-hit-target="solid"
+        >
+          <span class="presentation-say-icon" aria-hidden="true">✦</span>
+          <span>{{ store.presentationSay.message }}</span>
+        </div>
+      </Transition>
+
+      <Transition v-else-if="bubbleSelection === 'activity'" name="toast" mode="out-in">
+        <div v-if="!isMultiPet && store.activityText" key="activity" class="pet-toast activity" data-pet-hit-target="solid">
           🔧 {{ store.activityText }}
         </div>
       </Transition>
