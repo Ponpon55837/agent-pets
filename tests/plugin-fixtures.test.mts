@@ -83,6 +83,16 @@ test('every evil fixture records a host log entry for its runtime probe', () => 
   }
 })
 
+test('evil-network exercises a successful declared public host and each forbidden URL class', () => {
+  const fixture = readFixture('evil-network')
+  const source = Buffer.from(fixture.files['dist/main.js']!).toString('utf8')
+  assert.ok(fixture.manifest.permissions.network?.hosts.includes('api.github.com'))
+  assert.match(source, /api\.net\.fetch\('https:\/\/api\.github\.com\/robots\.txt'\)/)
+  for (const marker of [
+    'unlisted host', 'http scheme', 'public IP literal', 'localhost', 'private network', 'redirect to loopback',
+  ]) assert.ok(source.includes(marker), `missing network rejection probe: ${marker}`)
+})
+
 test('all source fixtures can be packed and installed by PluginRegistry', () => {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-fixtures-'))
   try {

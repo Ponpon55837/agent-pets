@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { zipSync } from 'fflate'
 import { guardArchive } from './archive-guard.ts'
 import { parsePluginManifest } from './plugin-manifest.ts'
 import type { PluginManifest, PluginRuntimeState } from '../src/types/plugin.ts'
@@ -335,6 +336,69 @@ export class PluginRegistry {
     }, guarded.files, manifest)
   }
 
+  /** Package a developer-selected folder in memory, then run the exact archive validator. */
+  planInstallDirectory(directory: string): PluginRegistryResult<PluginInstallPlan> {
+    if (typeof directory !== 'string' || !path.isAbsolute(directory)) return { ok: false, error: 'invalid_archive' }
+    const root = path.resolve(directory)
+    let rootReal: string
+    try {
+      const stat = fs.lstatSync(root)
+      if (!stat.isDirectory() || stat.isSymbolicLink()) return { ok: false, error: 'filesystem_unsafe' }
+      rootReal = fs.realpathSync(root)
+    } catch {
+      return { ok: false, error: 'invalid_archive' }
+    }
+
+    const files: Record<string, Uint8Array> = Object.create(null) as Record<string, Uint8Array>
+    let totalBytes = 0
+    let fileCount = 0
+    const collect = (current: string, relativeDirectory: string): boolean => {
+      let entries: fs.Dirent[]
+      try { entries = fs.readdirSync(current, { withFileTypes: true }) } catch { return false }
+      for (const entry of entries) {
+        const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name
+        const absolutePath = path.join(current, entry.name)
+        let stat: fs.Stats
+        try { stat = fs.lstatSync(absolutePath) } catch { return false }
+        if (stat.isSymbolicLink()) return false
+        if (stat.isDirectory()) {
+          if (!collect(absolutePath, relativePath)) return false
+          continue
+        }
+        if (!stat.isFile()) return false
+        fileCount += 1
+        if (fileCount > PLUGIN_ARCHIVE_MAX_FILES || stat.size > PLUGIN_ARCHIVE_MAX_BYTES) return false
+        totalBytes += stat.size
+        if (!Number.isSafeInteger(totalBytes) || totalBytes > PLUGIN_ARCHIVE_MAX_BYTES) return false
+        let descriptor: number | null = null
+        try {
+          const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0
+          descriptor = fs.openSync(absolutePath, fs.constants.O_RDONLY | noFollow)
+          const opened = fs.fstatSync(descriptor)
+          const realPath = fs.realpathSync(absolutePath)
+          const relativeRealPath = path.relative(rootReal, realPath)
+          if (!opened.isFile() || opened.isSymbolicLink() || opened.size !== stat.size
+            || opened.dev !== stat.dev || opened.ino !== stat.ino
+            || relativeRealPath === '..' || relativeRealPath.startsWith(`..${path.sep}`) || path.isAbsolute(relativeRealPath)) return false
+          files[relativePath] = fs.readFileSync(descriptor)
+        } catch {
+          return false
+        } finally {
+          if (descriptor !== null) fs.closeSync(descriptor)
+        }
+      }
+      return true
+    }
+
+    if (!collect(rootReal, '') || fileCount === 0) return { ok: false, error: 'invalid_archive' }
+    try {
+      const archive = zipSync(files, { level: 0 })
+      return this.planInstall(archive)
+    } catch {
+      return { ok: false, error: 'invalid_archive' }
+    }
+  }
+
   install(planToken: string, acceptAdditionalPermissions = false): PluginRegistryResult<PluginRegistryEntry> {
     const prepared = this.getPlan(planToken)
     if (!prepared) return { ok: false, error: 'plan_not_found' }
@@ -415,6 +479,10 @@ export class PluginRegistry {
       }
       return { ok: false, error: 'install_failed' }
     }
+  }
+
+  discardPlan(planToken: string): void {
+    if (typeof planToken === 'string') this.plans.delete(planToken)
   }
 
   remove(pluginId: string, keepData: boolean): PluginRegistryResult<{ removed: true; keptData: boolean }> {

@@ -367,6 +367,27 @@ async function selectArchive(): Promise<void> {
   }
 }
 
+async function selectDeveloperFolder(): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  errorMessage.value = ''
+  statusMessage.value = ''
+  pendingPlan.value = null
+  try {
+    const result = await window.electronAPI?.selectPluginFolder()
+    if (!result?.ok) {
+      if (result && !result.ok && !result.cancelled) setError(result.error)
+      return
+    }
+    pendingPlan.value = result.value
+    if (result.value.kind === 'incompatible') setError('incompatible')
+  } catch {
+    setError('plugin_action_failed')
+  } finally {
+    busy.value = false
+  }
+}
+
 function planKindLabel(plan: PluginInstallPlan): string {
   const keys: Record<PluginInstallPlan['kind'], TranslationKey> = {
     new: 'pluginInstallNew',
@@ -552,6 +573,9 @@ onUnmounted(() => {
         <Button variant="primary" size="sm" :disabled="busy" @click="selectArchive">
           {{ t('pluginInstallButton') }}
         </Button>
+        <Button v-if="snapshot?.preferences.developerMode" variant="secondary" size="sm" :disabled="busy" @click="selectDeveloperFolder">
+          {{ t('pluginDeveloperLoadFolder') }}
+        </Button>
       </div>
     </div>
 
@@ -606,6 +630,7 @@ onUnmounted(() => {
             <div class="plugin-copy">
               <strong :title="pluginName(plugin)">{{ pluginName(plugin) }}</strong>
               <span>{{ plugin.id }} · {{ t('pluginVersion', { version: plugin.currentVersion }) }}</span>
+              <span v-if="plugin.development" class="plugin-development-badge">{{ t('pluginDevelopmentBadge') }}</span>
             </div>
             <span class="plugin-status" :class="`tone-${pluginStatusTone(plugin)}`">{{ pluginStatusLabel(plugin) }}</span>
           </div>
@@ -869,6 +894,7 @@ onUnmounted(() => {
 .plugin-copy { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; }
 .plugin-copy strong { overflow: hidden; color: var(--text-primary); text-overflow: ellipsis; white-space: nowrap; }
 .plugin-copy span { overflow: hidden; color: var(--text-muted); font-size: var(--font-xs); text-overflow: ellipsis; white-space: nowrap; }
+.plugin-copy .plugin-development-badge { align-self: flex-start; border-radius: var(--radius-sm); padding: 1px 5px; background: var(--surface-secondary); color: var(--text-secondary); font-size: var(--font-2xs); }
 .plugin-status { flex: 0 0 auto; max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-xs); }
 .tone-success { color: var(--text-success, var(--accent)); }
 .tone-warn { color: var(--text-warning, var(--text-secondary)); }

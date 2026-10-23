@@ -55,6 +55,7 @@ import { PluginSecretsStore } from './plugin-secrets.ts'
 import { PluginSettingsStore } from './plugin-settings.ts'
 import { PluginAgentStatusController } from './plugin-agent-status.ts'
 import { effectivePluginScheduleMinimum } from './plugin-schedule.ts'
+import { PluginDeveloperModeWatcher } from './plugin-developer-mode.ts'
 import {
   isPluginPanelInstallConfirmation,
   isPluginPanelNotificationId,
@@ -155,12 +156,16 @@ let pluginHostGrantController: PluginHostGrantController | null = null
 let pluginFeedController: PluginFeedController | null = null
 let pluginAgentStatusController: PluginAgentStatusController | null = null
 const pendingPluginPlanIds = new Map<string, string>()
+const pendingDeveloperFolders = new Map<string, string>()
+const developerSourceFolders = new Map<string, string>()
+const developerReloadsInFlight = new Set<string>()
 const pluginRootsByToken = new Map<string, string>()
 const pluginEnableOrder = new Map<string, number>()
 const diagnosedPluginLimitIds = new Set<string>()
 let nextPluginEnableOrder = 0
 let pluginRuntimeContexts = new Map<string, PluginBrokerContext & { muted: boolean; rateLimitPer10Min: number; targetPetId: string | null; grantedHosts: string[] }>()
 let pluginPreferencesSnapshot: ReturnType<PluginPreferencesStore['get']> | null = null
+let pluginDeveloperModeWatcher: PluginDeveloperModeWatcher | null = null
 let presentationStatusProjection: PresentationStatusSnapshot = {
   activePets: [],
   dnd: false,
@@ -445,6 +450,7 @@ function pluginPanelSnapshot(): PluginPanelResult<PluginPanelSnapshot> {
       return {
         ...entry,
         manifest,
+        development: developerSourceFolders.has(entry.id),
         preference: preferences.plugins[entry.id] ?? pluginPreferences!.getPlugin(entry.id),
       }
     })
@@ -650,8 +656,56 @@ function enabledPluginDescriptors(): PluginHostDescriptor[] {
   return selection.selected
 }
 
+async function reloadDeveloperPlugin(pluginId: string, sourceFolder: string): Promise<void> {
+  if (developerReloadsInFlight.has(pluginId)) return
+  if (!pluginRegistry || !pluginPreferences || developerSourceFolders.get(pluginId) !== sourceFolder
+    || pluginPreferencesSnapshot?.developerMode !== true) return
+  developerReloadsInFlight.add(pluginId)
+  try {
+    const planned = pluginRegistry.planInstallDirectory(sourceFolder)
+    if (!planned.ok) {
+      pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
+      return
+    }
+    if (planned.value.pluginId !== pluginId || planned.value.kind === 'incompatible') {
+      pluginRegistry.discardPlan(planned.value.token)
+      pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
+      return
+    }
+    if (planned.value.requiresReconsent) {
+      pluginRegistry.discardPlan(planned.value.token)
+      pluginBroker?.recordSystemDiagnostic(pluginId, 'not_permitted', 'developer.reload')
+      return
+    }
+    const installed = pluginRegistry.install(planned.value.token, false)
+    if (!installed.ok) {
+      pluginRegistry.discardPlan(planned.value.token)
+      pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
+      return
+    }
+    syncPluginHost()
+  } catch {
+    pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
+  } finally {
+    developerReloadsInFlight.delete(pluginId)
+  }
+}
+
+function syncDeveloperWatchers(): void {
+  if (!pluginDeveloperModeWatcher) return
+  if (pluginPreferencesSnapshot?.developerMode !== true) {
+    pluginDeveloperModeWatcher.clear()
+    return
+  }
+  for (const [pluginId, folder] of developerSourceFolders) {
+    if (pluginDeveloperModeWatcher.isWatching(pluginId, folder)) continue
+    pluginDeveloperModeWatcher.watch(pluginId, folder, () => reloadDeveloperPlugin(pluginId, folder))
+  }
+}
+
 function syncPluginHost(): void {
   refreshPluginRuntimeContexts()
+  syncDeveloperWatchers()
   pluginHostWindow?.sync(enabledPluginDescriptors())
 }
 
@@ -687,6 +741,7 @@ function createPluginServices(): void {
   if (pluginRegistry || pluginPreferences || pluginHostWindow) return
   const userDataDirectory = app.getPath('userData')
   pluginRegistry = new PluginRegistry(userDataDirectory)
+  pluginDeveloperModeWatcher = new PluginDeveloperModeWatcher(500)
   pluginPreferences = new PluginPreferencesStore(userDataDirectory)
   pluginSecretsStore = new PluginSecretsStore(userDataDirectory, safeStorage)
   pluginSettingsStore = new PluginSettingsStore(userDataDirectory)
@@ -1008,8 +1063,51 @@ function createPluginServices(): void {
           const oldest = pendingPluginPlanIds.keys().next().value as string | undefined
           if (oldest === undefined) break
           pendingPluginPlanIds.delete(oldest)
+          pendingDeveloperFolders.delete(oldest)
         }
         pendingPluginPlanIds.set(planned.value.token, planned.value.pluginId)
+      }
+      return { ok: true, value: planned.value }
+    } catch {
+      return { ok: false, error: 'invalid_archive' }
+    }
+  })
+  ipcMain.handle('plugin-install-select-folder', async (event) => {
+    assertPluginPanelSender(event)
+    if (!pluginRegistry || !pluginPreferences || !panelWindow || panelWindow.isDestroyed()) {
+      return { ok: false, error: 'plugin_service_unavailable' }
+    }
+    if (pluginPreferences.get().developerMode !== true) return { ok: false, error: 'not_permitted' }
+    if (dialogOpen) return { ok: false, error: 'dialog_unavailable' }
+    dialogOpen = true
+    let selection: Electron.OpenDialogReturnValue
+    try {
+      selection = await dialog.showOpenDialog(panelWindow, {
+        title: t('pluginDeveloperFolderPickerTitle'),
+        properties: ['openDirectory'],
+      })
+    } catch {
+      return { ok: false, error: 'plugin_action_failed' }
+    } finally {
+      dialogOpen = false
+    }
+    if (selection.canceled || selection.filePaths.length === 0) {
+      return { ok: false, error: 'cancelled', cancelled: true }
+    }
+    try {
+      const sourceFolder = selection.filePaths[0]
+      if (!sourceFolder) return { ok: false, error: 'invalid_archive' }
+      const planned = pluginRegistry.planInstallDirectory(sourceFolder)
+      if (!planned.ok) return { ok: false, error: planned.error }
+      if (planned.value.pluginId && planned.value.kind !== 'incompatible') {
+        while (pendingPluginPlanIds.size >= 20) {
+          const oldest = pendingPluginPlanIds.keys().next().value as string | undefined
+          if (oldest === undefined) break
+          pendingPluginPlanIds.delete(oldest)
+          pendingDeveloperFolders.delete(oldest)
+        }
+        pendingPluginPlanIds.set(planned.value.token, planned.value.pluginId)
+        pendingDeveloperFolders.set(planned.value.token, sourceFolder)
       }
       return { ok: true, value: planned.value }
     } catch {
@@ -1022,6 +1120,7 @@ function createPluginServices(): void {
     if (!isPluginPanelInstallConfirmation(token, acceptAdditionalPermissions)
       || typeof acceptAdditionalPermissions !== 'boolean') return { ok: false, error: 'invalid_request' }
     const pluginId = pendingPluginPlanIds.get(token)
+    const developerFolder = pendingDeveloperFolders.get(token)
     if (!pluginId) return { ok: false, error: 'plan_not_found' }
     try {
       // Persist the default preference row before installation so an unsafe
@@ -1033,6 +1132,12 @@ function createPluginServices(): void {
     const installed = pluginRegistry.install(token, acceptAdditionalPermissions)
     if (!installed.ok) return { ok: false, error: installed.error }
     pendingPluginPlanIds.delete(token)
+    pendingDeveloperFolders.delete(token)
+    if (developerFolder) developerSourceFolders.set(pluginId, developerFolder)
+    else {
+      developerSourceFolders.delete(pluginId)
+      pluginDeveloperModeWatcher?.unwatch(pluginId)
+    }
     syncPluginHost()
     const snapshot = pluginPanelSnapshot()
     if (!snapshot.ok) return snapshot
@@ -1054,6 +1159,8 @@ function createPluginServices(): void {
     }
     const removed = pluginRegistry.remove(pluginId, keepData)
     if (!removed.ok) return { ok: false, error: removed.error }
+    developerSourceFolders.delete(pluginId)
+    pluginDeveloperModeWatcher?.unwatch(pluginId)
     pluginBroker?.removePlugin(pluginId, keepData)
     pluginHostGrantController?.clearPlugin(pluginId)
     if (!keepData) {
@@ -3375,6 +3482,8 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  pluginDeveloperModeWatcher?.destroy()
+  pluginDeveloperModeWatcher = null
   pluginBroker?.destroy()
   pluginBroker = null
   pluginFeedController = null

@@ -65,6 +65,78 @@ test('plugin registry plans and atomically installs a valid archive', () => {
   })
 })
 
+test('plugin registry loads a developer folder through the archive validation path', () => {
+  withUserData((userData) => {
+    const source = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-source-'))
+    try {
+      fs.mkdirSync(path.join(source, 'dist'), { recursive: true })
+      fs.writeFileSync(path.join(source, 'plugin.json'), JSON.stringify({
+        id: 'sample-plugin', name: { 'zh-TW': '測試插件', 'en-US': 'Sample Plugin' }, version: '1.0.0',
+        apiVersion: '1', author: 'Test Author', entry: 'dist/main.js', permissions: {}, contributes: { feed: true },
+      }))
+      fs.writeFileSync(path.join(source, 'dist', 'main.js'), 'export default { activate() {} }')
+      const registry = new PluginRegistry(userData)
+      const planned = registry.planInstallDirectory(source)
+      assert.equal(planned.ok, true)
+      if (!planned.ok) return
+      const installed = registry.install(planned.value.token)
+      assert.equal(installed.ok, true)
+      assert.equal(fs.readFileSync(path.join(userData, 'plugins', 'sample-plugin', '1.0.0', 'dist', 'main.js'), 'utf8'), 'export default { activate() {} }')
+    } finally {
+      fs.rmSync(source, { recursive: true, force: true })
+    }
+  })
+})
+
+test('plugin registry refuses symlinks and unsupported files in developer folders', () => {
+  withUserData((userData) => {
+    const source = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-source-'))
+    const outside = path.join(source, '..', `${path.basename(source)}-outside.js`)
+    try {
+      fs.mkdirSync(path.join(source, 'dist'), { recursive: true })
+      fs.writeFileSync(path.join(source, 'plugin.json'), '{}')
+      fs.writeFileSync(path.join(source, 'dist', 'main.js'), 'export default {}')
+      fs.writeFileSync(outside, 'outside')
+      fs.symlinkSync(outside, path.join(source, 'dist', 'linked.js'))
+      assert.deepEqual(new PluginRegistry(userData).planInstallDirectory(source), { ok: false, error: 'invalid_archive' })
+      fs.rmSync(path.join(source, 'dist', 'linked.js'))
+      fs.writeFileSync(path.join(source, 'notes.txt'), 'not packaged')
+      assert.deepEqual(new PluginRegistry(userData).planInstallDirectory(source), { ok: false, error: 'invalid_archive' })
+    } finally {
+      fs.rmSync(source, { recursive: true, force: true })
+      fs.rmSync(outside, { force: true })
+    }
+  })
+})
+
+test('invalid developer folder changes do not replace the installed package', () => {
+  withUserData((userData) => {
+    const source = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-source-'))
+    try {
+      fs.mkdirSync(path.join(source, 'dist'), { recursive: true })
+      const writeManifest = (version: string) => fs.writeFileSync(path.join(source, 'plugin.json'), JSON.stringify({
+        id: 'sample-plugin', name: { 'zh-TW': '測試插件', 'en-US': 'Sample Plugin' }, version,
+        apiVersion: '1', author: 'Test Author', entry: 'dist/main.js', permissions: {}, contributes: { feed: true },
+      }))
+      writeManifest('1.0.0')
+      fs.writeFileSync(path.join(source, 'dist', 'main.js'), 'export default { activate() {} }')
+      const registry = new PluginRegistry(userData)
+      const first = registry.planInstallDirectory(source)
+      assert.equal(first.ok, true)
+      if (!first.ok) return
+      assert.equal(registry.install(first.value.token).ok, true)
+
+      writeManifest('2.0.0')
+      fs.writeFileSync(path.join(source, 'README.txt'), 'unsupported developer file')
+      assert.equal(registry.planInstallDirectory(source).ok, false)
+      assert.equal(registry.list().find(entry => entry.id === 'sample-plugin')?.currentVersion, '1.0.0')
+      assert.equal(fs.readFileSync(path.join(userData, 'plugins', 'sample-plugin', '1.0.0', 'dist', 'main.js'), 'utf8'), 'export default { activate() {} }')
+    } finally {
+      fs.rmSync(source, { recursive: true, force: true })
+    }
+  })
+})
+
 test('plugin registry rejects missing entry, invalid icon, and misplaced html', () => {
   withUserData((userData) => {
     const registry = new PluginRegistry(userData)

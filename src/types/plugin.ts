@@ -168,6 +168,7 @@ export interface PluginPanelPlugin {
   installedAt: number
   grantedPermissions: unknown
   manifest: PluginManifest | null
+  development: boolean
   preference: PluginInstancePreferences
 }
 

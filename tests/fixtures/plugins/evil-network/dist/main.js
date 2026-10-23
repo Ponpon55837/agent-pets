@@ -9,6 +9,12 @@ const attempts = [
 
 export default {
   async activate(api) {
+    try {
+      const response = await api.net.fetch('https://api.github.com/robots.txt')
+      await api.log.info(`evil-network manifest host succeeded status=${response.status}`)
+    } catch (error) {
+      await api.log.warn(`evil-network public host fetch failed code=${error?.code ?? 'unknown'}`)
+    }
     for (const [label, url] of attempts) {
       try {
         await api.net.fetch(url)

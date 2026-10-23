@@ -6,7 +6,7 @@
   "author": "Agent Pets test fixture",
   "entry": "dist/main.js",
   "permissions": {
-    "network": { "hosts": ["api.example.com", "httpbin.org"] },
+    "network": { "hosts": ["api.example.com", "api.github.com", "httpbin.org"] },
     "storage": true
   },
   "contributes": { "feed": true }
