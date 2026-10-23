@@ -29,6 +29,7 @@ function createHarness(options: {
   storageBytesPerPlugin?: number
   onSecretGet?: (pluginId: string, key: string) => string | { ok: false; error: 'secret_unavailable' | 'secret_not_found' }
   onSettingsGet?: (pluginId: string) => Record<string, unknown> | { ok: false; error: 'settings_invalid' }
+  onAgentStatusGet?: (pluginId: string) => unknown
 } = {}) {
   const userDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-broker-'))
   fs.mkdirSync(path.join(userDataDirectory, 'plugins', 'sample'), { recursive: true })
@@ -62,6 +63,7 @@ function createHarness(options: {
     },
     onSecretGet: options.onSecretGet,
     onSettingsGet: options.onSettingsGet,
+    onAgentStatusGet: options.onAgentStatusGet,
     now: () => now,
   })
   return {
@@ -207,6 +209,32 @@ test('PluginBroker returns declared secrets and non-secret settings directly wit
       id: 'secret-missing', ok: false, error: 'secret_not_found',
     })
   } finally { harness.cleanup() }
+})
+
+test('pet.status requires agentStatus permission and returns the sanitized projection directly', () => {
+  const status = [{
+    petId: 'pet-main', name: 'Main Pet', agentFamily: 'claude-code',
+    previousState: 'thinking', visibleState: 'tool-running', dnd: false, at: 1_000_000,
+  }]
+  const harness = createHarness({
+    pluginManifest: manifest({ permissions: { agentStatus: true } }),
+    onAgentStatusGet: () => status,
+  })
+  try {
+    assert.deepEqual(harness.broker.handle('sample', request('status', 'pet.status')), {
+      id: 'status', ok: true, value: status,
+    })
+    assert.deepEqual(harness.broker.handle('sample', request('bad-args', 'pet.status', ['private'])), {
+      id: 'bad-args', ok: false, error: 'invalid_request',
+    })
+  } finally { harness.cleanup() }
+
+  const denied = createHarness({ pluginManifest: manifest({ permissions: {} }) })
+  try {
+    assert.deepEqual(denied.broker.handle('sample', request('denied', 'pet.status')), {
+      id: 'denied', ok: false, error: 'not_permitted',
+    })
+  } finally { denied.cleanup() }
 })
 
 test('PluginBroker fails closed for symlinked plugin storage', () => {

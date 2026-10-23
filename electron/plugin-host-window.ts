@@ -9,6 +9,9 @@ export interface PluginHostDescriptor {
   id: string
   entry: string
   revision?: string
+  scheduleEnabled?: boolean
+  scheduleMinIntervalSec?: number
+  agentStatusEnabled?: boolean
 }
 
 export interface PluginHostControllerOptions {
@@ -96,6 +99,11 @@ export class PluginHostWindowController {
     this.post({ type: 'settings-changed', pluginId, value })
   }
 
+  notifyStatusChanged(pluginId: string, value: readonly unknown[]): void {
+    if (!this.desired.has(pluginId) || !Array.isArray(value)) return
+    this.post({ type: 'status-changed', pluginId, value })
+  }
+
   close(): void {
     this.desired.clear()
     this.closeHost()
@@ -181,8 +189,12 @@ export class PluginHostWindowController {
         this.revokePluginToken(pluginId, state.token)
         this.runtime.delete(pluginId)
         this.failureTracker.clear(pluginId)
-      } else if (this.desired.get(pluginId)?.entry !== state.descriptor.entry
-        || this.desired.get(pluginId)?.revision !== state.descriptor.revision) {
+      } else {
+        const next = this.desired.get(pluginId)!
+        if (next.entry === state.descriptor.entry && next.revision === state.descriptor.revision
+          && next.scheduleEnabled === state.descriptor.scheduleEnabled
+          && next.scheduleMinIntervalSec === state.descriptor.scheduleMinIntervalSec
+          && next.agentStatusEnabled === state.descriptor.agentStatusEnabled) continue
         this.post({ type: 'stop', pluginId })
         this.revokePluginToken(pluginId, state.token)
         this.runtime.delete(pluginId)
@@ -196,7 +208,7 @@ export class PluginHostWindowController {
       try { token = this.createPluginToken(pluginId) } catch { continue }
       if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(token)) continue
       this.runtime.set(pluginId, { descriptor, lastPongAt: now, startedAt: now, token, receivedPong: false })
-      this.post({ type: 'start', pluginId, token, entry: descriptor.entry })
+      this.post({ type: 'start', pluginId, token, ...descriptor })
     }
   }
 
@@ -303,7 +315,7 @@ export class PluginHostWindowController {
         try { token = this.createPluginToken(pluginId) } catch { return }
         if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(token)) return
         this.runtime.set(pluginId, { descriptor, lastPongAt: now, startedAt: now, token, receivedPong: false })
-        this.post({ type: 'start', pluginId, token, entry: descriptor.entry })
+        this.post({ type: 'start', pluginId, token, ...descriptor })
       }, pluginHostRetryDelay(count))
     }
   }

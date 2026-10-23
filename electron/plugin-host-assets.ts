@@ -43,7 +43,12 @@ window.addEventListener('message', (event) => {
             try { worker.terminate() } catch {}
             port.postMessage({ type: 'worker-crash', pluginId })
           }
-          worker.postMessage({ type: 'activate', pluginId, token, entry: data.entry })
+          worker.postMessage({
+            type: 'activate', pluginId, token, entry: data.entry,
+            scheduleEnabled: data.scheduleEnabled,
+            scheduleMinIntervalSec: data.scheduleMinIntervalSec,
+            agentStatusEnabled: data.agentStatusEnabled,
+          })
           port.postMessage({ type: 'worker-started', pluginId })
         } catch {
           port.postMessage({ type: 'worker-crash', pluginId })
@@ -68,6 +73,8 @@ window.addEventListener('message', (event) => {
       } else if (data.type === 'settings-changed' && typeof data.pluginId === 'string'
         && data.value && typeof data.value === 'object' && !Array.isArray(data.value)) {
         workers.get(data.pluginId)?.postMessage({ type: 'settings-changed', value: data.value })
+      } else if (data.type === 'status-changed' && typeof data.pluginId === 'string' && Array.isArray(data.value)) {
+        workers.get(data.pluginId)?.postMessage({ type: 'status-changed', value: data.value })
       }
   }
 })
@@ -81,6 +88,8 @@ let pluginModule = null
 const pending = new Map()
 let sequence = 0
 let scheduleMinIntervalSec = 60
+let scheduleEnabled = false
+let agentStatusEnabled = false
 const schedules = new Map()
 const settingsListeners = new Set()
 const statusListeners = new Set()
@@ -131,7 +140,16 @@ function clearSchedules() {
 }
 const api = Object.freeze({
   feed: Object.freeze({ notify: (item) => rpc('feed.notify', [item]) }),
-  pet: Object.freeze({ react: (reaction, options) => rpc('pet.react', [reaction, options]) }),
+  pet: Object.freeze({
+    react: (reaction, options) => rpc('pet.react', [reaction, options]),
+    status: () => rpc('pet.status', []),
+    onStatusChange: (callback) => {
+      if (!agentStatusEnabled) throw Object.assign(new Error('not_permitted'), { code: 'not_permitted' })
+      if (typeof callback !== 'function') throw Object.assign(new Error('invalid_request'), { code: 'invalid_request' })
+      statusListeners.add(callback)
+      return () => statusListeners.delete(callback)
+    },
+  }),
   net: Object.freeze({
     fetch: (url, options) => rpc('net.fetch', [url, options]),
     requestHost: (host, reason) => rpc('net.requestHost', [host, reason]),
@@ -147,7 +165,8 @@ const api = Object.freeze({
   }),
   schedule: Object.freeze({
     every: (seconds, callback) => {
-      if (!Number.isFinite(seconds) || seconds <= 0 || typeof callback !== 'function') {
+      if (!scheduleEnabled) throw Object.assign(new Error('not_permitted'), { code: 'not_permitted' })
+      if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 2_147_483 || typeof callback !== 'function') {
         throw Object.assign(new Error('schedule_invalid'), { code: 'schedule_invalid' })
       }
       const interval = Math.max(scheduleMinIntervalSec, Math.ceil(seconds)) * 1000
@@ -180,6 +199,8 @@ scope.onmessage = async ({ data }) => {
     pluginId = id
     pluginToken = token
     setScheduleMinInterval(data.scheduleMinIntervalSec)
+    scheduleEnabled = data.scheduleEnabled === true
+    agentStatusEnabled = data.agentStatusEnabled === true
     try {
       if (!removeCrossPluginApis()) throw new TypeError('Plugin isolation could not be established')
       pluginModule = await import('agent-pets://plugin/' + pluginToken + '/' + entry)
@@ -192,7 +213,9 @@ scope.onmessage = async ({ data }) => {
   } else if (data.type === 'settings-changed' && data.value && typeof data.value === 'object' && !Array.isArray(data.value)) {
     for (const listener of settingsListeners) { try { listener(data.value) } catch {} }
   } else if (data.type === 'status-changed' && Array.isArray(data.value)) {
-    for (const listener of statusListeners) { try { listener(data.value) } catch {} }
+    for (const item of data.value) {
+      for (const listener of statusListeners) { try { listener(item) } catch {} }
+    }
   } else if (data.type === 'ping' && Number.isSafeInteger(data.at)) {
     postToHost({ type: 'pong', at: data.at })
   } else if (data.type === 'rpc-result' && data.result && typeof data.result === 'object') {

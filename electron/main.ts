@@ -53,6 +53,8 @@ import { isPublicPluginNetworkHost } from './plugin-net.ts'
 import { PluginHostGrantController, sanitizePluginHostRequestReason } from './plugin-host-grants.ts'
 import { PluginSecretsStore } from './plugin-secrets.ts'
 import { PluginSettingsStore } from './plugin-settings.ts'
+import { PluginAgentStatusController } from './plugin-agent-status.ts'
+import { effectivePluginScheduleMinimum } from './plugin-schedule.ts'
 import {
   isPluginPanelInstallConfirmation,
   isPluginPanelNotificationId,
@@ -151,6 +153,7 @@ let pluginBroker: PluginBroker | null = null
 let pluginNetworkClient: PluginNetworkClient | null = null
 let pluginHostGrantController: PluginHostGrantController | null = null
 let pluginFeedController: PluginFeedController | null = null
+let pluginAgentStatusController: PluginAgentStatusController | null = null
 const pendingPluginPlanIds = new Map<string, string>()
 const pluginRootsByToken = new Map<string, string>()
 const pluginEnableOrder = new Map<string, number>()
@@ -624,6 +627,12 @@ function enabledPluginDescriptors(): PluginHostDescriptor[] {
       return {
         id,
         entry: context.manifest.entry,
+        scheduleEnabled: context.manifest.permissions.schedule !== undefined,
+        scheduleMinIntervalSec: effectivePluginScheduleMinimum(
+          context.manifest.permissions.schedule?.minIntervalSec ?? preferences.resources.scheduleMinIntervalSeconds,
+          preferences.resources.scheduleMinIntervalSeconds,
+        ),
+        agentStatusEnabled: context.manifest.permissions.agentStatus === true,
         ...(registryEntry ? { revision: `${registryEntry.currentVersion}:${registryEntry.installedAt}` } : {}),
       }
     })
@@ -682,6 +691,15 @@ function createPluginServices(): void {
   pluginSecretsStore = new PluginSecretsStore(userDataDirectory, safeStorage)
   pluginSettingsStore = new PluginSettingsStore(userDataDirectory)
   pluginHostGrantController = new PluginHostGrantController()
+  pluginAgentStatusController = new PluginAgentStatusController({
+    emit: change => {
+      for (const [pluginId, context] of pluginRuntimeContexts) {
+        if (context.enabled && context.pluginsEnabled && context.manifest.permissions.agentStatus) {
+          pluginHostWindow?.notifyStatusChanged(pluginId, [change])
+        }
+      }
+    },
+  })
   refreshPluginRuntimeContexts()
   pluginFeedController = new PluginFeedController({
     emit: item => {
@@ -781,6 +799,11 @@ function createPluginServices(): void {
       try { return pluginSettingsStore.get(pluginId, context.manifest) } catch {
         return { ok: false, error: 'settings_invalid' }
       }
+    },
+    onAgentStatusGet: pluginId => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      if (!context?.manifest.permissions.agentStatus) return { ok: false, error: 'not_permitted' }
+      return pluginAgentStatusController?.getStatus() ?? { ok: false, error: 'agent_status_unavailable' }
     },
     onReaction: (pluginId, request: PluginReactionRequest) => {
       const result = presentationController?.submitPluginReaction(pluginId, request)
@@ -1031,6 +1054,7 @@ function createPluginServices(): void {
     const removed = pluginRegistry.remove(pluginId, keepData)
     if (!removed.ok) return { ok: false, error: removed.error }
     pluginBroker?.removePlugin(pluginId, keepData)
+    pluginHostGrantController?.clearPlugin(pluginId)
     if (!keepData) {
       try { pluginPreferences.removePlugin(pluginId) } catch (error) {
         return { ok: false, error: pluginPanelError(error) }
@@ -2677,6 +2701,7 @@ app.whenReady().then(() => {
   ipcMain.on('presentation-status-update', (event, payload: unknown) => {
     if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
     presentationStatusProjection = normalizePresentationStatus(payload)
+    pluginAgentStatusController?.update(presentationStatusProjection)
   })
 
   ipcMain.handle('progression-init', (event, petId?: unknown) => {
@@ -3352,6 +3377,10 @@ app.on('before-quit', () => {
   pluginBroker?.destroy()
   pluginBroker = null
   pluginFeedController = null
+  pluginAgentStatusController?.destroy()
+  pluginAgentStatusController = null
+  pluginSecretsStore = null
+  pluginSettingsStore = null
   pluginRuntimeContexts.clear()
   pluginPreferencesSnapshot = null
   pluginHostWindow?.close()

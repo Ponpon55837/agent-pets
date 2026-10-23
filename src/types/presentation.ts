@@ -56,6 +56,7 @@ export type PresentationMood = 'low' | 'neutral' | 'happy'
 export interface PresentationPetStatus {
   petId: string
   name: string
+  agentFamily?: 'codex' | 'claude-code' | 'opencode' | null
   mood: PresentationMood
   level: number
   visibleState: AgentState

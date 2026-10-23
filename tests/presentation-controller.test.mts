@@ -82,6 +82,7 @@ test('presentation queue has a bounded depth and status projection is sanitized'
   assert.deepEqual(status.activePets, [{
     petId: 'cat',
     name: 'pet',
+    agentFamily: null,
     mood: 'happy',
     level: 3,
     visibleState: 'thinking',

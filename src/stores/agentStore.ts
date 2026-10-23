@@ -1327,10 +1327,13 @@ export const useAgentStore = defineStore('agent', () => {
   function getPresentationStatus(): PresentationStatusUpdate {
     const lines = familyLines.value.length > 0
       ? familyLines.value
-      : [{ petId: activePetId.value, state: currentState.value }]
+      : [{ key: '', petId: activePetId.value, state: currentState.value }]
     const activePets = lines.slice(0, 16).map(line => ({
       petId: line.petId,
       name: pets.value.find(pet => pet.id === line.petId)?.displayName ?? line.petId,
+      agentFamily: line.key === 'codex' ? 'codex' as const
+        : line.key === 'claude' ? 'claude-code' as const
+          : line.key === 'opencode' ? 'opencode' as const : null,
       mood: moodLabel(mood.value),
       level: progression.value?.level ?? 1,
       visibleState: line.state,
