@@ -37,7 +37,10 @@ const CLAUDE_CLI_BLOCKED_ENV = new Set([
   'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT', 'CLAUDE_CODE_EXTRA_BODY',
 ])
 const CLAUDE_USAGE_LINE = /^Current (session|week(?: \(([^)]+)\))?):\s*([0-9.]+)% used(?:\s*·\s*resets (.+))?$/
-const CLAUDE_SIGN_IN_LAPSED = /\b(401|403)\b|not (logged|signed) in|signed out|log ?in again|re-?authenticate|sign-in (has )?expired|(oauth|session|token) (has )?expired|could not be refreshed|unauthorized|forbidden|authentication (failed|required)|invalid (access )?token/i
+const CLAUDE_SIGN_IN_LAPSED = /\b(401|403)\b|not (logged|signed) in|signed out|log ?in again|re-?authenticate|sign-in (has )?expired|(oauth|session|token) (has )?expired|could not be refreshed|unauthorized|forbidden|authentication (failed|required)|invalid (access )?token|invalid api key|run \/login/i
+// Without a subscription sign-in, /usage prints only the session's cost summary.
+const CLAUDE_COST_SUMMARY = /^Total cost:/m
+const CLAUDE_NOT_SIGNED_IN = 'Claude Code CLI is not signed in to a subscription. Run `claude` in a terminal and sign in with /login.'
 const CLAUDE_RESET_TIME = /^(?:([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2})(?:,\s*(\d{4}))?(?:,\s*|\s+at\s+))?(\d{1,2})(?::(\d{2}))?\s*([ap]m)$/i
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 const HOUR_MS = 60 * 60_000
@@ -658,6 +661,9 @@ export function parseClaudeCliUsage(text: string, now = Date.now()): QuotaWindow
   }
   if (windows.length === 0 && lines.some((line) => CLAUDE_SIGN_IN_LAPSED.test(line))) {
     throw new QuotaDisplayError('The existing Claude Code session expired. Re-authenticate in Claude Code.')
+  }
+  if (windows.length === 0 && CLAUDE_COST_SUMMARY.test(lines.join('\n'))) {
+    throw new QuotaDisplayError(CLAUDE_NOT_SIGNED_IN)
   }
   return windows
 }
