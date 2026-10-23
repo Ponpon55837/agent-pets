@@ -56,5 +56,5 @@ Claude Quota 只讀 Keychain `Claude Code-credentials`（或 `~/.claude/.credent
 
 ## 版本與發布
 
-- 建議 patch 升版（`1.2.2` → `1.2.3`）。依專案規則，待使用者確認後才變更版本。
+- 使用者於 2026-10-23 確認本 phase，應用程式版本 patch 升版 `1.2.2` → `1.2.3`（`pnpm-lock.yaml` 不含根套件版本，無需變更）；升版後重新執行單元測試與型別檢查皆通過。
 - 不建立 Git tag 或發布套件。
