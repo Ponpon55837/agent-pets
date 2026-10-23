@@ -10,6 +10,8 @@ import type {
   PluginPanelPlugin,
   PluginPanelSettingsSnapshot,
   PluginPanelSnapshot,
+  PluginResourceLimits,
+  PluginInstancePreferences,
   PluginPreferences,
   PluginSettingScalar,
 } from '@/types/plugin'
@@ -23,6 +25,7 @@ const snapshot = ref<PluginPanelSnapshot | null>(null)
 const notifications = ref<PluginNotificationRecord[]>([])
 const logs = ref<PluginBrokerLogEntry[]>([])
 const diagnostics = ref<PluginBrokerDiagnostic[]>([])
+const petOptions = ref<Array<{ id: string; displayName: string }>>([])
 const pluginSettings = ref<PluginPanelSettingsSnapshot | null>(null)
 const settingsDraft = ref<Record<string, PluginSettingScalar>>({})
 const secretDrafts = ref<Record<string, string>>({})
@@ -41,6 +44,22 @@ const selectedPlugin = computed(() => plugins.value.find(plugin => plugin.id ===
 const enabledGlobally = computed(() => snapshot.value?.preferences.pluginsEnabled ?? false)
 const hasCompatiblePlan = computed(() => Boolean(pendingPlan.value && pendingPlan.value.kind !== 'incompatible'))
 const pendingPluginName = computed(() => pendingPlan.value?.name?.[locale.value] ?? pendingPlan.value?.pluginId ?? '')
+const resourceFields: Array<{
+  key: keyof PluginResourceLimits
+  label: TranslationKey
+  defaultValue: number
+  min: number
+  max: number
+}> = [
+  { key: 'maxEnabledPlugins', label: 'pluginResourceMaxEnabled', defaultValue: 10, min: 1, max: 50 },
+  { key: 'memoryMbPerPlugin', label: 'pluginResourceMemory', defaultValue: 64, min: 16, max: 512 },
+  { key: 'netMaxResponseBytes', label: 'pluginResourceNetBytes', defaultValue: 2 * 1024 * 1024, min: 64 * 1024, max: 20 * 1024 * 1024 },
+  { key: 'netTimeoutSeconds', label: 'pluginResourceNetTimeout', defaultValue: 15, min: 5, max: 60 },
+  { key: 'netRequestsPerMinute', label: 'pluginResourceNetRate', defaultValue: 30, min: 1, max: 300 },
+  { key: 'storageBytesPerPlugin', label: 'pluginResourceStorage', defaultValue: 1024 * 1024, min: 64 * 1024, max: 50 * 1024 * 1024 },
+  { key: 'globalFeedPer10Min', label: 'pluginResourceGlobalFeed', defaultValue: 60, min: 10, max: 300 },
+  { key: 'scheduleMinIntervalSeconds', label: 'pluginResourceSchedule', defaultValue: 60, min: 30, max: 3_600 },
+]
 
 function pluginName(plugin: PluginPanelPlugin): string {
   return plugin.manifest?.name[locale.value] ?? plugin.id
@@ -127,6 +146,16 @@ async function refreshPanel(): Promise<void> {
     setError('plugin_service_unavailable')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadPetOptions(): Promise<void> {
+  try {
+    const pets = await window.electronAPI?.loadPets()
+    petOptions.value = (pets ?? []).filter(pet => /^[A-Za-z0-9._-]{1,64}$/.test(pet.id))
+      .map(pet => ({ id: pet.id, displayName: pet.displayName || pet.id }))
+  } catch {
+    petOptions.value = []
   }
 }
 
@@ -244,15 +273,39 @@ async function updateGlobalPreferences(patch: PluginGlobalPreferencesPatch): Pro
   }
 }
 
-async function updateMaxEnabledPlugins(value: string): Promise<void> {
-  const maximum = Number(value)
-  if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > 50) return
-  await updateGlobalPreferences({ resources: { maxEnabledPlugins: maximum } })
+function updateResourceLimit(key: keyof PluginResourceLimits, raw: string): void {
+  const field = resourceFields.find(item => item.key === key)
+  const parsed = Number(raw)
+  const value = key === 'netMaxResponseBytes' || key === 'storageBytesPerPlugin' ? parsed * 1024 : parsed
+  if (!field || !Number.isSafeInteger(value) || value < field.min || value > field.max) {
+    if (field) {
+      errorMessage.value = t('pluginResourceRangeInvalid', { min: String(field.min), max: String(field.max) })
+      statusMessage.value = ''
+    }
+    return
+  }
+  void updateGlobalPreferences({ resources: { [key]: value } })
+}
+
+function resourceInputValue(key: keyof PluginResourceLimits, value: number): string {
+  return String(key === 'netMaxResponseBytes' || key === 'storageBytesPerPlugin' ? value / 1024 : value)
+}
+
+function resourceBoundText(key: keyof PluginResourceLimits, value: number): string {
+  if (key === 'memoryMbPerPlugin') return `${value} MB`
+  if (key === 'netMaxResponseBytes' || key === 'storageBytesPerPlugin') {
+    const unit = value % (1024 * 1024) === 0 ? 'MB' : 'KB'
+    return `${value / (unit === 'MB' ? 1024 * 1024 : 1024)} ${unit}`
+  }
+  if (key === 'netTimeoutSeconds' || key === 'scheduleMinIntervalSeconds') return `${value} s`
+  if (key === 'netRequestsPerMinute') return `${value} / min`
+  if (key === 'globalFeedPer10Min') return `${value} / 10 min`
+  return String(value)
 }
 
 async function updatePluginPreference(
   pluginId: string,
-  patch: { enabled?: boolean; muted?: boolean },
+  patch: Partial<Pick<PluginInstancePreferences, 'enabled' | 'muted' | 'rateLimitPer10Min' | 'targetPetId' | 'grantedHosts'>>,
 ): Promise<void> {
   if (busy.value) return
   busy.value = true
@@ -271,6 +324,26 @@ async function updatePluginPreference(
   } finally {
     busy.value = false
   }
+}
+
+async function updatePluginRate(pluginId: string, raw: string): Promise<void> {
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value < 1 || value > 30) {
+    errorMessage.value = t('pluginPerPluginRateRange')
+    statusMessage.value = ''
+    return
+  }
+  await updatePluginPreference(pluginId, { rateLimitPer10Min: value })
+}
+
+async function updatePluginTarget(pluginId: string, targetPetId: string): Promise<void> {
+  await updatePluginPreference(pluginId, { targetPetId: targetPetId || null })
+}
+
+async function revokeGrantedHost(plugin: PluginPanelPlugin, host: string): Promise<void> {
+  await updatePluginPreference(plugin.id, {
+    grantedHosts: plugin.preference.grantedHosts.filter(item => item !== host),
+  })
 }
 
 async function selectArchive(): Promise<void> {
@@ -334,6 +407,8 @@ const pendingPermissions = computed(() => {
   if (plan.contributes?.panelView) permissionUnits.push('contributes:panelView')
   return permissionUnits.map(permissionLabel)
 })
+
+const pendingAddedPermissions = computed(() => (pendingPlan.value?.addedPermissions ?? []).map(permissionLabel))
 
 async function confirmInstall(): Promise<void> {
   const plan = pendingPlan.value
@@ -449,6 +524,7 @@ watch(selectedPluginId, pluginId => {
 
 onMounted(() => {
   void refreshPanel()
+  void loadPetOptions()
   removeNotificationsListener = window.electronAPI?.onPluginNotificationsChanged(() => {
     void refreshNotifications()
   }) ?? null
@@ -480,19 +556,33 @@ onUnmounted(() => {
     </div>
 
     <Card :title="t('pluginAdvancedSettings')" class="plugin-section">
-      <p class="plugin-limit-help">{{ t('pluginMaxEnabledHelp') }}</p>
-      <label class="plugin-limit-control">
-        <span>{{ t('pluginMaxEnabledLabel') }}</span>
-        <Select
-          :model-value="String(snapshot?.preferences.resources.maxEnabledPlugins ?? 10)"
-          size="sm"
-          :aria-label="t('pluginMaxEnabledLabel')"
-          :disabled="busy || loading"
-          @update:model-value="updateMaxEnabledPlugins"
-        >
-          <option v-for="limit in 50" :key="limit" :value="String(limit)">{{ limit }}</option>
-        </Select>
-      </label>
+      <p class="plugin-limit-help">{{ t('pluginAdvancedSettingsHelp') }}</p>
+      <ToggleRow
+        :model-value="snapshot?.preferences.developerMode ?? false"
+        :label="t('pluginDeveloperMode')"
+        :help="t('pluginDeveloperModeHelp')"
+        :disabled="busy || loading"
+        @update:model-value="updateGlobalPreferences({ developerMode: $event })"
+      />
+      <div class="plugin-resource-grid">
+        <label v-for="field in resourceFields" :key="field.key" class="plugin-resource-field">
+          <span>{{ t(field.label) }}</span>
+          <input
+            type="number"
+            :value="resourceInputValue(field.key, snapshot?.preferences.resources[field.key] ?? field.defaultValue)"
+            :min="resourceInputValue(field.key, field.min)"
+            :max="resourceInputValue(field.key, field.max)"
+            step="1"
+            :disabled="busy || loading"
+            @change="updateResourceLimit(field.key, ($event.target as HTMLInputElement).value)"
+          />
+          <small>{{ t('pluginResourceRange', {
+            default: resourceBoundText(field.key, field.defaultValue),
+            min: resourceBoundText(field.key, field.min),
+            max: resourceBoundText(field.key, field.max),
+          }) }}</small>
+        </label>
+      </div>
     </Card>
 
     <div v-if="errorMessage" class="error-msg plugin-message" role="alert">{{ errorMessage }}</div>
@@ -532,9 +622,50 @@ onUnmounted(() => {
               :disabled="busy || !plugin.manifest"
               @update:model-value="updatePluginPreference(plugin.id, { muted: $event })"
             />
+            <label class="plugin-preference-field">
+              <span>{{ t('pluginPerPluginRateLabel') }}</span>
+              <input
+                type="number"
+                min="1"
+                max="30"
+                step="1"
+                :value="String(plugin.preference.rateLimitPer10Min)"
+                :disabled="busy || !plugin.manifest"
+                @change="updatePluginRate(plugin.id, ($event.target as HTMLInputElement).value)"
+              />
+              <small>{{ t('pluginPerPluginRateHelp') }}</small>
+            </label>
+            <label class="plugin-preference-field">
+              <span>{{ t('pluginTargetPetLabel') }}</span>
+              <select
+                :value="plugin.preference.targetPetId ?? ''"
+                :disabled="busy || !plugin.manifest"
+                @change="updatePluginTarget(plugin.id, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">{{ t('pluginPrimaryPet') }}</option>
+                <option v-for="pet in petOptions" :key="pet.id" :value="pet.id">{{ pet.displayName }}</option>
+              </select>
+            </label>
             <Button variant="danger" size="sm" :disabled="busy" @click="requestRemove(plugin)">
               {{ t('remove') }}
             </Button>
+          </div>
+          <div class="plugin-granted-hosts">
+            <strong>{{ t('pluginManifestHostsHeading') }}</strong>
+            <p v-if="(plugin.manifest?.permissions.network?.hosts ?? []).length === 0" class="plugin-empty compact">{{ t('pluginGrantedHostsEmpty') }}</p>
+            <ul v-else>
+              <li v-for="host in plugin.manifest?.permissions.network?.hosts ?? []" :key="host"><code>{{ host }}</code></li>
+            </ul>
+            <strong>{{ t('pluginGrantedHostsHeading') }}</strong>
+            <p v-if="plugin.preference.grantedHosts.length === 0" class="plugin-empty compact">{{ t('pluginGrantedHostsEmpty') }}</p>
+            <ul v-else>
+              <li v-for="host in plugin.preference.grantedHosts" :key="host">
+                <code>{{ host }}</code>
+                <Button variant="ghost" size="sm" :disabled="busy" @click="revokeGrantedHost(plugin, host)">
+                  {{ t('pluginRevokeHost') }}
+                </Button>
+              </li>
+            </ul>
           </div>
         </Card>
       </div>
@@ -679,6 +810,10 @@ onUnmounted(() => {
         }) }}</p>
         <p v-if="pendingPlan.kind === 'downgrade'" class="plugin-plan-warning">{{ t('pluginDowngradeWarning') }}</p>
         <p v-if="pendingPlan.requiresReconsent" class="plugin-plan-warning">{{ t('pluginNewPermissionWarning') }}</p>
+        <template v-if="pendingPlan.requiresReconsent && pendingAddedPermissions.length">
+          <h3>{{ t('pluginAddedPermissions') }}</h3>
+          <ul><li v-for="permission in pendingAddedPermissions" :key="permission">{{ permission }}</li></ul>
+        </template>
         <h3>{{ t('pluginRequestedPermissions') }}</h3>
         <ul v-if="pendingPermissions.length">
           <li v-for="permission in pendingPermissions" :key="permission">{{ permission }}</li>
@@ -739,6 +874,15 @@ onUnmounted(() => {
 .tone-warn { color: var(--text-warning, var(--text-secondary)); }
 .tone-neutral { color: var(--text-muted); }
 .plugin-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: var(--space-3); margin-top: var(--space-2); }
+.plugin-preference-field, .plugin-resource-field { display: flex; flex-direction: column; gap: var(--space-1); color: var(--text-secondary); font-size: var(--font-xs); }
+.plugin-preference-field input, .plugin-preference-field select, .plugin-resource-field input { width: 100%; min-width: 0; min-height: 34px; padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-raised); color: var(--text-primary); }
+.plugin-preference-field small, .plugin-resource-field small { color: var(--text-muted); line-height: 1.4; }
+.plugin-resource-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-3); }
+.plugin-granted-hosts { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-3); }
+.plugin-granted-hosts > strong { color: var(--text-secondary); font-size: var(--font-xs); }
+.plugin-granted-hosts ul { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.plugin-granted-hosts li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.plugin-granted-hosts code { overflow-wrap: anywhere; color: var(--text-primary); }
 .plugin-empty { padding: var(--space-3); color: var(--text-muted); font-size: var(--font-sm); text-align: center; }
 .plugin-empty.compact { padding: var(--space-2); text-align: left; }
 .plugin-subheading { color: var(--text-secondary); font-size: var(--font-xs); font-weight: var(--weight-medium); }

@@ -926,6 +926,7 @@ function createPluginServices(): void {
     const definition = context.manifest.contributes.settings?.properties[key]
     const declared = context.manifest.permissions.secrets ?? []
     if (!definition || definition.format !== 'secret' || !declared.includes(key)) return { ok: false, error: 'not_permitted' }
+    if (value.length > (definition.maxLength ?? 4_096)) return { ok: false, error: 'settings_invalid' }
     try {
       pluginSecretsStore.set(pluginId, key, value, declared)
       return { ok: true, value: { configured: pluginSecretsStore.has(pluginId, key) } }
