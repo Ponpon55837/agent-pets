@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { selectBubble, type BubbleCandidates, type BubbleKind, type PluginBubbleControls } from '../src/utils/feed-arbiter.ts'
 
@@ -21,6 +22,8 @@ const candidatesFor = (kind: BubbleKind): BubbleCandidates => {
     case 'plugin-feed-low': return { pluginFeed: { priority: 'low', controls: ENABLED_PLUGIN } }
   }
 }
+
+const feedArbiterSource = readFileSync(new URL('../src/utils/feed-arbiter.ts', import.meta.url), 'utf8')
 
 const PRIORITY: BubbleKind[] = [
   'permission-request',
@@ -47,9 +50,14 @@ for (let higher = 0; higher < PRIORITY.length; higher += 1) {
   }
 }
 
-test('plugin feed ignores bubbleEnabled and follows only plugin-side controls', () => {
+test('BubbleCandidates omits the unused bubbleEnabled field', () => {
+  const declaration = feedArbiterSource.match(/export interface BubbleCandidates \{([\s\S]*?)\n\}/)
+  assert.ok(declaration)
+  assert.equal(declaration?.[1]?.includes('bubbleEnabled'), false)
+})
+
+test('plugin feed selection uses only plugin-side controls', () => {
   assert.equal(selectBubble({
-    bubbleEnabled: false,
     pluginFeed: { priority: 'normal', controls: ENABLED_PLUGIN },
   }), 'plugin-feed-normal')
 })

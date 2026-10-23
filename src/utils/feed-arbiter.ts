@@ -27,8 +27,6 @@ export interface BubbleCandidates {
   presentationSay?: boolean
   pluginFeed?: PluginBubbleCandidate | null
   activity?: boolean
-  /** Agent bubbles use this in their caller-side gate; plugin feeds ignore it. */
-  bubbleEnabled?: boolean
 }
 
 /** Selects one visible bubble from already-gated Agent and plugin candidates. */
