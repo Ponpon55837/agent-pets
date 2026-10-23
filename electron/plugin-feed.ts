@@ -267,7 +267,7 @@ export class PluginFeedController {
 
     const global = this.readGlobalState()
     const plugin = this.readPluginState(pluginId)
-    if (!global || !plugin || !global.pluginsEnabled || global.dndEnabled || !plugin.enabled) {
+    if (!global || !plugin || !global.pluginsEnabled || !plugin.enabled) {
       return { accepted: false, error: 'disabled' }
     }
 
@@ -283,7 +283,7 @@ export class PluginFeedController {
     const item = this.createFeedItem(pluginId, plugin.name, normalized.value, now)
     if (!item) return { accepted: false, error: 'invalid_request' }
 
-    if (plugin.muted) {
+    if (plugin.muted || global.dndEnabled) {
       if (dedupeIdentity) this.rememberDedupe(dedupeIdentity, now)
       this.addToCenter(item, false)
       return { accepted: true, itemId: item.id, queued: this.queue.length, delivery: 'center' }

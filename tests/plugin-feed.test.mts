@@ -193,7 +193,7 @@ test('plugin and global sliding rates default to 5 and 60 per ten minutes', () =
   if (!globalLimited.accepted) assert.equal(globalLimited.error, 'rate_limited')
 })
 
-test('muted, DND, disabled global switch, and disabled plugin do not count against rate limits', () => {
+test('muted notifications and disabled plugin controls do not consume rate limits', () => {
   const harness = createHarness()
   harness.setPlugin('sample', { muted: true })
   const muted = submitValid(harness.controller)
@@ -205,9 +205,6 @@ test('muted, DND, disabled global switch, and disabled plugin do not count again
   harness.setPlugin('sample', { muted: false, enabled: false })
   assert.deepEqual(submitValid(harness.controller), { accepted: false, error: 'disabled' })
   harness.setPlugin('sample', { enabled: true })
-  harness.globalState.dndEnabled = true
-  assert.deepEqual(submitValid(harness.controller), { accepted: false, error: 'disabled' })
-  harness.globalState.dndEnabled = false
   harness.globalState.pluginsEnabled = false
   assert.deepEqual(submitValid(harness.controller), { accepted: false, error: 'disabled' })
   harness.globalState.pluginsEnabled = true
@@ -217,6 +214,27 @@ test('muted, DND, disabled global switch, and disabled plugin do not count again
     assert.equal(result.accepted, true)
     completeIfQueued(harness.controller, result)
   }
+})
+
+test('DND notifications stay unread in the center without bubbles, rate use, or replay', () => {
+  const harness = createHarness({ defaultPluginState: { rateLimitPer10Min: 1 } })
+  harness.globalState.dndEnabled = true
+  const duringDnd = [
+    submitValid(harness.controller, 'sample', { title: 'DND 1' }),
+    submitValid(harness.controller, 'sample', { title: 'DND 2' }),
+  ]
+  assert.ok(duringDnd.every(result => result.accepted && result.delivery === 'center'))
+  assert.equal(harness.controller.unreadCount(), 2)
+  assert.equal(harness.emitted.length, 0)
+
+  harness.globalState.dndEnabled = false
+  assert.equal(harness.emitted.length, 0)
+  const afterDnd = submitValid(harness.controller, 'sample', { title: 'After DND' })
+  assert.equal(afterDnd.accepted, true)
+  if (afterDnd.accepted) assert.equal(afterDnd.delivery, 'bubble')
+  assert.equal(harness.emitted.length, 1)
+  if (afterDnd.accepted) assert.equal(harness.emitted[0]?.id, afterDnd.itemId)
+  assert.equal(harness.controller.unreadCount(), 2)
 })
 
 test('dedupe is scoped to a plugin and expires after 24 hours', () => {
