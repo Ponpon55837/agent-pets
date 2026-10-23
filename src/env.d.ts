@@ -54,6 +54,8 @@ declare global {
       getPluginPanelSnapshot: () => Promise<PluginPanelResult<PluginPanelSnapshot>>
       getPluginSettings: (pluginId: string) => Promise<PluginPanelResult<PluginPanelSettingsSnapshot>>
       setPluginSettings: (pluginId: string, value: Record<string, PluginSettingScalar>) => Promise<PluginPanelResult<Record<string, PluginSettingScalar>>>
+      getPluginSecretConsent: () => Promise<PluginPanelResult<boolean>>
+      acceptPluginSecretConsent: () => Promise<PluginPanelResult<boolean>>
       setPluginSecret: (pluginId: string, key: string, value: string) => Promise<PluginPanelResult<{ configured: boolean }>>
       setPluginGlobalPreferences: (patch: PluginGlobalPreferencesPatch) => Promise<PluginPanelResult<PluginPreferences>>
       setPluginInstancePreferences: (pluginId: string, patch: unknown) => Promise<PluginPanelResult<PluginPreferences>>

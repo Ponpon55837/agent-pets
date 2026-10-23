@@ -69,6 +69,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPluginPanelSnapshot: (): Promise<PluginPanelResult<PluginPanelSnapshot>> => ipcRenderer.invoke('plugin-panel-snapshot'),
   getPluginSettings: (pluginId: string): Promise<PluginPanelResult<PluginPanelSettingsSnapshot>> => ipcRenderer.invoke('plugin-settings-get', pluginId),
   setPluginSettings: (pluginId: string, value: Record<string, PluginSettingScalar>): Promise<PluginPanelResult<Record<string, PluginSettingScalar>>> => ipcRenderer.invoke('plugin-settings-set', pluginId, value),
+  getPluginSecretConsent: (): Promise<PluginPanelResult<boolean>> => ipcRenderer.invoke('plugin-secret-consent-get'),
+  acceptPluginSecretConsent: (): Promise<PluginPanelResult<boolean>> => ipcRenderer.invoke('plugin-secret-consent-accept'),
   setPluginSecret: (pluginId: string, key: string, value: string): Promise<PluginPanelResult<{ configured: boolean }>> => ipcRenderer.invoke('plugin-secret-set', pluginId, key, value),
   setPluginGlobalPreferences: (patch: PluginGlobalPreferencesPatch): Promise<PluginPanelResult<PluginPreferences>> => ipcRenderer.invoke('plugin-preferences-global-set', patch),
   setPluginInstancePreferences: (pluginId: string, patch: unknown): Promise<PluginPanelResult<PluginPreferences>> => ipcRenderer.invoke('plugin-preferences-instance-set', pluginId, patch),

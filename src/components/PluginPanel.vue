@@ -36,6 +36,7 @@ const errorMessage = ref('')
 const statusMessage = ref('')
 const pendingPlan = ref<PluginInstallPlan | null>(null)
 const pendingRemove = ref<PluginPanelPlugin | null>(null)
+const pendingSecretConsentKey = ref('')
 const keepData = ref(false)
 let removeNotificationsListener: (() => void) | null = null
 
@@ -103,6 +104,7 @@ function localizedError(code: string): string {
     invalid_request: 'pluginActionFailed',
     secret_unavailable: 'pluginSecretUnavailable',
     secret_not_found: 'pluginSecretNotFound',
+    secret_consent_required: 'pluginSecretConsentRequired',
     settings_invalid: 'pluginSettingsInvalid',
     dialog_unavailable: 'pluginActionFailed',
     install_failed: 'pluginActionFailed',
@@ -234,6 +236,22 @@ async function savePluginSettings(): Promise<void> {
 async function savePluginSecret(key: string): Promise<void> {
   const pluginId = selectedPluginId.value
   if (!pluginId || busy.value) return
+  if ((secretDrafts.value[key] ?? '').length > 0) {
+    try {
+      const consent = await window.electronAPI?.getPluginSecretConsent()
+      if (!consent?.ok) {
+        setError(consent && !consent.ok ? consent.error : 'plugin_service_unavailable')
+        return
+      }
+      if (!consent.value) {
+        pendingSecretConsentKey.value = key
+        return
+      }
+    } catch {
+      setError('plugin_action_failed')
+      return
+    }
+  }
   busy.value = true
   errorMessage.value = ''
   statusMessage.value = ''
@@ -251,6 +269,26 @@ async function savePluginSecret(key: string): Promise<void> {
   } finally {
     busy.value = false
   }
+}
+
+async function confirmSecretConsent(): Promise<void> {
+  const key = pendingSecretConsentKey.value
+  if (!key || busy.value) return
+  busy.value = true
+  errorMessage.value = ''
+  try {
+    const result = await window.electronAPI?.acceptPluginSecretConsent()
+    if (!result?.ok) {
+      setError(result && !result.ok ? result.error : 'plugin_service_unavailable')
+      return
+    }
+    pendingSecretConsentKey.value = ''
+  } catch {
+    setError('plugin_action_failed')
+  } finally {
+    busy.value = false
+  }
+  if (!pendingSecretConsentKey.value) await savePluginSecret(key)
 }
 
 async function updateGlobalPreferences(patch: PluginGlobalPreferencesPatch): Promise<void> {
@@ -862,6 +900,16 @@ onUnmounted(() => {
         <span>{{ t('pluginKeepData') }}</span>
       </label>
     </ConfirmDialog>
+
+    <ConfirmDialog
+      :open="pendingSecretConsentKey !== ''"
+      :title="t('pluginSecretConsentTitle')"
+      :message="t('pluginSecretConsentMessage')"
+      :confirm-label="t('pluginSecretConsentConfirm')"
+      :cancel-label="t('cancel')"
+      @confirm="confirmSecretConsent"
+      @cancel="pendingSecretConsentKey = ''"
+    />
   </div>
 </template>
 

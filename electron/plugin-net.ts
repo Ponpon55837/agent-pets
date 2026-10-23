@@ -26,7 +26,7 @@ export interface PluginNetResponse {
 
 export interface PluginNetDependencies {
   lookupAll: (host: string) => Promise<Array<{ address: string; family: number }>>
-  fetch: (url: string, init: RequestInit) => Promise<Response>
+  request: (url: string, init: RequestInit) => Promise<Response>
   now: () => number
 }
 
@@ -81,7 +81,9 @@ export function isPluginNetIpBlocked(value: unknown): boolean {
     return [
       ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
       ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.168.0.0', 16],
-      ['224.0.0.0', 4], ['240.0.0.0', 4],
+      ['192.0.0.0', 24], ['192.0.2.0', 24], ['198.18.0.0', 15],
+      ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4],
+      ['240.0.0.0', 4], ['255.255.255.255', 32],
     ].some(([network, prefix]) => inIpv4Range(value, network as string, prefix as number))
   }
   if (family !== 6) return true
@@ -92,12 +94,25 @@ export function isPluginNetIpBlocked(value: unknown): boolean {
     const octets = [24, 16, 8, 0].map(shift => (mappedIpv4 >>> shift) & 0xff)
     return isPluginNetIpBlocked(octets.join('.'))
   }
+  const nat64Prefix = 0x64ff9bn << 96n
+  if (ipv6PrefixMatches(address, nat64Prefix, 96)) {
+    const embeddedIpv4 = Number(address & 0xffffffffn)
+    const octets = [24, 16, 8, 0].map(shift => (embeddedIpv4 >>> shift) & 0xff)
+    return isPluginNetIpBlocked(octets.join('.'))
+  }
+  if (ipv6PrefixMatches(address, 0x2002n << 112n, 16)) {
+    const embeddedIpv4 = Number((address >> 80n) & 0xffffffffn)
+    const octets = [24, 16, 8, 0].map(shift => (embeddedIpv4 >>> shift) & 0xff)
+    return isPluginNetIpBlocked(octets.join('.'))
+  }
   const loopback = address === 1n
   const unspecified = address === 0n
   return loopback || unspecified
     || ipv6PrefixMatches(address, 0xfc00n << 112n, 7)
     || ipv6PrefixMatches(address, 0xfe80n << 112n, 10)
     || ipv6PrefixMatches(address, 0xff00n << 112n, 8)
+    || ipv6PrefixMatches(address, 0x20010db8n << 96n, 32)
+    || ipv6PrefixMatches(address, 0x100n << 112n, 64)
 }
 
 export function isPluginNetHostAllowed(host: string, allowedHosts: readonly string[]): boolean {
@@ -184,6 +199,25 @@ function parseResponseHeaders(headers: Headers): PluginNetResponse['headers'] {
   return result
 }
 
+export function stripPluginSetCookieHeaders(
+  headers: Record<string, string[] | undefined> | undefined,
+): Record<string, string[]> | undefined {
+  if (!headers) return undefined
+  return Object.fromEntries(Object.entries(headers)
+    .filter(([name]) => name.toLowerCase() !== 'set-cookie' && name.toLowerCase() !== 'set-cookie2')
+    .flatMap(([name, values]) => values === undefined ? [] : [[name, [...values]]]))
+}
+
+export function filterPluginRequestHeaders(
+  headers: Record<string, string | undefined> | undefined,
+): Record<string, string> {
+  const result = Object.fromEntries(Object.entries(headers ?? {})
+    .filter(([name]) => !['accept-language', 'cookie', 'cookie2', 'user-agent'].includes(name.toLowerCase()))
+    .flatMap(([name, value]) => value === undefined ? [] : [[name, value]]))
+  result['User-Agent'] = 'AgentPetsPlugin/1'
+  return result
+}
+
 function isTextResponse(contentType: string | undefined): boolean {
   if (!contentType) return false
   const type = contentType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
@@ -229,7 +263,7 @@ export class PluginNetworkClient {
   constructor(dependencies: Partial<PluginNetDependencies> = {}) {
     this.dependencies = {
       lookupAll: dependencies.lookupAll ?? (async host => lookup(host, { all: true, verbatim: true })),
-      fetch: dependencies.fetch ?? ((url, init) => fetch(url, init)),
+      request: dependencies.request ?? (async () => { throw new Error('Plugin network transport unavailable') }),
       now: dependencies.now ?? Date.now,
     }
   }
@@ -278,7 +312,7 @@ export class PluginNetworkClient {
         }
         let response: Response
         try {
-          response = await Promise.race([this.dependencies.fetch(validated.href, {
+          response = await Promise.race([this.dependencies.request(validated.href, {
             method: request.method,
             headers,
             ...(request.body === undefined ? {} : { body: request.body }),

@@ -18,7 +18,7 @@ Additional fixed limits:
 - Feed: default 5 items per plugin per 10 minutes; the panel permits 1–30. Queue depth 8, notification center 500 items, and 100 retained items per plugin. Title 60 characters, body 240; TTL defaults to 6 seconds and accepts 1–15 seconds. `dedupeKey` is at most 128 characters and deduplicates for 24 hours.
 - Pet reactions: TTL defaults to 4 seconds and accepts 1–15 seconds; at most 32 RPC arguments and 32 queued interactions.
 - Manifest/package: 5 MB total and 64 files; `plugin.json` at most 256 KB. Settings and secrets files are each at most 64 KB; settings have at most 20 fields. Storage defaults to 1 MB and follows the panel limit.
-- Network: request body at most 256 KB; response bytes and timeout use the panel limits; at most three redirects. Requests per plugin per minute follow the panel limit.
+- Network: request body at most 256 KB; response bytes and timeout use the panel limits; at most three redirects, each revalidated before a new request. Plugin requests do not send or store cookies. Requests per plugin per minute follow the panel limit.
 - Runtime: heartbeat every 10 seconds, failure after 30 seconds without a pong, and disable plus notification after three consecutive crashes. Plugin Host process memory is monitored against the combined enabled-plugin budgets; **exact per-Worker memory isolation is not available**.
 - Runtime host requests: at most three per plugin per 10 minutes; denial cools down that host for 24 hours.
 

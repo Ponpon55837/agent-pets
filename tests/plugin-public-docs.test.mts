@@ -43,3 +43,23 @@ test('getting-started tutorial writes its package outside the watched source fol
     assert.match(content, /zip -r \.\.\/hello-feed\.agentpet-plugin plugin\.json dist\//)
   }
 })
+
+test('plugin network and secret docs match redirect, cookie, and settings event behavior', () => {
+  const api = fs.readFileSync(path.join(docsDirectory, 'api-reference.md'), 'utf8')
+  const apiZh = fs.readFileSync(path.join(docsDirectory, 'api-reference.zh-TW.md'), 'utf8')
+  const limits = fs.readFileSync(path.join(docsDirectory, 'limits.md'), 'utf8')
+  const limitsZh = fs.readFileSync(path.join(docsDirectory, 'limits.zh-TW.md'), 'utf8')
+  const security = fs.readFileSync(path.join(docsDirectory, 'security.md'), 'utf8')
+  const securityZh = fs.readFileSync(path.join(docsDirectory, 'security.zh-TW.md'), 'utf8')
+
+  assert.match(api, /up to three redirects/)
+  assert.match(apiZh, /最多 3 次 redirect/)
+  assert.match(limits, /at most three redirects/)
+  assert.match(limitsZh, /最多跟隨 3 個 redirect/)
+  assert.match(api, /do not send or store cookies/)
+  assert.match(apiZh, /不會送出或儲存 Cookie/)
+  assert.match(api, /secret additions, updates, or clears trigger the callback/)
+  assert.match(apiZh, /密鑰新增、更新或清除都會觸發 callback/)
+  assert.match(security, /DNS rebinding race/)
+  assert.match(securityZh, /DNS rebinding 時間差風險/)
+})

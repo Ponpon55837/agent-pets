@@ -58,6 +58,17 @@ export class PluginSettingsStore {
   }
 }
 
+export function publishPluginSettingsChanged(
+  pluginId: string,
+  manifest: PluginManifest,
+  settingsStore: Pick<PluginSettingsStore, 'get'>,
+  publish: (pluginId: string, values: Record<string, PluginSettingScalar>) => void,
+): Record<string, PluginSettingScalar> {
+  const values = settingsStore.get(pluginId, manifest)
+  publish(pluginId, values)
+  return values
+}
+
 export function isValidSettingValue(definition: PluginSettingDefinition, value: unknown): value is PluginSettingScalar {
   if (definition.format === 'secret' || typeof value !== definition.type) return false
   if (typeof value === 'string') {

@@ -239,6 +239,10 @@ For a configured adapter, click **Test** to send a short-lived event through the
 
 > Note: there is no separate "Codex Desktop" hook install — only Codex CLI hooks are wired up today.
 
+## Plugins
+
+Plugin network requests do not send or store cookies. For authenticated APIs, declare the required secret in the plugin manifest and send it with an `authorization` header. Secret values are encrypted with the system keychain. Before the first secret is saved, Agent Pets shows a one-time notice; macOS may ask whether Agent Pets can access the keychain.
+
 ---
 
 ## Custom Pets

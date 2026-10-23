@@ -4,6 +4,7 @@ import {
   screen,
   ipcMain,
   dialog,
+  net,
   session,
   protocol,
   globalShortcut,
@@ -15,6 +16,7 @@ import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { join, resolve } from 'path'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest, type Server } from 'node:http'
+import { Readable } from 'node:stream'
 import * as fs from 'fs'
 import * as path from 'path'
 import { guardArchive } from './archive-guard.ts'
@@ -48,11 +50,12 @@ import { PluginHostWindowController, type PluginHostDescriptor } from './plugin-
 import { canEnablePluginWithinLimit, selectEnabledPluginDescriptors } from './plugin-host-selection'
 import { PluginBroker, type PluginBrokerContext, type PluginReactionRequest } from './plugin-broker.ts'
 import { PluginFeedController } from './plugin-feed.ts'
-import { PluginNetworkClient } from './plugin-net.ts'
+import { filterPluginRequestHeaders, PluginNetworkClient, stripPluginSetCookieHeaders } from './plugin-net.ts'
 import { isPublicPluginNetworkHost } from './plugin-net.ts'
 import { PluginHostGrantController, sanitizePluginHostRequestReason } from './plugin-host-grants.ts'
 import { PluginSecretsStore } from './plugin-secrets.ts'
-import { PluginSettingsStore } from './plugin-settings.ts'
+import { PluginSecretConsentStore } from './plugin-secret-consent.ts'
+import { PluginSettingsStore, publishPluginSettingsChanged } from './plugin-settings.ts'
 import { PluginAgentStatusController } from './plugin-agent-status.ts'
 import { effectivePluginScheduleMinimum } from './plugin-schedule.ts'
 import { PluginDeveloperModeWatcher } from './plugin-developer-mode.ts'
@@ -148,6 +151,7 @@ let projectRoutingStore: ProjectRoutingStore | null = null
 let pluginRegistry: PluginRegistry | null = null
 let pluginPreferences: PluginPreferencesStore | null = null
 let pluginSecretsStore: PluginSecretsStore | null = null
+let pluginSecretConsentStore: PluginSecretConsentStore | null = null
 let pluginSettingsStore: PluginSettingsStore | null = null
 let pluginHostWindow: PluginHostWindowController | null = null
 let pluginBroker: PluginBroker | null = null
@@ -737,6 +741,76 @@ function isPluginLinkHostAllowed(pluginId: string, host: string): boolean {
   })
 }
 
+function requestPluginNetwork(
+  networkSession: Electron.Session,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const headers = Object.fromEntries(new Headers(init.headers).entries())
+    const request = net.request({
+      url,
+      method: init.method ?? 'GET',
+      headers,
+      session: networkSession,
+      useSessionCookies: false,
+      credentials: 'omit',
+      redirect: 'manual',
+      cache: 'no-store',
+    })
+    let settled = false
+    const signal = init.signal
+    let onAbort = () => {}
+    const cleanup = () => signal?.removeEventListener('abort', onAbort)
+    const finish = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      callback()
+    }
+    onAbort = () => {
+      try { request.abort() } catch {}
+      finish(() => reject(new Error('Plugin network request aborted')))
+    }
+
+    request.removeHeader('Cookie')
+    request.removeHeader('Accept-Language')
+    request.setHeader('User-Agent', 'AgentPetsPlugin/1')
+    request.on('redirect', (status, _method, redirectUrl) => {
+      try { request.abort() } catch {}
+      finish(() => resolve(new Response(null, { status, headers: { location: redirectUrl } })))
+    })
+    request.on('response', response => {
+      const responseHeaders = new Headers()
+      for (const [name, rawValue] of Object.entries(response.headers)) {
+        if (name.toLowerCase() === 'set-cookie' || name.toLowerCase() === 'set-cookie2') continue
+        const values = Array.isArray(rawValue) ? rawValue : typeof rawValue === 'string' ? [rawValue] : []
+        for (const value of values) {
+          try { responseHeaders.append(name, value) } catch {}
+        }
+      }
+      const status = response.statusCode || 200
+      const body = status === 204 || status === 205 || status === 304
+        ? null
+        : Readable.toWeb(response as unknown as Readable) as ReadableStream<Uint8Array>
+      try {
+        const result = new Response(body, { status, headers: responseHeaders })
+        finish(() => resolve(result))
+      } catch (error) {
+        finish(() => reject(error))
+      }
+    })
+    request.on('error', error => finish(() => reject(error)))
+    if (signal?.aborted) {
+      onAbort()
+      return
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (typeof init.body === 'string') request.write(init.body)
+    request.end()
+  })
+}
+
 function createPluginServices(): void {
   if (pluginRegistry || pluginPreferences || pluginHostWindow) return
   const userDataDirectory = app.getPath('userData')
@@ -744,6 +818,7 @@ function createPluginServices(): void {
   pluginDeveloperModeWatcher = new PluginDeveloperModeWatcher(500)
   pluginPreferences = new PluginPreferencesStore(userDataDirectory)
   pluginSecretsStore = new PluginSecretsStore(userDataDirectory, safeStorage)
+  pluginSecretConsentStore = new PluginSecretConsentStore(userDataDirectory)
   pluginSettingsStore = new PluginSettingsStore(userDataDirectory)
   pluginHostGrantController = new PluginHostGrantController()
   pluginAgentStatusController = new PluginAgentStatusController({
@@ -783,6 +858,13 @@ function createPluginServices(): void {
       pluginRuntimeContexts.has(pluginId) ? `agent-pets://plugin/${pluginId}/${relativePath}` : null
     ),
   })
+  const pluginNetworkSession = session.fromPartition('plugin-network')
+  pluginNetworkSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    callback({ requestHeaders: filterPluginRequestHeaders(details.requestHeaders) })
+  })
+  pluginNetworkSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({ responseHeaders: stripPluginSetCookieHeaders(details.responseHeaders) })
+  })
   pluginBroker = new PluginBroker({
     userDataDirectory,
     getContext: pluginId => {
@@ -791,7 +873,7 @@ function createPluginServices(): void {
     },
     feed: pluginFeedController,
     network: pluginNetworkClient ??= new PluginNetworkClient({
-      fetch: (url, init) => session.fromPartition('plugin-network').fetch(url, init),
+      request: (url, init) => requestPluginNetwork(pluginNetworkSession, url, init),
     }),
     onRequestHost: async (pluginId, rawHost, rawReason) => {
       const context = pluginRuntimeContexts.get(pluginId)
@@ -964,11 +1046,27 @@ function createPluginServices(): void {
     if (!context.manifest.contributes.settings) return { ok: false, error: 'not_permitted' }
     try {
       const values = pluginSettingsStore.set(pluginId, context.manifest, value)
-      pluginHostWindow?.notifySettingsChanged(pluginId, values)
+      publishPluginSettingsChanged(pluginId, context.manifest, pluginSettingsStore,
+        (changedPluginId, changedValues) => pluginHostWindow?.notifySettingsChanged(changedPluginId, changedValues))
       return { ok: true, value: values }
     } catch (error) {
       return { ok: false, error: error && typeof error === 'object' && 'code' in error && error.code === 'plugin_data_unsafe'
         ? 'settings_invalid' : pluginPanelError(error) }
+    }
+  })
+  ipcMain.handle('plugin-secret-consent-get', event => {
+    assertPluginPanelSender(event)
+    if (!pluginSecretConsentStore) return { ok: false, error: 'plugin_service_unavailable' }
+    return { ok: true, value: pluginSecretConsentStore.hasAccepted() }
+  })
+  ipcMain.handle('plugin-secret-consent-accept', event => {
+    assertPluginPanelSender(event)
+    if (!pluginSecretConsentStore) return { ok: false, error: 'plugin_service_unavailable' }
+    try {
+      pluginSecretConsentStore.accept()
+      return { ok: true, value: true }
+    } catch {
+      return { ok: false, error: 'plugin_action_failed' }
     }
   })
   ipcMain.handle('plugin-secret-set', (event, pluginId: unknown, key: unknown, value: unknown) => {
@@ -982,8 +1080,17 @@ function createPluginServices(): void {
     const declared = context.manifest.permissions.secrets ?? []
     if (!definition || definition.format !== 'secret' || !declared.includes(key)) return { ok: false, error: 'not_permitted' }
     if (value.length > (definition.maxLength ?? 4_096)) return { ok: false, error: 'settings_invalid' }
+    if (value.length > 0 && pluginSecretConsentStore?.hasAccepted() !== true) {
+      return { ok: false, error: 'secret_consent_required' }
+    }
     try {
       pluginSecretsStore.set(pluginId, key, value, declared)
+      try {
+        if (pluginSettingsStore) {
+          publishPluginSettingsChanged(pluginId, context.manifest, pluginSettingsStore,
+            (changedPluginId, changedValues) => pluginHostWindow?.notifySettingsChanged(changedPluginId, changedValues))
+        }
+      } catch {}
       return { ok: true, value: { configured: pluginSecretsStore.has(pluginId, key) } }
     } catch (error) {
       return { ok: false, error: error && typeof error === 'object' && 'code' in error && error.code === 'plugin_data_unsafe'
@@ -3490,6 +3597,7 @@ app.on('before-quit', () => {
   pluginAgentStatusController?.destroy()
   pluginAgentStatusController = null
   pluginSecretsStore = null
+  pluginSecretConsentStore = null
   pluginSettingsStore = null
   pluginRuntimeContexts.clear()
   pluginPreferencesSnapshot = null

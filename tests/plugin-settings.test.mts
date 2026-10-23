@@ -4,7 +4,8 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import test from 'node:test'
 import { PluginSecretsStore } from '../electron/plugin-secrets.ts'
-import { PluginSettingsStore } from '../electron/plugin-settings.ts'
+import { PluginSettingsStore, publishPluginSettingsChanged } from '../electron/plugin-settings.ts'
+import { PluginSecretConsentStore, PLUGIN_SECRET_CONSENT_FILENAME } from '../electron/plugin-secret-consent.ts'
 import type { PluginManifest } from '../src/types/plugin.ts'
 
 const NAME = { 'zh-TW': '設定範例', 'en-US': 'Settings Sample' }
@@ -68,6 +69,66 @@ test('secrets fail closed when platform encryption is unavailable and empty inpu
     state.secrets.set('sample', 'apiToken', '', ['apiToken'])
     assert.equal(state.secrets.has('sample', 'apiToken'), false)
   } finally { state.cleanup() }
+})
+
+test('startup, configured snapshots, and clearing an empty secret do not call safeStorage', () => {
+  const state = fixture()
+  let availabilityCalls = 0
+  let encryptCalls = 0
+  let decryptCalls = 0
+  const countedSecrets = new PluginSecretsStore(state.userData, {
+    isEncryptionAvailable: () => { availabilityCalls += 1; return true },
+    encryptString: value => { encryptCalls += 1; return Buffer.from(`encrypted:${value}`) },
+    decryptString: value => { decryptCalls += 1; return value.toString('utf8').slice('encrypted:'.length) },
+  })
+  try {
+    assert.equal(availabilityCalls + encryptCalls + decryptCalls, 0)
+    assert.deepEqual(countedSecrets.listConfigured('sample', ['apiToken']), { apiToken: false })
+    assert.equal(countedSecrets.has('sample', 'apiToken'), false)
+    assert.throws(() => countedSecrets.get('sample', 'apiToken', ['apiToken']), { code: 'secret_not_found' })
+    fs.writeFileSync(path.join(state.dataDirectory, 'secrets.json'), JSON.stringify({ apiToken: '' }))
+    assert.deepEqual(countedSecrets.listConfigured('sample', ['apiToken']), { apiToken: false })
+    assert.throws(() => countedSecrets.get('sample', 'apiToken', ['apiToken']), { code: 'secret_not_found' })
+    countedSecrets.set('sample', 'apiToken', '', ['apiToken'])
+    assert.deepEqual({ availabilityCalls, encryptCalls, decryptCalls }, { availabilityCalls: 0, encryptCalls: 0, decryptCalls: 0 })
+  } finally { state.cleanup() }
+})
+
+test('secret-only updates publish a fresh non-secret settings snapshot', () => {
+  const state = fixture()
+  const notifications: Array<{ pluginId: string; values: Record<string, string | number | boolean> }> = []
+  const publish = (pluginId: string, values: Record<string, string | number | boolean>) => notifications.push({ pluginId, values })
+  try {
+    state.secrets.set('sample', 'apiToken', 'synthetic-secret', ['apiToken'])
+    publishPluginSettingsChanged('sample', manifest, state.settings, publish)
+    state.secrets.set('sample', 'apiToken', 'updated-synthetic-secret', ['apiToken'])
+    publishPluginSettingsChanged('sample', manifest, state.settings, publish)
+    state.secrets.set('sample', 'apiToken', '', ['apiToken'])
+    publishPluginSettingsChanged('sample', manifest, state.settings, publish)
+    assert.equal(notifications.length, 3)
+    assert.deepEqual(notifications[0], {
+      pluginId: 'sample', values: { username: 'guest', refreshMinutes: 10, enabled: true, mode: 'compact' },
+    })
+    assert.equal(JSON.stringify(notifications).includes('synthetic-secret'), false)
+  } finally { state.cleanup() }
+})
+
+test('secret storage consent persists once and rejects a symlink marker', () => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-secret-consent-'))
+  const consent = new PluginSecretConsentStore(userData)
+  const marker = path.join(userData, PLUGIN_SECRET_CONSENT_FILENAME)
+  const target = path.join(userData, 'outside.json')
+  fs.writeFileSync(target, '{}')
+  try {
+    assert.equal(consent.hasAccepted(), false)
+    consent.accept()
+    assert.equal(consent.hasAccepted(), true)
+    fs.rmSync(marker)
+    fs.symlinkSync(target, marker)
+    assert.equal(consent.hasAccepted(), false)
+    assert.throws(() => consent.accept(), { code: 'unsafe_file' })
+    assert.equal(fs.readFileSync(target, 'utf8'), '{}')
+  } finally { fs.rmSync(userData, { recursive: true, force: true }) }
 })
 
 test('secret storage rejects symlinked files without writing through them', () => {

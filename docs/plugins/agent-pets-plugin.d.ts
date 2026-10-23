@@ -110,8 +110,10 @@ export interface AgentPetsPluginApi {
      */
     get(): Promise<PluginSettings>
     /**
-     * Subscribe to settings saved by the user in the plugin panel. Returns an unsubscribe function.
-     * Throws coded error immediately: invalid_request. Example: `api.settings.onChange(value => api.log.info(value.repository))`
+     * Subscribe to settings saved by the user in the plugin panel. Secret additions, updates, and clears also trigger
+     * the callback, but the callback value contains only non-secret settings. Call api.secrets.get(key) to read a declared secret.
+     * Returns an unsubscribe function. Throws coded error immediately: invalid_request.
+     * Example: `api.settings.onChange(value => api.log.info(value.repository))`
      */
     onChange(callback: (settings: PluginSettings) => void): () => void
   }

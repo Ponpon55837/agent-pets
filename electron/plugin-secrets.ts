@@ -22,12 +22,13 @@ export class PluginSecretsStore {
 
   get(pluginId: string, key: string, declaredKeys: readonly string[]): string {
     if (!declaredKeys.includes(key)) throw codedError('not_permitted')
-    if (!this.encryption.isEncryptionAvailable()) throw codedError('secret_unavailable')
     const values = this.read(pluginId)
     const encoded = values[key]
-    if (typeof encoded !== 'string' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+    if (typeof encoded !== 'string' || encoded.length === 0
+      || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
       throw codedError('secret_not_found')
     }
+    if (!this.encryption.isEncryptionAvailable()) throw codedError('secret_unavailable')
     try {
       return this.encryption.decryptString(Buffer.from(encoded, 'base64'))
     } catch {
@@ -43,22 +44,27 @@ export class PluginSecretsStore {
   set(pluginId: string, key: string, value: unknown, declaredKeys: readonly string[]): void {
     if (!declaredKeys.includes(key)) throw codedError('not_permitted')
     if (typeof value !== 'string' || value.length > 4_096 || /[\u0000-\u001f\u007f]/.test(value)) throw codedError('settings_invalid')
-    if (!this.encryption.isEncryptionAvailable()) throw codedError('secret_unavailable')
     const values = this.read(pluginId)
-    if (value.length === 0) delete values[key]
-    else {
-      try {
-        values[key] = this.encryption.encryptString(value).toString('base64')
-      } catch {
-        throw codedError('secret_unavailable')
-      }
+    if (value.length === 0) {
+      delete values[key]
+      this.write(pluginId, values)
+      return
+    }
+    if (!this.encryption.isEncryptionAvailable()) throw codedError('secret_unavailable')
+    try {
+      values[key] = this.encryption.encryptString(value).toString('base64')
+    } catch {
+      throw codedError('secret_unavailable')
     }
     this.write(pluginId, values)
   }
 
   listConfigured(pluginId: string, declaredKeys: readonly string[]): Record<string, boolean> {
     const values = this.read(pluginId)
-    return Object.fromEntries(declaredKeys.map(key => [key, typeof values[key] === 'string']))
+    return Object.fromEntries(declaredKeys.map(key => {
+      const value = values[key]
+      return [key, typeof value === 'string' && value.length > 0]
+    }))
   }
 
   remove(pluginId: string): void {

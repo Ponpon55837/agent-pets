@@ -240,6 +240,10 @@ Setup Wizard 會讀取 runtime Agent Adapter registry，並在你點擊按鈕時
 
 > 註：目前沒有獨立的「Codex Desktop」hook 安裝項目——只有 Codex CLI 的 hooks 有接上。
 
+## 插件
+
+插件網路請求不會送出或儲存 Cookie。需要登入 API 時，請在插件 manifest 宣告密鑰，並透過 `authorization` header 傳送。密鑰會使用系統鑰匙圈加密；第一次儲存前 Agent Pets 會顯示一次性說明，macOS 可能會詢問是否允許 Agent Pets 存取鑰匙圈。
+
 ---
 
 ## 自訂寵物
