@@ -12,6 +12,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Icon from '@/components/ui/Icon.vue'
 import InlinePermissionCard from '@/components/ui/InlinePermissionCard.vue'
 import PetAnimation from '@/components/PetAnimation.vue'
+import PluginPanel from '@/components/PluginPanel.vue'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
 import Select from '@/components/ui/Select.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
@@ -23,12 +24,13 @@ const editName = ref('')
 
 // --- 設定分頁 ----------------------------------------------------------------
 
-type SettingsSection = 'language' | 'appearance' | 'desktop' | 'pets' | 'growth' | 'advanced'
+type SettingsSection = 'language' | 'appearance' | 'desktop' | 'plugins' | 'pets' | 'growth' | 'advanced'
 const settingsTab = ref<SettingsSection>('appearance')
 const settingsSections = computed<Array<{ id: SettingsSection; icon: string; label: string; hint: string }>>(() => [
   { id: 'language', icon: 'language', label: t('language'), hint: t('languageHint') },
   { id: 'appearance', icon: 'appearance', label: t('appearance'), hint: t('appearanceHint') },
   { id: 'desktop', icon: 'desktop', label: t('desktop'), hint: t('desktopHint') },
+  { id: 'plugins', icon: 'advanced', label: t('plugins'), hint: t('pluginSettingsHint') },
   { id: 'pets', icon: 'pets', label: t('pets'), hint: t('petsHint') },
   { id: 'growth', icon: 'growth', label: t('growth'), hint: t('growthHint') },
   { id: 'advanced', icon: 'advanced', label: t('advanced'), hint: t('advancedHint') },
@@ -1050,6 +1052,10 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
               @update:model-value="store.setLaunchAtStartup($event)"
             />
           </Card>
+        </template>
+
+        <template v-else-if="settingsTab === 'plugins'">
+          <PluginPanel />
         </template>
 
         <template v-else-if="settingsTab === 'growth'">

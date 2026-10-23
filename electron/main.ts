@@ -40,11 +40,18 @@ import {
 } from './presentation-controller'
 import { ProjectMcpRegistryStore } from './project-mcp-registry'
 import { ProjectRoutingStore } from './project-routing'
-import { PluginRegistry } from './plugin-registry'
+import { PluginRegistry, PLUGIN_ARCHIVE_MAX_BYTES } from './plugin-registry'
 import { PluginPreferencesStore } from './plugin-preferences'
 import { PluginHostWindowController, type PluginHostDescriptor } from './plugin-host-window'
 import { PluginBroker, type PluginBrokerContext, type PluginReactionRequest } from './plugin-broker.ts'
 import { PluginFeedController } from './plugin-feed.ts'
+import {
+  isPluginPanelInstallConfirmation,
+  isPluginPanelNotificationId,
+  isPluginPanelPluginId,
+  isPluginPanelPreferencePatch,
+  pluginPanelErrorCode,
+} from './plugin-panel-validation.ts'
 import { handlePluginProtocolRequest } from './plugin-protocol'
 import { pluginHostAssets } from './plugin-host-assets'
 import { parsePluginManifest } from './plugin-manifest'
@@ -59,6 +66,7 @@ import type { ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
 import type { PresentationIntent, PresentationStatusSnapshot } from '../src/types/presentation'
+import type { PluginPanelPlugin, PluginPanelResult, PluginPanelSnapshot } from '../src/types/plugin'
 import type { ProjectMcpRegistrySnapshot, ProjectMcpRemovalSummary } from '../src/types/project-mcp'
 import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from '../src/types/project-pet'
 import type { PetEdge, PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
@@ -131,6 +139,7 @@ let pluginPreferences: PluginPreferencesStore | null = null
 let pluginHostWindow: PluginHostWindowController | null = null
 let pluginBroker: PluginBroker | null = null
 let pluginFeedController: PluginFeedController | null = null
+const pendingPluginPlanIds = new Map<string, string>()
 let pluginRuntimeContexts = new Map<string, PluginBrokerContext & { muted: boolean; rateLimitPer10Min: number; targetPetId: string | null; grantedHosts: string[] }>()
 let pluginPreferencesSnapshot: ReturnType<PluginPreferencesStore['get']> | null = null
 let presentationStatusProjection: PresentationStatusSnapshot = {
@@ -389,6 +398,43 @@ function assertTrustedIpcSender(
   }
 }
 
+function assertPluginPanelSender(event: IpcMainEvent | IpcMainInvokeEvent): void {
+  if (!panelWindow || panelWindow.isDestroyed() || event.sender !== panelWindow.webContents) {
+    throw new Error('Unauthorized plugin panel IPC sender')
+  }
+  assertTrustedIpcSender(event, panelWindow)
+}
+
+function pluginPanelError(error: unknown): string {
+  return pluginPanelErrorCode(error)
+}
+
+function pluginPanelSnapshot(): PluginPanelResult<PluginPanelSnapshot> {
+  if (!pluginRegistry || !pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
+  try {
+    const preferences = pluginPreferences.get()
+    const plugins: PluginPanelPlugin[] = pluginRegistry.list().map(entry => {
+      const root = resolve(app.getPath('userData'), 'plugins', entry.id, entry.currentVersion)
+      const source = readRegularFileWithin(root, 'plugin.json', 256 * 1024)
+      let manifest: PluginPanelPlugin['manifest'] = null
+      if (source) {
+        try {
+          const parsed = parsePluginManifest(JSON.parse(source.toString('utf8')) as unknown)
+          if (parsed.ok && parsed.manifest.id === entry.id) manifest = parsed.manifest
+        } catch {}
+      }
+      return {
+        ...entry,
+        manifest,
+        preference: preferences.plugins[entry.id] ?? pluginPreferences!.getPlugin(entry.id),
+      }
+    })
+    return { ok: true, value: { preferences, plugins } }
+  } catch (error) {
+    return { ok: false, error: pluginPanelError(error) }
+  }
+}
+
 function isIntegrationTarget(value: unknown): value is IntegrationTarget {
   return value === 'opencode' || value === 'codex' || value === 'claude' || value === 'claudeCode'
 }
@@ -561,7 +607,10 @@ function syncPluginHost(): void {
 
 function broadcastPluginFeedUnreadCount(count = pluginFeedController?.unreadCount() ?? 0): void {
   for (const window of [petWindow, panelWindow]) {
-    if (window && !window.isDestroyed()) window.webContents.send('plugin-feed-unread-count', count)
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('plugin-feed-unread-count', count)
+      window.webContents.send('plugin-notifications-changed')
+    }
   }
 }
 
@@ -675,6 +724,157 @@ function createPluginServices(): void {
     } catch {
       return false
     }
+  })
+
+  ipcMain.handle('plugin-panel-snapshot', event => {
+    assertPluginPanelSender(event)
+    return pluginPanelSnapshot()
+  })
+  ipcMain.handle('plugin-preferences-global-set', (event, patch: unknown) => {
+    assertPluginPanelSender(event)
+    if (!pluginPreferences || !isPluginPanelPreferencePatch(patch)) {
+      return { ok: false, error: pluginPreferences ? 'invalid_request' : 'plugin_service_unavailable' }
+    }
+    try {
+      const preferences = pluginPreferences.updateGlobal(patch)
+      syncPluginHost()
+      return { ok: true, value: preferences }
+    } catch (error) {
+      return { ok: false, error: pluginPanelError(error) }
+    }
+  })
+  ipcMain.handle('plugin-preferences-instance-set', (event, pluginId: unknown, patch: unknown) => {
+    assertPluginPanelSender(event)
+    if (!pluginRegistry || !pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
+    if (!isPluginPanelPluginId(pluginId) || !isPluginPanelPreferencePatch(patch)
+      || !pluginRegistry.list().some(entry => entry.id === pluginId)) {
+      return { ok: false, error: 'invalid_request' }
+    }
+    try {
+      const preferences = pluginPreferences.updatePlugin(pluginId, patch)
+      if (typeof patch.enabled === 'boolean') {
+        pluginRegistry.setStatus(pluginId, patch.enabled ? 'enabled' : 'installed')
+      }
+      syncPluginHost()
+      return { ok: true, value: preferences }
+    } catch (error) {
+      return { ok: false, error: pluginPanelError(error) }
+    }
+  })
+  ipcMain.handle('plugin-install-select', async (event) => {
+    assertPluginPanelSender(event)
+    if (!pluginRegistry || !panelWindow || panelWindow.isDestroyed()) {
+      return { ok: false, error: 'plugin_service_unavailable' }
+    }
+    if (dialogOpen) return { ok: false, error: 'dialog_unavailable' }
+    dialogOpen = true
+    let selection: Electron.OpenDialogReturnValue
+    try {
+      selection = await dialog.showOpenDialog(panelWindow, {
+        title: t('pluginNativePickerTitle'),
+        filters: [{ name: 'Agent Pets Plugins', extensions: ['agentpet-plugin'] }],
+        properties: ['openFile'],
+      })
+    } catch {
+      return { ok: false, error: 'plugin_action_failed' }
+    } finally {
+      dialogOpen = false
+    }
+    if (selection.canceled || selection.filePaths.length === 0) {
+      return { ok: false, error: 'cancelled', cancelled: true }
+    }
+    try {
+      const archivePath = selection.filePaths[0]
+      if (!archivePath) return { ok: false, error: 'invalid_archive' }
+      const stat = fs.lstatSync(archivePath)
+      if (!stat.isFile() || stat.isSymbolicLink()) return { ok: false, error: 'invalid_archive' }
+      if (stat.size > PLUGIN_ARCHIVE_MAX_BYTES) return { ok: false, error: 'archive_too_large' }
+      const planned = pluginRegistry.planInstall(fs.readFileSync(archivePath))
+      if (!planned.ok) return { ok: false, error: planned.error }
+      if (planned.value.pluginId && planned.value.kind !== 'incompatible') {
+        while (pendingPluginPlanIds.size >= 20) {
+          const oldest = pendingPluginPlanIds.keys().next().value as string | undefined
+          if (oldest === undefined) break
+          pendingPluginPlanIds.delete(oldest)
+        }
+        pendingPluginPlanIds.set(planned.value.token, planned.value.pluginId)
+      }
+      return { ok: true, value: planned.value }
+    } catch {
+      return { ok: false, error: 'invalid_archive' }
+    }
+  })
+  ipcMain.handle('plugin-install-confirm', (event, token: unknown, acceptAdditionalPermissions: unknown) => {
+    assertPluginPanelSender(event)
+    if (!pluginRegistry || !pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
+    if (!isPluginPanelInstallConfirmation(token, acceptAdditionalPermissions)
+      || typeof acceptAdditionalPermissions !== 'boolean') return { ok: false, error: 'invalid_request' }
+    const pluginId = pendingPluginPlanIds.get(token)
+    if (!pluginId) return { ok: false, error: 'plan_not_found' }
+    try {
+      // Persist the default preference row before installation so an unsafe
+      // preference path cannot leave an installed plugin outside the panel.
+      pluginPreferences.updatePlugin(pluginId, {})
+    } catch (error) {
+      return { ok: false, error: pluginPanelError(error) }
+    }
+    const installed = pluginRegistry.install(token, acceptAdditionalPermissions)
+    if (!installed.ok) return { ok: false, error: installed.error }
+    pendingPluginPlanIds.delete(token)
+    syncPluginHost()
+    const snapshot = pluginPanelSnapshot()
+    if (!snapshot.ok) return snapshot
+    const plugin = snapshot.value.plugins.find(item => item.id === pluginId)
+    return plugin ? { ok: true, value: plugin } : { ok: false, error: 'plugin_action_failed' }
+  })
+  ipcMain.handle('plugin-remove', (event, pluginId: unknown, keepData: unknown) => {
+    assertPluginPanelSender(event)
+    if (!pluginRegistry || !pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
+    if (!isPluginPanelPluginId(pluginId) || typeof keepData !== 'boolean') return { ok: false, error: 'invalid_request' }
+    if (!pluginRegistry.list().some(entry => entry.id === pluginId)) return { ok: false, error: 'plugin_not_found' }
+    if (!keepData) {
+      try { pluginPreferences.updatePlugin(pluginId, {}) } catch (error) {
+        return { ok: false, error: pluginPanelError(error) }
+      }
+    }
+    const removed = pluginRegistry.remove(pluginId, keepData)
+    if (!removed.ok) return { ok: false, error: removed.error }
+    pluginBroker?.removePlugin(pluginId, keepData)
+    if (!keepData) {
+      try { pluginPreferences.removePlugin(pluginId) } catch (error) {
+        return { ok: false, error: pluginPanelError(error) }
+      }
+      pluginFeedController?.clear(pluginId)
+    }
+    syncPluginHost()
+    return { ok: true, value: removed.value }
+  })
+  ipcMain.handle('plugin-diagnostics', (event, pluginId: unknown) => {
+    assertPluginPanelSender(event)
+    if (!isPluginPanelPluginId(pluginId) || !pluginRegistry?.list().some(entry => entry.id === pluginId)) {
+      return { ok: false, error: 'invalid_request' }
+    }
+    return {
+      ok: true,
+      value: {
+        logs: pluginBroker?.listLogs(pluginId) ?? [],
+        diagnostics: pluginBroker?.listDiagnostics(pluginId) ?? [],
+      },
+    }
+  })
+  ipcMain.handle('plugin-notifications-list', event => {
+    assertPluginPanelSender(event)
+    return { ok: true, value: pluginFeedController?.listNotifications() ?? [] }
+  })
+  ipcMain.handle('plugin-notifications-read', (event, itemId: unknown) => {
+    assertPluginPanelSender(event)
+    if (!isPluginPanelNotificationId(itemId)) return { ok: false, error: 'invalid_request' }
+    return { ok: true, value: { read: pluginFeedController?.markRead(itemId) ?? false } }
+  })
+  ipcMain.handle('plugin-notifications-clear', (event, pluginId: unknown) => {
+    assertPluginPanelSender(event)
+    if (pluginId !== undefined && !isPluginPanelPluginId(pluginId)) return { ok: false, error: 'invalid_request' }
+    return { ok: true, value: { removed: pluginFeedController?.clear(pluginId) ?? 0 } }
   })
 }
 

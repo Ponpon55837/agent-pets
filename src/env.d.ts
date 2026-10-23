@@ -14,7 +14,17 @@ import type {
   DiagnosticReport,
 } from '@/types/agent-adapter'
 import type { PresentationIntent, PresentationStatusUpdate } from '@/types/presentation'
-import type { PluginFeedItem } from '@/types/plugin'
+import type {
+  PluginBrokerDiagnostic,
+  PluginBrokerLogEntry,
+  PluginFeedItem,
+  PluginInstallPlan,
+  PluginNotificationRecord,
+  PluginPanelPlugin,
+  PluginPanelResult,
+  PluginPanelSnapshot,
+  PluginPreferences,
+} from '@/types/plugin'
 import type {
   ProjectMcpRegistrySnapshot,
   ProjectMcpRemovalSummary,
@@ -38,6 +48,17 @@ declare global {
       getPluginFeedUnreadCount: () => Promise<number>
       completePluginFeed: (itemId: string) => Promise<boolean>
       openPluginFeedLink: (itemId: string) => Promise<boolean>
+      getPluginPanelSnapshot: () => Promise<PluginPanelResult<PluginPanelSnapshot>>
+      setPluginGlobalPreferences: (patch: unknown) => Promise<PluginPanelResult<PluginPreferences>>
+      setPluginInstancePreferences: (pluginId: string, patch: unknown) => Promise<PluginPanelResult<PluginPreferences>>
+      selectPluginArchive: () => Promise<PluginPanelResult<PluginInstallPlan>>
+      installPluginPlan: (token: string, acceptAdditionalPermissions: boolean) => Promise<PluginPanelResult<PluginPanelPlugin>>
+      removeInstalledPlugin: (pluginId: string, keepData: boolean) => Promise<PluginPanelResult<{ removed: true; keptData: boolean }>>
+      getPluginDiagnostics: (pluginId: string) => Promise<PluginPanelResult<{ logs: PluginBrokerLogEntry[]; diagnostics: PluginBrokerDiagnostic[] }>>
+      listPluginNotifications: () => Promise<PluginPanelResult<PluginNotificationRecord[]>>
+      markPluginNotificationRead: (itemId: string) => Promise<PluginPanelResult<{ read: boolean }>>
+      clearPluginNotifications: (pluginId?: string) => Promise<PluginPanelResult<{ removed: number }>>
+      onPluginNotificationsChanged: (callback: () => void) => () => void
       publishPresentationStatus: (snapshot: PresentationStatusUpdate) => void
       startDrag: () => void
       notifyDragEnd: (moved: boolean) => void

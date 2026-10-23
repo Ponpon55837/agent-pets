@@ -1,0 +1,33 @@
+export function isPluginPanelPluginId(value: unknown): value is string {
+  return typeof value === 'string' && /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/.test(value)
+}
+
+export function isPluginPanelNotificationId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{8,80}$/.test(value)
+}
+
+export function isPluginPanelPreferencePatch(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) return false
+  const keys = Object.keys(value)
+  if (keys.length > 16) return false
+  try {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8') <= 16 * 1024
+  } catch {
+    return false
+  }
+}
+
+export function isPluginPanelInstallConfirmation(token: unknown, acceptAdditionalPermissions: unknown): token is string {
+  return typeof token === 'string' && token.length > 0 && token.length <= 128
+    && typeof acceptAdditionalPermissions === 'boolean'
+}
+
+export function pluginPanelErrorCode(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error && error.code === 'unsafe_file') {
+    return 'preferences_unsafe'
+  }
+  if (error instanceof TypeError) return 'invalid_request'
+  return 'plugin_action_failed'
+}

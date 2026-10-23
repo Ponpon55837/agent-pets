@@ -129,3 +129,53 @@ export type PluginErrorCode =
   | 'not_found'
 
 export type PluginRuntimeState = 'installed' | 'enabled' | 'disabled_crashed' | 'incompatible'
+
+export type PluginInstallKind = 'new' | 'update' | 'downgrade' | 'reinstall' | 'incompatible'
+
+export interface PluginInstallPlan {
+  token: string
+  kind: PluginInstallKind
+  pluginId?: string
+  name?: PluginLocalizedText
+  version?: string
+  author?: string
+  previousVersion?: string
+  permissions?: PluginManifest['permissions']
+  contributes?: PluginManifest['contributes']
+  addedPermissions: string[]
+  requiresReconsent: boolean
+}
+
+export interface PluginPanelPlugin {
+  id: string
+  currentVersion: string
+  status: PluginRuntimeState
+  installedAt: number
+  grantedPermissions: unknown
+  manifest: PluginManifest | null
+  preference: PluginInstancePreferences
+}
+
+export interface PluginBrokerLogEntry {
+  at: number
+  level: 'info' | 'warn' | 'error'
+  message: string
+}
+
+export interface PluginBrokerDiagnostic {
+  at: number
+  code: PluginErrorCode
+  method?: string
+}
+
+export interface PluginPanelSnapshot {
+  preferences: PluginPreferences
+  plugins: PluginPanelPlugin[]
+}
+
+export interface PluginNotificationRecord {
+  item: PluginFeedItem
+  read: boolean
+}
+
+export type PluginPanelResult<T> = { ok: true; value: T } | { ok: false; error: string; cancelled?: boolean }

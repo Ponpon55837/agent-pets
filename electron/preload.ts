@@ -7,7 +7,17 @@ import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '.
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 import type { PetBehaviorManifest } from '../src/types/pet'
 import type { PresentationIntent, PresentationStatusUpdate } from '../src/types/presentation'
-import type { PluginFeedItem } from '../src/types/plugin.ts'
+import type {
+  PluginBrokerDiagnostic,
+  PluginBrokerLogEntry,
+  PluginFeedItem,
+  PluginInstallPlan,
+  PluginNotificationRecord,
+  PluginPanelPlugin,
+  PluginPanelResult,
+  PluginPanelSnapshot,
+  PluginPreferences,
+} from '../src/types/plugin.ts'
 import type {
   ProjectMcpRegistrySnapshot,
   ProjectMcpRemovalSummary,
@@ -53,6 +63,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPluginFeedUnreadCount: (): Promise<number> => ipcRenderer.invoke('plugin-feed-unread-count'),
   completePluginFeed: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-complete', itemId),
   openPluginFeedLink: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-open-link', itemId),
+  getPluginPanelSnapshot: (): Promise<PluginPanelResult<PluginPanelSnapshot>> => ipcRenderer.invoke('plugin-panel-snapshot'),
+  setPluginGlobalPreferences: (patch: unknown): Promise<PluginPanelResult<PluginPreferences>> => ipcRenderer.invoke('plugin-preferences-global-set', patch),
+  setPluginInstancePreferences: (pluginId: string, patch: unknown): Promise<PluginPanelResult<PluginPreferences>> => ipcRenderer.invoke('plugin-preferences-instance-set', pluginId, patch),
+  selectPluginArchive: (): Promise<PluginPanelResult<PluginInstallPlan>> => ipcRenderer.invoke('plugin-install-select'),
+  installPluginPlan: (token: string, acceptAdditionalPermissions: boolean): Promise<PluginPanelResult<PluginPanelPlugin>> => ipcRenderer.invoke('plugin-install-confirm', token, acceptAdditionalPermissions),
+  removeInstalledPlugin: (pluginId: string, keepData: boolean): Promise<PluginPanelResult<{ removed: true; keptData: boolean }>> => ipcRenderer.invoke('plugin-remove', pluginId, keepData),
+  getPluginDiagnostics: (pluginId: string): Promise<PluginPanelResult<{ logs: PluginBrokerLogEntry[]; diagnostics: PluginBrokerDiagnostic[] }>> => ipcRenderer.invoke('plugin-diagnostics', pluginId),
+  listPluginNotifications: (): Promise<PluginPanelResult<PluginNotificationRecord[]>> => ipcRenderer.invoke('plugin-notifications-list'),
+  markPluginNotificationRead: (itemId: string): Promise<PluginPanelResult<{ read: boolean }>> => ipcRenderer.invoke('plugin-notifications-read', itemId),
+  clearPluginNotifications: (pluginId?: string): Promise<PluginPanelResult<{ removed: number }>> => ipcRenderer.invoke('plugin-notifications-clear', pluginId),
+  onPluginNotificationsChanged: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('plugin-notifications-changed', handler)
+    return () => ipcRenderer.removeListener('plugin-notifications-changed', handler)
+  },
   publishPresentationStatus: (snapshot: PresentationStatusUpdate) => {
     ipcRenderer.send('presentation-status-update', snapshot)
   },
