@@ -235,6 +235,20 @@ export class PluginRegistry {
     }
   }
 
+  setStatus(pluginId: string, status: PluginRuntimeState): boolean {
+    if (!PLUGIN_ID.test(pluginId)
+      || (status !== 'installed' && status !== 'enabled' && status !== 'disabled_crashed' && status !== 'incompatible')) return false
+    try {
+      const entries = readRegistry(this.registryPath)
+      const current = entries[pluginId]
+      if (!current) return false
+      atomicWriteJson(this.registryPath, { plugins: { ...entries, [pluginId]: { ...current, status } } })
+      return true
+    } catch {
+      return false
+    }
+  }
+
   planInstall(archive: Uint8Array): PluginRegistryResult<PluginInstallPlan> {
     if (!(archive instanceof Uint8Array) || archive.byteLength > PLUGIN_ARCHIVE_MAX_BYTES) {
       return { ok: false, error: 'archive_too_large' }

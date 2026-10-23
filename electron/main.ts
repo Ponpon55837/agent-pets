@@ -39,6 +39,12 @@ import {
 } from './presentation-controller'
 import { ProjectMcpRegistryStore } from './project-mcp-registry'
 import { ProjectRoutingStore } from './project-routing'
+import { PluginRegistry } from './plugin-registry'
+import { PluginPreferencesStore } from './plugin-preferences'
+import { PluginHostWindowController, type PluginHostDescriptor } from './plugin-host-window'
+import { handlePluginProtocolRequest } from './plugin-protocol'
+import { pluginHostAssets } from './plugin-host-assets'
+import { parsePluginManifest } from './plugin-manifest'
 import {
   createPermissionAdapterServer,
   PERMISSION_ADAPTER_PORT,
@@ -117,6 +123,9 @@ let presentationController: PresentationController | null = null
 let presentationMcpServer: Server | null = null
 let projectMcpRegistry: ProjectMcpRegistryStore | null = null
 let projectRoutingStore: ProjectRoutingStore | null = null
+let pluginRegistry: PluginRegistry | null = null
+let pluginPreferences: PluginPreferencesStore | null = null
+let pluginHostWindow: PluginHostWindowController | null = null
 let presentationStatusProjection: PresentationStatusSnapshot = {
   activePets: [],
   dnd: false,
@@ -453,6 +462,12 @@ function configureSecureProtocol(): void {
     try {
       const url = new URL(request.url)
       const pathname = decodeURIComponent(url.pathname)
+      if (url.hostname === 'plugin') {
+        return handlePluginProtocolRequest(request.url, {
+          pluginRootForId: enabledPluginRoot,
+          hostAssets: pluginHostAssets,
+        })
+      }
       if (url.hostname === 'app') {
         const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
         const data = readRegularFileWithin(resolve(join(__dirname, '../dist')), relativePath, 25 * 1024 * 1024)
@@ -480,6 +495,67 @@ function configureSecureProtocol(): void {
       }
     } catch {}
     return new Response('Not found', { status: 404 })
+  })
+}
+
+function enabledPluginRoot(pluginId: string): string | null {
+  const preferences = pluginPreferences?.get()
+  if (!preferences?.pluginsEnabled || !preferences.plugins[pluginId]?.enabled) return null
+  const entry = pluginRegistry?.list().find(plugin => plugin.id === pluginId)
+  if (!entry || (entry.status !== 'installed' && entry.status !== 'enabled')) return null
+  return resolve(app.getPath('userData'), 'plugins', entry.id, entry.currentVersion)
+}
+
+function enabledPluginDescriptors(): PluginHostDescriptor[] {
+  const preferences = pluginPreferences?.get()
+  if (!preferences?.pluginsEnabled) return []
+  const installed = pluginRegistry?.list() ?? []
+  const candidates = installed.filter(entry => (
+    (entry.status === 'installed' || entry.status === 'enabled')
+    && preferences.plugins[entry.id]?.enabled === true
+  ))
+  if (candidates.length > preferences.resources.maxEnabledPlugins) return []
+  return candidates.flatMap((entry) => {
+    const root = enabledPluginRoot(entry.id)
+    if (!root) return []
+    const source = readRegularFileWithin(root, 'plugin.json', 256 * 1024)
+    if (!source) return []
+    try {
+      const parsed = parsePluginManifest(JSON.parse(source.toString('utf8')) as unknown)
+      return parsed.ok ? [{ id: entry.id, entry: parsed.manifest.entry }] : []
+    } catch {
+      return []
+    }
+  })
+}
+
+function syncPluginHost(): void {
+  pluginHostWindow?.sync(enabledPluginDescriptors())
+}
+
+function createPluginServices(): void {
+  if (pluginRegistry || pluginPreferences || pluginHostWindow) return
+  const userDataDirectory = app.getPath('userData')
+  pluginRegistry = new PluginRegistry(userDataDirectory)
+  pluginPreferences = new PluginPreferencesStore(userDataDirectory)
+  pluginHostWindow = new PluginHostWindowController({
+    onRpc: (_pluginId, request) => ({
+      id: request && typeof request === 'object' && !Array.isArray(request)
+        && 'id' in request && typeof request.id === 'string' ? request.id : '',
+      ok: false,
+      error: 'not_permitted',
+    }),
+    onPluginCrash: (pluginId, consecutiveCrashes) => {
+      if (consecutiveCrashes >= 3) {
+        try { pluginRegistry?.setStatus(pluginId, 'disabled_crashed') } catch {}
+        try { pluginPreferences?.updatePlugin(pluginId, { enabled: false }) } catch {}
+        syncPluginHost()
+      }
+    },
+    getMemoryBudgetMb: activePluginCount => {
+      const perPlugin = pluginPreferences?.get().resources.memoryMbPerPlugin ?? 0
+      return perPlugin * activePluginCount
+    },
   })
 }
 
@@ -811,6 +887,8 @@ function createPetWindow() {
     },
   })
   petCaptureProtectionApplied = null
+
+  petWindow.once('ready-to-show', syncPluginHost)
 
   secureRendererWindow(petWindow)
 
@@ -1748,6 +1826,7 @@ app.whenReady().then(() => {
     join(app.getPath('userData'), 'project-mcp-registry.json'),
   )
   createProjectRoutingServices()
+  createPluginServices()
   const permissionToken = ensurePermissionToken()
   const presentationToken = ensurePresentationToken()
   configureSecureProtocol()
@@ -2753,6 +2832,8 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  pluginHostWindow?.close()
+  pluginHostWindow = null
   windowsFullscreenDetector?.stop()
   windowsFullscreenDetector = null
   if (panelBlurHideHandle) clearTimeout(panelBlurHideHandle)
