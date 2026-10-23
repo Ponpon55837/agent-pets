@@ -90,3 +90,25 @@
 - `pet.status()`／`onStatusChange` 欄位恰為規定的七個，`agentFamily` 正確。
 - `schedule` 最短間隔被拉高到偏好下限。
 - §7.1 中 P14.6 的 13 個頁面（中英文）、`plugin.schema.json`、`.d.ts`、`hello-feed` 與 `github-pr-watch` 範例皆已建立（內容依 N6 修正）。
+
+## 修正複檢結果（2026-10-23）
+
+- 複檢對象：`b11f4b2..623fa1e`（`732a58e` 程式修正、`623fa1e` 報告）。
+- 重跑檢查：`vue-tsc` 通過、`pnpm test:unit` 276/276、`vite build` 通過、`git diff --check` 通過、`pnpm audit --prod` 無弱點。
+- 程式審查：網路改用 `net.request`（插件專用 session、`redirect: 'manual'`、`useSessionCookies: false`），收到 `redirect` 事件即中止並交回逐跳檢查迴圈重發；移除 `Cookie`、`Accept-Language`，`User-Agent` 固定為 `AgentPetsPlugin/1`，並在 session 層剝除 `Set-Cookie`；IP 黑名單補齊 N5 各網段，NAT64／6to4 會取出內嵌 IPv4 判斷；密鑰新增一次性同意，同意前不呼叫 `safeStorage`。
+- **Electron 實機（隔離環境，先以「會計數的假 `safeStorage`」取代真實實作，全程未觸碰鑰匙圈）**：
+
+| 項目 | 結果 |
+|---|---|
+| N1 `/redirect/1`、`/relative-redirect/2` | 200 ✅ |
+| N1 `/redirect/5` | `too_many_redirects` ✅ |
+| N1 轉址到 `localtest.me`／`169.254.169.254`／未宣告網域 | 皆 `host_not_allowed` ✅ |
+| N1 跨來源轉址（`httpbin.org` → `www.httpbin.org/headers`） | 目的端看不到 `Authorization` ✅；同來源請求仍保留 ✅ |
+| N2 設定 cookie 後讀 `/cookies` | `{"cookies":{}}` ✅；`/headers` 無 `Cookie`、`User-Agent` 為 `AgentPetsPlugin/1` ✅ |
+| N4 啟動、開面板、安裝與啟用插件、讀設定快照 | `safeStorage` 呼叫次數 0 ✅ |
+| N4 未同意說明就存密鑰 | 回 `secret_consent_required`，呼叫次數仍 0 ✅ |
+| N3 同意後只存密鑰 | 插件 `settings.onChange` 被呼叫並讀到新值 ✅（此時才呼叫 `safeStorage`：isEncryptionAvailable 2、encrypt 1、decrypt 1） |
+
+- 結論：**N1–N6 修正確認，Phase 14 通過**，可進 Phase 15。
+- 觀察：`pnpm-lock.yaml` 有 1 行 `glob@7.2.3` 的 deprecated 說明文字變動（pnpm 重新產生的中繼資料），不影響版本與相依，保留。
+- 未驗證：真實 macOS 鑰匙圈（依規定不在自動化中觸發）、真實 Codex／Claude adapter 事件、原生 `requestHost` 確認框的點擊、Windows。DNS rebinding 依 N5 理由列為已知殘餘風險。
