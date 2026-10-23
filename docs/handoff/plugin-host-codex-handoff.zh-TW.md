@@ -356,16 +356,19 @@ Phase 最後一個 checkpoint 必須：
 ### P14.6 開發者模式與對外規格
 
 - 開發者模式（進階頁的開關，預設關）：開啟後可「從資料夾載入插件」，略過打包但 **其他驗證完全相同**；資料夾內檔案變更時（`fs.watch`，debounce 500ms）自動重新載入該插件；面板標示「開發中」。
-- 對外規格（給第三方作者）：
-  - `docs/plugins/README.zh-TW.md` 與 `docs/plugins/README.md`：manifest 欄位、權限、插入點、Host API、限制與錯誤碼、打包方式（就是 zip 改副檔名）、開發者模式用法、安全限制。
-  - `docs/plugins/plugin.schema.json`：manifest 的 JSON Schema（與 `parsePluginManifest` 一致；在測試中加一個檢查，確保 schema 中的必要欄位與驗證器一致）。
-  - `docs/plugins/agent-pets-plugin.d.ts`：Host API 型別。
+- 對外開發者文件（給第三方作者），結構見下方 §7.1「插件開發者文件規格」。本 checkpoint 要完成：
+  - `docs/plugins/README.zh-TW.md` 與 `docs/plugins/README.md`（索引頁）。
+  - §7.1 中標示 **P14.6** 的所有頁面（中英文各一份）。
+  - `docs/plugins/plugin.schema.json`：manifest 的 JSON Schema（與 `parsePluginManifest` 一致；在測試中加一個檢查，確保 schema 中的必要欄位、列舉值與驗證器一致）。
+  - `docs/plugins/agent-pets-plugin.d.ts`：Host API 型別，每個方法附 JSDoc（用途、需要的權限、可能的錯誤碼、範例）。
+  - 文件中的範例程式碼放在 `docs/plugins/examples/<名稱>/`（`plugin.json` + `dist/main.js`），**只供參考，不打包、不隨 App 發佈**；新增一個測試確認每個範例的 `plugin.json` 都能通過 `parsePluginManifest`。
 - 寫 `docs/phase-reports/phase-14-plugin-network-settings.md`。驗收：
   - [ ] 測試插件透過 manifest host 成功 fetch；未宣告 host、http、IP、localhost、私有網段、redirect 到私有網段全部被擋。
   - [ ] `requestHost` 確認框、拒絕冷卻、申請速率、撤銷都實測。
   - [ ] 密鑰加密儲存、不回顯、移除時刪除。
   - [ ] `onStatusChange` 在 Codex／Claude 狀態改變時收到事件，欄位只有規定的那些。
   - [ ] 開發者模式資料夾載入與自動重載。
+  - [ ] **照 `docs/plugins/getting-started` 入門教學從零做一個插件，用開發者模式載入，在隔離 Electron 中確認泡泡出現**；教學中任何與實際不符的步驟都要修正文件。
 - 停止並回報。
 
 ---
@@ -401,6 +404,7 @@ Phase 最後一個 checkpoint 必須：
 - 測試插件 `ok-panel`（顯示 storage 內容、與 Worker 互傳訊息）與 `evil-panel`（嘗試 fetch、`window.open`、`location = 'https://...'`、`window.parent`、`top`、下載、`navigator.mediaDevices.getUserMedia`、拖放、畫一個長得像權限確認框的畫面）。
 - 在 `pnpm dev` 實測並記錄每一項。
 - 視覺：外框在深色／淺色、高對比、reduced motion 下正確；面板縮放時 `WebContentsView` bounds 正確。
+- 開發者文件：完成 §7.1 中標示 **P15** 的頁面（面板頁開發指南），更新索引頁、`agent-pets-plugin.d.ts`（`ui.postMessage`／`onMessage`、`preferredSize`）、`plugin.schema.json`，並新增 `docs/plugins/examples/panel-demo/`（面板頁與背景互傳訊息的最小範例）。在隔離 Electron 中載入這個範例確認可用。
 - 寫 `docs/phase-reports/phase-15-plugin-panel-view.md`。
 - 停止並回報。
 
@@ -470,7 +474,40 @@ Phase 最後一個 checkpoint 必須：
   - 更新規劃文件狀態為「已實作（Phase 12–16）」，並列出實作與規劃的差異。
   - 執行一次 `pnpm build:fast`（會打包；確認打包後插件功能可用，至少安裝 `ok-notify` 與 `ok-skin` 驗證），在報告記錄。
   - 另寫 `docs/phase-reports/plugin-host-summary.md`：Phase 12–16 總覽、所有 checkpoint commit、整體殘餘風險、建議版本 `1.3.0`。
+  - 開發者文件收尾：
+    - 完成 §7.1 中標示 **P16** 的頁面，並把 `commands`、`tray`、`badge`、`skins` 補進 API 參考、權限顯示文字、限制表、錯誤碼表。
+    - 新增範例：`docs/plugins/examples/pomodoro/`（番茄鐘，只用 `agentStatus`、`schedule`、`feed`、`badge`）、`docs/plugins/examples/skin-pack/`（只有外觀、沒有 entry）。
+    - 全文校對：每個 API、權限、錯誤碼、上限數值都要和程式碼一致（列出比對結果）；中英文兩份內容一致；所有連結有效。
+    - **驗收**：照入門教學從零做一個插件、照面板頁指南做一個面板頁、安裝 `skin-pack` 範例，三者都在隔離 Electron 中成功；把過程寫進 summary 報告。
 - 停止並回報。**不要改版本號**；版本由使用者確認後另外處理。
+
+---
+
+## 7.1 插件開發者文件規格
+
+目標讀者是 **沒看過本 repo 原始碼的第三方開發者**。原則：
+
+- 中英文各一份，檔名 `<頁面>.zh-TW.md` 與 `<頁面>.md`，內容一致。
+- 每個 API 都要有可以直接複製的範例，以及失敗時會發生什麼（錯誤碼、使用者看到什麼）。
+- 所有數值（上限、速率、大小）都要寫出來，並與程式碼一致；改程式時要同步改文件。
+- 不寫內部實作細節（Main 模組名稱、IPC 頻道），只寫作者看得到的行為。
+
+| 頁面（`docs/plugins/`） | 內容 | 完成於 |
+|---|---|---|
+| `README` | 索引：插件能做什麼、不能做什麼（一段話）、各頁連結、目前 `apiVersion` | P14.6（P15、P16 更新） |
+| `getting-started` | 入門教學：建立資料夾 → 寫 `plugin.json` 與 `dist/main.js` → 開啟開發者模式 → 從資料夾載入 → 看到泡泡 → 改程式自動重載 → 打包成 `.agentpet-plugin` → 安裝。目標 10 分鐘完成。 | P14.6 |
+| `manifest` | `plugin.json` 每個欄位：型別、必填與否、格式規則、上限、範例；`entry` 何時可省略（P16 補） | P14.6（P16 更新） |
+| `permissions` | 每個權限：用途、宣告方式、**安裝確認框顯示的繁中／英文原文**、`network.userGranted` 與 `requestHost` 的確認流程、權限增加時更新需要重新同意 | P14.6（P16 更新） |
+| `api-reference` | Host API 每個方法：簽名、需要的權限、回傳值、會 reject 的錯誤碼、範例；說明呼叫成功時直接回傳值、失敗時丟出帶 `code` 的 `Error` | P14.6（P15、P16 更新） |
+| `contribution-points` | `feed`、`reaction`、`settings`、`agentStatus`（P14.6）；`panelView`（P15）；`commands`、`tray`、`badge`、`skins`（P16）：每個在畫面上長什麼樣子、顯示優先順序、使用者能做的操作 | P14.6／P15／P16 |
+| `sandbox` | 執行環境：背景程式跑在受限 Worker；**被移除或被擋的 Web API 清單**（`fetch`、`WebSocket`、`XMLHttpRequest`、`EventSource`、`indexedDB`、`caches`、`BroadcastChannel`、巢狀 `Worker` 等）與替代做法（`api.net.fetch`、`api.storage`）；不能存取其他插件 | P14.6 |
+| `limits` | 規劃文件 §3.4 的預設值與硬上限表、通知速率與佇列、TTL、文字長度、`storage` 大小、`net.fetch` 大小／逾時／次數、`schedule` 最短間隔；超過時的行為 | P14.6（P16 更新） |
+| `notifications` | 通知何時會出現、何時進通知中心（勿擾、寵物縮小或隱藏、靜音、速率超過）、`dedupeKey` 用法、連結限制、與 Agent 泡泡的優先順序 | P14.6 |
+| `debugging` | 開發者模式、在哪看 log 與被拒原因、常見問題（插件被停用＝連續崩潰 3 次、通知沒跳出來、`host_not_allowed`、`rate_limited`、`not_permitted` 的原因與處理）、心跳逾時的條件 | P14.6 |
+| `packaging-and-versioning` | 打包規則（zip 結構、允許的副檔名、大小與檔案數上限）、版本號、更新與降版時使用者看到什麼、`apiVersion` 相容與過渡期規則 | P14.6 |
+| `security` | 給作者的安全須知：插件被視為不受信任、不要在 log 或通知放密鑰、密鑰只透過 `secrets` 讀取、使用者可隨時撤銷權限 | P14.6 |
+| `panel-view` | 面板頁開發指南：檔案放哪、`preferredSize`、可用的 API 子集（沒有 `secrets.get`、`requestHost`）、被禁止的行為（連網、開新視窗、導覽、下載、拖放）、`ui.postMessage`／`onMessage` 與背景互傳、`tokens.css` 用法、外框由宿主繪製 | P15 |
+| `examples` | 各範例的說明與連結：`hello-feed`（P14.6，入門教學的完成版）、`github-pr-watch`（P14.6，示範 `network`、`secrets`、`schedule`、`dedupeKey`）、`panel-demo`（P15）、`pomodoro`、`skin-pack`（P16） | P14.6／P15／P16 |
 
 ---
 
