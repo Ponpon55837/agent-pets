@@ -14,7 +14,7 @@ import { join, resolve } from 'path'
 import { request as httpRequest, type Server } from 'node:http'
 import * as fs from 'fs'
 import * as path from 'path'
-import { unzipSync } from 'fflate'
+import { guardArchive } from './archive-guard.ts'
 import { createEventServer } from './event-server'
 import { createAgentAdapterRegistry, isAgentAdapterId, type AgentAdapterRegistry } from './agent-adapter'
 import { createAgentAdapterOperations } from './agent-adapter-operations'
@@ -2627,33 +2627,36 @@ app.whenReady().then(() => {
         return { ok: false, error: 'Zip must be no larger than 10 MB' }
       }
 
-      let entryCount = 0
-      let uncompressedBytes = 0
-      const entries = unzipSync(new Uint8Array(zipBuf), {
-        filter: (entry) => {
-          entryCount += 1
-          if (entryCount > MAX_PET_ZIP_ENTRIES) {
-            throw new Error('Zip contains too many entries')
-          }
-          if (!Number.isFinite(entry.originalSize) || entry.originalSize < 0) {
-            throw new Error('Zip contains an invalid entry size')
-          }
-          uncompressedBytes += entry.originalSize
-          if (uncompressedBytes > MAX_PET_UNCOMPRESSED_BYTES) {
-            throw new Error('Zip expands beyond the 25 MB safety limit')
-          }
-          const baseName = path.basename(entry.name)
-          return /^pet\.json$/i.test(baseName) || /\.(webp|png|jpe?g)$/i.test(baseName)
-        },
+      const guarded = guardArchive(new Uint8Array(zipBuf), {
+        maxTotalBytes: MAX_PET_UNCOMPRESSED_BYTES,
+        maxFileBytes: MAX_PET_UNCOMPRESSED_BYTES,
+        maxFiles: MAX_PET_ZIP_ENTRIES,
+        allowedExtensions: ['.json', '.webp', '.png', '.jpg', '.jpeg'],
+        rejectUnsupportedExtensions: false,
+        includePath: relativePath => /(^|\/)pet\.json$/i.test(relativePath)
+          || /\.(webp|png|jpe?g)$/i.test(relativePath),
       })
+      if (!guarded.ok) {
+        const error = guarded.error === 'file_limit_exceeded'
+          ? 'Zip contains too many entries'
+          : guarded.error === 'total_size_exceeded' || guarded.error === 'file_size_exceeded'
+            ? 'Zip expands beyond the 25 MB safety limit'
+            : guarded.error === 'unsafe_path' || guarded.error === 'duplicate_path'
+              ? 'Zip contains an unsafe or duplicate path'
+              : 'Invalid zip archive'
+        return { ok: false, error }
+      }
+      const entries = guarded.files
+      const entryNames = [...entries.keys()]
 
-      const petJsonName = Object.keys(entries).find((name) => /(^|\/)pet\.json$/i.test(name))
+      const petJsonName = entryNames.find((name) => /(^|\/)pet\.json$/i.test(name))
       if (!petJsonName) return { ok: false, error: 'No pet.json found in this zip' }
-      if (entries[petJsonName].byteLength > MAX_PET_JSON_BYTES) {
+      const petJsonBytes = entries.get(petJsonName)
+      if (!petJsonBytes || petJsonBytes.byteLength > MAX_PET_JSON_BYTES) {
         return { ok: false, error: 'pet.json exceeds the 256 KB safety limit' }
       }
 
-      const petData = JSON.parse(Buffer.from(entries[petJsonName]).toString('utf-8'))
+      const petData = JSON.parse(Buffer.from(petJsonBytes).toString('utf-8'))
       const rawId = String(petData.id || petData.displayName || `imported-${Date.now()}`)
       const safeId = sanitizePetId(rawId) || sanitizePetId(`pet-${Date.now()}`)
       if (!safeId) return { ok: false, error: 'Could not derive a valid pet id' }
@@ -2663,10 +2666,11 @@ app.whenReady().then(() => {
         ? path.basename(String(petData.spritesheetPath)).toLowerCase()
         : null
       const spriteName =
-        Object.keys(entries).find((name) => path.basename(name).toLowerCase() === wantedBase) ??
-        Object.keys(entries).find((name) => imageExt.test(name))
+        entryNames.find((name) => path.basename(name).toLowerCase() === wantedBase) ??
+        entryNames.find((name) => imageExt.test(name))
       if (!spriteName) return { ok: false, error: 'No spritesheet image found in this zip' }
-      const spriteData = entries[spriteName]
+      const spriteData = entries.get(spriteName)
+      if (!spriteData) return { ok: false, error: 'No spritesheet image found in this zip' }
       if (spriteData.byteLength > MAX_PET_IMAGE_BYTES) {
         return { ok: false, error: 'Spritesheet exceeds the 20 MB safety limit' }
       }
