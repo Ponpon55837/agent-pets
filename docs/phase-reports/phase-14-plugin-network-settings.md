@@ -2,7 +2,7 @@
 
 - 日期：2026-10-23
 - 目前版本：`1.2.4`（未修改）
-- 階段狀態：P14.1–P14.6 實作完成；各 checkpoint 的 §0.4 四項檢查通過並已推送。隔離 Electron 已驗證多條真實 Host API 路徑；密鑰加密、外部 redirect 來源及真實 Agent adapter 仍有明確未驗證項目。
+- 階段狀態：P14.1–P14.6 實作及複檢修正均完成；N1–N6 的最新檢查、Electron 實測與安全結果見本文「複檢修正」。真實 macOS Keychain 與真實 Agent adapter 仍未驗證。
 - 建議版本：`1.3.0`（Phase 12–16 整體 minor 建議；本階段不改版）
 - 分支：`feat/plugin-host`
 - `origin/main`：`package.json` 的 Vue 為 `^3.5.44`。`git merge origin/main` 回報 `Already up to date`；主線已在本分支祖先中，沒有新增 merge commit，也沒有合併到 main。
@@ -41,9 +41,9 @@ P14.1–P14.6 各 checkpoint 均依序通過相同四項檢查後才 commit、pu
 
 | 驗收條件 | 結果 | 證據與限制 |
 |---|---|---|
-| manifest host 可 fetch；未宣告 host、HTTP、IP、localhost、私有網段及 redirect 私有目標都阻擋 | 部分隔離 Electron 驗證；純模組測試通過 | Electron 中 `api.github.com` 請求收到 HTTP 404，證明請求完成並取得 HTTP 回應；未宣告 host、HTTP、公開 IP literal、localhost、私有 IP 均記錄 `host_not_allowed`。外部 `httpbin.org` redirect source 在此環境不可達；透過 CDP 注入 302 `Location: https://127.0.0.1/` 後，實際插件 API 記錄 `host_not_allowed`。redirect 私有目標另有單元測試。外部 redirect source 本身未驗證。 |
+| manifest host 與逐跳 redirect | 複檢隔離 Electron 通過 | httpbin.org 的絕對／相對 redirect 成功；localtest.me、169.254.169.254 與未宣告網域目標均遭拒；跨來源後 Authorization 已移除。原始 P14.6 的未驗證狀態由複檢結果更新。 |
 | `requestHost` 確認、拒絕冷卻、申請速率與撤銷 | Host API 邏輯通過隔離 Electron 驗證；確認框視覺操作未驗證 | 對話框回應以 CDP stub 分別模擬允許與拒絕。拒絕 `example.com` 後再次申請回 `denied`；兩個公開網域成功加入 `grantedHosts`；同一插件第 4 次申請回 `rate_limited`；面板將授權清單設為空後確認已撤銷。 |
-| 密鑰加密儲存、不回顯、移除時刪除 | 未驗證 | 使用者要求不得觸碰電腦密碼鑰匙圈，因此沒有再執行任何密鑰讀寫或加密儲存驗收。先前隔離環境回報 `safeStorage.isEncryptionAvailable() === false`，假值寫入回 `secret_unavailable`；這不代表加密成功。單元測試以隔離 fake safeStorage 覆蓋加密、讀取權限及移除行為。 |
+| 密鑰保護、設定通知與無密鑰行為 | fake safeStorage 的隔離 Electron 及單元測試通過；真實 Keychain 未觸碰 | secret-only 儲存觸發只含非密鑰欄位的 settings.onChange；無密鑰啟動、面板與設定快照時 safeStorage 呼叫數均為 0。真實 macOS Keychain 加密仍未驗證。 |
 | `onStatusChange` 接收 Codex／Claude 狀態變更且只含規定欄位 | 部分隔離 Electron 驗證；真實 Agent adapter 未驗證 | 寵物視窗透過現有 Presentation 投影管線注入 `agentFamily: 'claude-code'` 狀態變更；插件收到事件，欄位為 `agentFamily, at, dnd, name, petId, previousState, visibleState`。這是隔離注入，不是真實 Codex／Claude 程序事件。純模組測試確認 status object 欄位集合。 |
 | 開發者模式資料夾載入與自動重載 | 隔離 Electron 通過 | 開啟開發者模式，載入 `hello-feed` 資料夾，寵物 DOM 出現 `Hello Feed` 泡泡；修改來源後 watcher 重新載入插件。 |
 | 依入門教學從零建立插件，在隔離 Electron 載入並看到泡泡；打包並安裝 | 隔離 Electron 通過 | 建立 `plugin.json` 與 `dist/main.js`、資料夾載入並看到泡泡、編輯來源觸發自動重載。依修正後命令在來源資料夾內執行 `zip -r ../hello-feed.agentpet-plugin plugin.json dist/`，輸出檔列出三個預期項目；面板 `selectPluginArchive()` 回傳安裝計畫，`installPluginPlan()` 成功安裝。 |
@@ -51,27 +51,27 @@ P14.1–P14.6 各 checkpoint 均依序通過相同四項檢查後才 commit、pu
 
 ## Electron 實機驗證
 
-依 §0.4a 使用暫存 `HOME` 與 `user-data-dir` 啟動 Electron，沒有使用已安裝 App 的資料目錄；透過 9348／9349 CDP target 執行面板、寵物與 main 的測試操作，結束時已關閉隔離程序。此環境的 17373–17375 埠已被既有 App 使用，啟動時出現 handoff 註明可接受的 port-in-use 訊息；另看到既有 `project-pets-get-enabled` unauthorized IPC 記錄，未由本 Phase 引入或修改。
+原始 P14.6 Electron 驗收記錄如下；本次複檢另使用主程序預載 hook 將 app userData 明確指向新的暫存目錄，並在插件啟用前確認 safeStorage 假實作。
 
 | 實測項目 | 步驟與觀察結果 |
 |---|---|
 | 教學資料夾載入與通知泡泡 | 面板選取 `hello-feed` 開發資料夾並啟用；寵物視窗 `.plugin-feed-toast` 顯示 `Hello Feed`、`P14 Electron smoke` 與通知內文，並觀察到 `onPluginFeedItem`。 |
 | 開發者 watcher | 修改暫存插件來源後，診斷記錄顯示重新 activate；面板快照標示 `development: true`。 |
 | 教學 archive 安裝 | 從來源目錄依文件命令輸出到上一層；archive chooser 回傳 `kind: reinstall` 安裝計畫，確認後面板回傳安裝成功、`development: false`。 |
-| `net.fetch` 攻擊面 | `evil-network` 真實 Worker 的 log 顯示 manifest host 回應 status 404；未宣告 host、HTTP、IP、localhost、私有網段均被拒。遠端 redirect source 無法連線；注入 302 私有目標後，實際 Host API 阻擋 loopback。 |
+| net.fetch 攻擊面 | 原始驗收未驗證外部 redirect source；本次複檢以真實 httpbin source 完成逐跳檢查，結果見「複檢修正」。 |
 | `requestHost` | 使用暫存插件逐項呼叫；以 CDP 對話框 stub 回應拒絕／同意。診斷顯示拒絕、24 小時同 host 冷卻、每 10 分鐘三次上限；面板快照先顯示已授權 `api.github.com` 與 `www.iana.org`，撤銷後清單為空。 |
 | Storage 與 settings | API smoke log 顯示 storage round-trip 成功及 settings 預設值 `mode: safe`。 |
 | 排程 | manifest 最短間隔為 30 秒、使用者偏好為 60 秒；隔離 Electron 等候後診斷 log 出現 `schedule-fired`。 |
 | Agent 狀態 | 從隔離寵物視窗發布一筆 `claude-code` Presentation snapshot；插件收到 `onStatusChange`，log 中欄位名稱符合 allowlist。只驗證注入快照，不代表真實 Agent integration。 |
-| 密鑰 | 沒有執行加密、回顯或移除測試。隔離環境的 encryption availability 為 false；使用者明確要求不得觸碰電腦密碼鑰匙圈。 |
+| 密鑰 | 本次複檢以隔離 fake safeStorage 驗證無密鑰計數、面板同意說明、合成值讀回及非密鑰 callback；真實 Keychain 未呼叫。 |
 
 ## 安全檢查
 
 - `pnpm audit --prod --audit-level moderate`：通過，`No known vulnerabilities found`。
-- Secret／個資模式掃描：涵蓋 Phase 12 起至本報告草稿的所有追蹤檔案新增內容。私鑰、GitHub／OpenAI／Slack token、AWS key、Google API key 與本機使用者路徑均未命中；Email pattern 命中兩筆測試用 `.example.com` 保留網域佔位值，不含個人郵件；電話 pattern 的 8 筆命中都是網路測試中的 IP 位址形式，沒有電話號碼。commit author email 均使用 GitHub noreply 格式。沒有發現本機使用者路徑、個人聯絡資料或符合憑證模式的值寫入文件／程式碼。
+- Secret／個資模式掃描：本次掃描 Phase 12 起至複檢工作樹的新增內容；私鑰、GitHub／OpenAI／Slack token、AWS key、Google API key、本機使用者路徑與非保留網域 email 均為 0。email-like 命中僅為保留 example 網域測試佔位值；未發現個人聯絡資料或符合憑證模式的值。
 - IPC／最小權限：新 API 透過已驗證插件身分的 Host RPC；面板設定 IPC 綁定可信任面板 sender，並對插件 id、網域、設定 patch 與輸入長度執行執行期驗證。單元測試涵蓋未授權 API、錯誤 payload 與 status 欄位。
 - 網路邊界：只允許 HTTPS、無帳密及空／443 port；manifest／使用者授權網域比對後，每一 redirect 重新檢查 URL、host 與 DNS；解析結果含 loopback、私有、link-local、CGNAT、multicast 與 IPv4-mapped IPv6 即拒絕。仍保留 handoff 指定的 DNS 檢查與實際連線之間時間差風險。
-- 檔案／密鑰／設定：插件資料檔案拒絕 symlink 與非一般檔；偏好和 settings 測試涵蓋安全路徑、原子寫入、大小界限及 schema 驗證。密鑰實機驗收未執行，詳見上文。
+- 檔案／密鑰／設定：插件資料檔案拒絕 symlink 與非一般檔；偏好和 settings 測試涵蓋安全路徑、原子寫入、大小界限及 schema 驗證。fake safeStorage 的密鑰實機與無密鑰計數已驗證；真實 macOS Keychain 未驗證。
 - 通知與 UI：插件文字以純文字呈現，設定與診斷不回傳密鑰原值；回歸測試涵蓋選填 RPC 參數避免 `undefined` 進入 JSON message。
 - 版本／依賴：`package.json` 仍是 `1.2.4`；未新增 runtime dependency，未改 `.claude/`，沒有執行 `pnpm build`。
 
@@ -88,10 +88,52 @@ P14.1–P14.6 各 checkpoint 均依序通過相同四項檢查後才 commit、pu
 7. 啟用有 `agentStatus` 權限的測試插件，透過真實 Codex／Claude 狀態來源切換 idle／busy。預期 callback 僅含 `petId`、`name`、`agentFamily`、`previousState`、`visibleState`、`dnd`、`at`；狀態變化按 1 秒合併。
 8. 設定 `schedule.every(60, ...)`，等待一分鐘。預期診斷出現一次 schedule callback；停用插件後不再有 callback。
 
+## 複檢修正
+
+依 docs/reviews/phase-14-review.md 完成 N1–N6。下方結果更新並取代前文原始 P14.6 驗收時，對 redirect source 與密鑰行為所記錄的未驗證狀態。
+
+| 項目 | 修正內容 | Commit SHA | 新增或更新的測試 |
+|---|---|---|---|
+| N1 | 改用 Electron net.request 與手動逐跳 redirect；每跳檢查 URL、白名單、DNS/IP；跨來源移除 Authorization 與 x-api-key；最多 3 次。 | 732a58e7f54527fd7c75d1c6b2ee36b2ce566975 | tests/plugin-net.test.mts：逐跳 DNS/私有目標、跨來源憑證移除；隔離 Electron 真實 httpbin redirect。 |
+| N2 | 禁用 Session cookies、過濾 Set-Cookie、移除 Accept-Language，使用固定 User-Agent。 | 732a58e7f54527fd7c75d1c6b2ee36b2ce566975 | tests/plugin-net.test.mts：Cookie 回應與請求標頭過濾；隔離 Electron cookie store 與端點測試。 |
+| N3 | 密鑰新增、更新、清除後均發送僅含非密鑰欄位的 settings snapshot。 | 732a58e7f54527fd7c75d1c6b2ee36b2ce566975 | tests/plugin-settings.test.mts：secret-only 更新只發布非密鑰設定；隔離 Electron callback 驗證。 |
+| N4 | 首次儲存前顯示繁中／英文一次性說明；無非空密鑰時不呼叫 safeStorage。 | 732a58e7f54527fd7c75d1c6b2ee36b2ce566975 | tests/plugin-settings.test.mts：無密鑰呼叫數、同意檔與 symlink；隔離 Electron inspector 與面板確認框。 |
+| N5 | 補上 IPv4 特殊用途網段與 IPv6 NAT64、6to4、文件位址和 discard-only 網段，並檢查內嵌 IPv4。 | 732a58e7f54527fd7c75d1c6b2ee36b2ce566975 | tests/plugin-net.test.mts：擴充 IPv4/IPv6 黑名單和 NAT64/6to4 位址案例。 |
+| N6 | 修正 redirect 次數、cookie、settings callback、密鑰同意與 DNS rebinding 文件。 | 732a58e7f54527fd7c75d1c6b2ee36b2ce566975 | tests/plugin-public-docs.test.mts：比對 redirect、cookie、callback、DNS rebinding 文件與實作。 |
+
+### 最終檢查與安全掃描
+
+| 檢查 | 實際結果 |
+|---|---|
+| pnpm exec vue-tsc --noEmit | 通過 |
+| pnpm test:unit | 通過，276/276；0 失敗、0 略過 |
+| pnpm exec vite build | 通過；renderer、Electron main、preload、plugin-host preload 均建置成功 |
+| git diff --check | 通過 |
+| pnpm audit --prod --audit-level moderate | 通過，No known vulnerabilities found |
+| Phase 12 起新增內容 secret／個資模式掃描 | 私鑰、GitHub/OpenAI/Slack token、AWS key、Google API key、本機使用者路徑、非保留網域 email 均為 0；email-like 命中僅為保留 example 網域測試佔位值 |
+
+### Electron 實機驗證（§0.4a）
+
+- 在全新暫存 HOME 與 userData 啟動 Electron。由主程序預載 hook 在應用程式初始化前將 app userData 明確設為暫存目錄，並把 safeStorage 三個方法換成可逆假實作。Inspector 確認 userData 路徑隔離、三個函式原始碼為假實作後才啟用測試插件；原生 safeStorage 未被呼叫，沒有觸發或存取使用者 Keychain。
+- N1 使用實際 httpbin.org 回應，不使用假的 fetch 或注入 redirect：/redirect/1 與 /relative-redirect/1 均回 200；轉址至 localtest.me、169.254.169.254 及未宣告網域均回 host_not_allowed；跨來源轉址回 200，目標端回應沒有 Authorization。
+- N2 先呼叫 response-headers 設定合成 Set-Cookie，再讀 /cookies，cookie 數為 0；/headers 沒有 Cookie。plugin-network Session cookie store 為空；回應中的 User-Agent 固定為 AgentPetsPlugin/1，沒有 Accept-Language。
+- N3 在隔離插件中只設定合成密鑰後，settings.onChange 有觸發；插件 callback 不含合成密鑰，並能重新讀到已設定狀態。假 safeStorage 計數為 isEncryptionAvailable 2、encryptString 1、decryptString 1。
+- N4 在另一個沒有密鑰的全新暫存 profile，啟動、開啟面板、讀面板快照及 getPluginSettings 後，isEncryptionAvailable、encryptString、decryptString 均為 0。面板輸入合成值按儲存後先顯示一次性說明；尚未確認時呼叫數仍為 0。真實 Keychain 未驗證且未觸碰。
+- N5 的新增特殊用途網段由單元測試驗證；DNS rebinding 時間差仍是已知殘餘風險。
+- N6 由文件一致性測試與上述真實 redirect、cookie 結果核對文件與行為。
+
+### 可直接照做的複檢步驟
+
+1. 執行 pnpm exec vite build；建立暫存資料夾並建立 home 與 userData 子資料夾。啟動隔離 Electron，於主程序初始化前把 app userData 指向暫存 userData。
+2. 在主程序以 inspector 把 safeStorage.isEncryptionAvailable、encryptString、decryptString 換成 §0.4a 第 8 步的可逆假實作。先核對函式原始碼與 app.getPath('userData')；確認後才安裝或啟用宣告 secrets 的插件。預期原生 Keychain 沒有被呼叫。
+3. 安裝測試插件，manifest 宣告 httpbin.org、httpbingo.org、localtest.me 及 probeToken。呼叫 /redirect/1、/relative-redirect/1、redirect-to localtest.me、redirect-to 169.254.169.254、redirect-to 未宣告網域及跨來源 Authorization 案例。預期前兩項 200，三種不允許目標均回 host_not_allowed，跨來源不含 Authorization。
+4. 呼叫 response-headers?Set-Cookie=leak%3D1，再依序呼叫 /cookies 與 /headers。預期 cookies 為空、請求沒有 Cookie、Session cookie store 為空。
+5. 使用沒有密鑰的全新 userData，記錄 fake safeStorage 計數；啟動、開啟插件面板、讀面板與設定快照後三個方法都應為 0。輸入合成密鑰並按儲存，預期先顯示雙語一次性說明；只在假實作下確認與保存，並核對 secret-only callback 不含密鑰。
+6. 執行 pnpm test:unit、pnpm exec vue-tsc --noEmit、pnpm exec vite build、git diff --check、pnpm audit --prod --audit-level moderate 及 Phase 12 起新增內容 secret pattern 掃描。預期四項檢查通過、audit 無弱點，憑證模式與本機路徑掃描無命中。
+
 ## 殘餘風險與待決問題
 
-1. 依使用者要求未觸碰電腦密碼鑰匙圈；密鑰加密持久化、不回顯及移除刪除均未做 Electron 實機驗收。既有隔離環境 encryption availability 為 false，不能據此宣稱成功。
-2. 遠端 `httpbin.org` redirect source 在此環境無法連線；私有 redirect 目標已由單元測試及 Electron 內注入的 302 驗證，但未驗證遠端 redirect source 的完整網路往返。
-3. Agent 狀態事件以注入的 `claude-code` Presentation snapshot 驗證；真實 Codex／Claude adapter 狀態更新未驗證。`pet.status()` 的 live smoke fixture 只記錄了陣列頂層 key `0`；每筆資料欄位由單元測試覆蓋，未在 Electron log 單獨列出。
-4. `requestHost` 的同意與拒絕結果由 CDP stub 驅動，Host API、冷卻、限流、授權存取及撤銷均實測；原生確認框的實際畫面與滑鼠點擊未驗證。
-5. `net.fetch` 的 DNS 查詢與實際連線之間仍有 DNS rebinding 時間差，為 handoff 已知限制。
+1. 依使用者要求，真實 macOS Keychain 行為未驗證且本次完全未觸碰；密鑰流程只在可逆假 safeStorage 下測試，正式版首次使用仍需使用者手動確認系統提示。
+2. 真實 Codex／Claude adapter 狀態更新未驗證；目前 Electron 驗收使用隔離 Presentation 狀態投影，欄位 allowlist 由單元測試覆蓋。
+3. requestHost 原生確認框的畫面與實際滑鼠操作未驗證；允許／拒絕、冷卻、限流、授權與撤銷由 CDP 驅動的隔離測試驗證。
+4. DNS 查詢與實際連線之間仍有 DNS rebinding 時間差；HTTPS-only、443、TLS 憑證驗證及逐跳檢查降低風險，但不能完全消除。
