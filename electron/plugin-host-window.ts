@@ -1,16 +1,23 @@
 import { app, BrowserWindow, MessageChannelMain, session } from 'electron'
 import type { MessagePortMain } from 'electron'
+import { createPluginHostProtocolHandler } from './plugin-protocol.ts'
+import { pluginHostAssets } from './plugin-host-assets.ts'
+import { PluginHostFailureTracker, pluginHostRetryDelay, shouldRetryPluginHost } from './plugin-host-recovery.ts'
 import { join } from 'node:path'
 
 export interface PluginHostDescriptor {
   id: string
   entry: string
+  revision?: string
 }
 
 export interface PluginHostControllerOptions {
   onRpc: (pluginId: string, request: unknown) => Promise<unknown> | unknown
-  onPluginCrash: (pluginId: string, consecutiveCrashes: number) => void
+  onPluginCrash: (pluginId: string, consecutiveCrashes: number, reason: 'host' | 'worker') => void
   getMemoryBudgetMb: (activePluginCount: number) => number
+  createPluginToken: (pluginId: string) => string
+  revokePluginToken: (pluginId: string, token: string) => void
+  pluginRootForToken: (token: string) => string | null
   now?: () => number
 }
 
@@ -18,15 +25,17 @@ interface PluginHostRuntime {
   descriptor: PluginHostDescriptor
   lastPongAt: number
   startedAt: number
+  token: string
+  receivedPong: boolean
 }
 
 const PLUGIN_SCHEME_PREFIX = 'agent-pets://plugin/'
 const PING_INTERVAL_MS = 10_000
 const PONG_TIMEOUT_MS = 30_000
 const MEMORY_POLL_INTERVAL_MS = 30_000
-const MAX_CONSECUTIVE_CRASHES = 3
 const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 const PLUGIN_ENTRY = /^(?!\/)(?!.*(?:^|\/)\.\.?\/)[^\\:]+\.js$/
+const configuredPluginSessions = new WeakSet<object>()
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -36,22 +45,30 @@ export class PluginHostWindowController {
   private readonly onRpc: PluginHostControllerOptions['onRpc']
   private readonly onPluginCrash: PluginHostControllerOptions['onPluginCrash']
   private readonly getMemoryBudgetMb: PluginHostControllerOptions['getMemoryBudgetMb']
+  private readonly createPluginToken: PluginHostControllerOptions['createPluginToken']
+  private readonly revokePluginToken: PluginHostControllerOptions['revokePluginToken']
+  private readonly pluginRootForToken: PluginHostControllerOptions['pluginRootForToken']
   private readonly now: () => number
   private readonly desired = new Map<string, PluginHostDescriptor>()
   private readonly runtime = new Map<string, PluginHostRuntime>()
-  private readonly crashCounts = new Map<string, number>()
+  private readonly failureTracker: PluginHostFailureTracker
   private hostWindow: BrowserWindow | null = null
   private hostPort: MessagePortMain | null = null
   private portReady = false
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private memoryTimer: ReturnType<typeof setInterval> | null = null
+  private restartTimer: ReturnType<typeof setTimeout> | null = null
   private closingIntentionally = false
 
   constructor(options: PluginHostControllerOptions) {
     this.onRpc = options.onRpc
     this.onPluginCrash = options.onPluginCrash
     this.getMemoryBudgetMb = options.getMemoryBudgetMb
+    this.createPluginToken = options.createPluginToken
+    this.revokePluginToken = options.revokePluginToken
+    this.pluginRootForToken = options.pluginRootForToken
     this.now = options.now ?? Date.now
+    this.failureTracker = new PluginHostFailureTracker(this.now)
   }
 
   sync(enabledPlugins: readonly PluginHostDescriptor[]): void {
@@ -81,6 +98,14 @@ export class PluginHostWindowController {
 
   private createHost(): void {
     const pluginSession = session.fromPartition('plugin-host')
+    if (!configuredPluginSessions.has(pluginSession)) {
+      const handlePluginRequest = createPluginHostProtocolHandler({
+        pluginRootForToken: this.pluginRootForToken,
+        hostAssets: pluginHostAssets,
+      })
+      pluginSession.protocol.handle('agent-pets', request => handlePluginRequest(request))
+      configuredPluginSessions.add(pluginSession)
+    }
     pluginSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
     pluginSession.setPermissionCheckHandler(() => false)
     pluginSession.on('will-download', event => event.preventDefault())
@@ -121,8 +146,9 @@ export class PluginHostWindowController {
       this.clearTimers()
       const shouldRestart = !this.closingIntentionally && this.desired.size > 0
       if (shouldRestart) {
-        for (const pluginId of this.desired.keys()) this.recordCrash(pluginId)
-        if (this.desired.size > 0) setTimeout(() => this.createHost(), 250)
+        const pluginIds = [...this.desired.keys()]
+        for (const pluginId of pluginIds) this.recordCrash(pluginId, 'host', false)
+        if (this.desired.size > 0) this.scheduleHostRestart(pluginIds)
       }
       this.closingIntentionally = false
     })
@@ -147,10 +173,13 @@ export class PluginHostWindowController {
     for (const [pluginId, state] of this.runtime) {
       if (!this.desired.has(pluginId)) {
         this.post({ type: 'stop', pluginId })
+        this.revokePluginToken(pluginId, state.token)
         this.runtime.delete(pluginId)
-        this.crashCounts.delete(pluginId)
-      } else if (this.desired.get(pluginId)?.entry !== state.descriptor.entry) {
+        this.failureTracker.clear(pluginId)
+      } else if (this.desired.get(pluginId)?.entry !== state.descriptor.entry
+        || this.desired.get(pluginId)?.revision !== state.descriptor.revision) {
         this.post({ type: 'stop', pluginId })
+        this.revokePluginToken(pluginId, state.token)
         this.runtime.delete(pluginId)
       }
     }
@@ -158,8 +187,11 @@ export class PluginHostWindowController {
     if (now === null) return
     for (const [pluginId, descriptor] of this.desired) {
       if (this.runtime.has(pluginId)) continue
-      this.runtime.set(pluginId, { descriptor, lastPongAt: now, startedAt: now })
-      this.post({ type: 'start', pluginId, entry: descriptor.entry })
+      let token: string
+      try { token = this.createPluginToken(pluginId) } catch { continue }
+      if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(token)) continue
+      this.runtime.set(pluginId, { descriptor, lastPongAt: now, startedAt: now, token, receivedPong: false })
+      this.post({ type: 'start', pluginId, token, entry: descriptor.entry })
     }
   }
 
@@ -167,25 +199,35 @@ export class PluginHostWindowController {
     if (!isRecord(value) || typeof value.type !== 'string' || typeof value.pluginId !== 'string'
       || !this.desired.has(value.pluginId)) return
     const pluginId = value.pluginId
-    if (value.type === 'worker-started' || value.type === 'worker-ready') {
-      const runtime = this.runtime.get(pluginId)
-      if (runtime) runtime.lastPongAt = this.readNow() ?? runtime.lastPongAt
-      return
-    }
+    if (value.type === 'worker-started' || value.type === 'worker-ready') return
     if (value.type === 'pong') {
       const runtime = this.runtime.get(pluginId)
-      if (runtime) runtime.lastPongAt = this.readNow() ?? runtime.lastPongAt
+      const now = this.readNow()
+      if (runtime && now !== null) {
+        runtime.lastPongAt = now
+        runtime.receivedPong = true
+      }
       return
     }
     if (value.type === 'worker-crash') {
-      this.recordCrash(pluginId)
+      this.recordCrash(pluginId, 'worker')
       return
     }
     if (value.type === 'rpc') {
+      const requestId = isRecord(value.request) && typeof value.request.id === 'string' ? value.request.id : ''
       void Promise.resolve()
         .then(() => this.onRpc(pluginId, value.request))
-        .then(result => this.post({ type: 'rpc-result', pluginId, result }))
-        .catch(() => this.post({ type: 'rpc-result', pluginId, result: { ok: false, error: 'invalid_request' } }))
+        .then(result => {
+          const normalizedResult = requestId && isRecord(result) && result.id === requestId
+            ? result
+            : { ...(requestId ? { id: requestId } : {}), ok: false, error: 'invalid_request' }
+          this.post({ type: 'rpc-result', pluginId, result: normalizedResult })
+        })
+        .catch(() => this.post({
+          type: 'rpc-result',
+          pluginId,
+          result: { ...(requestId ? { id: requestId } : {}), ok: false, error: 'invalid_request' },
+        }))
     }
   }
 
@@ -201,10 +243,11 @@ export class PluginHostWindowController {
     if (now === null) return
     this.post({ type: 'ping', at: now })
     for (const [pluginId, runtime] of this.runtime) {
-      if (now - runtime.startedAt >= PONG_TIMEOUT_MS) this.crashCounts.delete(pluginId)
       if (now - runtime.lastPongAt >= PONG_TIMEOUT_MS) {
         this.post({ type: 'terminate', pluginId })
-        this.recordCrash(pluginId)
+        this.recordCrash(pluginId, 'worker')
+      } else if (runtime.receivedPong && now - runtime.startedAt >= 60_000) {
+        this.failureTracker.resetAfterHealthyRuntime(pluginId, runtime.startedAt, runtime.receivedPong)
       }
     }
   }
@@ -218,40 +261,55 @@ export class PluginHostWindowController {
     const budget = this.getMemoryBudgetMb(this.desired.size)
     if (!Number.isFinite(workingSetKb) || !Number.isFinite(budget) || budget <= 0) return
     if ((workingSetKb ?? 0) / 1024 <= budget) return
-    for (const pluginId of this.desired.keys()) this.recordCrash(pluginId)
+    const pluginIds = [...this.desired.keys()]
+    for (const pluginId of pluginIds) this.recordCrash(pluginId, 'host', false)
     this.closingIntentionally = true
     window.destroy()
     this.hostWindow = null
     this.portReady = false
     this.closePort()
     this.clearTimers()
-    if (this.desired.size > 0) setTimeout(() => this.createHost(), 250)
+    if (this.desired.size > 0) this.scheduleHostRestart(pluginIds)
   }
 
   private handleHostCrash(window: BrowserWindow): void {
     if (this.hostWindow !== window || window.isDestroyed()) return
-    this.closingIntentionally = true
     window.destroy()
   }
 
-  private recordCrash(pluginId: string): void {
-    const count = (this.crashCounts.get(pluginId) ?? 0) + 1
-    this.crashCounts.set(pluginId, count)
+  private recordCrash(pluginId: string, reason: 'host' | 'worker', scheduleWorkerRestart = true): void {
+    if (!this.desired.has(pluginId)) return
+    const runtime = this.runtime.get(pluginId)
+    if (reason === 'worker' && !runtime) return
+    if (runtime) this.revokePluginToken(pluginId, runtime.token)
+    const count = this.failureTracker.record(pluginId)
     this.runtime.delete(pluginId)
-    this.onPluginCrash(pluginId, count)
-    if (count >= MAX_CONSECUTIVE_CRASHES) {
+    this.onPluginCrash(pluginId, count, reason)
+    if (!shouldRetryPluginHost(count)) {
       this.desired.delete(pluginId)
       this.post({ type: 'terminate', pluginId })
-    } else if (this.portReady && this.desired.has(pluginId)) {
+    } else if (scheduleWorkerRestart && this.portReady && this.desired.has(pluginId)) {
       setTimeout(() => {
         const descriptor = this.desired.get(pluginId)
         if (!descriptor || this.runtime.has(pluginId) || !this.portReady) return
         const now = this.readNow()
         if (now === null) return
-        this.runtime.set(pluginId, { descriptor, lastPongAt: now, startedAt: now })
-        this.post({ type: 'start', pluginId, entry: descriptor.entry })
-      }, 250)
+        let token: string
+        try { token = this.createPluginToken(pluginId) } catch { return }
+        if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(token)) return
+        this.runtime.set(pluginId, { descriptor, lastPongAt: now, startedAt: now, token, receivedPong: false })
+        this.post({ type: 'start', pluginId, token, entry: descriptor.entry })
+      }, pluginHostRetryDelay(count))
     }
+  }
+
+  private scheduleHostRestart(pluginIds: readonly string[]): void {
+    if (this.restartTimer) clearTimeout(this.restartTimer)
+    const maxFailures = pluginIds.reduce((maximum, id) => Math.max(maximum, this.failureTracker.count(id)), 1)
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null
+      if (!this.closingIntentionally && this.desired.size > 0 && !this.hostWindow) this.createHost()
+    }, pluginHostRetryDelay(maxFailures))
   }
 
   private post(message: unknown): void {
@@ -266,13 +324,16 @@ export class PluginHostWindowController {
   private clearTimers(): void {
     if (this.pingTimer) clearInterval(this.pingTimer)
     if (this.memoryTimer) clearInterval(this.memoryTimer)
+    if (this.restartTimer) clearTimeout(this.restartTimer)
     this.pingTimer = null
     this.memoryTimer = null
+    this.restartTimer = null
   }
 
   private closeHost(): void {
+    for (const [pluginId, runtime] of this.runtime) this.revokePluginToken(pluginId, runtime.token)
     this.runtime.clear()
-    this.crashCounts.clear()
+    this.failureTracker.clear()
     this.portReady = false
     this.closePort()
     this.clearTimers()
@@ -300,5 +361,6 @@ export class PluginHostWindowController {
 function isValidDescriptor(value: unknown): value is PluginHostDescriptor {
   if (!isRecord(value) || typeof value.id !== 'string' || !PLUGIN_ID.test(value.id)
     || typeof value.entry !== 'string' || value.entry.length > 512 || !PLUGIN_ENTRY.test(value.entry)) return false
+  if (value.revision !== undefined && (typeof value.revision !== 'string' || value.revision.length > 128)) return false
   return !value.entry.split('/').some(segment => !segment || segment === '.' || segment === '..')
 }

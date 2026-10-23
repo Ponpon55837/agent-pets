@@ -116,6 +116,12 @@ export interface PluginPreferences {
   plugins: Record<string, PluginInstancePreferences>
 }
 
+export interface PluginGlobalPreferencesPatch {
+  pluginsEnabled?: boolean
+  developerMode?: boolean
+  resources?: Partial<PluginResourceLimits>
+}
+
 export type PluginErrorCode =
   | 'not_permitted'
   | 'rate_limited'
@@ -127,6 +133,8 @@ export type PluginErrorCode =
   | 'queue_full'
   | 'duplicate'
   | 'not_found'
+  | 'too_many_enabled'
+  | 'host_unavailable'
 
 export type PluginRuntimeState = 'installed' | 'enabled' | 'disabled_crashed' | 'incompatible'
 

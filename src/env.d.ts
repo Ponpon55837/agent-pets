@@ -18,6 +18,7 @@ import type {
   PluginBrokerDiagnostic,
   PluginBrokerLogEntry,
   PluginFeedItem,
+  PluginGlobalPreferencesPatch,
   PluginInstallPlan,
   PluginNotificationRecord,
   PluginPanelPlugin,
@@ -49,7 +50,7 @@ declare global {
       completePluginFeed: (itemId: string) => Promise<boolean>
       openPluginFeedLink: (itemId: string) => Promise<boolean>
       getPluginPanelSnapshot: () => Promise<PluginPanelResult<PluginPanelSnapshot>>
-      setPluginGlobalPreferences: (patch: unknown) => Promise<PluginPanelResult<PluginPreferences>>
+      setPluginGlobalPreferences: (patch: PluginGlobalPreferencesPatch) => Promise<PluginPanelResult<PluginPreferences>>
       setPluginInstancePreferences: (pluginId: string, patch: unknown) => Promise<PluginPanelResult<PluginPreferences>>
       selectPluginArchive: () => Promise<PluginPanelResult<PluginInstallPlan>>
       installPluginPlan: (token: string, acceptAdditionalPermissions: boolean) => Promise<PluginPanelResult<PluginPanelPlugin>>

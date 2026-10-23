@@ -12,6 +12,7 @@ import {
 } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { join, resolve } from 'path'
+import { randomUUID } from 'node:crypto'
 import { request as httpRequest, type Server } from 'node:http'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -43,6 +44,7 @@ import { ProjectRoutingStore } from './project-routing'
 import { PluginRegistry, PLUGIN_ARCHIVE_MAX_BYTES } from './plugin-registry'
 import { PluginPreferencesStore } from './plugin-preferences'
 import { PluginHostWindowController, type PluginHostDescriptor } from './plugin-host-window'
+import { canEnablePluginWithinLimit, selectEnabledPluginDescriptors } from './plugin-host-selection'
 import { PluginBroker, type PluginBrokerContext, type PluginReactionRequest } from './plugin-broker.ts'
 import { PluginFeedController } from './plugin-feed.ts'
 import {
@@ -140,6 +142,10 @@ let pluginHostWindow: PluginHostWindowController | null = null
 let pluginBroker: PluginBroker | null = null
 let pluginFeedController: PluginFeedController | null = null
 const pendingPluginPlanIds = new Map<string, string>()
+const pluginRootsByToken = new Map<string, string>()
+const pluginEnableOrder = new Map<string, number>()
+const diagnosedPluginLimitIds = new Set<string>()
+let nextPluginEnableOrder = 0
 let pluginRuntimeContexts = new Map<string, PluginBrokerContext & { muted: boolean; rateLimitPer10Min: number; targetPetId: string | null; grantedHosts: string[] }>()
 let pluginPreferencesSnapshot: ReturnType<PluginPreferencesStore['get']> | null = null
 let presentationStatusProjection: PresentationStatusSnapshot = {
@@ -595,9 +601,29 @@ function refreshPluginRuntimeContexts(): void {
 function enabledPluginDescriptors(): PluginHostDescriptor[] {
   const preferences = pluginPreferencesSnapshot
   if (!preferences?.pluginsEnabled) return []
-  const candidates = [...pluginRuntimeContexts.entries()].filter(([, context]) => context.enabled)
-  if (candidates.length > preferences.resources.maxEnabledPlugins) return []
-  return candidates.map(([id, context]) => ({ id, entry: context.manifest.entry }))
+  const registryById = new Map((pluginRegistry?.list() ?? []).map(entry => [entry.id, entry] as const))
+  const candidates = [...pluginRuntimeContexts.entries()]
+    .filter(([, context]) => context.enabled)
+    .map(([id, context]) => {
+      const registryEntry = registryById.get(id)
+      return {
+        id,
+        entry: context.manifest.entry,
+        ...(registryEntry ? { revision: `${registryEntry.currentVersion}:${registryEntry.installedAt}` } : {}),
+      }
+    })
+  for (const descriptor of candidates) {
+    if (!pluginEnableOrder.has(descriptor.id)) pluginEnableOrder.set(descriptor.id, nextPluginEnableOrder++)
+  }
+  candidates.sort((left, right) => (pluginEnableOrder.get(left.id) ?? 0) - (pluginEnableOrder.get(right.id) ?? 0))
+  const selection = selectEnabledPluginDescriptors(candidates, preferences.resources.maxEnabledPlugins)
+  for (const plugin of selection.skipped) {
+    if (diagnosedPluginLimitIds.has(plugin.id)) continue
+    diagnosedPluginLimitIds.add(plugin.id)
+    pluginBroker?.recordSystemDiagnostic(plugin.id, 'too_many_enabled', 'plugin.limit')
+  }
+  if (selection.skipped.length === 0) diagnosedPluginLimitIds.clear()
+  return selection.selected
 }
 
 function syncPluginHost(): void {
@@ -687,18 +713,33 @@ function createPluginServices(): void {
   pluginHostWindow = new PluginHostWindowController({
     onRpc: (pluginId, request) => pluginBroker?.handle(pluginId, request)
       ?? { ok: false, error: 'disabled' },
-    onPluginCrash: (pluginId, consecutiveCrashes) => {
+    createPluginToken: pluginId => {
+      const root = enabledPluginRoot(pluginId)
+      if (!root) throw new Error('Plugin is unavailable')
+      const token = randomUUID()
+      pluginRootsByToken.set(token, root)
+      return token
+    },
+    revokePluginToken: (_pluginId, token) => {
+      pluginRootsByToken.delete(token)
+    },
+    pluginRootForToken: token => pluginRootsByToken.get(token) ?? null,
+    onPluginCrash: (pluginId, consecutiveCrashes, reason) => {
       if (consecutiveCrashes >= 3) {
         const name = pluginRuntimeContexts.get(pluginId)?.manifest.name ?? { 'zh-TW': pluginId, 'en-US': pluginId }
+        if (reason === 'host') pluginBroker?.recordHostUnavailable(pluginId)
         pluginFeedController?.addSystemNotification(
           pluginId,
           name,
-          t('pluginCrashDisabledTitle'),
-          t('pluginCrashDisabledBody', { name: name[locale.value] }),
+          reason === 'host' ? t('pluginHostUnavailableTitle') : t('pluginCrashDisabledTitle'),
+          reason === 'host'
+            ? t('pluginHostUnavailableBody', { name: name[locale.value] })
+            : t('pluginCrashDisabledBody', { name: name[locale.value] }),
         )
         try { pluginRegistry?.setStatus(pluginId, 'disabled_crashed') } catch {}
         try { pluginPreferences?.updatePlugin(pluginId, { enabled: false }) } catch {}
-        syncPluginHost()
+        pluginEnableOrder.delete(pluginId)
+        setTimeout(() => syncPluginHost(), 0)
       }
     },
     getMemoryBudgetMb: activePluginCount => {
@@ -758,9 +799,16 @@ function createPluginServices(): void {
       return { ok: false, error: 'invalid_request' }
     }
     try {
+      if (patch.enabled === true && pluginRuntimeContexts.get(pluginId)?.enabled !== true) {
+        const limit = pluginPreferencesSnapshot?.resources.maxEnabledPlugins ?? 0
+        const enabledCount = [...pluginRuntimeContexts.values()].filter(context => context.enabled).length
+        if (!canEnablePluginWithinLimit(false, enabledCount, limit)) return { ok: false, error: 'too_many_enabled' }
+      }
       const preferences = pluginPreferences.updatePlugin(pluginId, patch)
       if (typeof patch.enabled === 'boolean') {
         pluginRegistry.setStatus(pluginId, patch.enabled ? 'enabled' : 'installed')
+        if (patch.enabled) pluginEnableOrder.set(pluginId, nextPluginEnableOrder++)
+        else pluginEnableOrder.delete(pluginId)
       }
       syncPluginHost()
       return { ok: true, value: preferences }

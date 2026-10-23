@@ -195,6 +195,14 @@ export class PluginBroker {
     return (this.diagnostics.get(pluginId) ?? []).map(entry => ({ ...entry }))
   }
 
+  recordSystemDiagnostic(pluginId: string, code: PluginErrorCode, method?: string): void {
+    this.recordDiagnostic(pluginId, code, method)
+  }
+
+  recordHostUnavailable(pluginId: string): void {
+    this.recordDiagnostic(pluginId, 'host_unavailable', 'host.start')
+  }
+
   flushStorage(pluginId: string): boolean {
     if (!PLUGIN_ID.test(pluginId)) return false
     const state = this.storage.get(pluginId)
@@ -245,7 +253,7 @@ export class PluginBroker {
       if (!context.manifest.contributes.feed || args.length !== 1) return { ok: false, error: 'not_permitted' }
       const result = this.feed.submit(pluginId, args[0])
       return result.accepted
-        ? { accepted: true, itemId: result.itemId, queued: result.queued, delivery: result.delivery }
+        ? { itemId: result.itemId, delivery: result.delivery }
         : { ok: false, error: result.error }
     }
     if (method === 'pet.react') {

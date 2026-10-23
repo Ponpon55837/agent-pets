@@ -4,15 +4,20 @@ export const pluginHostAssets: PluginProtocolAssets = {
   'index.html': '<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src agent-pets://plugin; worker-src agent-pets://plugin; connect-src \'none\'; img-src agent-pets://plugin; style-src agent-pets://plugin; frame-src \'none\'; object-src \'none\'; base-uri \'none\'; form-action \'none\'"></head><body><script type="module" src="agent-pets://plugin/_host/host.js"></script></body></html>',
   'host.js': String.raw`
 const workers = new Map()
-const bridge = window.agentPetsPluginHost
-if (bridge && typeof bridge.onPort === 'function') {
-  bridge.onPort((port) => {
-    port.start()
-    port.onmessage = ({ data }) => {
+let portAccepted = false
+window.addEventListener('message', (event) => {
+  if (portAccepted || event.source !== window || event.origin !== window.location.origin
+    || event.data !== 'agent-pets-plugin-host-port' || !event.ports || !event.ports[0]) return
+  portAccepted = true
+  const port = event.ports[0]
+  port.start()
+  port.onmessage = ({ data }) => {
       if (!data || typeof data !== 'object') return
       if (data.type === 'start' && typeof data.pluginId === 'string' && typeof data.entry === 'string') {
         const pluginId = data.pluginId
-        if (!/^(?!_host$|_shared$)[a-z0-9-]{3,48}$/.test(pluginId) || workers.has(pluginId)) return
+        const token = data.token
+        if (!/^(?!_host$|_shared$)[a-z0-9-]{3,48}$/.test(pluginId)
+          || typeof token !== 'string' || !/^[a-f0-9-]{36}$/.test(token) || workers.has(pluginId)) return
         try {
           const worker = new Worker('agent-pets://plugin/_host/worker-bootstrap.js', { type: 'module', name: pluginId })
           workers.set(pluginId, worker)
@@ -38,7 +43,7 @@ if (bridge && typeof bridge.onPort === 'function') {
             try { worker.terminate() } catch {}
             port.postMessage({ type: 'worker-crash', pluginId })
           }
-          worker.postMessage({ type: 'activate', pluginId, entry: data.entry })
+          worker.postMessage({ type: 'activate', pluginId, token, entry: data.entry })
           port.postMessage({ type: 'worker-started', pluginId })
         } catch {
           port.postMessage({ type: 'worker-crash', pluginId })
@@ -61,26 +66,53 @@ if (bridge && typeof bridge.onPort === 'function') {
       } else if (data.type === 'rpc-result' && typeof data.pluginId === 'string') {
         workers.get(data.pluginId)?.postMessage({ type: 'rpc-result', result: data.result })
       }
-    }
-  })
-}
+  }
+})
 `,
   'worker-bootstrap.js': String.raw`
 const scope = self
 const postToHost = scope.postMessage.bind(scope)
-Object.defineProperty(scope, 'postMessage', {
-  value: () => { throw new TypeError('Plugin workers cannot post directly to the host') },
-  writable: false,
-  configurable: false,
-})
 let pluginId = null
+let pluginToken = null
 let pluginModule = null
 const pending = new Map()
 let sequence = 0
+const blockedApis = [
+  'indexedDB', 'caches', 'BroadcastChannel', 'Worker', 'SharedWorker', 'WebSocket',
+  'EventSource', 'XMLHttpRequest', 'fetch', 'postMessage',
+]
+function removeCrossPluginApis() {
+  const chain = []
+  for (let current = scope; current; current = Object.getPrototypeOf(current)) chain.push(current)
+  for (const name of blockedApis) {
+    for (const owner of chain) {
+      const descriptor = Object.getOwnPropertyDescriptor(owner, name)
+      if (!descriptor) continue
+      if (!descriptor.configurable && !('value' in descriptor && descriptor.writable)) return false
+      try {
+        Object.defineProperty(owner, name, { value: undefined, configurable: false, writable: false })
+      } catch {
+        return false
+      }
+    }
+    try {
+      if (!Object.hasOwn(scope, name)) Object.defineProperty(scope, name, { value: undefined, configurable: false, writable: false })
+    } catch {
+      return false
+    }
+    if (scope[name] !== undefined) return false
+  }
+  return true
+}
 function rpc(method, args) {
   const id = String(++sequence)
-  postToHost({ type: 'rpc', request: { id, method, args } })
-  return new Promise((resolve) => pending.set(id, resolve))
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject })
+    try { postToHost({ type: 'rpc', request: { id, method, args } }) } catch (error) {
+      pending.delete(id)
+      reject(error)
+    }
+  })
 }
 const api = Object.freeze({
   feed: Object.freeze({ notify: (item) => rpc('feed.notify', [item]) }),
@@ -101,11 +133,15 @@ scope.onmessage = async ({ data }) => {
   if (data.type === 'activate' && pluginId === null) {
     const id = data.pluginId
     const entry = data.entry
+    const token = data.token
     if (typeof id !== 'string' || !/^(?!_host$|_shared$)[a-z0-9-]{3,48}$/.test(id)
+      || typeof token !== 'string' || !/^[a-f0-9-]{36}$/.test(token)
       || typeof entry !== 'string' || !/^(?!\/)(?!.*(?:^|\/)\.\.?\/)[^\\:]+\.js$/.test(entry)) return
     pluginId = id
+    pluginToken = token
     try {
-      pluginModule = await import('agent-pets://plugin/' + id + '/' + entry)
+      if (!removeCrossPluginApis()) throw new TypeError('Plugin isolation could not be established')
+      pluginModule = await import('agent-pets://plugin/' + pluginToken + '/' + entry)
       if (!pluginModule.default || typeof pluginModule.default.activate !== 'function') throw new TypeError('invalid plugin entry')
       await pluginModule.default.activate(api)
       postToHost({ type: 'ready' })
@@ -117,10 +153,16 @@ scope.onmessage = async ({ data }) => {
   } else if (data.type === 'rpc-result' && data.result && typeof data.result === 'object') {
     const result = data.result
     const id = result && typeof result.id === 'string' ? result.id : null
-    const resolve = id ? pending.get(id) : undefined
-    if (resolve) {
+    const pendingRequest = id ? pending.get(id) : undefined
+    if (pendingRequest) {
       pending.delete(id)
-      resolve(result)
+      if (result.ok === true) pendingRequest.resolve(result.value)
+      else {
+        const code = typeof result.error === 'string' ? result.error : 'invalid_request'
+        const error = new Error(code)
+        error.code = code
+        pendingRequest.reject(error)
+      }
     }
   } else if (data.type === 'deactivate' && pluginId !== null) {
     try {

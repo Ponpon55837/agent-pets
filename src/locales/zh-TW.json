@@ -325,6 +325,9 @@
   "pluginSettingsHint": "安裝與管理本機插件",
   "pluginGlobalEnabled": "啟用插件",
   "pluginGlobalEnabledHelp": "關閉後不會執行任何插件。",
+  "pluginAdvancedSettings": "進階",
+  "pluginMaxEnabledLabel": "同時啟用的插件上限",
+  "pluginMaxEnabledHelp": "超出上限時，較早啟用的插件會保留執行；可在此調整 1–50 個。",
   "pluginInstallButton": "安裝插件…",
   "pluginNativePickerTitle": "選擇 Agent Pets 插件檔",
   "pluginInstalledHeading": "已安裝的插件",
@@ -338,7 +341,7 @@
   "pluginEnabled": "執行此插件",
   "pluginMuted": "靜音通知",
   "pluginDiagnosticsHeading": "插件診斷",
-  "pluginDiagnosticsHelp": "只顯示最近的純文字記錄與被拒絕的呼叫。",
+  "pluginDiagnosticsHelp": "顯示最近的純文字記錄、被拒絕的呼叫與宿主錯誤。",
   "pluginRecentLogs": "最近記錄",
   "pluginNoLogs": "尚無記錄。",
   "pluginRejectedCalls": "被拒絕的呼叫",
@@ -388,5 +391,8 @@
   "pluginActionFailed": "插件操作失敗，請重新整理後再試。",
   "pluginCrashDisabledTitle": "連續崩潰後已停用",
   "pluginCrashDisabledBody": "{name} 因連續崩潰而停用。",
+  "pluginHostUnavailableTitle": "插件執行環境無法啟動",
+  "pluginHostUnavailableBody": "{name} 的插件執行環境連續啟動失敗，已停用。",
+  "pluginTooManyEnabled": "已達插件啟用上限（{limit} 個）。請先停用其他插件，或到插件設定的「進階」調整上限。",
   "system": "系統整合"
 }

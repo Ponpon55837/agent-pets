@@ -5,6 +5,7 @@ import type {
   PluginBrokerDiagnostic,
   PluginBrokerLogEntry,
   PluginInstallPlan,
+  PluginGlobalPreferencesPatch,
   PluginNotificationRecord,
   PluginPanelPlugin,
   PluginPanelSnapshot,
@@ -58,6 +59,11 @@ function pluginStatusTone(plugin: PluginPanelPlugin): 'success' | 'warn' | 'neut
 }
 
 function localizedError(code: string): string {
+  if (code === 'too_many_enabled') {
+    return t('pluginTooManyEnabled', {
+      limit: String(snapshot.value?.preferences.resources.maxEnabledPlugins ?? 10),
+    })
+  }
   const keys: Record<string, TranslationKey> = {
     preferences_unsafe: 'pluginPreferencesUnsafe',
     plugin_service_unavailable: 'pluginServiceUnavailable',
@@ -130,7 +136,7 @@ async function refreshDiagnostics(pluginId = selectedPluginId.value): Promise<vo
   }
 }
 
-async function updateGlobalPreferences(patch: Partial<Pick<PluginPreferences, 'pluginsEnabled'>>): Promise<void> {
+async function updateGlobalPreferences(patch: PluginGlobalPreferencesPatch): Promise<void> {
   if (busy.value) return
   busy.value = true
   errorMessage.value = ''
@@ -148,6 +154,12 @@ async function updateGlobalPreferences(patch: Partial<Pick<PluginPreferences, 'p
   } finally {
     busy.value = false
   }
+}
+
+async function updateMaxEnabledPlugins(value: string): Promise<void> {
+  const maximum = Number(value)
+  if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > 50) return
+  await updateGlobalPreferences({ resources: { maxEnabledPlugins: maximum } })
 }
 
 async function updatePluginPreference(
@@ -333,6 +345,12 @@ function diagnosticTime(timestamp: number): string {
 }
 
 function diagnosticCodeLabel(item: PluginBrokerDiagnostic): string {
+  if (item.code === 'host_unavailable') return t('pluginHostUnavailableTitle')
+  if (item.code === 'too_many_enabled') {
+    return t('pluginTooManyEnabled', {
+      limit: String(snapshot.value?.preferences.resources.maxEnabledPlugins ?? 10),
+    })
+  }
   return t('pluginDiagnosticRejected', { code: item.code, method: item.method ?? t('pluginDiagnosticUnknownMethod') })
 }
 
@@ -369,6 +387,22 @@ onUnmounted(() => {
         </Button>
       </div>
     </div>
+
+    <Card :title="t('pluginAdvancedSettings')" class="plugin-section">
+      <p class="plugin-limit-help">{{ t('pluginMaxEnabledHelp') }}</p>
+      <label class="plugin-limit-control">
+        <span>{{ t('pluginMaxEnabledLabel') }}</span>
+        <Select
+          :model-value="String(snapshot?.preferences.resources.maxEnabledPlugins ?? 10)"
+          size="sm"
+          :aria-label="t('pluginMaxEnabledLabel')"
+          :disabled="busy || loading"
+          @update:model-value="updateMaxEnabledPlugins"
+        >
+          <option v-for="limit in 50" :key="limit" :value="String(limit)">{{ limit }}</option>
+        </Select>
+      </label>
+    </Card>
 
     <div v-if="errorMessage" class="error-msg plugin-message" role="alert">{{ errorMessage }}</div>
     <div v-if="statusMessage" class="plugin-message plugin-success" role="status" aria-live="polite">{{ statusMessage }}</div>
@@ -528,6 +562,9 @@ onUnmounted(() => {
 .plugin-toolbar-actions { display: flex; gap: var(--space-2); }
 .plugin-message { margin: 0; }
 .plugin-success { color: var(--text-success, var(--text-primary)); font-size: var(--font-sm); }
+.plugin-limit-help { margin: 0; color: var(--text-muted); font-size: var(--font-xs); line-height: 1.5; }
+.plugin-limit-control { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); color: var(--text-secondary); font-size: var(--font-sm); }
+.plugin-limit-control > :deep(.select-wrap) { width: 88px; flex: 0 0 88px; }
 .plugin-section { display: flex; flex-direction: column; gap: var(--space-3); }
 .plugin-section-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-width: 0; }
 .plugin-section-heading h3 { margin: 0; color: var(--text-primary); font-size: var(--font-md); }

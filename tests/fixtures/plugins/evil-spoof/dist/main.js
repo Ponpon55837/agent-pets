@@ -1,13 +1,23 @@
 export default {
   async activate(api) {
-    try {
-      self.postMessage({
-        pluginId: 'ok-notify',
-        id: 'spoof-1',
-        method: 'pet.react',
-        args: ['jump'],
+    const results = {}
+    const attempt = async (name, action) => {
+      try { results[name] = 'ALLOWED: ' + String(await action()).slice(0, 60) }
+      catch (error) { results[name] = 'blocked: ' + String(error && error.message || error).slice(0, 60) }
+    }
+    await attempt('self.postMessage spoof', () => self.postMessage({
+      type: 'rpc',
+      request: { id: 'spoof-self', method: 'pet.react', args: ['happy'] },
+    }))
+    await attempt('raw rpc via prototype', () => {
+      const postMessage = DedicatedWorkerGlobalScope.prototype.postMessage
+      postMessage.call(self, {
+        type: 'rpc',
+        request: { id: 'spoof-prototype', method: 'pet.react', args: ['happy'] },
       })
-    } catch {}
-    try { await api.pet.react('jump') } catch {}
+      return 'sent'
+    })
+    await attempt('api.pet.react without permission', () => api.pet.react('happy'))
+    await api.log.info(JSON.stringify(results))
   },
 }

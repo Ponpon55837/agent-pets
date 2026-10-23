@@ -137,6 +137,25 @@ test('PluginBroker validates reactions, applies DND, and shares feed rate limits
   }
 })
 
+test('PluginBroker returns clean feed results and records host startup diagnostics', () => {
+  const harness = createHarness()
+  try {
+    assert.deepEqual(harness.broker.handle('sample', request('feed-ok', 'feed.notify', [{ title: 'Ready', body: 'Storage is available.' }])), {
+      id: 'feed-ok',
+      ok: true,
+      value: { itemId: 'feed-item-00000001', delivery: 'bubble' },
+    })
+    harness.broker.recordHostUnavailable('sample')
+    assert.deepEqual(harness.broker.listDiagnostics('sample').at(-1), {
+      at: 1_000_000,
+      code: 'host_unavailable',
+      method: 'host.start',
+    })
+  } finally {
+    harness.cleanup()
+  }
+})
+
 test('PluginBroker persists storage atomically and rejects values over the configured limit', () => {
   const harness = createHarness({ storageBytesPerPlugin: 64 * 1024 })
   try {

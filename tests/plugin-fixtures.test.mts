@@ -14,7 +14,7 @@ import { pluginHostAssets } from '../electron/plugin-host-assets.ts'
 import type { PluginManifest } from '../src/types/plugin.ts'
 
 const fixtureRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'plugins')
-const FIXTURE_IDS = ['ok-notify', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip'] as const
+const FIXTURE_IDS = ['ok-notify', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape'] as const
 
 function readFixture(pluginId: string): { manifest: PluginManifest; files: Record<string, Uint8Array> } {
   const sourceDirectory = path.join(fixtureRoot, pluginId)
@@ -76,6 +76,13 @@ test('plugin fixture sources have bounded manifests, entry points, and PNG icons
   }
 })
 
+test('every evil fixture records a host log entry for its runtime probe', () => {
+  for (const pluginId of ['evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape']) {
+    const source = Buffer.from(readFixture(pluginId).files['dist/main.js']!).toString('utf8')
+    assert.match(source, /api\.log\.info/, `${pluginId} must leave inspectable evidence`)
+  }
+})
+
 test('all source fixtures can be packed and installed by PluginRegistry', () => {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-fixtures-'))
   try {
@@ -117,6 +124,7 @@ test('evil-zip path traversal and excess entries are rejected during planning', 
 test('evil-fetch source targets forbidden network APIs and host CSP denies connections', () => {
   const source = Buffer.from(readFixture('evil-fetch').files['dist/main.js']!).toString('utf8')
   for (const api of ['fetch(', 'new WebSocket(', 'importScripts(', "import('https://"]) assert.ok(source.includes(api))
+  assert.match(source, /api\.log\.info\(JSON\.stringify\(results\)\)/)
   assert.match(PLUGIN_CONTENT_SECURITY_POLICY, /connect-src 'none'/)
   assert.match(pluginHostAssets['host.js'] ?? '', /worker-crash/)
 })
@@ -158,6 +166,9 @@ test('evil-spoof cannot claim another plugin id or call an undeclared capability
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-evil-spoof-'))
   const { feed } = createFeed('evil-spoof', manifest)
   try {
+    const source = Buffer.from(readFixture('evil-spoof').files['dist/main.js']!).toString('utf8')
+    assert.match(source, /DedicatedWorkerGlobalScope\.prototype\.postMessage/)
+    assert.match(source, /api\.log\.info\(JSON\.stringify\(results\)\)/)
     const broker = new PluginBroker({
       userDataDirectory: userData,
       getContext: pluginId => pluginId === 'evil-spoof'
@@ -185,4 +196,27 @@ test('evil-spoof cannot claim another plugin id or call an undeclared capability
   } finally {
     fs.rmSync(userData, { recursive: true, force: true })
   }
+})
+
+test('evil-escape logs isolation probes and Host API results are unwrapped', () => {
+  const { files } = readFixture('evil-escape')
+  const source = Buffer.from(files['dist/main.js']!).toString('utf8')
+  for (const probe of [
+    'fetch https', 'fetch loopback event server', 'fetch app origin', 'import other plugin module',
+    'nested worker', 'BroadcastChannel', 'indexedDB', 'raw rpc via prototype', 'storage round-trip',
+  ]) assert.ok(source.includes(probe))
+  assert.match(source, /api\.log\.info\(JSON\.stringify\(results\)\)/)
+  const bootstrap = pluginHostAssets['worker-bootstrap.js'] ?? ''
+  for (const api of ['indexedDB', 'caches', 'BroadcastChannel', 'Worker', 'SharedWorker', 'WebSocket', 'EventSource', 'XMLHttpRequest', 'fetch']) {
+    assert.ok(bootstrap.includes(`'${api}'`), `${api} is removed before plugin import`)
+  }
+  assert.match(bootstrap, /pendingRequest\.resolve\(result\.value\)/)
+  assert.match(bootstrap, /pendingRequest\.reject\(error\)/)
+  assert.ok(bootstrap.includes("import('agent-pets://plugin/' + pluginToken"))
+  assert.match(pluginHostAssets['host.js'] ?? '', /event\.source !== window/)
+  assert.match(pluginHostAssets['host.js'] ?? '', /event\.origin !== window\.location\.origin/)
+  assert.match(pluginHostAssets['host.js'] ?? '', /portAccepted/)
+  const hostPreload = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'electron', 'plugin-host-preload.ts'), 'utf8')
+  assert.match(hostPreload, /window\.postMessage\('agent-pets-plugin-host-port', window\.location\.origin, \[port\]\)/)
+  assert.doesNotMatch(hostPreload, /contextBridge/)
 })

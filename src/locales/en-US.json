@@ -325,6 +325,9 @@
   "pluginSettingsHint": "Install and manage local plugins",
   "pluginGlobalEnabled": "Enable plugins",
   "pluginGlobalEnabledHelp": "When off, no plugins will run.",
+  "pluginAdvancedSettings": "Advanced",
+  "pluginMaxEnabledLabel": "Maximum enabled plugins",
+  "pluginMaxEnabledHelp": "When the limit is exceeded, the earliest enabled plugins keep running. Set a limit from 1 to 50 here.",
   "pluginInstallButton": "Install plugin…",
   "pluginNativePickerTitle": "Choose an Agent Pets plugin file",
   "pluginInstalledHeading": "Installed plugins",
@@ -338,7 +341,7 @@
   "pluginEnabled": "Run this plugin",
   "pluginMuted": "Mute notifications",
   "pluginDiagnosticsHeading": "Plugin diagnostics",
-  "pluginDiagnosticsHelp": "Recent plain-text logs and rejected calls only.",
+  "pluginDiagnosticsHelp": "Recent plain-text logs, rejected calls, and host errors.",
   "pluginRecentLogs": "Recent logs",
   "pluginNoLogs": "No logs yet.",
   "pluginRejectedCalls": "Rejected calls",
@@ -388,5 +391,8 @@
   "pluginActionFailed": "The plugin operation failed. Refresh and try again.",
   "pluginCrashDisabledTitle": "Disabled after repeated crashes",
   "pluginCrashDisabledBody": "{name} was disabled after repeated crashes.",
+  "pluginHostUnavailableTitle": "Plugin execution environment could not start",
+  "pluginHostUnavailableBody": "{name}'s plugin execution environment failed to start repeatedly and was disabled.",
+  "pluginTooManyEnabled": "The plugin limit ({limit}) is reached. Disable another plugin or adjust the limit in Plugin settings → Advanced.",
   "system": "System integration"
 }

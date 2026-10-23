@@ -2,6 +2,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 
 export const PLUGIN_CONTENT_SECURITY_POLICY = "default-src 'none'; script-src agent-pets://plugin; worker-src agent-pets://plugin; connect-src 'none'; img-src agent-pets://plugin; style-src agent-pets://plugin; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+export const PLUGIN_WORKER_CONTENT_SECURITY_POLICY = "default-src 'none'; script-src agent-pets://plugin; worker-src 'none'; connect-src 'none'; img-src agent-pets://plugin; style-src agent-pets://plugin; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
 export const PLUGIN_PROTOCOL_MAX_FILE_BYTES = 5 * 1024 * 1024
 
 export interface PluginProtocolAssets {
@@ -13,6 +14,16 @@ export interface PluginProtocolAssets {
 export interface PluginProtocolOptions {
   pluginRootForId: (pluginId: string) => string | null
   hostAssets: PluginProtocolAssets
+}
+
+export interface PluginHostProtocolOptions {
+  pluginRootForToken: (token: string) => string | null
+  hostAssets: PluginProtocolAssets
+}
+
+export interface PluginProtocolRequestLike {
+  url: string
+  method?: string
 }
 
 const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
@@ -74,6 +85,58 @@ function pluginResponse(relativePath: string, bytes: Uint8Array): Response {
       'content-security-policy': PLUGIN_CONTENT_SECURITY_POLICY,
     },
   })
+}
+
+function pluginHostResponse(relativePath: string, bytes: Uint8Array, workerResponse = false): Response {
+  return new Response(Uint8Array.from(bytes), {
+    status: 200,
+    headers: {
+      'content-type': contentType(relativePath),
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': workerResponse
+        ? PLUGIN_WORKER_CONTENT_SECURITY_POLICY
+        : PLUGIN_CONTENT_SECURITY_POLICY,
+    },
+  })
+}
+
+function handlePluginHostProtocolRequest(requestUrl: string, options: PluginHostProtocolOptions): Response {
+  try {
+    const url = new URL(requestUrl)
+    if (url.protocol !== 'agent-pets:' || url.hostname !== 'plugin' || url.username || url.password || url.port
+      || url.search || url.hash || url.pathname.includes('%')) return new Response('Not found', { status: 404 })
+    const pathname = decodeURIComponent(url.pathname)
+    const match = pathname.match(/^\/([^/]+)\/(.+)$/)
+    if (!match) return new Response('Not found', { status: 404 })
+    const tokenOrHost = match[1] ?? ''
+    const relativePath = match[2] ?? ''
+    if (tokenOrHost === '_host') {
+      if (!Object.hasOwn(options.hostAssets, relativePath)) return new Response('Not found', { status: 404 })
+      return pluginHostResponse(
+        relativePath,
+        new TextEncoder().encode(options.hostAssets[relativePath as keyof PluginProtocolAssets]),
+        relativePath === 'worker-bootstrap.js',
+      )
+    }
+    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(tokenOrHost)) {
+      return new Response('Not found', { status: 404 })
+    }
+    const root = options.pluginRootForToken(tokenOrHost)
+    if (!root) return new Response('Not found', { status: 404 })
+    const data = readRegularFileWithin(root, relativePath)
+    if (!data) return new Response('Not found', { status: 404 })
+    return pluginHostResponse(relativePath, data, true)
+  } catch {
+    return new Response('Not found', { status: 404 })
+  }
+}
+
+/** Creates the isolated partition handler; it can only serve plugin-host resources. */
+export function createPluginHostProtocolHandler(options: PluginHostProtocolOptions): (request: PluginProtocolRequestLike) => Response {
+  return request => {
+    if (request.method && request.method !== 'GET') return new Response('Method not allowed', { status: 405 })
+    return handlePluginHostProtocolRequest(request.url, options)
+  }
 }
 
 /** Serves only embedded host resources and explicitly supplied current-version plugin roots. */
