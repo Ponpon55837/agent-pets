@@ -254,6 +254,19 @@ test('DND notifications stay unread in the center without bubbles, rate use, or 
   assert.equal(harness.controller.unreadCount(), 2)
 })
 
+test('host crash notices enter the notification center without plugin rates or bubbles', () => {
+  const harness = createHarness()
+  assert.equal(harness.controller.addSystemNotification(
+    'sample',
+    { 'zh-TW': '測試插件', 'en-US': 'Test Plugin' },
+    '連續崩潰後已停用',
+    '測試插件已停用。',
+  ), true)
+  assert.equal(harness.emitted.length, 0)
+  assert.equal(harness.controller.unreadCount(), 1)
+  assert.equal(harness.controller.listNotifications()[0]?.item.title, '連續崩潰後已停用')
+})
+
 test('unread-count updates fire when notifications enter, become visible, are read, and are cleared', () => {
   const harness = createHarness({ visible: false })
   const hidden = submitValid(harness.controller, 'sample', { title: 'Hidden' })

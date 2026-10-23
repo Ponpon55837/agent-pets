@@ -386,5 +386,7 @@
   "pluginPlanExpired": "The installation plan expired. Select the plugin archive again.",
   "pluginNotFound": "This plugin could not be found.",
   "pluginActionFailed": "The plugin operation failed. Refresh and try again.",
+  "pluginCrashDisabledTitle": "Disabled after repeated crashes",
+  "pluginCrashDisabledBody": "{name} was disabled after repeated crashes.",
   "system": "System integration"
 }

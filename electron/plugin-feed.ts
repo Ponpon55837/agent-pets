@@ -327,6 +327,32 @@ export class PluginFeedController {
     return { accepted: true, itemId: item.id, queued: this.queue.length, delivery: 'bubble' }
   }
 
+  /** Adds a host-owned notice to the center without starting a plugin bubble or rate budget. */
+  addSystemNotification(pluginId: unknown, pluginName: unknown, title: unknown, body: unknown): boolean {
+    const now = this.readNow()
+    if (now === null || !normalizePluginId(pluginId)) return false
+    const name = normalizeLocalizedName(pluginName)
+    const safeTitle = normalizePresentationMessage(title)
+    const safeBody = normalizePresentationMessage(body)
+    if (!name || !safeTitle || safeTitle.length > 60 || !safeBody || safeBody.length > 240) return false
+    const expiresAt = now + PLUGIN_FEED_DEFAULT_TTL_MS
+    if (!Number.isSafeInteger(expiresAt)) return false
+    let id: unknown
+    try { id = this.createId() } catch { return false }
+    if (typeof id !== 'string' || !FEED_ID.test(id) || this.center.some(record => record.item.id === id)) return false
+    this.addToCenter({
+      id,
+      pluginId,
+      pluginName: name,
+      title: safeTitle,
+      body: safeBody,
+      priority: 'normal',
+      createdAt: now,
+      expiresAt,
+    }, false)
+    return true
+  }
+
   /** Shares the same sliding per-plugin/global budget with non-feed RPCs such as reactions. */
   consumeRateLimit(pluginId: string): PluginFeedRateResult {
     const now = this.readNow()

@@ -386,5 +386,7 @@
   "pluginPlanExpired": "安裝計畫已過期，請重新選取插件檔。",
   "pluginNotFound": "找不到此插件。",
   "pluginActionFailed": "插件操作失敗，請重新整理後再試。",
+  "pluginCrashDisabledTitle": "連續崩潰後已停用",
+  "pluginCrashDisabledBody": "{name} 因連續崩潰而停用。",
   "system": "系統整合"
 }

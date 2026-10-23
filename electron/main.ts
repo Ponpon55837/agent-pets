@@ -61,7 +61,7 @@ import {
   PermissionAdapterRelay,
 } from './permission-adapter-server'
 import type { DesktopPreferences } from '../src/types/desktop'
-import { setLocale, t } from '../src/i18n'
+import { locale, setLocale, t } from '../src/i18n'
 import type { ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
@@ -689,6 +689,13 @@ function createPluginServices(): void {
       ?? { ok: false, error: 'disabled' },
     onPluginCrash: (pluginId, consecutiveCrashes) => {
       if (consecutiveCrashes >= 3) {
+        const name = pluginRuntimeContexts.get(pluginId)?.manifest.name ?? { 'zh-TW': pluginId, 'en-US': pluginId }
+        pluginFeedController?.addSystemNotification(
+          pluginId,
+          name,
+          t('pluginCrashDisabledTitle'),
+          t('pluginCrashDisabledBody', { name: name[locale.value] }),
+        )
         try { pluginRegistry?.setStatus(pluginId, 'disabled_crashed') } catch {}
         try { pluginPreferences?.updatePlugin(pluginId, { enabled: false }) } catch {}
         syncPluginHost()
