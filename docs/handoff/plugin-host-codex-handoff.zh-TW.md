@@ -49,27 +49,20 @@ git diff --check
 Phase 13 複檢證明：單元測試全過，但插件在真實 Electron 中完全跑不起來。所以每個 Phase 收尾都要實際啟動 Electron 驗證。不需要操作畫面，用下面的隔離方式即可：
 
 1. `pnpm exec vite build`
-2. 建立暫存資料夾（例如 `mktemp -d`），裡面建 `home/` 與 `ud/`。
-3. 以隔離環境啟動，**不能碰使用者已安裝的 Agent Pets 與 `~/.desktop-pet`**：
+2. **一律使用隔離啟動腳本**（不要再自己組 electron 指令或用 `pnpm dev`）：
    ```bash
-   HOME=<tmp>/home ./node_modules/.bin/electron --inspect=9349 --remote-debugging-port=9348 --user-data-dir=<tmp>/ud .
+   node scripts/e2e-isolated-electron.mjs
    ```
+   腳本會在 App 任何程式載入前：設定暫存 userData、以暫存 `HOME` 啟動、把 `safeStorage` 換成會計數的假實作，並驗證三者；任一不符就直接結束、不載入 App。看到輸出 `AGENT_PETS_E2E_READY {...}`（含暫存路徑與 `fakeSafeStorage: true`）才繼續；沒看到就停止驗收並回報。
+3. 主程序 inspector 可讀 `globalThis.__agentPetsE2E`（`root`、`userData`、`calls`：safeStorage 各方法呼叫次數）。驗收報告要記錄開始與結束時的 `calls`。
    （本機 17373–17375 埠被已安裝的 App 佔用時會印出 already in use，屬正常。）
 4. `curl http://127.0.0.1:9348/json/list` 取得各視窗的 WebSocket；`curl http://127.0.0.1:9349/json/list` 取得主程序。用 Node 內建 `WebSocket` 送 CDP `Runtime.evaluate`（`awaitPromise: true, returnByValue: true`）。
 5. 需要選檔時，在主程序執行
    `process.mainModule.require('electron').dialog.showOpenDialog = async () => ({ canceled: false, filePaths: ['<套件路徑>'] })`，再在面板呼叫 `window.electronAPI.selectPluginArchive()` 等 API。
 6. 寵物視窗的狀態可用 `document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('agent')` 讀寫；截圖用 CDP `Page.captureScreenshot`。
-7. 驗完用 `pkill -f "user-data-dir=<tmp>/ud"` 關閉，並重新 `pnpm exec vite build`（若曾修改建置輸出）。
-8. **絕對不可觸發使用者的 macOS 鑰匙圈（Keychain）**：開發版 Electron 呼叫 `safeStorage` 時，macOS 會跳出鑰匙圈存取視窗，而且可能反覆出現。測試前必須先在主程序用 inspector 把 `safeStorage` 換成假的可逆實作，再安裝或啟用任何會用到 `secrets` 的插件：
-   ```js
-   const { safeStorage } = process.mainModule.require('electron')
-   safeStorage.isEncryptionAvailable = () => true
-   safeStorage.encryptString = value => Buffer.from('test:' + value, 'utf8')
-   safeStorage.decryptString = value => { const text = value.toString('utf8'); if (!text.startsWith('test:')) throw new Error('bad'); return text.slice(5) }
-   ```
-   如果應用程式啟動時就會讀取密鑰（例如已啟用的插件在 activate 時呼叫 `secrets.get`），先用全新的暫存 userData 啟動、套用上面的替換後，才安裝與啟用插件。真實鑰匙圈的行為列為「未驗證（需使用者在正式版手動確認）」，不要在自動化驗收中觸發。
-
-phase report 的「Electron 驗證」一節要寫出實際執行的步驟與觀察到的結果；真的做不到的項目才寫「未驗證」並說明原因。
+7. 若曾修改建置輸出，驗完重新 `pnpm exec vite build`。
+8. **絕對不可觸發使用者的 macOS 鑰匙圈或系統權限視窗**：隔離啟動腳本已在載入前替換 `safeStorage`，不需要也不可以再用真實實作測試。插件面板或 Worker 的測試 **不可呼叫真實的相機、麥克風、定位、螢幕錄影等 API**（會跳 macOS 權限視窗）；權限拒絕改用 `navigator.permissions.query(...)`、`Notification.requestPermission()` 這類不會跳系統視窗的方式驗證。真實鑰匙圈與系統權限行為列為「未驗證（需使用者在正式版手動確認）」。
+9. 驗完用 `pkill -f "agent-pets-e2e-"` 關閉。
 
 ### 0.4b 安全檢查（必做）
 
