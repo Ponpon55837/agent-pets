@@ -102,11 +102,14 @@ test('network declarations accept DNS names and leftmost wildcards only', () => 
   assert.equal(isValidPluginNetworkHost('api.x.com'), true)
   assert.equal(isValidPluginNetworkHost('*.domain.tld'), true)
   for (const host of [
-    '127.0.0.1', '[::1]', 'localhost', 'api.localhost', 'example.local',
+    '127.0.0.1', '1.2.3.4', '0x7f.1', '127.1', '1.0x7f000001',
+    'foo.123', 'a.0x10', '*.0x7f.1', '[::1]', 'localhost', 'api.localhost', 'example.local',
     'api.x.com:443', 'api.x.com/path', 'https://api.x.com', '*.x', '*.*.example.com',
     'api..x.com', '-bad.example.com', 'bad-.example.com', 'api.x.com.',
   ]) assert.equal(isValidPluginNetworkHost(host), false, host)
   assert.equal(isValidPluginNetworkHost('*.domain.tld', false), false)
+  assert.equal(isValidPluginNetworkHost('a1.example.com'), true)
+  assert.equal(isValidPluginNetworkHost('123abc.example.com'), true)
   assert.equal(withManifest(manifest => {
     manifest.permissions.network!.hosts = Array.from({ length: 21 }, (_, index) => `api${index}.example.com`)
   }).ok, false)

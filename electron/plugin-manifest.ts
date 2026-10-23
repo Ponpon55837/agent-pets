@@ -109,6 +109,13 @@ export function isValidPluginNetworkHost(value: unknown, allowWildcard = true): 
   const labels = domain.split('.')
   if (labels.length < 2 || labels.some(label => label.length === 0 || label.length > 63)) return false
   if (labels.some(label => !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label))) return false
+  const finalLabel = labels.at(-1)!
+  if (/^\d+$/.test(finalLabel) || /^0x[0-9a-f]*$/i.test(finalLabel)) return false
+  try {
+    if (new URL(`https://${domain}`).hostname !== domain) return false
+  } catch {
+    return false
+  }
   if (isIP(domain) !== 0) return false
   if (domain === 'localhost' || domain.endsWith('.localhost')
     || domain === 'local' || domain.endsWith('.local')
