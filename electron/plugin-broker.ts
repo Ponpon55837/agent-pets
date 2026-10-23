@@ -49,6 +49,8 @@ export interface PluginBrokerOptions {
   now?: () => number
   network?: PluginNetworkClient
   onRequestHost?: (pluginId: string, host: unknown, reason: unknown) => Promise<unknown> | unknown
+  onSecretGet?: (pluginId: string, key: string) => string | { ok: false; error: PluginErrorCode }
+  onSettingsGet?: (pluginId: string) => Record<string, unknown> | { ok: false; error: PluginErrorCode }
 }
 
 type RpcResponse = { id: string; ok: true; value: unknown } | { id: string; ok: false; error: PluginErrorCode }
@@ -64,7 +66,7 @@ const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 const STORAGE_KEY_FORBIDDEN = new Set(['__proto__', 'prototype', 'constructor'])
 const KNOWN_METHODS = new Set([
   'feed.notify', 'pet.react', 'storage.get', 'storage.set', 'storage.remove',
-  'log.info', 'log.warn', 'log.error', 'net.fetch', 'net.requestHost',
+  'log.info', 'log.warn', 'log.error', 'net.fetch', 'net.requestHost', 'secrets.get', 'settings.get',
 ])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -134,6 +136,8 @@ export class PluginBroker {
   private readonly onReaction: PluginBrokerOptions['onReaction']
   private readonly network: PluginBrokerOptions['network']
   private readonly onRequestHost: PluginBrokerOptions['onRequestHost']
+  private readonly onSecretGet: PluginBrokerOptions['onSecretGet']
+  private readonly onSettingsGet: PluginBrokerOptions['onSettingsGet']
   private readonly now: () => number
   private readonly storage = new Map<string, PluginStorageState>()
   private readonly storageTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -148,6 +152,8 @@ export class PluginBroker {
     this.onReaction = options.onReaction
     this.network = options.network
     this.onRequestHost = options.onRequestHost
+    this.onSecretGet = options.onSecretGet
+    this.onSettingsGet = options.onSettingsGet
     this.now = options.now ?? Date.now
   }
 
@@ -297,6 +303,17 @@ export class PluginBroker {
       if (args.length !== 2) return { ok: false, error: 'invalid_request' }
       if (!this.onRequestHost) return { ok: false, error: 'disabled' }
       return this.onRequestHost(pluginId, args[0], args[1])
+    }
+    if (method === 'secrets.get') {
+      const declared = context.manifest.permissions.secrets ?? []
+      if (args.length !== 1 || typeof args[0] !== 'string') return { ok: false, error: 'invalid_request' }
+      if (!declared.includes(args[0])) return { ok: false, error: 'not_permitted' }
+      return this.onSecretGet?.(pluginId, args[0]) ?? { ok: false, error: 'secret_unavailable' }
+    }
+    if (method === 'settings.get') {
+      if (args.length !== 0) return { ok: false, error: 'invalid_request' }
+      if (!context.manifest.contributes.settings) return { ok: false, error: 'not_permitted' }
+      return this.onSettingsGet?.(pluginId) ?? { ok: false, error: 'disabled' }
     }
     if (method.startsWith('storage.')) {
       if (!context.manifest.permissions.storage || args.length !== (method === 'storage.set' ? 2 : 1)) {

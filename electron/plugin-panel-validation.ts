@@ -28,6 +28,10 @@ export function pluginPanelErrorCode(error: unknown): string {
   if (error && typeof error === 'object' && 'code' in error && error.code === 'unsafe_file') {
     return 'preferences_unsafe'
   }
+  if (error && typeof error === 'object' && 'code' in error
+    && ['secret_unavailable', 'secret_not_found', 'settings_invalid', 'too_large', 'not_permitted'].includes(String(error.code))) {
+    return String(error.code)
+  }
   if (error instanceof TypeError) return 'invalid_request'
   return 'plugin_action_failed'
 }

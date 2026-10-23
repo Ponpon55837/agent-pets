@@ -27,6 +27,8 @@ function createHarness(options: {
   pluginManifest?: PluginManifest
   pluginRateLimit?: number
   storageBytesPerPlugin?: number
+  onSecretGet?: (pluginId: string, key: string) => string | { ok: false; error: 'secret_unavailable' | 'secret_not_found' }
+  onSettingsGet?: (pluginId: string) => Record<string, unknown> | { ok: false; error: 'settings_invalid' }
 } = {}) {
   const userDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-broker-'))
   fs.mkdirSync(path.join(userDataDirectory, 'plugins', 'sample'), { recursive: true })
@@ -58,6 +60,8 @@ function createHarness(options: {
       reactions.push(reaction)
       return { ok: true }
     },
+    onSecretGet: options.onSecretGet,
+    onSettingsGet: options.onSettingsGet,
     now: () => now,
   })
   return {
@@ -175,6 +179,34 @@ test('PluginBroker persists storage atomically and rejects values over the confi
   } finally {
     harness.cleanup()
   }
+})
+
+test('PluginBroker returns declared secrets and non-secret settings directly with coded failures', () => {
+  const harness = createHarness({
+    pluginManifest: manifest({
+      permissions: { secrets: ['apiToken', 'missingToken'] },
+      contributes: { settings: { type: 'object', properties: {
+        apiToken: { type: 'string', format: 'secret' },
+        missingToken: { type: 'string', format: 'secret' },
+      } } },
+    }),
+    onSecretGet: (_pluginId, key) => key === 'apiToken' ? 'private-value' : { ok: false, error: 'secret_not_found' },
+    onSettingsGet: () => ({ theme: 'compact', enabled: true }),
+  })
+  try {
+    assert.deepEqual(harness.broker.handle('sample', request('secret', 'secrets.get', ['apiToken'])), {
+      id: 'secret', ok: true, value: 'private-value',
+    })
+    assert.deepEqual(harness.broker.handle('sample', request('undeclared', 'secrets.get', ['other'])), {
+      id: 'undeclared', ok: false, error: 'not_permitted',
+    })
+    assert.deepEqual(harness.broker.handle('sample', request('settings', 'settings.get')), {
+      id: 'settings', ok: true, value: { theme: 'compact', enabled: true },
+    })
+    assert.deepEqual(harness.broker.handle('sample', request('secret-missing', 'secrets.get', ['missingToken'])), {
+      id: 'secret-missing', ok: false, error: 'secret_not_found',
+    })
+  } finally { harness.cleanup() }
 })
 
 test('PluginBroker fails closed for symlinked plugin storage', () => {

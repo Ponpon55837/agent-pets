@@ -91,6 +91,11 @@ export class PluginHostWindowController {
     if (this.portReady) this.syncWorkers()
   }
 
+  notifySettingsChanged(pluginId: string, value: Record<string, unknown>): void {
+    if (!this.desired.has(pluginId) || !isRecord(value)) return
+    this.post({ type: 'settings-changed', pluginId, value })
+  }
+
   close(): void {
     this.desired.clear()
     this.closeHost()

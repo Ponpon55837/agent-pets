@@ -9,6 +9,7 @@ import {
   globalShortcut,
   powerMonitor,
   shell,
+  safeStorage,
 } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { join, resolve } from 'path'
@@ -50,6 +51,8 @@ import { PluginFeedController } from './plugin-feed.ts'
 import { PluginNetworkClient } from './plugin-net.ts'
 import { isPublicPluginNetworkHost } from './plugin-net.ts'
 import { PluginHostGrantController, sanitizePluginHostRequestReason } from './plugin-host-grants.ts'
+import { PluginSecretsStore } from './plugin-secrets.ts'
+import { PluginSettingsStore } from './plugin-settings.ts'
 import {
   isPluginPanelInstallConfirmation,
   isPluginPanelNotificationId,
@@ -71,7 +74,7 @@ import type { ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
 import type { PresentationIntent, PresentationStatusSnapshot } from '../src/types/presentation'
-import type { PluginPanelPlugin, PluginPanelResult, PluginPanelSnapshot } from '../src/types/plugin'
+import type { PluginPanelPlugin, PluginPanelResult, PluginPanelSettingsSnapshot, PluginPanelSnapshot } from '../src/types/plugin'
 import type { ProjectMcpRegistrySnapshot, ProjectMcpRemovalSummary } from '../src/types/project-mcp'
 import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from '../src/types/project-pet'
 import type { PetEdge, PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
@@ -141,6 +144,8 @@ let projectMcpRegistry: ProjectMcpRegistryStore | null = null
 let projectRoutingStore: ProjectRoutingStore | null = null
 let pluginRegistry: PluginRegistry | null = null
 let pluginPreferences: PluginPreferencesStore | null = null
+let pluginSecretsStore: PluginSecretsStore | null = null
+let pluginSettingsStore: PluginSettingsStore | null = null
 let pluginHostWindow: PluginHostWindowController | null = null
 let pluginBroker: PluginBroker | null = null
 let pluginNetworkClient: PluginNetworkClient | null = null
@@ -674,6 +679,8 @@ function createPluginServices(): void {
   const userDataDirectory = app.getPath('userData')
   pluginRegistry = new PluginRegistry(userDataDirectory)
   pluginPreferences = new PluginPreferencesStore(userDataDirectory)
+  pluginSecretsStore = new PluginSecretsStore(userDataDirectory, safeStorage)
+  pluginSettingsStore = new PluginSettingsStore(userDataDirectory)
   pluginHostGrantController = new PluginHostGrantController()
   refreshPluginRuntimeContexts()
   pluginFeedController = new PluginFeedController({
@@ -757,6 +764,24 @@ function createPluginServices(): void {
         return { ok: false, error: 'disabled' }
       }
     },
+    onSecretGet: (pluginId, key) => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      if (!context || !pluginSecretsStore) return { ok: false, error: 'disabled' }
+      try {
+        return pluginSecretsStore.get(pluginId, key, context.manifest.permissions.secrets ?? [])
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error ? error.code : null
+        return { ok: false, error: code === 'secret_unavailable' || code === 'secret_not_found' || code === 'not_permitted'
+          ? code : 'secret_unavailable' }
+      }
+    },
+    onSettingsGet: pluginId => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      if (!context || !pluginSettingsStore) return { ok: false, error: 'disabled' }
+      try { return pluginSettingsStore.get(pluginId, context.manifest) } catch {
+        return { ok: false, error: 'settings_invalid' }
+      }
+    },
     onReaction: (pluginId, request: PluginReactionRequest) => {
       const result = presentationController?.submitPluginReaction(pluginId, request)
       if (result?.accepted) return { ok: true }
@@ -835,6 +860,56 @@ function createPluginServices(): void {
   ipcMain.handle('plugin-panel-snapshot', event => {
     assertPluginPanelSender(event)
     return pluginPanelSnapshot()
+  })
+  ipcMain.handle('plugin-settings-get', (event, pluginId: unknown) => {
+    assertPluginPanelSender(event)
+    if (!isPluginPanelPluginId(pluginId)) return { ok: false, error: 'invalid_request' }
+    const context = pluginRuntimeContexts.get(pluginId)
+    if (!context || !pluginSettingsStore || !pluginSecretsStore) return { ok: false, error: 'plugin_not_found' }
+    if (!context.manifest.contributes.settings) return { ok: false, error: 'not_permitted' }
+    try {
+      const value: PluginPanelSettingsSnapshot = {
+        values: pluginSettingsStore.get(pluginId, context.manifest),
+        secrets: pluginSecretsStore.listConfigured(pluginId, context.manifest.permissions.secrets ?? []),
+      }
+      return { ok: true, value }
+    } catch (error) {
+      return { ok: false, error: error && typeof error === 'object' && 'code' in error && error.code === 'plugin_data_unsafe'
+        ? 'settings_invalid' : pluginPanelError(error) }
+    }
+  })
+  ipcMain.handle('plugin-settings-set', (event, pluginId: unknown, value: unknown) => {
+    assertPluginPanelSender(event)
+    if (!isPluginPanelPluginId(pluginId)) return { ok: false, error: 'invalid_request' }
+    const context = pluginRuntimeContexts.get(pluginId)
+    if (!context || !pluginSettingsStore) return { ok: false, error: 'plugin_not_found' }
+    if (!context.manifest.contributes.settings) return { ok: false, error: 'not_permitted' }
+    try {
+      const values = pluginSettingsStore.set(pluginId, context.manifest, value)
+      pluginHostWindow?.notifySettingsChanged(pluginId, values)
+      return { ok: true, value: values }
+    } catch (error) {
+      return { ok: false, error: error && typeof error === 'object' && 'code' in error && error.code === 'plugin_data_unsafe'
+        ? 'settings_invalid' : pluginPanelError(error) }
+    }
+  })
+  ipcMain.handle('plugin-secret-set', (event, pluginId: unknown, key: unknown, value: unknown) => {
+    assertPluginPanelSender(event)
+    if (!isPluginPanelPluginId(pluginId) || typeof key !== 'string' || typeof value !== 'string') {
+      return { ok: false, error: 'invalid_request' }
+    }
+    const context = pluginRuntimeContexts.get(pluginId)
+    if (!context || !pluginSecretsStore) return { ok: false, error: 'plugin_not_found' }
+    const definition = context.manifest.contributes.settings?.properties[key]
+    const declared = context.manifest.permissions.secrets ?? []
+    if (!definition || definition.format !== 'secret' || !declared.includes(key)) return { ok: false, error: 'not_permitted' }
+    try {
+      pluginSecretsStore.set(pluginId, key, value, declared)
+      return { ok: true, value: { configured: pluginSecretsStore.has(pluginId, key) } }
+    } catch (error) {
+      return { ok: false, error: error && typeof error === 'object' && 'code' in error && error.code === 'plugin_data_unsafe'
+        ? 'secret_unavailable' : pluginPanelError(error) }
+    }
   })
   ipcMain.handle('plugin-preferences-global-set', (event, patch: unknown) => {
     assertPluginPanelSender(event)
@@ -945,6 +1020,9 @@ function createPluginServices(): void {
     if (!pluginRegistry || !pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
     if (!isPluginPanelPluginId(pluginId) || typeof keepData !== 'boolean') return { ok: false, error: 'invalid_request' }
     if (!pluginRegistry.list().some(entry => entry.id === pluginId)) return { ok: false, error: 'plugin_not_found' }
+    try { pluginSecretsStore?.remove(pluginId) } catch (error) {
+      return { ok: false, error: pluginPanelError(error) }
+    }
     if (!keepData) {
       try { pluginPreferences.updatePlugin(pluginId, {}) } catch (error) {
         return { ok: false, error: pluginPanelError(error) }

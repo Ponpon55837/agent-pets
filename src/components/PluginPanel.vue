@@ -8,8 +8,10 @@ import type {
   PluginGlobalPreferencesPatch,
   PluginNotificationRecord,
   PluginPanelPlugin,
+  PluginPanelSettingsSnapshot,
   PluginPanelSnapshot,
   PluginPreferences,
+  PluginSettingScalar,
 } from '@/types/plugin'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
@@ -21,6 +23,9 @@ const snapshot = ref<PluginPanelSnapshot | null>(null)
 const notifications = ref<PluginNotificationRecord[]>([])
 const logs = ref<PluginBrokerLogEntry[]>([])
 const diagnostics = ref<PluginBrokerDiagnostic[]>([])
+const pluginSettings = ref<PluginPanelSettingsSnapshot | null>(null)
+const settingsDraft = ref<Record<string, PluginSettingScalar>>({})
+const secretDrafts = ref<Record<string, string>>({})
 const selectedPluginId = ref('')
 const busy = ref(false)
 const loading = ref(false)
@@ -32,6 +37,7 @@ const keepData = ref(false)
 let removeNotificationsListener: (() => void) | null = null
 
 const plugins = computed(() => snapshot.value?.plugins ?? [])
+const selectedPlugin = computed(() => plugins.value.find(plugin => plugin.id === selectedPluginId.value) ?? null)
 const enabledGlobally = computed(() => snapshot.value?.preferences.pluginsEnabled ?? false)
 const hasCompatiblePlan = computed(() => Boolean(pendingPlan.value && pendingPlan.value.kind !== 'incompatible'))
 const pendingPluginName = computed(() => pendingPlan.value?.name?.[locale.value] ?? pendingPlan.value?.pluginId ?? '')
@@ -76,6 +82,9 @@ function localizedError(code: string): string {
     plan_not_found: 'pluginPlanExpired',
     plugin_not_found: 'pluginNotFound',
     invalid_request: 'pluginActionFailed',
+    secret_unavailable: 'pluginSecretUnavailable',
+    secret_not_found: 'pluginSecretNotFound',
+    settings_invalid: 'pluginSettingsInvalid',
     dialog_unavailable: 'pluginActionFailed',
     install_failed: 'pluginActionFailed',
     registry_unavailable: 'pluginActionFailed',
@@ -133,6 +142,85 @@ async function refreshDiagnostics(pluginId = selectedPluginId.value): Promise<vo
     } else if (result && !result.ok) setError(result.error)
   } catch {
     setError('plugin_action_failed')
+  }
+}
+
+async function refreshPluginSettings(pluginId = selectedPluginId.value): Promise<void> {
+  pluginSettings.value = null
+  settingsDraft.value = {}
+  secretDrafts.value = {}
+  const plugin = plugins.value.find(item => item.id === pluginId)
+  if (!plugin?.manifest?.contributes.settings) return
+  try {
+    const result = await window.electronAPI?.getPluginSettings(pluginId)
+    if (!result?.ok) {
+      if (result && !result.ok) setError(result.error)
+      return
+    }
+    pluginSettings.value = result.value
+    settingsDraft.value = { ...result.value.values }
+    secretDrafts.value = Object.fromEntries(Object.keys(result.value.secrets).map(key => [key, '']))
+  } catch {
+    setError('plugin_action_failed')
+  }
+}
+
+function settingTitle(title: string | { 'zh-TW': string; 'en-US': string } | undefined, fallback: string): string {
+  if (typeof title === 'string') return title
+  return title?.[locale.value] ?? fallback
+}
+
+function settingValue(key: string, definition: { default?: PluginSettingScalar }): string {
+  const value = settingsDraft.value[key] ?? definition.default ?? ''
+  return String(value)
+}
+
+function updateSetting(key: string, type: string, raw: string | boolean): void {
+  const value = type === 'boolean' ? Boolean(raw) : type === 'number' ? Number(raw) : String(raw)
+  settingsDraft.value = { ...settingsDraft.value, [key]: value as PluginSettingScalar }
+}
+
+async function savePluginSettings(): Promise<void> {
+  const pluginId = selectedPluginId.value
+  if (!pluginId || busy.value) return
+  busy.value = true
+  errorMessage.value = ''
+  statusMessage.value = ''
+  try {
+    const result = await window.electronAPI?.setPluginSettings(pluginId, settingsDraft.value)
+    if (!result?.ok) {
+      if (result && !result.ok) setError(result.error)
+      return
+    }
+    settingsDraft.value = { ...result.value }
+    if (pluginSettings.value) pluginSettings.value.values = { ...result.value }
+    statusMessage.value = t('pluginSettingsSaved')
+  } catch {
+    setError('plugin_action_failed')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function savePluginSecret(key: string): Promise<void> {
+  const pluginId = selectedPluginId.value
+  if (!pluginId || busy.value) return
+  busy.value = true
+  errorMessage.value = ''
+  statusMessage.value = ''
+  try {
+    const result = await window.electronAPI?.setPluginSecret(pluginId, key, secretDrafts.value[key] ?? '')
+    if (!result?.ok) {
+      if (result && !result.ok) setError(result.error)
+      return
+    }
+    if (pluginSettings.value) pluginSettings.value.secrets[key] = result.value.configured
+    secretDrafts.value = { ...secretDrafts.value, [key]: '' }
+    statusMessage.value = result.value.configured ? t('pluginSecretSaved') : t('pluginSettingsSaved')
+  } catch {
+    setError('plugin_action_failed')
+  } finally {
+    busy.value = false
   }
 }
 
@@ -354,7 +442,10 @@ function diagnosticCodeLabel(item: PluginBrokerDiagnostic): string {
   return t('pluginDiagnosticRejected', { code: item.code, method: item.method ?? t('pluginDiagnosticUnknownMethod') })
 }
 
-watch(selectedPluginId, pluginId => { void refreshDiagnostics(pluginId) })
+watch(selectedPluginId, pluginId => {
+  void refreshDiagnostics(pluginId)
+  void refreshPluginSettings(pluginId)
+})
 
 onMounted(() => {
   void refreshPanel()
@@ -448,6 +539,64 @@ onUnmounted(() => {
         </Card>
       </div>
     </section>
+
+    <Card v-if="selectedPlugin?.manifest?.contributes.settings" :title="t('pluginSettingsHeading')" class="plugin-section">
+      <div v-for="(definition, key) in selectedPlugin.manifest.contributes.settings.properties" :key="key" class="plugin-setting-field">
+        <template v-if="definition.format === 'secret'">
+          <span class="plugin-setting-label">{{ settingTitle(definition.title, key) }}</span>
+          <p class="plugin-secret-state">
+            {{ pluginSettings?.secrets[key] ? t('pluginSecretConfigured') : t('pluginSecretNotConfigured') }}
+          </p>
+          <div class="plugin-secret-control">
+            <input
+              v-model="secretDrafts[key]"
+              type="password"
+              autocomplete="new-password"
+              :maxlength="definition.maxLength ?? 4096"
+              :aria-label="settingTitle(definition.title, key)"
+              :disabled="busy || loading"
+            />
+            <Button variant="secondary" size="sm" :disabled="busy || loading" @click="savePluginSecret(key)">
+              {{ t('pluginSecretSave') }}
+            </Button>
+          </div>
+        </template>
+        <template v-else>
+          <label :for="`plugin-setting-${key}`" class="plugin-setting-label">{{ settingTitle(definition.title, key) }}</label>
+          <input
+            v-if="definition.type === 'boolean'"
+            :id="`plugin-setting-${key}`"
+            type="checkbox"
+            :checked="Boolean(settingsDraft[key] ?? definition.default ?? false)"
+            :disabled="busy || loading"
+            @change="updateSetting(key, 'boolean', ($event.target as HTMLInputElement).checked)"
+          />
+          <select
+            v-else-if="definition.enum"
+            :id="`plugin-setting-${key}`"
+            :value="settingValue(key, definition)"
+            :disabled="busy || loading"
+            @change="updateSetting(key, definition.type, ($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="option in definition.enum" :key="String(option)" :value="String(option)">{{ option }}</option>
+          </select>
+          <input
+            v-else
+            :id="`plugin-setting-${key}`"
+            :type="definition.type === 'number' ? 'number' : 'text'"
+            :value="settingValue(key, definition)"
+            :min="definition.minimum"
+            :max="definition.maximum"
+            :maxlength="definition.maxLength"
+            :disabled="busy || loading"
+            @input="updateSetting(key, definition.type, ($event.target as HTMLInputElement).value)"
+          />
+        </template>
+      </div>
+      <Button variant="primary" size="sm" :disabled="busy || loading" @click="savePluginSettings">
+        {{ t('pluginSettingsSave') }}
+      </Button>
+    </Card>
 
     <section class="plugin-section">
       <div class="plugin-section-heading">
@@ -571,6 +720,13 @@ onUnmounted(() => {
 .plugin-section-heading p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--font-xs); }
 .plugin-count { flex: 0 0 auto; color: var(--text-muted); font-size: var(--font-xs); }
 .plugin-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.plugin-setting-field { display: flex; flex-direction: column; gap: var(--space-2); color: var(--text-secondary); font-size: var(--font-sm); }
+.plugin-setting-label { color: var(--text-primary); font-size: var(--font-sm); }
+.plugin-setting-field > input:not([type="checkbox"]), .plugin-setting-field > select, .plugin-secret-control > input { width: 100%; min-height: 36px; padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-raised); color: var(--text-primary); }
+.plugin-setting-field > input[type="checkbox"] { align-self: flex-start; accent-color: var(--accent-primary); }
+.plugin-secret-state { margin: 0; color: var(--text-muted); font-size: var(--font-xs); }
+.plugin-secret-control { display: flex; align-items: center; gap: var(--space-2); }
+.plugin-secret-control > input { min-width: 0; flex: 1 1 auto; }
 .plugin-card { min-width: 0; }
 .plugin-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .plugin-icon { width: 32px; height: 32px; flex: 0 0 32px; border-radius: var(--radius-sm); object-fit: contain; background: var(--surface-raised); }

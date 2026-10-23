@@ -65,6 +65,9 @@ window.addEventListener('message', (event) => {
         }
       } else if (data.type === 'rpc-result' && typeof data.pluginId === 'string') {
         workers.get(data.pluginId)?.postMessage({ type: 'rpc-result', result: data.result })
+      } else if (data.type === 'settings-changed' && typeof data.pluginId === 'string'
+        && data.value && typeof data.value === 'object' && !Array.isArray(data.value)) {
+        workers.get(data.pluginId)?.postMessage({ type: 'settings-changed', value: data.value })
       }
   }
 })
@@ -79,6 +82,7 @@ const pending = new Map()
 let sequence = 0
 let scheduleMinIntervalSec = 60
 const schedules = new Map()
+const settingsListeners = new Set()
 const statusListeners = new Set()
 let scheduleSequence = 0
 const blockedApis = [
@@ -137,9 +141,8 @@ const api = Object.freeze({
     get: () => rpc('settings.get', []),
     onChange: (callback) => {
       if (typeof callback !== 'function') throw Object.assign(new Error('invalid_request'), { code: 'invalid_request' })
-      const listener = event => callback(event.value)
-      scope.addEventListener('message', listener)
-      return () => scope.removeEventListener('message', listener)
+      settingsListeners.add(callback)
+      return () => settingsListeners.delete(callback)
     },
   }),
   schedule: Object.freeze({
@@ -186,8 +189,8 @@ scope.onmessage = async ({ data }) => {
     } catch {
       postToHost({ type: 'activation-error' })
     }
-  } else if (data.type === 'settings-changed' && Array.isArray(data.value)) {
-    scope.dispatchEvent(new MessageEvent('message', { data: { type: 'settings-changed', value: data.value } }))
+  } else if (data.type === 'settings-changed' && data.value && typeof data.value === 'object' && !Array.isArray(data.value)) {
+    for (const listener of settingsListeners) { try { listener(data.value) } catch {} }
   } else if (data.type === 'status-changed' && Array.isArray(data.value)) {
     for (const listener of statusListeners) { try { listener(data.value) } catch {} }
   } else if (data.type === 'ping' && Number.isSafeInteger(data.at)) {

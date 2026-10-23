@@ -188,6 +188,11 @@ export interface PluginPanelSnapshot {
   plugins: PluginPanelPlugin[]
 }
 
+export interface PluginPanelSettingsSnapshot {
+  values: Record<string, PluginSettingScalar>
+  secrets: Record<string, boolean>
+}
+
 export interface PluginNotificationRecord {
   item: PluginFeedItem
   read: boolean

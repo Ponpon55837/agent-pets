@@ -22,9 +22,11 @@ import type {
   PluginInstallPlan,
   PluginNotificationRecord,
   PluginPanelPlugin,
+  PluginPanelSettingsSnapshot,
   PluginPanelResult,
   PluginPanelSnapshot,
   PluginPreferences,
+  PluginSettingScalar,
 } from '@/types/plugin'
 import type {
   ProjectMcpRegistrySnapshot,
@@ -50,6 +52,9 @@ declare global {
       completePluginFeed: (itemId: string) => Promise<boolean>
       openPluginFeedLink: (itemId: string) => Promise<boolean>
       getPluginPanelSnapshot: () => Promise<PluginPanelResult<PluginPanelSnapshot>>
+      getPluginSettings: (pluginId: string) => Promise<PluginPanelResult<PluginPanelSettingsSnapshot>>
+      setPluginSettings: (pluginId: string, value: Record<string, PluginSettingScalar>) => Promise<PluginPanelResult<Record<string, PluginSettingScalar>>>
+      setPluginSecret: (pluginId: string, key: string, value: string) => Promise<PluginPanelResult<{ configured: boolean }>>
       setPluginGlobalPreferences: (patch: PluginGlobalPreferencesPatch) => Promise<PluginPanelResult<PluginPreferences>>
       setPluginInstancePreferences: (pluginId: string, patch: unknown) => Promise<PluginPanelResult<PluginPreferences>>
       selectPluginArchive: () => Promise<PluginPanelResult<PluginInstallPlan>>
