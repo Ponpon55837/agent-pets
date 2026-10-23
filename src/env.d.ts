@@ -54,6 +54,8 @@ declare global {
       getPluginPanelSnapshot: () => Promise<PluginPanelResult<PluginPanelSnapshot>>
       openPluginPanelView: (pluginId: string) => Promise<PluginPanelResult<{ opened: true }>>
       closePluginPanelView: () => void
+      setPluginPanelViewBounds: (frame: unknown, content: unknown) => void
+      openPluginPanelFromPet: (pluginId: string) => Promise<boolean>
       getPluginSettings: (pluginId: string) => Promise<PluginPanelResult<PluginPanelSettingsSnapshot>>
       setPluginSettings: (pluginId: string, value: Record<string, PluginSettingScalar>) => Promise<PluginPanelResult<Record<string, PluginSettingScalar>>>
       getPluginSecretConsent: () => Promise<PluginPanelResult<boolean>>
@@ -87,6 +89,7 @@ declare global {
       hidePanel: () => void
       onPanelOpened: (callback: () => void) => () => void
       onPanelOpenSettings: (callback: () => void) => () => void
+      onPanelOpenPluginView: (callback: (pluginId: string) => void) => () => void
       initializeDesktopPreferences: (legacySoundEnabled: boolean) => Promise<DesktopPreferences>
       setDesktopPreferences: (patch: DesktopPreferencesPatch) => Promise<DesktopPreferences>
       getPowerSaveState: () => Promise<boolean>

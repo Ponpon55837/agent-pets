@@ -944,6 +944,23 @@
   text-underline-offset: 2px;
 }
 
+.plugin-feed-open-panel {
+  align-self: flex-start;
+  margin-top: 3px;
+  padding: 2px 6px;
+  border: 1px solid rgba(228, 255, 243, 0.28);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: max(8px, calc(9px * var(--pet-scale, 1)));
+}
+
+.plugin-feed-open-panel:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
 .plugin-feed-close {
   display: grid;
   flex: 0 0 18px;

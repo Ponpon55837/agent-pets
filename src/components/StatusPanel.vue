@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { STATE_LABELS, STATE_LABELS_SHORT, SOURCE_LABELS, STATE_COLORS, STATE_PRIORITY, SOURCE_FAMILIES } from '@/types/agent'
 import { formatProject, quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
@@ -26,6 +26,7 @@ const editName = ref('')
 
 type SettingsSection = 'language' | 'appearance' | 'desktop' | 'plugins' | 'pets' | 'growth' | 'advanced'
 const settingsTab = ref<SettingsSection>('appearance')
+const requestedPluginViewId = ref('')
 const settingsSections = computed<Array<{ id: SettingsSection; icon: string; label: string; hint: string }>>(() => [
   { id: 'language', icon: 'language', label: t('language'), hint: t('languageHint') },
   { id: 'appearance', icon: 'appearance', label: t('appearance'), hint: t('appearanceHint') },
@@ -36,6 +37,24 @@ const settingsSections = computed<Array<{ id: SettingsSection; icon: string; lab
   { id: 'advanced', icon: 'advanced', label: t('advanced'), hint: t('advancedHint') },
 ])
 const activeSettingsSection = computed(() => settingsSections.value.find(section => section.id === settingsTab.value))
+let removePluginViewRequestListener: (() => void) | null = null
+let removePanelSettingsListener: (() => void) | null = null
+
+onMounted(() => {
+  removePanelSettingsListener = window.electronAPI?.onPanelOpenSettings(() => {
+    requestedPluginViewId.value = ''
+  }) ?? null
+  removePluginViewRequestListener = window.electronAPI?.onPanelOpenPluginView(pluginId => {
+    settingsTab.value = 'plugins'
+    requestedPluginViewId.value = ''
+    void nextTick(() => { requestedPluginViewId.value = pluginId })
+  }) ?? null
+})
+
+onUnmounted(() => {
+  removePluginViewRequestListener?.()
+  removePanelSettingsListener?.()
+})
 
 // --- 控制面板分頁（工作階段 / 用量 / 歷史）------------------------------------
 
@@ -1055,7 +1074,7 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
         </template>
 
         <template v-else-if="settingsTab === 'plugins'">
-          <PluginPanel />
+          <PluginPanel :requested-plugin-id="requestedPluginViewId" />
         </template>
 
         <template v-else-if="settingsTab === 'growth'">

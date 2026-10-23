@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { locale, t, type TranslationKey } from '@/i18n'
 import type {
   PluginBrokerDiagnostic,
@@ -21,6 +21,8 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Select from '@/components/ui/Select.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
 
+const props = defineProps<{ requestedPluginId?: string }>()
+
 const snapshot = ref<PluginPanelSnapshot | null>(null)
 const notifications = ref<PluginNotificationRecord[]>([])
 const logs = ref<PluginBrokerLogEntry[]>([])
@@ -30,6 +32,9 @@ const pluginSettings = ref<PluginPanelSettingsSnapshot | null>(null)
 const settingsDraft = ref<Record<string, PluginSettingScalar>>({})
 const secretDrafts = ref<Record<string, string>>({})
 const selectedPluginId = ref('')
+const panelViewPluginId = ref('')
+const panelViewFrame = ref<HTMLElement | null>(null)
+const panelViewContent = ref<HTMLElement | null>(null)
 const busy = ref(false)
 const loading = ref(false)
 const errorMessage = ref('')
@@ -39,9 +44,11 @@ const pendingRemove = ref<PluginPanelPlugin | null>(null)
 const pendingSecretConsentKey = ref('')
 const keepData = ref(false)
 let removeNotificationsListener: (() => void) | null = null
+let panelViewBoundsObserver: ResizeObserver | null = null
 
 const plugins = computed(() => snapshot.value?.plugins ?? [])
 const selectedPlugin = computed(() => plugins.value.find(plugin => plugin.id === selectedPluginId.value) ?? null)
+const panelViewPlugin = computed(() => plugins.value.find(plugin => plugin.id === panelViewPluginId.value) ?? null)
 const enabledGlobally = computed(() => snapshot.value?.preferences.pluginsEnabled ?? false)
 const hasCompatiblePlan = computed(() => Boolean(pendingPlan.value && pendingPlan.value.kind !== 'incompatible'))
 const pendingPluginName = computed(() => pendingPlan.value?.name?.[locale.value] ?? pendingPlan.value?.pluginId ?? '')
@@ -72,6 +79,46 @@ function pluginIconUrl(plugin: PluginPanelPlugin): string | null {
   return `agent-pets://plugin/${plugin.id}/${icon.split('/').map(encodeURIComponent).join('/')}`
 }
 
+function sendPluginPanelViewBounds(): void {
+  const frame = panelViewFrame.value?.getBoundingClientRect()
+  const content = panelViewContent.value?.getBoundingClientRect()
+  if (!frame || !content) return
+  window.electronAPI?.setPluginPanelViewBounds(
+    { x: frame.left, y: frame.top, width: frame.width, height: frame.height },
+    { x: content.left, y: content.top, width: content.width, height: content.height },
+  )
+}
+
+async function openPluginPanelView(pluginId: string): Promise<void> {
+  const plugin = plugins.value.find(item => item.id === pluginId)
+  if (!plugin?.manifest?.contributes.panelView || !plugin.preference.enabled || !enabledGlobally.value) {
+    setError('disabled')
+    return
+  }
+  selectedPluginId.value = pluginId
+  panelViewPluginId.value = pluginId
+  errorMessage.value = ''
+  await nextTick()
+  try {
+    const result = await window.electronAPI?.openPluginPanelView(pluginId)
+    if (!result?.ok) {
+      panelViewPluginId.value = ''
+      setError(result && !result.ok ? result.error : 'plugin_service_unavailable')
+      return
+    }
+    await nextTick()
+    sendPluginPanelViewBounds()
+  } catch {
+    panelViewPluginId.value = ''
+    setError('plugin_service_unavailable')
+  }
+}
+
+function closePluginPanelView(): void {
+  panelViewPluginId.value = ''
+  window.electronAPI?.closePluginPanelView()
+}
+
 function pluginStatusLabel(plugin: PluginPanelPlugin): string {
   if (plugin.status === 'disabled_crashed') return t('pluginStatusCrashed')
   if (plugin.status === 'incompatible' || !plugin.manifest) return t('pluginStatusIncompatible')
@@ -91,6 +138,7 @@ function localizedError(code: string): string {
     })
   }
   const keys: Record<string, TranslationKey> = {
+    disabled: 'pluginPanelUnavailable',
     preferences_unsafe: 'pluginPreferencesUnsafe',
     plugin_service_unavailable: 'pluginServiceUnavailable',
     archive_too_large: 'pluginArchiveTooLarge',
@@ -140,7 +188,11 @@ async function refreshPanel(): Promise<void> {
       return
     }
     snapshot.value = result.value
-    if (!result.value.plugins.some(plugin => plugin.id === selectedPluginId.value)) {
+    const requestedPluginId = props.requestedPluginId
+    if (requestedPluginId && result.value.plugins.some(plugin => plugin.id === requestedPluginId)) {
+      selectedPluginId.value = requestedPluginId
+      void openPluginPanelView(requestedPluginId)
+    } else if (!result.value.plugins.some(plugin => plugin.id === selectedPluginId.value)) {
       selectedPluginId.value = result.value.plugins[0]?.id ?? ''
     }
     await refreshNotifications()
@@ -577,8 +629,30 @@ function diagnosticCodeLabel(item: PluginBrokerDiagnostic): string {
 }
 
 watch(selectedPluginId, pluginId => {
+  if (panelViewPluginId.value && panelViewPluginId.value !== pluginId) closePluginPanelView()
   void refreshDiagnostics(pluginId)
   void refreshPluginSettings(pluginId)
+})
+
+watch(panelViewPluginId, async pluginId => {
+  panelViewBoundsObserver?.disconnect()
+  panelViewBoundsObserver = null
+  if (!pluginId) return
+  await nextTick()
+  const frame = panelViewFrame.value
+  const content = panelViewContent.value
+  if (!frame || !content) return
+  panelViewBoundsObserver = new ResizeObserver(sendPluginPanelViewBounds)
+  panelViewBoundsObserver.observe(frame)
+  panelViewBoundsObserver.observe(content)
+  window.addEventListener('resize', sendPluginPanelViewBounds)
+  window.addEventListener('scroll', sendPluginPanelViewBounds, true)
+  sendPluginPanelViewBounds()
+}, { flush: 'post' })
+
+watch(() => props.requestedPluginId, pluginId => {
+  if (!pluginId && panelViewPluginId.value) closePluginPanelView()
+  else if (pluginId && plugins.value.some(plugin => plugin.id === pluginId)) void openPluginPanelView(pluginId)
 })
 
 onMounted(() => {
@@ -591,11 +665,33 @@ onMounted(() => {
 
 onUnmounted(() => {
   removeNotificationsListener?.()
+  panelViewBoundsObserver?.disconnect()
+  window.removeEventListener('resize', sendPluginPanelViewBounds)
+  window.removeEventListener('scroll', sendPluginPanelViewBounds, true)
+  if (panelViewPluginId.value) window.electronAPI?.closePluginPanelView()
 })
 </script>
 
 <template>
-  <div class="plugin-panel">
+  <section
+    v-if="panelViewPlugin"
+    ref="panelViewFrame"
+    class="plugin-panel-view-frame"
+    data-testid="plugin-panel-view-frame"
+  >
+    <header class="plugin-panel-view-chrome">
+      <img v-if="pluginIconUrl(panelViewPlugin)" :src="pluginIconUrl(panelViewPlugin) ?? ''" alt="" />
+      <span v-else class="plugin-panel-view-icon" aria-hidden="true">◇</span>
+      <div class="plugin-panel-view-title">
+        <strong>{{ pluginName(panelViewPlugin) }}</strong>
+        <span>{{ t('pluginPanelContent') }}</span>
+      </div>
+      <button class="plugin-panel-view-close" type="button" :aria-label="t('pluginPanelClose')" @click="closePluginPanelView">×</button>
+    </header>
+    <div ref="panelViewContent" class="plugin-panel-view-content" data-testid="plugin-panel-view-content" />
+  </section>
+
+  <div v-else class="plugin-panel">
     <div class="plugin-toolbar">
       <ToggleRow
         :model-value="enabledGlobally"
@@ -711,6 +807,15 @@ onUnmounted(() => {
             </label>
             <Button variant="danger" size="sm" :disabled="busy" @click="requestRemove(plugin)">
               {{ t('remove') }}
+            </Button>
+            <Button
+              v-if="plugin.manifest?.contributes.panelView"
+              variant="secondary"
+              size="sm"
+              :disabled="busy || !plugin.preference.enabled || !enabledGlobally"
+              @click="openPluginPanelView(plugin.id)"
+            >
+              {{ t('pluginOpenPanel') }}
             </Button>
           </div>
           <div class="plugin-granted-hosts">
@@ -915,6 +1020,15 @@ onUnmounted(() => {
 
 <style scoped>
 .plugin-panel { display: flex; flex-direction: column; gap: var(--space-4); }
+.plugin-panel-view-frame { display: flex; min-width: 0; min-height: 0; height: 100%; flex: 1 1 auto; flex-direction: column; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-raised); }
+.plugin-panel-view-chrome { position: relative; z-index: 1; display: flex; min-height: 52px; flex: 0 0 52px; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); border-bottom: 1px solid var(--border-subtle); background: var(--surface-base); color: var(--text-primary); }
+.plugin-panel-view-chrome img, .plugin-panel-view-icon { display: grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; border-radius: var(--radius-sm); object-fit: contain; background: var(--surface-raised); color: var(--text-muted); }
+.plugin-panel-view-title { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; }
+.plugin-panel-view-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-panel-view-title span { color: var(--text-muted); font-size: var(--font-xs); }
+.plugin-panel-view-close { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); cursor: pointer; font: inherit; font-size: 20px; }
+.plugin-panel-view-close:hover { background: var(--surface-secondary); color: var(--text-primary); }
+.plugin-panel-view-content { min-width: 0; min-height: 0; flex: 1 1 auto; background: var(--surface-base); }
 .plugin-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
 .plugin-toolbar-actions { display: flex; gap: var(--space-2); }
 .plugin-message { margin: 0; }

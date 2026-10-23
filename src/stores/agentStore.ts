@@ -510,6 +510,7 @@ export const useAgentStore = defineStore('agent', () => {
       priority: raw.priority,
       createdAt: raw.createdAt,
       expiresAt: raw.expiresAt,
+      ...(raw.panelViewAvailable === true ? { panelViewAvailable: true } : {}),
     }
   }
 

@@ -69,6 +69,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPluginPanelSnapshot: (): Promise<PluginPanelResult<PluginPanelSnapshot>> => ipcRenderer.invoke('plugin-panel-snapshot'),
   openPluginPanelView: (pluginId: string): Promise<PluginPanelResult<{ opened: true }>> => ipcRenderer.invoke('plugin-panel-view-open', pluginId),
   closePluginPanelView: (): void => ipcRenderer.send('plugin-panel-view-close'),
+  setPluginPanelViewBounds: (frame: unknown, content: unknown): void => ipcRenderer.send('plugin-panel-view-bounds', { frame, content }),
+  openPluginPanelFromPet: (pluginId: string): Promise<boolean> => ipcRenderer.invoke('plugin-panel-view-open-from-pet', pluginId),
   getPluginSettings: (pluginId: string): Promise<PluginPanelResult<PluginPanelSettingsSnapshot>> => ipcRenderer.invoke('plugin-settings-get', pluginId),
   setPluginSettings: (pluginId: string, value: Record<string, PluginSettingScalar>): Promise<PluginPanelResult<Record<string, PluginSettingScalar>>> => ipcRenderer.invoke('plugin-settings-set', pluginId, value),
   getPluginSecretConsent: (): Promise<PluginPanelResult<boolean>> => ipcRenderer.invoke('plugin-secret-consent-get'),
@@ -168,6 +170,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => {
       ipcRenderer.removeListener('panel-open-settings', handler)
     }
+  },
+
+  onPanelOpenPluginView: (callback: (pluginId: string) => void) => {
+    const handler = (_event: unknown, pluginId: string) => callback(pluginId)
+    ipcRenderer.on('panel-open-plugin-view', handler)
+    return () => ipcRenderer.removeListener('panel-open-plugin-view', handler)
   },
 
   initializeDesktopPreferences: (legacySoundEnabled: boolean): Promise<DesktopPreferences> => {

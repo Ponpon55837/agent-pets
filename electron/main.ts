@@ -66,6 +66,11 @@ import {
   type PluginPanelViewSession,
 } from './plugin-panel-view.ts'
 import {
+  PluginPanelWindowSizer,
+  validatePluginPanelViewBounds,
+  type PluginPanelRect,
+} from './plugin-panel-window.ts'
+import {
   isPluginPanelInstallConfirmation,
   isPluginPanelNotificationId,
   isPluginPanelPluginId,
@@ -161,6 +166,9 @@ let pluginSecretConsentStore: PluginSecretConsentStore | null = null
 let pluginSettingsStore: PluginSettingsStore | null = null
 let pluginHostWindow: PluginHostWindowController | null = null
 let pluginPanelViewController: PluginPanelViewController | null = null
+const pluginPanelWindowSizer = new PluginPanelWindowSizer()
+let programmaticPluginPanelSize: { width: number; height: number } | null = null
+let pluginPanelResizeResetTimer: ReturnType<typeof setTimeout> | null = null
 let pluginBroker: PluginBroker | null = null
 let pluginNetworkClient: PluginNetworkClient | null = null
 let pluginHostGrantController: PluginHostGrantController | null = null
@@ -248,8 +256,8 @@ if (!hasSingleInstanceLock) {
 }
 
 const PANEL_WIDTH = 460
-const PANEL_MIN_WIDTH = 340
-const PANEL_MAX_WIDTH = 760
+const PANEL_MIN_WIDTH = 320
+const PANEL_MAX_WIDTH = 960
 const PANEL_GAP = 6
 // petWindow's actual bounds include a fixed, unscaled band of transparent
 // space reserved above the visible sprite for the quota tooltip to pop
@@ -844,7 +852,10 @@ function createPluginServices(): void {
   refreshPluginRuntimeContexts()
   pluginFeedController = new PluginFeedController({
     emit: item => {
-      if (petWindow && !petWindow.isDestroyed()) petWindow.webContents.send('plugin-feed-item', item)
+      if (petWindow && !petWindow.isDestroyed()) {
+        const panelViewAvailable = Boolean(pluginRuntimeContexts.get(item.pluginId)?.manifest.contributes.panelView)
+        petWindow.webContents.send('plugin-feed-item', { ...item, ...(panelViewAvailable ? { panelViewAvailable: true } : {}) })
+      }
     },
     onNotificationsChanged: count => broadcastPluginFeedUnreadCount(count),
     isPetVisible: isPluginFeedVisible,
@@ -1027,6 +1038,7 @@ function createPluginServices(): void {
     pluginRootForToken: token => pluginRootsByToken.get(token) ?? null,
     onApiRequest: (pluginId, request) => pluginBroker?.handle(pluginId, request)
       ?? { ok: false, error: 'disabled' },
+    onClosed: pluginId => restorePluginPanelWindowSize(pluginId),
   })
 
   ipcMain.handle('plugin-feed-unread-count', event => {
@@ -1062,13 +1074,41 @@ function createPluginServices(): void {
   ipcMain.handle('plugin-panel-view-open', async (event, pluginId: unknown) => {
     assertPluginPanelSender(event)
     if (!isPluginPanelPluginId(pluginId)) return { ok: false, error: 'invalid_request' }
+    return openPluginPanelViewForPlugin(pluginId)
+  })
+  ipcMain.handle('plugin-panel-view-open-from-pet', (event, pluginId: unknown) => {
+    if (!isTrustedIpcSender(event, petWindow) || !isPluginPanelPluginId(pluginId)) return false
     const context = pluginRuntimeContexts.get(pluginId)
-    const panelView = context?.manifest.contributes.panelView
-    if (!panelView || !context.pluginsEnabled || !context.enabled || !enabledPluginRoot(pluginId)) {
-      return { ok: false, error: panelView ? 'disabled' : 'not_permitted' }
+    if (!context?.pluginsEnabled || !context.enabled || !context.manifest.contributes.panelView || !enabledPluginRoot(pluginId)) return false
+    showPanelWindow('settings', pluginId)
+    return true
+  })
+  ipcMain.on('plugin-panel-view-bounds', (event, payload: unknown) => {
+    assertPluginPanelSender(event)
+    if (!panelWindow || panelWindow.isDestroyed() || !pluginPanelViewController) return
+    const data = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : {}
+    const readRect = (value: unknown): PluginPanelRect | null => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+      const rect = value as Record<string, unknown>
+      const x = finiteNumber(rect.x)
+      const y = finiteNumber(rect.y)
+      const width = finiteNumber(rect.width)
+      const height = finiteNumber(rect.height)
+      return x === null || y === null || width === null || height === null ? null : { x, y, width, height }
     }
-    return pluginPanelViewController?.open({ pluginId, entry: panelView.entry })
-      ?? { ok: false, error: 'disabled' }
+    const contentBounds = panelWindow.getContentBounds()
+    const bounds = validatePluginPanelViewBounds(
+      readRect(data.frame) ?? { x: -1, y: -1, width: 0, height: 0 },
+      readRect(data.content) ?? { x: -1, y: -1, width: 0, height: 0 },
+      { width: contentBounds.width, height: contentBounds.height },
+    )
+    if (!bounds) {
+      pluginPanelViewController.setBounds({ x: 0, y: 0, width: 1, height: 1 })
+      return
+    }
+    pluginPanelViewController.setBounds(bounds)
   })
   ipcMain.on('plugin-panel-view-close', event => {
     assertPluginPanelSender(event)
@@ -1784,6 +1824,25 @@ function createPanelWindow() {
   })
 
   panelWindow.on('hide', () => pluginPanelViewController?.close())
+  panelWindow.on('resize', () => {
+    if (!panelWindow || panelWindow.isDestroyed()) return
+    const pluginId = pluginPanelWindowSizer.activePluginId()
+    if (!pluginId) return
+    const [width, height] = panelWindow.getSize()
+    if (programmaticPluginPanelSize) {
+      if (programmaticPluginPanelSize.width === width && programmaticPluginPanelSize.height === height) {
+        programmaticPluginPanelSize = null
+        if (pluginPanelResizeResetTimer) clearTimeout(pluginPanelResizeResetTimer)
+        pluginPanelResizeResetTimer = null
+        return
+      }
+      programmaticPluginPanelSize = null
+      if (pluginPanelResizeResetTimer) clearTimeout(pluginPanelResizeResetTimer)
+      pluginPanelResizeResetTimer = null
+    }
+    const workArea = screen.getDisplayMatching(panelWindow.getBounds()).workArea
+    pluginPanelWindowSizer.recordManualSize(pluginId, { width, height }, workArea)
+  })
 
   secureRendererWindow(panelWindow)
 
@@ -1859,6 +1918,46 @@ function computePanelBounds(height: number, width = PANEL_WIDTH) {
   return { x, y, width: panelWidth, height }
 }
 
+function setPluginPanelWindowBounds(bounds: ReturnType<typeof computePanelBounds>): void {
+  if (!panelWindow || panelWindow.isDestroyed()) return
+  programmaticPluginPanelSize = { width: bounds.width, height: bounds.height }
+  if (pluginPanelResizeResetTimer) clearTimeout(pluginPanelResizeResetTimer)
+  pluginPanelResizeResetTimer = setTimeout(() => {
+    programmaticPluginPanelSize = null
+    pluginPanelResizeResetTimer = null
+  }, 500)
+  panelWindow.setBounds(bounds)
+}
+
+function restorePluginPanelWindowSize(pluginId: string): void {
+  if (pluginPanelWindowSizer.activePluginId() !== pluginId) return
+  const baseSize = pluginPanelWindowSizer.finish()
+  if (!baseSize || !panelWindow || panelWindow.isDestroyed()) return
+  panelWindow.setResizable(false)
+  panelWindow.setMinimumSize(0, 0)
+  panelWindow.setMaximumSize(0, 0)
+  setPluginPanelWindowBounds(computePanelBounds(baseSize.height, baseSize.width))
+}
+
+async function openPluginPanelViewForPlugin(pluginId: string) {
+  const context = pluginRuntimeContexts.get(pluginId)
+  const panelView = context?.manifest.contributes.panelView
+  if (!isPluginPanelPluginId(pluginId) || !panelView || !context?.pluginsEnabled || !context.enabled
+    || !enabledPluginRoot(pluginId) || !panelWindow || panelWindow.isDestroyed() || !pluginPanelViewController) {
+    return { ok: false as const, error: panelView ? 'disabled' : 'not_permitted' }
+  }
+  const [currentWidth, currentHeight] = panelWindow.getSize()
+  const workArea = screen.getDisplayMatching(panelWindow.getBounds()).workArea
+  const size = pluginPanelWindowSizer.begin(pluginId, { width: currentWidth, height: currentHeight }, panelView.preferredSize, workArea)
+  panelWindow.setResizable(true)
+  panelWindow.setMinimumSize(Math.min(320, workArea.width), Math.min(240, workArea.height))
+  panelWindow.setMaximumSize(Math.min(960, workArea.width), Math.min(800, workArea.height))
+  setPluginPanelWindowBounds(computePanelBounds(size.height, size.width))
+  const result = await pluginPanelViewController.open({ pluginId, entry: panelView.entry })
+  if (!result.ok) restorePluginPanelWindowSize(pluginId)
+  return result
+}
+
 // Status-line count can flap as agents come and go, so coalesce the writes
 // instead of hitting disk on every resize.
 let persistBoundsHandle: ReturnType<typeof setTimeout> | null = null
@@ -1911,7 +2010,7 @@ function hidePetWindow(): void {
   desktopTray?.rebuild()
 }
 
-function showPanelWindow(view: 'sessions' | 'settings' = 'sessions'): void {
+function showPanelWindow(view: 'sessions' | 'settings' = 'sessions', pluginViewPluginId?: string): void {
   if (!ensureDesktopWindows() || !panelWindow) return
   pluginPanelViewController?.close()
   if (panelBlurHideHandle) clearTimeout(panelBlurHideHandle)
@@ -1932,6 +2031,7 @@ function showPanelWindow(view: 'sessions' | 'settings' = 'sessions'): void {
     if (!panelWindow || panelWindow.isDestroyed()) return
     panelWindow.webContents.send('panel-opened')
     if (view === 'settings') panelWindow.webContents.send('panel-open-settings')
+    if (view === 'settings' && pluginViewPluginId) panelWindow.webContents.send('panel-open-plugin-view', pluginViewPluginId)
   }
   if (panelWindow.webContents.isLoading()) {
     panelWindow.webContents.once('did-finish-load', notifyRenderer)

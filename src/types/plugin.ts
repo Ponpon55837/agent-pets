@@ -78,6 +78,8 @@ export interface PluginFeedItem {
   priority: 'low' | 'normal'
   createdAt: number
   expiresAt: number
+  /** Renderer hint only; Main still validates the current manifest before opening a panel page. */
+  panelViewAvailable?: boolean
 }
 
 export interface PetStatusChange {

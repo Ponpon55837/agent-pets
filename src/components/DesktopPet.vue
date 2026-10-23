@@ -223,6 +223,10 @@ function openPluginFeedLink(itemId: string): void {
   store.openPluginFeedLink(itemId)
 }
 
+function openPluginPanelFromFeed(pluginId: string): void {
+  void window.electronAPI?.openPluginPanelFromPet(pluginId)
+}
+
 const pluginFeedTargetPetId = computed(() => {
   const targetPetId = store.pluginFeedItem?.targetPetId
   if (targetPetId) return targetPetId
@@ -719,6 +723,15 @@ watch(() => store.achievementUnlock, (unlock) => {
               <strong>{{ store.pluginFeedItem.title }}</strong>
               <span>{{ store.pluginFeedItem.body }}</span>
             </div>
+            <button
+              v-if="store.pluginFeedItem.panelViewAvailable"
+              type="button"
+              class="plugin-feed-open-panel"
+              @mousedown.stop
+              @click.stop="openPluginPanelFromFeed(store.pluginFeedItem.pluginId)"
+            >
+              {{ t('pluginOpenPanel') }}
+            </button>
           </div>
           <button
             type="button"

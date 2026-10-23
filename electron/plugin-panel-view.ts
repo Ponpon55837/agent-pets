@@ -82,6 +82,7 @@ export interface PluginPanelViewControllerOptions {
   revokeToken: (pluginId: string, token: string) => void
   pluginRootForToken: (token: string) => string | null
   onApiRequest: (pluginId: string, request: { id: string; method: string; args: unknown[] }) => unknown | Promise<unknown>
+  onClosed?: (pluginId: string) => void
 }
 
 interface ActivePanelView {
@@ -217,6 +218,21 @@ export class PluginPanelViewController {
     try {
       if (!active.view.webContents.isDestroyed()) active.view.webContents.destroy()
     } catch {}
+    try { this.options.onClosed?.(active.pluginId) } catch {}
+  }
+
+  setBounds(bounds: { x: number; y: number; width: number; height: number }): boolean {
+    const active = this.active
+    if (!active || ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)
+      || bounds.width < 1 || bounds.height < 1 || bounds.width > 4_000 || bounds.height > 4_000) return false
+    active.view.setBounds({
+      x: Math.round(bounds.x),
+      y: Math.round(bounds.y),
+      width: Math.round(bounds.width),
+      height: Math.round(bounds.height),
+    })
+    active.view.setVisible(true)
+    return true
   }
 
   closeIfNotAllowed(isAllowed: (pluginId: string) => boolean): void {
