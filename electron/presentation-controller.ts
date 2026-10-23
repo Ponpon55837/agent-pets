@@ -254,6 +254,42 @@ export class PresentationController {
     }
   }
 
+  submitPluginReaction(pluginId: string, input: unknown): PresentationIntentResult {
+    this.cleanupExpired()
+    if (!/^(?!_host$|_shared$)[a-z0-9-]{3,48}$/.test(pluginId)) return { accepted: false, error: 'invalid_request' }
+    const status = normalizePresentationStatus(this.getStatusSnapshot())
+    if (status.dnd) return { accepted: false, error: 'dnd_enabled' }
+    const normalized = normalizePresentationInput({
+      ...(input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {}),
+      kind: 'react',
+    })
+    if (!normalized.ok) return { accepted: false, error: normalized.error }
+    if (normalized.value.kind !== 'react') return { accepted: false, error: 'invalid_request' }
+    if (this.pending.size >= PRESENTATION_MAX_QUEUE_DEPTH) {
+      return { accepted: false, error: 'queue_full', queued: this.pending.size }
+    }
+
+    const now = this.now()
+    const intent: PresentationIntent = {
+      id: this.createId(),
+      kind: 'react',
+      source: 'plugin',
+      ...(normalized.value.petId ? { petId: normalized.value.petId } : {}),
+      ...(normalized.value.reaction ? { reaction: normalized.value.reaction } : {}),
+      createdAt: now,
+      expiresAt: now + normalized.value.ttlMs,
+    }
+    this.pending.set(intent.id, { clientId: `plugin-${pluginId}`, intent })
+    try {
+      this.emitIntent(intent)
+    } catch {
+      this.pending.delete(intent.id)
+      return { accepted: false, error: 'not_found' }
+    }
+    this.scheduleCleanup()
+    return { accepted: true, id: intent.id, queued: this.pending.size, expiresAt: intent.expiresAt }
+  }
+
   disconnectClient(clientId: string): number {
     if (!isPresentationClientId(clientId)) return 0
     let removed = 0

@@ -459,9 +459,20 @@ export const useAgentStore = defineStore('agent', () => {
     presentationReaction.value = null
   }
 
-  function presentationBlocked(): boolean {
+  function clearMcpPresentation(): void {
+    if (presentationTimer) clearTimeout(presentationTimer)
+    presentationTimer = null
+    presentationQueue.value = presentationQueue.value.filter(intent => intent.source === 'plugin')
+    if (presentationActive.value?.source !== 'plugin') {
+      presentationActive.value = null
+      presentationReaction.value = null
+    }
+    pumpPresentation()
+  }
+
+  function presentationBlocked(source?: PresentationIntent['source']): boolean {
     return !desktopPreferencesReady.value
-      || !presentationMcpEnabled.value
+      || (source !== 'plugin' && !presentationMcpEnabled.value)
       || dndEnabled.value
       || (STATE_PRIORITY[currentState.value] ?? 0) >= PRESENTATION_HIGH_PRIORITY
   }
@@ -476,6 +487,8 @@ export const useAgentStore = defineStore('agent', () => {
       || !Number.isFinite(raw.createdAt)
       || !Number.isFinite(raw.expiresAt)
       || raw.expiresAt <= Date.now()) return null
+    const source = raw.source === undefined ? undefined : raw.source === 'plugin' ? 'plugin' : null
+    if (source === null || (source === 'plugin' && raw.kind !== 'react')) return null
 
     const petId = raw.petId === undefined
       ? undefined
@@ -491,6 +504,7 @@ export const useAgentStore = defineStore('agent', () => {
       return {
         id: raw.id.slice(0, 80),
         kind: 'react',
+        ...(source ? { source } : {}),
         ...(petId ? { petId } : {}),
         reaction: raw.reaction as PresentationReaction,
         createdAt: raw.createdAt,
@@ -520,12 +534,15 @@ export const useAgentStore = defineStore('agent', () => {
     if (presentationTimer) clearTimeout(presentationTimer)
     presentationTimer = null
     const now = Date.now()
-    presentationQueue.value = presentationQueue.value.filter(intent => intent.expiresAt > now)
-    if (presentationBlocked()) {
+    presentationQueue.value = presentationQueue.value.filter(intent => intent.expiresAt > now
+      && (intent.source === 'plugin' || presentationMcpEnabled.value))
+    if (!desktopPreferencesReady.value || dndEnabled.value
+      || (STATE_PRIORITY[currentState.value] ?? 0) >= PRESENTATION_HIGH_PRIORITY) {
       clearPresentation()
       return
     }
-    if (presentationActive.value && presentationActive.value.expiresAt > now) {
+    if (presentationActive.value && presentationActive.value.expiresAt > now
+      && (presentationActive.value.source === 'plugin' || presentationMcpEnabled.value)) {
       presentationTimer = setTimeout(pumpPresentation, presentationActive.value.expiresAt - now)
       return
     }
@@ -544,9 +561,8 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   function handlePresentationIntent(value: unknown): void {
-    if (presentationBlocked()) return
     const intent = normalizePresentationIntent(value)
-    if (!intent) return
+    if (!intent || presentationBlocked(intent.source)) return
     if (intent.petId) {
       const knownPetIds = new Set([
         activePetId.value,
@@ -587,7 +603,8 @@ export const useAgentStore = defineStore('agent', () => {
     launchAtStartupSupported.value = preferences.launchAtStartupSupported
     desktopPreferencesReady.value = true
     localStorage.setItem('agent-pet-sound', preferences.soundEnabled ? '1' : '0')
-    if (!preferences.presentationMcpEnabled || preferences.dndEnabled) clearPresentation()
+    if (preferences.dndEnabled) clearPresentation()
+    else if (!preferences.presentationMcpEnabled) clearMcpPresentation()
   }
 
   async function initializeDesktopPreferences() {
@@ -631,7 +648,7 @@ export const useAgentStore = defineStore('agent', () => {
 
   function setPresentationMcpEnabled(enabled: boolean) {
     presentationMcpEnabled.value = enabled
-    if (!enabled) clearPresentation()
+    if (!enabled) clearMcpPresentation()
     updateDesktopPreferences({ presentationMcpEnabled: enabled })
   }
 

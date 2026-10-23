@@ -52,6 +52,10 @@ export type PluginFeedSubmitResult =
     retryAfterMs?: number
   }
 
+export type PluginFeedRateResult =
+  | { allowed: true }
+  | { allowed: false; error: 'disabled' | 'rate_limited'; retryAfterMs?: number }
+
 interface NormalizedFeedInput {
   title: string
   body: string
@@ -319,6 +323,23 @@ export class PluginFeedController {
     return { accepted: true, itemId: item.id, queued: this.queue.length, delivery: 'bubble' }
   }
 
+  /** Shares the same sliding per-plugin/global budget with non-feed RPCs such as reactions. */
+  consumeRateLimit(pluginId: string): PluginFeedRateResult {
+    const now = this.readNow()
+    if (now === null || !normalizePluginId(pluginId)) return { allowed: false, error: 'disabled' }
+    const global = this.readGlobalState()
+    const plugin = this.readPluginState(pluginId)
+    if (!global || !plugin || !global.pluginsEnabled || global.dndEnabled || !plugin.enabled) {
+      return { allowed: false, error: 'disabled' }
+    }
+    const limits = this.readRateLimits(global, plugin)
+    if (!limits) return { allowed: false, error: 'disabled' }
+    const retryAfterMs = this.rateLimitRetryAfter(pluginId, limits.plugin, limits.global, now)
+    if (retryAfterMs !== null) return { allowed: false, error: 'rate_limited', retryAfterMs }
+    this.recordRate(pluginId, now)
+    return { allowed: true }
+  }
+
   /** Call after the host's pet visibility changes to flush only the newest hidden item. */
   onVisibilityChanged(): void {
     const now = this.readNow()
@@ -503,6 +524,13 @@ export class PluginFeedController {
     if (!limitedTimestamps) return null
     const oldest = limitedTimestamps[0] ?? now
     return Math.max(1, Math.min(PLUGIN_FEED_RATE_WINDOW_MS, PLUGIN_FEED_RATE_WINDOW_MS - (now - oldest)))
+  }
+
+  private recordRate(pluginId: string, now: number): void {
+    this.recentGlobal.push(now)
+    const pluginRecent = this.recentByPlugin.get(pluginId) ?? []
+    pluginRecent.push(now)
+    this.recentByPlugin.set(pluginId, pluginRecent)
   }
 
   private addToCenter(item: PluginFeedItem, read: boolean): void {

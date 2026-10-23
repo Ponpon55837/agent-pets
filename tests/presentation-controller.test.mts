@@ -90,3 +90,30 @@ test('presentation queue has a bounded depth and status projection is sanitized'
   controller.cleanupExpired()
   controller.clear()
 })
+
+test('plugin reactions share the low-priority presentation queue without requiring the MCP switch', (t) => {
+  const emitted: import('../src/types/presentation.ts').PresentationIntent[] = []
+  let dnd = false
+  const controller = new PresentationController({
+    now: () => 10_000,
+    createId: () => 'plugin-reaction-1',
+    emit: intent => emitted.push(intent),
+    getStatus: () => ({ activePets: [], dnd, enabled: false }),
+    getBlockReason: () => 'disabled',
+  })
+  t.after(() => controller.clear())
+
+  const accepted = controller.submitPluginReaction('sample', { reaction: 'curious', ttlMs: 2_000 })
+  assert.equal(accepted.accepted, true)
+  assert.deepEqual(emitted[0], {
+    id: 'plugin-reaction-1',
+    kind: 'react',
+    source: 'plugin',
+    reaction: 'curious',
+    createdAt: 10_000,
+    expiresAt: 12_000,
+  })
+
+  dnd = true
+  assert.equal(controller.submitPluginReaction('sample', { reaction: 'curious' }).error, 'dnd_enabled')
+})

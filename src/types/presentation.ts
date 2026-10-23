@@ -14,6 +14,7 @@ export type PresentationIntentKind = 'react' | 'say'
 export interface PresentationIntent {
   id: string
   kind: PresentationIntentKind
+  source?: 'plugin'
   petId?: string
   reaction?: PresentationReaction
   message?: string

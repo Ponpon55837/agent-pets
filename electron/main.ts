@@ -42,6 +42,8 @@ import { ProjectRoutingStore } from './project-routing'
 import { PluginRegistry } from './plugin-registry'
 import { PluginPreferencesStore } from './plugin-preferences'
 import { PluginHostWindowController, type PluginHostDescriptor } from './plugin-host-window'
+import { PluginBroker, type PluginBrokerContext, type PluginReactionRequest } from './plugin-broker.ts'
+import { PluginFeedController } from './plugin-feed.ts'
 import { handlePluginProtocolRequest } from './plugin-protocol'
 import { pluginHostAssets } from './plugin-host-assets'
 import { parsePluginManifest } from './plugin-manifest'
@@ -126,6 +128,10 @@ let projectRoutingStore: ProjectRoutingStore | null = null
 let pluginRegistry: PluginRegistry | null = null
 let pluginPreferences: PluginPreferencesStore | null = null
 let pluginHostWindow: PluginHostWindowController | null = null
+let pluginBroker: PluginBroker | null = null
+let pluginFeedController: PluginFeedController | null = null
+let pluginRuntimeContexts = new Map<string, PluginBrokerContext & { muted: boolean; rateLimitPer10Min: number; grantedHosts: string[] }>()
+let pluginPreferencesSnapshot: ReturnType<PluginPreferencesStore['get']> | null = null
 let presentationStatusProjection: PresentationStatusSnapshot = {
   activePets: [],
   dnd: false,
@@ -499,38 +505,75 @@ function configureSecureProtocol(): void {
 }
 
 function enabledPluginRoot(pluginId: string): string | null {
-  const preferences = pluginPreferences?.get()
-  if (!preferences?.pluginsEnabled || !preferences.plugins[pluginId]?.enabled) return null
+  const context = pluginRuntimeContexts.get(pluginId)
+  if (!context?.pluginsEnabled || !context.enabled) return null
   const entry = pluginRegistry?.list().find(plugin => plugin.id === pluginId)
   if (!entry || (entry.status !== 'installed' && entry.status !== 'enabled')) return null
   return resolve(app.getPath('userData'), 'plugins', entry.id, entry.currentVersion)
 }
 
-function enabledPluginDescriptors(): PluginHostDescriptor[] {
-  const preferences = pluginPreferences?.get()
-  if (!preferences?.pluginsEnabled) return []
-  const installed = pluginRegistry?.list() ?? []
-  const candidates = installed.filter(entry => (
-    (entry.status === 'installed' || entry.status === 'enabled')
-    && preferences.plugins[entry.id]?.enabled === true
-  ))
-  if (candidates.length > preferences.resources.maxEnabledPlugins) return []
-  return candidates.flatMap((entry) => {
-    const root = enabledPluginRoot(entry.id)
-    if (!root) return []
+function refreshPluginRuntimeContexts(): void {
+  let preferences: ReturnType<PluginPreferencesStore['get']> | null = null
+  try { preferences = pluginPreferences?.get() ?? null } catch {}
+  pluginPreferencesSnapshot = preferences
+  const next = new Map<string, PluginBrokerContext & { muted: boolean; rateLimitPer10Min: number; grantedHosts: string[] }>()
+  for (const entry of pluginRegistry?.list() ?? []) {
+    if (entry.status !== 'installed' && entry.status !== 'enabled') continue
+    const preference = preferences?.plugins[entry.id]
+    if (!preference) continue
+    const root = resolve(app.getPath('userData'), 'plugins', entry.id, entry.currentVersion)
     const source = readRegularFileWithin(root, 'plugin.json', 256 * 1024)
-    if (!source) return []
+    if (!source) continue
     try {
       const parsed = parsePluginManifest(JSON.parse(source.toString('utf8')) as unknown)
-      return parsed.ok ? [{ id: entry.id, entry: parsed.manifest.entry }] : []
+      if (!parsed.ok || parsed.manifest.id !== entry.id) continue
+      next.set(entry.id, {
+        manifest: parsed.manifest,
+        enabled: preference.enabled,
+        pluginsEnabled: preferences?.pluginsEnabled === true,
+        dndEnabled: currentDesktopPreferences().dndEnabled,
+        storageBytesPerPlugin: preferences?.resources.storageBytesPerPlugin ?? 0,
+        muted: preference.muted,
+        rateLimitPer10Min: preference.rateLimitPer10Min,
+        grantedHosts: [...(parsed.manifest.permissions.network?.hosts ?? []), ...preference.grantedHosts],
+      })
     } catch {
-      return []
+      // A malformed manifest remains unavailable to the runtime until reinstalled.
     }
-  })
+  }
+  pluginRuntimeContexts = next
+}
+
+function enabledPluginDescriptors(): PluginHostDescriptor[] {
+  const preferences = pluginPreferencesSnapshot
+  if (!preferences?.pluginsEnabled) return []
+  const candidates = [...pluginRuntimeContexts.entries()].filter(([, context]) => context.enabled)
+  if (candidates.length > preferences.resources.maxEnabledPlugins) return []
+  return candidates.map(([id, context]) => ({ id, entry: context.manifest.entry }))
 }
 
 function syncPluginHost(): void {
+  refreshPluginRuntimeContexts()
   pluginHostWindow?.sync(enabledPluginDescriptors())
+}
+
+function isPluginFeedVisible(): boolean {
+  return Boolean(petWindow && !petWindow.isDestroyed() && petWindow.isVisible()
+    && petWindowMode === 'normal' && !windowsFullscreenAutoHiddenPet
+    && !windowsFullscreenState.petDisplayFullscreen)
+}
+
+function isPluginLinkHostAllowed(pluginId: string, host: string): boolean {
+  const context = pluginRuntimeContexts.get(pluginId)
+  if (!context) return false
+  return context.grantedHosts.some((allowedHost) => {
+    const normalized = allowedHost.toLowerCase()
+    if (normalized.startsWith('*.')) {
+      const suffix = normalized.slice(2)
+      return host !== suffix && host.endsWith(`.${suffix}`)
+    }
+    return host === normalized
+  })
 }
 
 function createPluginServices(): void {
@@ -538,13 +581,53 @@ function createPluginServices(): void {
   const userDataDirectory = app.getPath('userData')
   pluginRegistry = new PluginRegistry(userDataDirectory)
   pluginPreferences = new PluginPreferencesStore(userDataDirectory)
-  pluginHostWindow = new PluginHostWindowController({
-    onRpc: (_pluginId, request) => ({
-      id: request && typeof request === 'object' && !Array.isArray(request)
-        && 'id' in request && typeof request.id === 'string' ? request.id : '',
-      ok: false,
-      error: 'not_permitted',
+  refreshPluginRuntimeContexts()
+  pluginFeedController = new PluginFeedController({
+    emit: item => {
+      if (petWindow && !petWindow.isDestroyed()) petWindow.webContents.send('plugin-feed-item', item)
+    },
+    isPetVisible: isPluginFeedVisible,
+    getGlobalState: () => ({
+      pluginsEnabled: pluginPreferencesSnapshot?.pluginsEnabled === true,
+      dndEnabled: currentDesktopPreferences().dndEnabled,
+      rateLimitPer10Min: pluginPreferencesSnapshot?.resources.globalFeedPer10Min,
     }),
+    getPluginState: pluginId => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      if (!context) return null
+      return {
+        enabled: context.enabled,
+        muted: context.muted,
+        rateLimitPer10Min: context.rateLimitPer10Min,
+        name: context.manifest.name,
+      }
+    },
+    isLinkHostAllowed: isPluginLinkHostAllowed,
+    resolveIconUrl: (pluginId, relativePath) => (
+      pluginRuntimeContexts.has(pluginId) ? `agent-pets://plugin/${pluginId}/${relativePath}` : null
+    ),
+  })
+  pluginBroker = new PluginBroker({
+    userDataDirectory,
+    getContext: pluginId => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      return context ? { ...context, dndEnabled: currentDesktopPreferences().dndEnabled } : null
+    },
+    feed: pluginFeedController,
+    onReaction: (pluginId, request: PluginReactionRequest) => {
+      const result = presentationController?.submitPluginReaction(pluginId, request)
+      if (result?.accepted) return { ok: true }
+      const error = result?.error
+      return {
+        ok: false,
+        error: error === 'invalid_request' || error === 'queue_full' || error === 'rate_limited'
+          || error === 'not_found' ? error : 'disabled',
+      }
+    },
+  })
+  pluginHostWindow = new PluginHostWindowController({
+    onRpc: (pluginId, request) => pluginBroker?.handle(pluginId, request)
+      ?? { ok: false, error: 'disabled' },
     onPluginCrash: (pluginId, consecutiveCrashes) => {
       if (consecutiveCrashes >= 3) {
         try { pluginRegistry?.setStatus(pluginId, 'disabled_crashed') } catch {}
@@ -553,7 +636,7 @@ function createPluginServices(): void {
       }
     },
     getMemoryBudgetMb: activePluginCount => {
-      const perPlugin = pluginPreferences?.get().resources.memoryMbPerPlugin ?? 0
+      const perPlugin = pluginPreferencesSnapshot?.resources.memoryMbPerPlugin ?? 0
       return perPlugin * activePluginCount
     },
   })
@@ -1840,6 +1923,7 @@ app.whenReady().then(() => {
   powerMonitor.on('on-ac', broadcastPowerSaveState)
   broadcastPowerSaveState()
   createPresentationServices(presentationToken)
+  syncPluginHost()
   screen.on('display-added', rehomePetWindowForDisplayChange)
   screen.on('display-removed', rehomePetWindowForDisplayChange)
   screen.on('display-metrics-changed', rehomePetWindowForDisplayChange)
@@ -2832,6 +2916,11 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  pluginBroker?.destroy()
+  pluginBroker = null
+  pluginFeedController = null
+  pluginRuntimeContexts.clear()
+  pluginPreferencesSnapshot = null
   pluginHostWindow?.close()
   pluginHostWindow = null
   windowsFullscreenDetector?.stop()
