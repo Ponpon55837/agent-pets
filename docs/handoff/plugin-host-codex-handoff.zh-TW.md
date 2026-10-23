@@ -60,6 +60,14 @@ Phase 13 複檢證明：單元測試全過，但插件在真實 Electron 中完�
    `process.mainModule.require('electron').dialog.showOpenDialog = async () => ({ canceled: false, filePaths: ['<套件路徑>'] })`，再在面板呼叫 `window.electronAPI.selectPluginArchive()` 等 API。
 6. 寵物視窗的狀態可用 `document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('agent')` 讀寫；截圖用 CDP `Page.captureScreenshot`。
 7. 驗完用 `pkill -f "user-data-dir=<tmp>/ud"` 關閉，並重新 `pnpm exec vite build`（若曾修改建置輸出）。
+8. **絕對不可觸發使用者的 macOS 鑰匙圈（Keychain）**：開發版 Electron 呼叫 `safeStorage` 時，macOS 會跳出鑰匙圈存取視窗，而且可能反覆出現。測試前必須先在主程序用 inspector 把 `safeStorage` 換成假的可逆實作，再安裝或啟用任何會用到 `secrets` 的插件：
+   ```js
+   const { safeStorage } = process.mainModule.require('electron')
+   safeStorage.isEncryptionAvailable = () => true
+   safeStorage.encryptString = value => Buffer.from('test:' + value, 'utf8')
+   safeStorage.decryptString = value => { const text = value.toString('utf8'); if (!text.startsWith('test:')) throw new Error('bad'); return text.slice(5) }
+   ```
+   如果應用程式啟動時就會讀取密鑰（例如已啟用的插件在 activate 時呼叫 `secrets.get`），先用全新的暫存 userData 啟動、套用上面的替換後，才安裝與啟用插件。真實鑰匙圈的行為列為「未驗證（需使用者在正式版手動確認）」，不要在自動化驗收中觸發。
 
 phase report 的「Electron 驗證」一節要寫出實際執行的步驟與觀察到的結果；真的做不到的項目才寫「未驗證」並說明原因。
 
