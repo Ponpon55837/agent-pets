@@ -1,8 +1,9 @@
 import { createPluginPanelProtocolHandler, type PluginProtocolRequestLike } from './plugin-protocol.ts'
 import type { PluginPanelApiMethod } from './plugin-panel-view-bridge.ts'
+import { dispatchPluginUiMessage, PLUGIN_UI_MESSAGE_MAX_BYTES, PluginUiMessageGuard } from './plugin-ui-messages.ts'
 
 export const PLUGIN_PANEL_PARTITION_PREFIX = 'plugin-ui-'
-export const PLUGIN_PANEL_MESSAGE_MAX_BYTES = 256 * 1024
+export const PLUGIN_PANEL_MESSAGE_MAX_BYTES = PLUGIN_UI_MESSAGE_MAX_BYTES
 
 const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 const UUID_TOKEN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
@@ -81,6 +82,7 @@ export interface PluginPanelViewControllerOptions {
   createToken: (pluginId: string) => string
   revokeToken: (pluginId: string, token: string) => void
   pluginRootForToken: (token: string) => string | null
+  messageGuard: PluginUiMessageGuard
   onApiRequest: (pluginId: string, request: { id: string; method: string; args: unknown[] }) => unknown | Promise<unknown>
   onClosed?: (pluginId: string) => void
 }
@@ -243,6 +245,19 @@ export class PluginPanelViewController {
     if (this.active?.pluginId === pluginId) this.close()
   }
 
+  postMessage(pluginId: string, data: unknown): { ok: true; value: { delivered: boolean } } | { ok: false; error: string } {
+    const active = this.active
+    const available = Boolean(active && active.pluginId === pluginId && !active.view.webContents.isDestroyed())
+    return dispatchPluginUiMessage({
+      pluginId,
+      direction: 'worker-to-panel',
+      value: data,
+      guard: this.options.messageGuard,
+      targetAvailable: available,
+      deliver: value => active!.view.webContents.send('plugin-panel-ui-message', value),
+    })
+  }
+
   activePluginId(): string | null {
     return this.active?.pluginId ?? null
   }
@@ -252,8 +267,9 @@ export class PluginPanelViewController {
     if (!active || active.view.webContents !== sender || active.view.webContents.isDestroyed()) return errorResult('not_permitted')
     if (typeof method !== 'string' || !PANEL_ENTRY_METHODS.has(method as PluginPanelApiMethod)
       || !Array.isArray(args) || args.length > 32 || !isJsonValue(args)) return errorResult('not_permitted')
+    if (method === 'ui.postMessage' && args.length !== 1) return errorResult('invalid_request')
     let serialized: string
-    try { serialized = JSON.stringify(args) } catch { return errorResult('invalid_request') }
+    try { serialized = JSON.stringify(method === 'ui.postMessage' ? args[0] : args) } catch { return errorResult('invalid_request') }
     if (Buffer.byteLength(serialized, 'utf8') > PLUGIN_PANEL_MESSAGE_MAX_BYTES) return errorResult('too_large')
     const id = `panel-${++this.requestSequence}`
     try {

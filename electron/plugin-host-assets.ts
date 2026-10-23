@@ -70,6 +70,8 @@ window.addEventListener('message', (event) => {
         }
       } else if (data.type === 'rpc-result' && typeof data.pluginId === 'string') {
         workers.get(data.pluginId)?.postMessage({ type: 'rpc-result', result: data.result })
+      } else if (data.type === 'ui-message' && typeof data.pluginId === 'string' && workers.has(data.pluginId)) {
+        workers.get(data.pluginId)?.postMessage({ type: 'ui-message', value: data.value })
       } else if (data.type === 'settings-changed' && typeof data.pluginId === 'string'
         && data.value && typeof data.value === 'object' && !Array.isArray(data.value)) {
         workers.get(data.pluginId)?.postMessage({ type: 'settings-changed', value: data.value })
@@ -93,6 +95,7 @@ let agentStatusEnabled = false
 const schedules = new Map()
 const settingsListeners = new Set()
 const statusListeners = new Set()
+const uiListeners = new Set()
 let scheduleSequence = 0
 const blockedApis = [
   'indexedDB', 'caches', 'BroadcastChannel', 'Worker', 'SharedWorker', 'WebSocket',
@@ -186,6 +189,14 @@ const api = Object.freeze({
     warn: (...values) => rpc('log.warn', [values]),
     error: (...values) => rpc('log.error', [values]),
   }),
+  ui: Object.freeze({
+    postMessage: (value) => rpc('ui.postMessage', [value]),
+    onMessage: (callback) => {
+      if (typeof callback !== 'function') throw Object.assign(new Error('invalid_request'), { code: 'invalid_request' })
+      uiListeners.add(callback)
+      return () => uiListeners.delete(callback)
+    },
+  }),
 })
 scope.onmessage = async ({ data }) => {
   if (!data || typeof data !== 'object') return
@@ -216,6 +227,8 @@ scope.onmessage = async ({ data }) => {
     for (const item of data.value) {
       for (const listener of statusListeners) { try { listener(item) } catch {} }
     }
+  } else if (data.type === 'ui-message') {
+    for (const listener of uiListeners) { try { listener(data.value) } catch {} }
   } else if (data.type === 'ping' && Number.isSafeInteger(data.at)) {
     postToHost({ type: 'pong', at: data.at })
   } else if (data.type === 'rpc-result' && data.result && typeof data.result === 'object') {
@@ -234,6 +247,7 @@ scope.onmessage = async ({ data }) => {
     }
   } else if (data.type === 'deactivate' && pluginId !== null) {
     clearSchedules()
+    uiListeners.clear()
     try {
       if (typeof pluginModule?.default?.deactivate === 'function') await pluginModule.default.deactivate()
     } catch {}

@@ -59,6 +59,7 @@ import { PluginSecretConsentStore } from './plugin-secret-consent.ts'
 import { PluginSettingsStore, publishPluginSettingsChanged } from './plugin-settings.ts'
 import { PluginAgentStatusController } from './plugin-agent-status.ts'
 import { effectivePluginScheduleMinimum } from './plugin-schedule.ts'
+import { PluginUiMessageGuard } from './plugin-ui-messages.ts'
 import { PluginDeveloperModeWatcher } from './plugin-developer-mode.ts'
 import {
   PluginPanelViewController,
@@ -166,6 +167,7 @@ let pluginSecretConsentStore: PluginSecretConsentStore | null = null
 let pluginSettingsStore: PluginSettingsStore | null = null
 let pluginHostWindow: PluginHostWindowController | null = null
 let pluginPanelViewController: PluginPanelViewController | null = null
+const pluginUiMessageGuard = new PluginUiMessageGuard()
 const pluginPanelWindowSizer = new PluginPanelWindowSizer()
 let programmaticPluginPanelSize: { width: number; height: number } | null = null
 let pluginPanelResizeResetTimer: ReturnType<typeof setTimeout> | null = null
@@ -976,8 +978,19 @@ function createPluginServices(): void {
     },
   })
   pluginHostWindow = new PluginHostWindowController({
-    onRpc: (pluginId, request) => pluginBroker?.handle(pluginId, request)
-      ?? { ok: false, error: 'disabled' },
+    onRpc: (pluginId, request) => {
+      const data = request && typeof request === 'object' && !Array.isArray(request)
+        ? request as Record<string, unknown>
+        : {}
+      if (data.method === 'ui.postMessage') {
+        if (!Array.isArray(data.args) || data.args.length !== 1) return { ok: false, error: 'invalid_request' }
+        if (typeof data.id !== 'string') return { ok: false, error: 'invalid_request' }
+        const response = pluginPanelViewController?.postMessage(pluginId, data.args[0])
+          ?? { ok: true as const, value: { delivered: false } }
+        return { id: data.id, ...response }
+      }
+      return pluginBroker?.handle(pluginId, request) ?? { ok: false, error: 'disabled' }
+    },
     createPluginToken: pluginId => {
       const root = enabledPluginRoot(pluginId)
       if (!root) throw new Error('Plugin is unavailable')
@@ -989,6 +1002,7 @@ function createPluginServices(): void {
       pluginRootsByToken.delete(token)
     },
     pluginRootForToken: token => pluginRootsByToken.get(token) ?? null,
+    messageGuard: pluginUiMessageGuard,
     onPluginCrash: (pluginId, consecutiveCrashes, reason) => {
       if (consecutiveCrashes >= 3) {
         const name = pluginRuntimeContexts.get(pluginId)?.manifest.name ?? { 'zh-TW': pluginId, 'en-US': pluginId }
@@ -1036,8 +1050,16 @@ function createPluginServices(): void {
     },
     revokeToken: (_pluginId, token) => { pluginRootsByToken.delete(token) },
     pluginRootForToken: token => pluginRootsByToken.get(token) ?? null,
-    onApiRequest: (pluginId, request) => pluginBroker?.handle(pluginId, request)
-      ?? { ok: false, error: 'disabled' },
+    messageGuard: pluginUiMessageGuard,
+    onApiRequest: (pluginId, request) => {
+      if (request.method === 'ui.postMessage') {
+        if (request.args.length !== 1) return { ok: false, error: 'invalid_request' }
+        const response = pluginHostWindow?.postUiMessageToWorker(pluginId, request.args[0])
+          ?? { ok: false as const, error: 'disabled' }
+        return { id: request.id, ...response }
+      }
+      return pluginBroker?.handle(pluginId, request) ?? { ok: false, error: 'disabled' }
+    },
     onClosed: pluginId => restorePluginPanelWindowSize(pluginId),
   })
 

@@ -143,7 +143,7 @@ interface PluginApi {
   schedule: { every(sec: number, fn): Disposable }                // 受 minIntervalSec 與最短間隔（預設 60s，§3.4）約束
   log: { info(...), warn(...), error(...) }                       // 進插件專屬診斷面板，有長度限制
   ui: {                                                           // contributes.panelView；只在同一插件的 Worker 與面板頁之間
-    postMessage(data: JsonValue): void
+    postMessage(data: JsonValue): Promise<{ delivered: boolean }>
     onMessage(cb: (data: JsonValue) => void): Disposable
   }
 }

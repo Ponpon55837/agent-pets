@@ -29,7 +29,7 @@ export interface PluginPanelPublicApi {
   }
   net: { fetch: (url: string, options?: unknown) => Promise<unknown> }
   ui: {
-    postMessage: (data: unknown) => Promise<void>
+    postMessage: (data: unknown) => Promise<{ delivered: boolean }>
     onMessage: (callback: (data: unknown) => void) => () => void
   }
 }
@@ -89,7 +89,7 @@ export function createPluginPanelPublicApi(transport: PluginPanelApiTransport): 
       fetch: (url: string, options?: unknown) => invoke('net.fetch', options === undefined ? [url] : [url, options]),
     }),
     ui: Object.freeze({
-      postMessage: async (data: unknown) => { await invoke('ui.postMessage', [data]) },
+      postMessage: async (data: unknown) => await invoke('ui.postMessage', [data]) as { delivered: boolean },
       onMessage: (callback: (data: unknown) => void) => {
         if (typeof callback !== 'function') throw codedError('invalid_request')
         return transport.onMessage(data => {

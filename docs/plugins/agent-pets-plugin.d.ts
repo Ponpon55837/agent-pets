@@ -51,6 +51,8 @@ export interface PluginSettings {
   [key: string]: string | number | boolean
 }
 
+export type PluginJsonValue = string | number | boolean | null | PluginJsonValue[] | { [key: string]: PluginJsonValue }
+
 export interface AgentPetsPluginApi {
   feed: {
     /**
@@ -158,6 +160,20 @@ export interface AgentPetsPluginApi {
      * Rejects: invalid_request, too_large, disabled. Example: `await api.log.error('Request failed')`
      */
     error(...values: unknown[]): Promise<{ logged: true }>
+  }
+  ui: {
+    /**
+     * Send a JSON message to this plugin's open panel page. Requires contributes.panelView.
+     * Messages are limited to 256 KB and 20 per second per plugin and direction. When the panel is closed,
+     * the message is dropped and the successful result is `{ delivered: false }`.
+     * Rejects: invalid_request, too_large, rate_limited, disabled. Example: `await api.ui.postMessage({ type: 'refresh' })`
+     */
+    postMessage(data: PluginJsonValue): Promise<{ delivered: boolean }>
+    /**
+     * Receive JSON messages sent by this plugin's open panel page. Returns an unsubscribe function.
+     * Example: `const off = api.ui.onMessage(message => api.log.info(message.type))`
+     */
+    onMessage(callback: (data: PluginJsonValue) => void): () => void
   }
 }
 

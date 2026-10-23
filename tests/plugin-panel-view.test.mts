@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   PluginPanelViewController,
+  PLUGIN_PANEL_MESSAGE_MAX_BYTES,
   PLUGIN_PANEL_PARTITION_PREFIX,
   isPluginPanelResourceAllowed,
   type PluginPanelNativeView,
@@ -9,6 +10,7 @@ import {
   type PluginPanelViewSession,
 } from '../electron/plugin-panel-view.ts'
 import { createPluginPanelPublicApi } from '../electron/plugin-panel-view-bridge.ts'
+import { PluginUiMessageGuard } from '../electron/plugin-ui-messages.ts'
 
 const token = '123e4567-e89b-42d3-a456-426614174000'
 
@@ -28,6 +30,7 @@ function fakeController() {
   const listeners = new Map<string, (event?: PluginPanelViewCancelableEvent) => void>()
   const revoked: Array<{ pluginId: string; token: string }> = []
   const apiRequests: Array<{ pluginId: string; method: string }> = []
+  const sentMessages: unknown[] = []
 
   const session = {
     protocol: { handle: () => {} },
@@ -54,7 +57,7 @@ function fakeController() {
         setWindowOpenHandler: (handler: typeof openHandler) => { openHandler = handler },
         on: (event: string, listener: (event?: PluginPanelViewCancelableEvent) => void) => { listeners.set(event, listener) },
         loadURL: async (url: string) => { loadedUrl = url },
-        send: () => {},
+        send: (_channel: string, data: unknown) => { sentMessages.push(data) },
         destroy: () => { destroyed = true },
         isDestroyed: () => destroyed,
       }
@@ -67,6 +70,7 @@ function fakeController() {
     createToken: () => token,
     revokeToken: (pluginId, value) => revoked.push({ pluginId, token: value }),
     pluginRootForToken: value => value === token ? '/plugin/sample/1.0.0' : null,
+    messageGuard: new PluginUiMessageGuard(() => 10),
     onApiRequest: (pluginId, request) => {
       apiRequests.push({ pluginId, method: request.method })
       return { ok: true, value: { method: request.method } }
@@ -91,6 +95,7 @@ function fakeController() {
     get listeners() { return listeners },
     get revoked() { return revoked },
     get apiRequests() { return apiRequests },
+    get sentMessages() { return sentMessages },
   }
 }
 
@@ -135,12 +140,20 @@ test('plugin panel uses an ephemeral plugin-specific WebContentsView and a token
   const contents = fake.addedView?.webContents
   const success = await fake.controller.handleApiRequest(contents, 'feed.notify', [{ title: 'ok' }])
   assert.deepEqual(success, { ok: true, value: { method: 'feed.notify' } })
+  assert.deepEqual(fake.controller.postMessage('sample-plugin', { type: 'from-worker' }), { ok: true, value: { delivered: true } })
+  assert.deepEqual(fake.controller.postMessage('another-plugin', { type: 'private' }), { ok: true, value: { delivered: false } })
+  assert.deepEqual(fake.sentMessages, [{ type: 'from-worker' }])
   const forbidden = await fake.controller.handleApiRequest(contents, 'secrets.get', ['secret'])
   assert.deepEqual(forbidden, { ok: false, error: 'not_permitted' })
+  assert.deepEqual(
+    await fake.controller.handleApiRequest(contents, 'ui.postMessage', ['x'.repeat(PLUGIN_PANEL_MESSAGE_MAX_BYTES + 1)]),
+    { ok: false, error: 'too_large' },
+  )
   assert.deepEqual(fake.apiRequests, [{ pluginId: 'sample-plugin', method: 'feed.notify' }])
   assert.deepEqual(await fake.controller.handleApiRequest({}, 'storage.get', ['key']), { ok: false, error: 'not_permitted' })
 
   fake.controller.close()
+  assert.deepEqual(fake.controller.postMessage('sample-plugin', { type: 'after-close' }), { ok: true, value: { delivered: false } })
   assert.equal(fake.destroyed, true)
   assert.equal(fake.removeCount, 1)
   assert.deepEqual(fake.revoked, [{ pluginId: 'sample-plugin', token }])
@@ -160,15 +173,23 @@ test('plugin panel request policy rejects external, cross-token, non-GET, and tr
 test('plugin panel preload bridge exposes only the approved API subset and unwraps coded errors', async () => {
   const messages = new Set<(data: unknown) => void>()
   const api = createPluginPanelPublicApi({
-    invoke: async method => method === 'feed.notify'
-      ? { ok: true, value: { itemId: 'item-1' } }
-      : { ok: false, error: 'not_permitted' },
+    invoke: async (method, args) => {
+      if (method === 'feed.notify') return { ok: true, value: { itemId: 'item-1' } }
+      if (method === 'ui.postMessage' && args[0] && typeof args[0] === 'object'
+        && 'type' in args[0] && args[0].type === 'limited') return { ok: false, error: 'rate_limited' }
+      if (method === 'ui.postMessage') return { ok: true, value: { delivered: true } }
+      return { ok: false, error: 'not_permitted' }
+    },
     onMessage: listener => { messages.add(listener); return () => messages.delete(listener) },
   })
   assert.deepEqual(Object.keys(api).sort(), ['feed', 'log', 'net', 'pet', 'settings', 'storage', 'ui'])
   assert.equal('secrets' in api, false)
   assert.equal('requestHost' in api.net, false)
   assert.deepEqual(await api.feed.notify({ title: 'test' }), { itemId: 'item-1' })
+  assert.deepEqual(await api.ui.postMessage({ type: 'panel' }), { delivered: true })
+  await assert.rejects(api.ui.postMessage({ type: 'limited' }), (error: unknown) => (
+    error instanceof Error && 'code' in error && error.code === 'rate_limited'
+  ))
   await assert.rejects(api.storage.get('key'), (error: unknown) => (
     error instanceof Error && 'code' in error && error.code === 'not_permitted'
   ))

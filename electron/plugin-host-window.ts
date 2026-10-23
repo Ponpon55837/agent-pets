@@ -3,6 +3,7 @@ import type { MessagePortMain } from 'electron'
 import { createPluginHostProtocolHandler } from './plugin-protocol.ts'
 import { pluginHostAssets } from './plugin-host-assets.ts'
 import { PluginHostFailureTracker, pluginHostRetryDelay, shouldRetryPluginHost } from './plugin-host-recovery.ts'
+import { dispatchPluginUiMessage, PluginUiMessageGuard, type PluginUiMessageResult } from './plugin-ui-messages.ts'
 import { join } from 'node:path'
 
 export interface PluginHostDescriptor {
@@ -21,6 +22,7 @@ export interface PluginHostControllerOptions {
   createPluginToken: (pluginId: string) => string
   revokePluginToken: (pluginId: string, token: string) => void
   pluginRootForToken: (token: string) => string | null
+  messageGuard: PluginUiMessageGuard
   now?: () => number
 }
 
@@ -51,6 +53,7 @@ export class PluginHostWindowController {
   private readonly createPluginToken: PluginHostControllerOptions['createPluginToken']
   private readonly revokePluginToken: PluginHostControllerOptions['revokePluginToken']
   private readonly pluginRootForToken: PluginHostControllerOptions['pluginRootForToken']
+  private readonly messageGuard: PluginHostControllerOptions['messageGuard']
   private readonly now: () => number
   private readonly desired = new Map<string, PluginHostDescriptor>()
   private readonly runtime = new Map<string, PluginHostRuntime>()
@@ -70,6 +73,7 @@ export class PluginHostWindowController {
     this.createPluginToken = options.createPluginToken
     this.revokePluginToken = options.revokePluginToken
     this.pluginRootForToken = options.pluginRootForToken
+    this.messageGuard = options.messageGuard
     this.now = options.now ?? Date.now
     this.failureTracker = new PluginHostFailureTracker(this.now)
   }
@@ -102,6 +106,19 @@ export class PluginHostWindowController {
   notifyStatusChanged(pluginId: string, value: readonly unknown[]): void {
     if (!this.desired.has(pluginId) || !Array.isArray(value)) return
     this.post({ type: 'status-changed', pluginId, value })
+  }
+
+  postUiMessageToWorker(pluginId: string, value: unknown): PluginUiMessageResult {
+    const hostPort = this.hostPort
+    const available = this.portReady && Boolean(hostPort) && this.desired.has(pluginId) && this.runtime.has(pluginId)
+    return dispatchPluginUiMessage({
+      pluginId,
+      direction: 'panel-to-worker',
+      value,
+      guard: this.messageGuard,
+      targetAvailable: available,
+      deliver: message => hostPort!.postMessage({ type: 'ui-message', pluginId, value: message }),
+    })
   }
 
   close(): void {
