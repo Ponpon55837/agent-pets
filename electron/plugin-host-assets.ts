@@ -77,6 +77,10 @@ let pluginToken = null
 let pluginModule = null
 const pending = new Map()
 let sequence = 0
+let scheduleMinIntervalSec = 60
+const schedules = new Map()
+const statusListeners = new Set()
+let scheduleSequence = 0
 const blockedApis = [
   'indexedDB', 'caches', 'BroadcastChannel', 'Worker', 'SharedWorker', 'WebSocket',
   'EventSource', 'XMLHttpRequest', 'fetch', 'postMessage',
@@ -114,9 +118,42 @@ function rpc(method, args) {
     }
   })
 }
+function setScheduleMinInterval(value) {
+  if (Number.isSafeInteger(value) && value >= 30 && value <= 3600) scheduleMinIntervalSec = value
+}
+function clearSchedules() {
+  for (const timer of schedules.values()) clearInterval(timer)
+  schedules.clear()
+}
 const api = Object.freeze({
   feed: Object.freeze({ notify: (item) => rpc('feed.notify', [item]) }),
   pet: Object.freeze({ react: (reaction, options) => rpc('pet.react', [reaction, options]) }),
+  net: Object.freeze({
+    fetch: (url, options) => rpc('net.fetch', [url, options]),
+    requestHost: (host, reason) => rpc('net.requestHost', [host, reason]),
+  }),
+  secrets: Object.freeze({ get: (key) => rpc('secrets.get', [key]) }),
+  settings: Object.freeze({
+    get: () => rpc('settings.get', []),
+    onChange: (callback) => {
+      if (typeof callback !== 'function') throw Object.assign(new Error('invalid_request'), { code: 'invalid_request' })
+      const listener = event => callback(event.value)
+      scope.addEventListener('message', listener)
+      return () => scope.removeEventListener('message', listener)
+    },
+  }),
+  schedule: Object.freeze({
+    every: (seconds, callback) => {
+      if (!Number.isFinite(seconds) || seconds <= 0 || typeof callback !== 'function') {
+        throw Object.assign(new Error('schedule_invalid'), { code: 'schedule_invalid' })
+      }
+      const interval = Math.max(scheduleMinIntervalSec, Math.ceil(seconds)) * 1000
+      const id = String(++scheduleSequence)
+      const timer = setInterval(() => { try { callback() } catch {} }, interval)
+      schedules.set(id, timer)
+      return () => { clearInterval(timer); schedules.delete(id) }
+    },
+  }),
   storage: Object.freeze({
     get: (key) => rpc('storage.get', [key]),
     set: (key, value) => rpc('storage.set', [key, value]),
@@ -130,7 +167,7 @@ const api = Object.freeze({
 })
 scope.onmessage = async ({ data }) => {
   if (!data || typeof data !== 'object') return
-  if (data.type === 'activate' && pluginId === null) {
+    if (data.type === 'activate' && pluginId === null) {
     const id = data.pluginId
     const entry = data.entry
     const token = data.token
@@ -139,6 +176,7 @@ scope.onmessage = async ({ data }) => {
       || typeof entry !== 'string' || !/^(?!\/)(?!.*(?:^|\/)\.\.?\/)[^\\:]+\.js$/.test(entry)) return
     pluginId = id
     pluginToken = token
+    setScheduleMinInterval(data.scheduleMinIntervalSec)
     try {
       if (!removeCrossPluginApis()) throw new TypeError('Plugin isolation could not be established')
       pluginModule = await import('agent-pets://plugin/' + pluginToken + '/' + entry)
@@ -148,6 +186,10 @@ scope.onmessage = async ({ data }) => {
     } catch {
       postToHost({ type: 'activation-error' })
     }
+  } else if (data.type === 'settings-changed' && Array.isArray(data.value)) {
+    scope.dispatchEvent(new MessageEvent('message', { data: { type: 'settings-changed', value: data.value } }))
+  } else if (data.type === 'status-changed' && Array.isArray(data.value)) {
+    for (const listener of statusListeners) { try { listener(data.value) } catch {} }
   } else if (data.type === 'ping' && Number.isSafeInteger(data.at)) {
     postToHost({ type: 'pong', at: data.at })
   } else if (data.type === 'rpc-result' && data.result && typeof data.result === 'object') {
@@ -165,6 +207,7 @@ scope.onmessage = async ({ data }) => {
       }
     }
   } else if (data.type === 'deactivate' && pluginId !== null) {
+    clearSchedules()
     try {
       if (typeof pluginModule?.default?.deactivate === 'function') await pluginModule.default.deactivate()
     } catch {}

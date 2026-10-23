@@ -135,6 +135,12 @@ export type PluginErrorCode =
   | 'not_found'
   | 'too_many_enabled'
   | 'host_unavailable'
+  | 'too_many_redirects'
+  | 'secret_unavailable'
+  | 'secret_not_found'
+  | 'settings_invalid'
+  | 'schedule_invalid'
+  | 'agent_status_unavailable'
 
 export type PluginRuntimeState = 'installed' | 'enabled' | 'disabled_crashed' | 'incompatible'
 

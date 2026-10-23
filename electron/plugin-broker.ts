@@ -4,6 +4,7 @@ import type { PluginErrorCode, PluginManifest } from '../src/types/plugin.ts'
 import { PRESENTATION_REACTIONS, type PresentationReaction } from '../src/types/presentation.ts'
 import { writeJsonAtomic } from './desktop-preferences.ts'
 import type { PluginFeedController } from './plugin-feed.ts'
+import type { PluginNetLimits, PluginNetworkClient } from './plugin-net.ts'
 
 export const PLUGIN_RPC_MAX_BYTES = 256 * 1024
 export const PLUGIN_RPC_ID_MAX_LENGTH = 64
@@ -18,6 +19,8 @@ export interface PluginBrokerContext {
   pluginsEnabled: boolean
   dndEnabled: boolean
   storageBytesPerPlugin: number
+  grantedHosts?: string[]
+  netLimits?: PluginNetLimits
 }
 
 export interface PluginReactionRequest {
@@ -44,6 +47,7 @@ export interface PluginBrokerOptions {
   feed: PluginFeedController
   onReaction: (pluginId: string, request: PluginReactionRequest) => { ok: boolean; error?: PluginErrorCode }
   now?: () => number
+  network?: PluginNetworkClient
 }
 
 type RpcResponse = { id: string; ok: true; value: unknown } | { id: string; ok: false; error: PluginErrorCode }
@@ -59,7 +63,7 @@ const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 const STORAGE_KEY_FORBIDDEN = new Set(['__proto__', 'prototype', 'constructor'])
 const KNOWN_METHODS = new Set([
   'feed.notify', 'pet.react', 'storage.get', 'storage.set', 'storage.remove',
-  'log.info', 'log.warn', 'log.error',
+  'log.info', 'log.warn', 'log.error', 'net.fetch',
 ])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -127,6 +131,7 @@ export class PluginBroker {
   private readonly getContext: PluginBrokerOptions['getContext']
   private readonly feed: PluginFeedController
   private readonly onReaction: PluginBrokerOptions['onReaction']
+  private readonly network: PluginBrokerOptions['network']
   private readonly now: () => number
   private readonly storage = new Map<string, PluginStorageState>()
   private readonly storageTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -139,10 +144,11 @@ export class PluginBroker {
     this.getContext = options.getContext
     this.feed = options.feed
     this.onReaction = options.onReaction
+    this.network = options.network
     this.now = options.now ?? Date.now
   }
 
-  handle(pluginId: string, rawRequest: unknown): RpcResponse | { ok: false; error: PluginErrorCode } {
+  handle(pluginId: string, rawRequest: unknown): RpcResponse | { ok: false; error: PluginErrorCode } | Promise<RpcResponse | { ok: false; error: PluginErrorCode }> {
     const id = isRecord(rawRequest) && typeof rawRequest.id === 'string' && rawRequest.id.length <= PLUGIN_RPC_ID_MAX_LENGTH
       ? rawRequest.id
       : null
@@ -173,12 +179,21 @@ export class PluginBroker {
     }
     try {
       const value = this.dispatch(pluginId, context, rawRequest.method, rawRequest.args)
-      if (value && typeof value === 'object' && 'ok' in value && value.ok === false && 'error' in value) {
-        const error = value.error as PluginErrorCode
-        this.recordDiagnostic(pluginId, error, rawRequest.method)
-        return { id, ok: false, error }
+      const finish = (resolved: unknown): RpcResponse => {
+        if (resolved && typeof resolved === 'object' && 'ok' in resolved && resolved.ok === false && 'error' in resolved) {
+          const error = resolved.error as PluginErrorCode
+          this.recordDiagnostic(pluginId, error, rawRequest.method as string)
+          return { id, ok: false, error }
+        }
+        return { id, ok: true, value: resolved }
       }
-      return { id, ok: true, value }
+      if (value && typeof value === 'object' && 'then' in value && typeof value.then === 'function') {
+        return Promise.resolve(value).then(finish).catch(() => {
+          this.recordDiagnostic(pluginId, 'invalid_request', rawRequest.method as string)
+          return { id, ok: false, error: 'invalid_request' }
+        })
+      }
+      return finish(value)
     } catch {
       this.recordDiagnostic(pluginId, 'invalid_request', rawRequest.method)
       return { id, ok: false, error: 'invalid_request' }
@@ -265,6 +280,14 @@ export class PluginBroker {
       if (!rate.allowed) return { ok: false, error: rate.error }
       const result = this.onReaction(pluginId, request)
       return result.ok ? { accepted: true } : { ok: false, error: result.error ?? 'invalid_request' }
+    }
+    if (method === 'net.fetch') {
+      if (!context.manifest.permissions.network) return { ok: false, error: 'not_permitted' }
+      if (args.length < 1 || args.length > 2 || !this.network || !context.netLimits) {
+        return { ok: false, error: !this.network || !context.netLimits ? 'disabled' : 'invalid_request' }
+      }
+      return this.network.fetch(pluginId, args[0], args[1], context.grantedHosts ?? context.manifest.permissions.network.hosts, context.netLimits)
+        .then(result => result.ok ? result.value : { ok: false, error: result.error })
     }
     if (method.startsWith('storage.')) {
       if (!context.manifest.permissions.storage || args.length !== (method === 'storage.set' ? 2 : 1)) {

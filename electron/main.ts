@@ -47,6 +47,7 @@ import { PluginHostWindowController, type PluginHostDescriptor } from './plugin-
 import { canEnablePluginWithinLimit, selectEnabledPluginDescriptors } from './plugin-host-selection'
 import { PluginBroker, type PluginBrokerContext, type PluginReactionRequest } from './plugin-broker.ts'
 import { PluginFeedController } from './plugin-feed.ts'
+import { PluginNetworkClient } from './plugin-net.ts'
 import {
   isPluginPanelInstallConfirmation,
   isPluginPanelNotificationId,
@@ -140,6 +141,7 @@ let pluginRegistry: PluginRegistry | null = null
 let pluginPreferences: PluginPreferencesStore | null = null
 let pluginHostWindow: PluginHostWindowController | null = null
 let pluginBroker: PluginBroker | null = null
+let pluginNetworkClient: PluginNetworkClient | null = null
 let pluginFeedController: PluginFeedController | null = null
 const pendingPluginPlanIds = new Map<string, string>()
 const pluginRootsByToken = new Map<string, string>()
@@ -586,6 +588,11 @@ function refreshPluginRuntimeContexts(): void {
         pluginsEnabled: preferences?.pluginsEnabled === true,
         dndEnabled: currentDesktopPreferences().dndEnabled,
         storageBytesPerPlugin: preferences?.resources.storageBytesPerPlugin ?? 0,
+        netLimits: {
+          maxResponseBytes: preferences?.resources.netMaxResponseBytes ?? 0,
+          timeoutMs: (preferences?.resources.netTimeoutSeconds ?? 0) * 1_000,
+          requestsPerMinute: preferences?.resources.netRequestsPerMinute ?? 0,
+        },
         muted: preference.muted,
         rateLimitPer10Min: preference.rateLimitPer10Min,
         targetPetId: preference.targetPetId,
@@ -699,6 +706,9 @@ function createPluginServices(): void {
       return context ? { ...context, dndEnabled: currentDesktopPreferences().dndEnabled } : null
     },
     feed: pluginFeedController,
+    network: pluginNetworkClient ??= new PluginNetworkClient({
+      fetch: (url, init) => session.fromPartition('plugin-network').fetch(url, init),
+    }),
     onReaction: (pluginId, request: PluginReactionRequest) => {
       const result = presentationController?.submitPluginReaction(pluginId, request)
       if (result?.accepted) return { ok: true }
