@@ -609,7 +609,20 @@ watch(() => store.achievementUnlock, (unlock) => {
         </div>
       </Transition>
 
-      <Transition v-else-if="bubbleSelection === 'agent-toast'" name="toast" mode="out-in">
+      <Transition v-else-if="bubbleSelection === 'presentation-say' && store.presentationSay" name="toast" mode="out-in">
+        <div
+          key="presentation-say"
+          class="pet-toast presentation-say"
+          role="status"
+          aria-live="polite"
+          data-pet-hit-target="solid"
+        >
+          <span class="presentation-say-icon" aria-hidden="true">✦</span>
+          <span>{{ store.presentationSay.message }}</span>
+        </div>
+      </Transition>
+
+      <Transition v-else-if="bubbleSelection === 'agent-toast' || bubbleSelection === 'activity'" name="toast" mode="out-in">
         <div
           v-if="store.toast"
           :key="`toast-${store.toast.id}`"
@@ -631,23 +644,7 @@ watch(() => store.achievementUnlock, (unlock) => {
           </span>
           <span class="sr-only">{{ t('permissionCountdown') }}</span>
         </div>
-      </Transition>
-
-      <Transition v-else-if="bubbleSelection === 'presentation-say' && store.presentationSay" name="toast" mode="out-in">
-        <div
-          key="presentation-say"
-          class="pet-toast presentation-say"
-          role="status"
-          aria-live="polite"
-          data-pet-hit-target="solid"
-        >
-          <span class="presentation-say-icon" aria-hidden="true">✦</span>
-          <span>{{ store.presentationSay.message }}</span>
-        </div>
-      </Transition>
-
-      <Transition v-else-if="bubbleSelection === 'activity'" name="toast" mode="out-in">
-        <div v-if="!isMultiPet && store.activityText" key="activity" class="pet-toast activity" data-pet-hit-target="solid">
+        <div v-else-if="!isMultiPet && store.activityText" key="activity" class="pet-toast activity" data-pet-hit-target="solid">
           🔧 {{ store.activityText }}
         </div>
       </Transition>
