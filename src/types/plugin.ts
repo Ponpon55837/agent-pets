@@ -89,6 +89,32 @@ export interface PetStatusChange {
   at: number
 }
 
+export interface PluginResourceLimits {
+  maxEnabledPlugins: number
+  memoryMbPerPlugin: number
+  netMaxResponseBytes: number
+  netTimeoutSeconds: number
+  netRequestsPerMinute: number
+  storageBytesPerPlugin: number
+  globalFeedPer10Min: number
+  scheduleMinIntervalSeconds: number
+}
+
+export interface PluginInstancePreferences {
+  enabled: boolean
+  muted: boolean
+  rateLimitPer10Min: number
+  targetPetId: string | null
+  grantedHosts: string[]
+}
+
+export interface PluginPreferences {
+  pluginsEnabled: boolean
+  developerMode: boolean
+  resources: PluginResourceLimits
+  plugins: Record<string, PluginInstancePreferences>
+}
+
 export type PluginErrorCode =
   | 'not_permitted'
   | 'rate_limited'
