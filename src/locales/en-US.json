@@ -319,5 +319,7 @@
   "cancel": "Cancel",
   "back": "Back",
   "close": "Close",
+  "pluginFeedOpenLink": "Open notification link",
+  "pluginFeedUnreadNotifications": "{count} unread plugin notifications",
   "system": "System integration"
 }

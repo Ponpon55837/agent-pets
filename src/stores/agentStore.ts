@@ -18,6 +18,7 @@ import { ACHIEVEMENT_DEFINITIONS } from '@/types/achievement'
 import type { PetWindowMode, PetWindowModeState } from '@/types/pet-window'
 import { normalizePetWindowModeState } from '@/types/pet-window'
 import type { PetBehaviorManifest } from '@/types/pet'
+import type { PluginFeedItem } from '@/types/plugin'
 import type { ProjectPetView } from '@/types/project-pet'
 import type {
   PresentationIntent,
@@ -279,6 +280,9 @@ export const useAgentStore = defineStore('agent', () => {
   let toastTimer: ReturnType<typeof setTimeout> | null = null
   let toastProgressTimer: ReturnType<typeof setTimeout> | null = null
   let toastSequence = 0
+  const pluginFeedItem = shallowRef<PluginFeedItem | null>(null)
+  const pluginFeedUnreadCount = ref(0)
+  let pluginFeedTimer: ReturnType<typeof setTimeout> | null = null
   const moodTaskProgress = new Map<string, MoodTaskProgress>()
 
   // Light meta-progression rewards completed tools, sustained work, and
@@ -450,6 +454,91 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   // --- Presentation MCP（本機 MCP client 的簡短反應/語音佇列） -----------------
+
+  function normalizePluginFeedItem(value: unknown): PluginFeedItem | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const raw = value as Record<string, unknown>
+    if (typeof raw.id !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(raw.id)
+      || typeof raw.pluginId !== 'string' || !/^(?!_host$|_shared$)[a-z0-9-]{3,48}$/.test(raw.pluginId)
+      || !raw.pluginName || typeof raw.pluginName !== 'object' || Array.isArray(raw.pluginName)
+      || typeof raw.title !== 'string' || raw.title.length === 0 || raw.title.length > 60
+      || typeof raw.body !== 'string' || raw.body.length === 0 || raw.body.length > 240
+      || (raw.priority !== 'low' && raw.priority !== 'normal')
+      || typeof raw.createdAt !== 'number' || !Number.isSafeInteger(raw.createdAt)
+      || typeof raw.expiresAt !== 'number' || !Number.isSafeInteger(raw.expiresAt)
+      || raw.expiresAt <= Date.now() || raw.expiresAt > Date.now() + 15_000) return null
+    const name = raw.pluginName as Record<string, unknown>
+    if (typeof name['zh-TW'] !== 'string' || name['zh-TW'].length === 0 || name['zh-TW'].length > 48
+      || typeof name['en-US'] !== 'string' || name['en-US'].length === 0 || name['en-US'].length > 48) return null
+
+    let targetPetId: string | undefined
+    if (raw.targetPetId !== undefined) {
+      if (typeof raw.targetPetId !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(raw.targetPetId)
+        || raw.targetPetId.includes('..')) return null
+      targetPetId = raw.targetPetId
+    }
+
+    let iconUrl: string | undefined
+    if (raw.iconUrl !== undefined) {
+      if (typeof raw.iconUrl !== 'string') return null
+      try {
+        const icon = new URL(raw.iconUrl)
+        if (icon.protocol !== 'agent-pets:' || icon.hostname !== 'plugin' || icon.username || icon.password
+          || icon.port || icon.search || icon.hash || !icon.pathname.startsWith(`/${raw.pluginId}/`)) return null
+        iconUrl = icon.href
+      } catch { return null }
+    }
+
+    let link: string | undefined
+    if (raw.link !== undefined) {
+      if (typeof raw.link !== 'string') return null
+      try {
+        const url = new URL(raw.link)
+        if (url.protocol !== 'https:' || url.username || url.password || url.port) return null
+        link = url.href
+      } catch { return null }
+    }
+    return {
+      id: raw.id,
+      pluginId: raw.pluginId,
+      ...(targetPetId ? { targetPetId } : {}),
+      pluginName: { 'zh-TW': name['zh-TW'], 'en-US': name['en-US'] },
+      ...(iconUrl ? { iconUrl } : {}),
+      title: raw.title,
+      body: raw.body,
+      ...(link ? { link } : {}),
+      priority: raw.priority,
+      createdAt: raw.createdAt,
+      expiresAt: raw.expiresAt,
+    }
+  }
+
+  function handlePluginFeedItem(value: unknown): void {
+    const item = normalizePluginFeedItem(value)
+    if (!item) return
+    if (pluginFeedTimer) clearTimeout(pluginFeedTimer)
+    pluginFeedItem.value = item
+    pluginFeedTimer = setTimeout(() => completePluginFeed(item.id), Math.max(1, item.expiresAt - Date.now()))
+  }
+
+  function completePluginFeed(itemId: unknown): void {
+    const item = pluginFeedItem.value
+    if (!item || item.id !== itemId) return
+    if (pluginFeedTimer) clearTimeout(pluginFeedTimer)
+    pluginFeedTimer = null
+    pluginFeedItem.value = null
+    void window.electronAPI?.completePluginFeed(item.id).catch(() => {})
+  }
+
+  function setPluginFeedUnreadCount(value: unknown): void {
+    pluginFeedUnreadCount.value = typeof value === 'number' && Number.isSafeInteger(value)
+      ? Math.max(0, Math.min(1_000_000, value))
+      : 0
+  }
+
+  function openPluginFeedLink(itemId: string): void {
+    void window.electronAPI?.openPluginFeedLink(itemId)
+  }
 
   function clearPresentation(): void {
     if (presentationTimer) clearTimeout(presentationTimer)
@@ -1566,6 +1655,8 @@ export const useAgentStore = defineStore('agent', () => {
     showProjectMcpPanel,
     toast,
     toastRemainingMs,
+    pluginFeedItem,
+    pluginFeedUnreadCount,
     mood,
     moodVisualsEnabled,
     soundEnabled,
@@ -1604,6 +1695,10 @@ export const useAgentStore = defineStore('agent', () => {
     presentationReaction,
     handlePresentationIntent,
     clearPresentation,
+    handlePluginFeedItem,
+    completePluginFeed,
+    setPluginFeedUnreadCount,
+    openPluginFeedLink,
     getPresentationStatus,
     permissionRequests,
     permissionRequest,

@@ -69,6 +69,7 @@ export interface FeedItemInput {
 export interface PluginFeedItem {
   id: string
   pluginId: string
+  targetPetId?: string
   pluginName: PluginLocalizedText
   iconUrl?: string
   title: string

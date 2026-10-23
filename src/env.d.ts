@@ -14,6 +14,7 @@ import type {
   DiagnosticReport,
 } from '@/types/agent-adapter'
 import type { PresentationIntent, PresentationStatusUpdate } from '@/types/presentation'
+import type { PluginFeedItem } from '@/types/plugin'
 import type {
   ProjectMcpRegistrySnapshot,
   ProjectMcpRemovalSummary,
@@ -32,6 +33,11 @@ declare global {
     electronAPI?: {
       onAgentStatusEvent: (callback: (event: any) => void) => () => void
       onPresentationIntent: (callback: (intent: PresentationIntent) => void) => () => void
+      onPluginFeedItem: (callback: (item: PluginFeedItem) => void) => () => void
+      onPluginFeedUnreadCount: (callback: (count: number) => void) => () => void
+      getPluginFeedUnreadCount: () => Promise<number>
+      completePluginFeed: (itemId: string) => Promise<boolean>
+      openPluginFeedLink: (itemId: string) => Promise<boolean>
       publishPresentationStatus: (snapshot: PresentationStatusUpdate) => void
       startDrag: () => void
       notifyDragEnd: (moved: boolean) => void

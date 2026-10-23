@@ -7,6 +7,7 @@ import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '.
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 import type { PetBehaviorManifest } from '../src/types/pet'
 import type { PresentationIntent, PresentationStatusUpdate } from '../src/types/presentation'
+import type { PluginFeedItem } from '../src/types/plugin.ts'
 import type {
   ProjectMcpRegistrySnapshot,
   ProjectMcpRemovalSummary,
@@ -35,6 +36,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('presentation-intent', handler)
     }
   },
+  onPluginFeedItem: (callback: (item: PluginFeedItem) => void) => {
+    const handler = (_event: unknown, item: PluginFeedItem) => callback(item)
+    ipcRenderer.on('plugin-feed-item', handler)
+    return () => {
+      ipcRenderer.removeListener('plugin-feed-item', handler)
+    }
+  },
+  onPluginFeedUnreadCount: (callback: (count: number) => void) => {
+    const handler = (_event: unknown, count: number) => callback(count)
+    ipcRenderer.on('plugin-feed-unread-count', handler)
+    return () => {
+      ipcRenderer.removeListener('plugin-feed-unread-count', handler)
+    }
+  },
+  getPluginFeedUnreadCount: (): Promise<number> => ipcRenderer.invoke('plugin-feed-unread-count'),
+  completePluginFeed: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-complete', itemId),
+  openPluginFeedLink: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-open-link', itemId),
   publishPresentationStatus: (snapshot: PresentationStatusUpdate) => {
     ipcRenderer.send('presentation-status-update', snapshot)
   },

@@ -319,5 +319,7 @@
   "cancel": "取消",
   "back": "返回",
   "close": "關閉",
+  "pluginFeedOpenLink": "開啟通知連結",
+  "pluginFeedUnreadNotifications": "{count} 則未讀插件通知",
   "system": "系統整合"
 }

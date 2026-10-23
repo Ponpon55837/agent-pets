@@ -16,6 +16,7 @@ import type { PluginFeedItem } from '../src/types/plugin.ts'
 interface Harness {
   controller: PluginFeedController
   emitted: PluginFeedItem[]
+  unreadUpdates: number[]
   globalState: PluginFeedGlobalState
   pluginStates: Map<string, PluginFeedPluginState>
   setVisible: (visible: boolean) => void
@@ -35,6 +36,7 @@ function createHarness(options: {
   let visible = options.visible ?? true
   let idSequence = 0
   const emitted: PluginFeedItem[] = []
+  const unreadUpdates: number[] = []
   const globalState: PluginFeedGlobalState = {
     pluginsEnabled: true,
     dndEnabled: false,
@@ -56,6 +58,7 @@ function createHarness(options: {
   }
   const controller = new PluginFeedController({
     emit: item => emitted.push(item),
+    onNotificationsChanged: count => unreadUpdates.push(count),
     isPetVisible: () => visible,
     getGlobalState: () => globalState,
     getPluginState: pluginId => getPlugin(pluginId),
@@ -68,6 +71,7 @@ function createHarness(options: {
   return {
     controller,
     emitted,
+    unreadUpdates,
     globalState,
     pluginStates,
     setVisible: value => { visible = value },
@@ -112,6 +116,19 @@ test('PluginFeedController sanitizes text and constructs a bounded host-owned fe
   assert.equal(item.pluginId, 'sample')
   assert.deepEqual(item.pluginName, { 'zh-TW': '測試插件', 'en-US': 'Test Plugin' })
   assert.equal(harness.controller.unreadCount(), 0)
+})
+
+test('PluginFeedController attaches only a validated target pet id to the bubble item', () => {
+  const harness = createHarness()
+  harness.setPlugin('sample', { targetPetId: 'custom-pet-1' })
+  const result = submitValid(harness.controller)
+  assert.equal(result.accepted, true)
+  assert.equal(harness.emitted[0]?.targetPetId, 'custom-pet-1')
+
+  const invalid = createHarness()
+  invalid.setPlugin('sample', { targetPetId: '../outside' })
+  assert.deepEqual(submitValid(invalid.controller), { accepted: false, error: 'disabled' })
+  assert.equal(invalid.emitted.length, 0)
 })
 
 test('PluginFeedController rejects malformed text, unsupported fields, and out-of-range options', () => {
@@ -235,6 +252,32 @@ test('DND notifications stay unread in the center without bubbles, rate use, or 
   assert.equal(harness.emitted.length, 1)
   if (afterDnd.accepted) assert.equal(harness.emitted[0]?.id, afterDnd.itemId)
   assert.equal(harness.controller.unreadCount(), 2)
+})
+
+test('unread-count updates fire when notifications enter, become visible, are read, and are cleared', () => {
+  const harness = createHarness({ visible: false })
+  const hidden = submitValid(harness.controller, 'sample', { title: 'Hidden' })
+  assert.equal(hidden.accepted, true)
+  assert.deepEqual(harness.unreadUpdates, [1])
+
+  harness.setVisible(true)
+  harness.controller.onVisibilityChanged()
+  assert.deepEqual(harness.unreadUpdates, [1, 0])
+  assert.equal(harness.controller.unreadCount(), 0)
+  assert.equal(harness.controller.complete(hidden.accepted ? hidden.itemId : ''), true)
+
+  const next = submitValid(harness.controller, 'sample', { title: 'Unread' })
+  assert.equal(next.accepted, true)
+  assert.deepEqual(harness.unreadUpdates.slice(-1), [0])
+  if (next.accepted) {
+    harness.setVisible(false)
+    harness.controller.onVisibilityChanged()
+    assert.equal(harness.controller.unreadCount(), 1)
+    assert.equal(harness.controller.markRead(next.itemId), true)
+    assert.equal(harness.controller.unreadCount(), 0)
+  }
+  assert.equal(harness.controller.clear(), 2)
+  assert.equal(harness.unreadUpdates.at(-1), 0)
 })
 
 test('dedupe is scoped to a plugin and expires after 24 hours', () => {

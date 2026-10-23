@@ -22,12 +22,14 @@ export interface PluginFeedGlobalState {
 export interface PluginFeedPluginState {
   enabled: boolean
   muted: boolean
+  targetPetId?: string | null
   rateLimitPer10Min?: number
   name: PluginLocalizedText
 }
 
 export interface PluginFeedControllerOptions {
   emit: (item: PluginFeedItem) => void
+  onNotificationsChanged?: (unreadCount: number) => void
   isPetVisible: () => boolean
   getGlobalState: () => PluginFeedGlobalState
   getPluginState: (pluginId: string) => PluginFeedPluginState | null
@@ -236,6 +238,7 @@ function cloneFeedItem(item: PluginFeedItem): PluginFeedItem {
 
 export class PluginFeedController {
   private readonly emitItem: (item: PluginFeedItem) => void
+  private readonly onNotificationsChanged?: (unreadCount: number) => void
   private readonly isPetVisible: () => boolean
   private readonly getGlobalState: () => PluginFeedGlobalState
   private readonly getPluginState: (pluginId: string) => PluginFeedPluginState | null
@@ -255,6 +258,7 @@ export class PluginFeedController {
 
   constructor(options: PluginFeedControllerOptions) {
     this.emitItem = options.emit
+    this.onNotificationsChanged = options.onNotificationsChanged
     this.isPetVisible = options.isPetVisible
     this.getGlobalState = options.getGlobalState
     this.getPluginState = options.getPluginState
@@ -284,7 +288,7 @@ export class PluginFeedController {
       return { accepted: false, error: 'duplicate' }
     }
 
-    const item = this.createFeedItem(pluginId, plugin.name, normalized.value, now)
+    const item = this.createFeedItem(pluginId, plugin.name, plugin.targetPetId ?? null, normalized.value, now)
     if (!item) return { accepted: false, error: 'invalid_request' }
 
     if (plugin.muted || global.dndEnabled) {
@@ -387,6 +391,7 @@ export class PluginFeedController {
     const record = this.center.find(candidate => candidate.item.id === itemId)
     if (!record || record.read) return false
     record.read = true
+    this.notifyNotificationsChanged()
     return true
   }
 
@@ -397,7 +402,9 @@ export class PluginFeedController {
       const record = this.center[index]
       if (record && (pluginId === undefined || record.item.pluginId === pluginId)) this.center.splice(index, 1)
     }
-    return initialCount - this.center.length
+    const removed = initialCount - this.center.length
+    if (removed > 0) this.notifyNotificationsChanged()
+    return removed
   }
 
   unreadCount(pluginId?: string): number {
@@ -438,7 +445,10 @@ export class PluginFeedController {
       const name = normalizeLocalizedName(state.name)
       const rate = safeRateLimit(state.rateLimitPer10Min, PLUGIN_FEED_DEFAULT_PLUGIN_RATE, 1, 30)
       if (!name || rate === null) return null
-      return { enabled: state.enabled, muted: state.muted, rateLimitPer10Min: rate, name }
+      const targetPetId = state.targetPetId === undefined ? null : state.targetPetId
+      if (targetPetId !== null && (typeof targetPetId !== 'string'
+        || !/^[A-Za-z0-9._-]{1,64}$/.test(targetPetId) || targetPetId.includes('..'))) return null
+      return { enabled: state.enabled, muted: state.muted, targetPetId, rateLimitPer10Min: rate, name }
     } catch {
       return null
     }
@@ -456,6 +466,7 @@ export class PluginFeedController {
   private createFeedItem(
     pluginId: string,
     pluginName: PluginLocalizedText,
+    targetPetId: string | null,
     input: NormalizedFeedInput,
     now: number,
   ): PluginFeedItem | null {
@@ -467,6 +478,7 @@ export class PluginFeedController {
     return {
       id,
       pluginId,
+      ...(targetPetId ? { targetPetId } : {}),
       pluginName,
       ...(input.icon ? { iconUrl: input.icon } : {}),
       title: input.title,
@@ -547,6 +559,11 @@ export class PluginFeedController {
       }
     }
     while (this.center.length > PLUGIN_FEED_MAX_CENTER_ITEMS) this.center.shift()
+    this.notifyNotificationsChanged()
+  }
+
+  private notifyNotificationsChanged(): void {
+    try { this.onNotificationsChanged?.(this.unreadCount()) } catch {}
   }
 
   private markCenterRead(itemId: string): void {
@@ -587,7 +604,10 @@ export class PluginFeedController {
         : null
       if (latestPending) {
         const record = this.center.find(candidate => candidate.item.id === latestPending.id)
-        if (record) record.read = false
+        if (record && record.read) {
+          record.read = false
+          this.notifyNotificationsChanged()
+        }
       }
       this.queue.length = 0
       this.queueTtlMs.clear()
@@ -621,6 +641,7 @@ export class PluginFeedController {
       try {
         this.emitItem(cloneFeedItem(item))
         this.markCenterRead(item.id)
+        this.notifyNotificationsChanged()
         return
       } catch {
         this.activeId = null

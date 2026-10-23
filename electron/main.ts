@@ -8,6 +8,7 @@ import {
   protocol,
   globalShortcut,
   powerMonitor,
+  shell,
 } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { join, resolve } from 'path'
@@ -130,7 +131,7 @@ let pluginPreferences: PluginPreferencesStore | null = null
 let pluginHostWindow: PluginHostWindowController | null = null
 let pluginBroker: PluginBroker | null = null
 let pluginFeedController: PluginFeedController | null = null
-let pluginRuntimeContexts = new Map<string, PluginBrokerContext & { muted: boolean; rateLimitPer10Min: number; grantedHosts: string[] }>()
+let pluginRuntimeContexts = new Map<string, PluginBrokerContext & { muted: boolean; rateLimitPer10Min: number; targetPetId: string | null; grantedHosts: string[] }>()
 let pluginPreferencesSnapshot: ReturnType<PluginPreferencesStore['get']> | null = null
 let presentationStatusProjection: PresentationStatusSnapshot = {
   activePets: [],
@@ -516,7 +517,7 @@ function refreshPluginRuntimeContexts(): void {
   let preferences: ReturnType<PluginPreferencesStore['get']> | null = null
   try { preferences = pluginPreferences?.get() ?? null } catch {}
   pluginPreferencesSnapshot = preferences
-  const next = new Map<string, PluginBrokerContext & { muted: boolean; rateLimitPer10Min: number; grantedHosts: string[] }>()
+  const next = new Map<string, PluginBrokerContext & { muted: boolean; rateLimitPer10Min: number; targetPetId: string | null; grantedHosts: string[] }>()
   for (const entry of pluginRegistry?.list() ?? []) {
     if (entry.status !== 'installed' && entry.status !== 'enabled') continue
     const preference = preferences?.plugins[entry.id]
@@ -535,6 +536,7 @@ function refreshPluginRuntimeContexts(): void {
         storageBytesPerPlugin: preferences?.resources.storageBytesPerPlugin ?? 0,
         muted: preference.muted,
         rateLimitPer10Min: preference.rateLimitPer10Min,
+        targetPetId: preference.targetPetId,
         grantedHosts: [...(parsed.manifest.permissions.network?.hosts ?? []), ...preference.grantedHosts],
       })
     } catch {
@@ -555,6 +557,12 @@ function enabledPluginDescriptors(): PluginHostDescriptor[] {
 function syncPluginHost(): void {
   refreshPluginRuntimeContexts()
   pluginHostWindow?.sync(enabledPluginDescriptors())
+}
+
+function broadcastPluginFeedUnreadCount(count = pluginFeedController?.unreadCount() ?? 0): void {
+  for (const window of [petWindow, panelWindow]) {
+    if (window && !window.isDestroyed()) window.webContents.send('plugin-feed-unread-count', count)
+  }
 }
 
 function isPluginFeedVisible(): boolean {
@@ -586,6 +594,7 @@ function createPluginServices(): void {
     emit: item => {
       if (petWindow && !petWindow.isDestroyed()) petWindow.webContents.send('plugin-feed-item', item)
     },
+    onNotificationsChanged: count => broadcastPluginFeedUnreadCount(count),
     isPetVisible: isPluginFeedVisible,
     getGlobalState: () => ({
       pluginsEnabled: pluginPreferencesSnapshot?.pluginsEnabled === true,
@@ -598,6 +607,7 @@ function createPluginServices(): void {
       return {
         enabled: context.enabled,
         muted: context.muted,
+        targetPetId: context.targetPetId,
         rateLimitPer10Min: context.rateLimitPer10Min,
         name: context.manifest.name,
       }
@@ -640,6 +650,32 @@ function createPluginServices(): void {
       return perPlugin * activePluginCount
     },
   })
+
+  ipcMain.handle('plugin-feed-unread-count', event => {
+    assertTrustedIpcSender(event)
+    return pluginFeedController?.unreadCount() ?? 0
+  })
+  ipcMain.handle('plugin-feed-complete', (event, itemId: unknown) => {
+    assertTrustedIpcSender(event, petWindow)
+    if (typeof itemId !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(itemId)) return false
+    return pluginFeedController?.complete(itemId) ?? false
+  })
+  ipcMain.handle('plugin-feed-open-link', async (event, itemId: unknown) => {
+    assertTrustedIpcSender(event)
+    if (typeof itemId !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(itemId)) return false
+    const item = pluginFeedController?.listNotifications().find(record => record.item.id === itemId)?.item
+    if (!item?.link || !pluginRuntimeContexts.has(item.pluginId)) return false
+    let url: URL
+    try { url = new URL(item.link) } catch { return false }
+    if (url.protocol !== 'https:' || url.username || url.password || url.port
+      || !isPluginLinkHostAllowed(item.pluginId, url.hostname.toLowerCase())) return false
+    try {
+      await shell.openExternal(url.href)
+      return true
+    } catch {
+      return false
+    }
+  })
 }
 
 function clearEdgeDwell(): void {
@@ -655,6 +691,7 @@ function petModeState(): PetWindowModeState {
 }
 
 function broadcastPetWindowMode(): void {
+  pluginFeedController?.onVisibilityChanged()
   const state = petModeState()
   for (const window of [petWindow, panelWindow]) {
     if (window && !window.isDestroyed()) {
@@ -1000,10 +1037,12 @@ function createPetWindow() {
     hidePetWindow()
   })
   petWindow.on('show', () => {
+    pluginFeedController?.onVisibilityChanged()
     desktopTray?.rebuild()
     schedulePermissionUiSync()
   })
   petWindow.on('hide', () => {
+    pluginFeedController?.onVisibilityChanged()
     desktopTray?.rebuild()
     schedulePermissionUiSync()
   })
@@ -1340,6 +1379,7 @@ function schedulePanelBlurHide(): void {
 
 function applyWindowsFullscreenAutoHideState(state: WindowsFullscreenState): void {
   windowsFullscreenState = state
+  pluginFeedController?.onVisibilityChanged()
   if (process.platform !== 'win32') return
 
   const preferences = syncDesktopVisibilityCapabilities() ?? currentDesktopPreferences()
@@ -1388,8 +1428,10 @@ function createWindowsFullscreenServices(): void {
 
 function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   if (!desktopPreferences) throw new Error('Desktop preferences are not ready')
-  const achievementsWereEnabled = desktopPreferences.get().achievementsEnabled
+  const previousPreferences = desktopPreferences.get()
+  const achievementsWereEnabled = previousPreferences.achievementsEnabled
   const preferences = desktopPreferences.update(patch)
+  if (previousPreferences.dndEnabled !== preferences.dndEnabled) pluginFeedController?.onVisibilityChanged()
   setLocale(preferences.locale)
   if (!preferences.edgeModeEnabled && petWindowMode === 'edge') applyNormalPetBounds()
   applyPetCaptureProtection()

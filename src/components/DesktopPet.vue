@@ -21,6 +21,7 @@ const hasMoved = ref(false)
 let mouseDownTime = 0
 const petAnimRef = ref<InstanceType<typeof PetAnimation> | null>(null)
 const multiPetRefs = ref<InstanceType<typeof PetAnimation>[]>([])
+const multiPetItemElements = ref<HTMLElement[]>([])
 
 // --- Shimeji 行為排程 -------------------------------------------------------
 
@@ -197,6 +198,7 @@ const bubbleSelection = computed(() => {
   const permissionRequest = Boolean(store.permissionBubbleActive && store.permissionRequest)
   const permissionNotice = Boolean(store.permissionBubbleActive && store.permissionNotice)
   const agentBubbleEnabled = !store.permissionRequest && !store.permissionNotice && store.bubbleActive
+  const pluginFeed = store.pluginFeedItem
 
   return selectBubble({
     permissionRequest,
@@ -204,8 +206,39 @@ const bubbleSelection = computed(() => {
     agentToast: Boolean(agentBubbleEnabled && store.toast),
     presentationSay: Boolean(store.presentationSay),
     activity: Boolean(agentBubbleEnabled && !store.toast && !isMultiPet.value && store.activityText),
-    pluginFeed: null,
+    pluginFeed: pluginFeed ? {
+      priority: pluginFeed.priority,
+      controls: {
+        pluginsEnabled: true,
+        enabled: true,
+        muted: false,
+        dnd: store.dndEnabled,
+        visible: store.petWindowMode.mode === 'normal' && document.visibilityState === 'visible',
+      },
+    } : null,
   })
+})
+
+function openPluginFeedLink(itemId: string): void {
+  store.openPluginFeedLink(itemId)
+}
+
+const pluginFeedTargetPetId = computed(() => {
+  const targetPetId = store.pluginFeedItem?.targetPetId
+  if (targetPetId) return targetPetId
+  return isMultiPet.value ? store.familyLines[0]?.petId ?? store.activePetId : store.activePetId
+})
+
+const pluginFeedTargetStyle = computed<Record<string, string>>(() => {
+  if (!isMultiPet.value || !store.pluginFeedItem) return {} as Record<string, string>
+  const clickArea = clickAreaRef.value
+  if (!clickArea) return {} as Record<string, string>
+  const targetIndex = store.familyLines.findIndex(line => line.petId === pluginFeedTargetPetId.value)
+  const target = targetIndex >= 0 ? multiPetItemElements.value[targetIndex] : undefined
+  if (!target) return {} as Record<string, string>
+  const targetBounds = target.getBoundingClientRect()
+  const areaBounds = clickArea.getBoundingClientRect()
+  return { left: `${targetBounds.left - areaBounds.left + targetBounds.width / 2}px` }
 })
 
 function quotaColor(familyKey: string): string {
@@ -537,6 +570,13 @@ watch(() => store.achievementUnlock, (unlock) => {
           />
         </span>
         <span class="edge-peek-grip" aria-hidden="true" />
+        <span
+          v-if="store.pluginFeedUnreadCount > 0"
+          class="edge-peek-unread-badge"
+          :aria-label="t('pluginFeedUnreadNotifications', { count: store.pluginFeedUnreadCount })"
+        >
+          {{ store.pluginFeedUnreadCount > 99 ? '99+' : store.pluginFeedUnreadCount }}
+        </span>
       </div>
 
       <template v-else>
@@ -649,9 +689,52 @@ watch(() => store.achievementUnlock, (unlock) => {
         </div>
       </Transition>
 
+      <Transition v-else-if="bubbleSelection === 'plugin-feed-normal' || bubbleSelection === 'plugin-feed-low'" name="toast" mode="out-in">
+        <article
+          v-if="store.pluginFeedItem"
+          :key="`plugin-feed-${store.pluginFeedItem.id}`"
+          class="pet-toast plugin-feed-toast"
+          :style="pluginFeedTargetStyle"
+          :data-target-pet-id="pluginFeedTargetPetId"
+          role="status"
+          aria-live="polite"
+          data-pet-hit-target="solid"
+          @mousedown.stop
+          @click.stop
+        >
+          <img v-if="store.pluginFeedItem.iconUrl" class="plugin-feed-icon" :src="store.pluginFeedItem.iconUrl" alt="" />
+          <div class="plugin-feed-copy">
+            <span class="plugin-feed-source">{{ store.pluginFeedItem.pluginName[locale] }}</span>
+            <button
+              v-if="store.pluginFeedItem.link"
+              type="button"
+              class="plugin-feed-message plugin-feed-link"
+              :aria-label="t('pluginFeedOpenLink')"
+              @click.stop="openPluginFeedLink(store.pluginFeedItem.id)"
+            >
+              <strong>{{ store.pluginFeedItem.title }}</strong>
+              <span>{{ store.pluginFeedItem.body }}</span>
+            </button>
+            <div v-else class="plugin-feed-message">
+              <strong>{{ store.pluginFeedItem.title }}</strong>
+              <span>{{ store.pluginFeedItem.body }}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="plugin-feed-close"
+            :aria-label="t('close')"
+            @mousedown.stop
+            @click.stop="store.completePluginFeed(store.pluginFeedItem.id)"
+          >
+            ×
+          </button>
+        </article>
+      </Transition>
+
       <template v-if="isMultiPet">
         <div class="multi-pet-row">
-          <div v-for="line in store.familyLines" :key="line.key" class="multi-pet-item">
+          <div v-for="line in store.familyLines" :key="line.key" ref="multiPetItemElements" class="multi-pet-item">
             <PetAnimation
               ref="multiPetRefs"
               :state="line.state"
