@@ -1,6 +1,6 @@
 # Agent Pets plugin development
 
-Plugins run in an isolated background Worker. They can show feed notifications, request pet reactions, read authorized Agent status, and use the controlled network, secrets, settings, schedule, and private storage APIs. Plugins do not receive Node.js, arbitrary network access, or another plugin's data. The Host API major version is `apiVersion: "1"`.
+Plugins run in an isolated background Worker and can optionally add a sandboxed page to the settings panel. They can show feed notifications, request pet reactions, read authorized Agent status, and use the controlled network, secrets, settings, schedule, and private storage APIs. Plugins do not receive Node.js, arbitrary network access, or another plugin's data. The Host API major version is `apiVersion: "1"`.
 
 ## Guides
 
@@ -15,6 +15,7 @@ Plugins run in an isolated background Worker. They can show feed notifications, 
 - [Debugging](debugging.md)
 - [Packaging and versioning](packaging-and-versioning.md)
 - [Security](security.md)
+- [Panel views](panel-view.md)
 - [Examples](examples.md)
 - [Manifest JSON Schema](plugin.schema.json)
 - [TypeScript Host API](agent-pets-plugin.d.ts)

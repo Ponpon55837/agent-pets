@@ -18,9 +18,11 @@
 | `storage.set(key,value)` | `permissions.storage`；`{stored:true}` | 同上。`await api.storage.set('etag','abc')` |
 | `storage.remove(key)` | `permissions.storage`；`{removed:boolean}` | `invalid_request`, `disabled`, `not_permitted`。`await api.storage.remove('etag')` |
 | `log.info/warn/error(...values)` | 插件面板診斷記錄；`{logged:true}` | `invalid_request`, `too_large`, `disabled`。`await api.log.warn('Retrying', code)` |
+| `ui.postMessage(data)` | `contributes.panelView`；`{delivered:boolean}` | `invalid_request`, `too_large`, `rate_limited`, `disabled`。`const result = await api.ui.postMessage({type:'refresh'})` |
+| `ui.onMessage(fn)` | `contributes.panelView`；解除訂閱函式 | 立即同步拋 `invalid_request`。`const off = api.ui.onMessage(message => api.log.info(message.type))` |
 
 `net.fetch` 的 method 為 `GET`、`POST`、`PUT`、`DELETE`、`PATCH`；可送出的 header 僅 `accept`、`authorization`、`content-type`、`if-modified-since`、`if-none-match`、`x-api-key`。Request body 最多 256 KB。回應只保留 `content-type`、`etag`、`last-modified`、`retry-after`；二進位 body 以 base64 字串回傳並設 `isBase64Encoded: true`。`requestHost` 的 reason 為 1–120 字。
 
 `PetStatusChange` 僅含 `petId`、`name`、`agentFamily`、`previousState`、`visibleState`、`dnd`、`at`。`net.fetch` 僅允許 HTTPS 公開 DNS 網域；最多 3 次 redirect，每一跳都重新驗證網域與 DNS。插件網路請求不會送出或儲存 Cookie；需要登入時，請使用 `authorization` header 與已宣告的密鑰。Host API 成功直接回傳，不包 `{ok,value}`。
 
-`net.fetch` 的 method 為 `GET`、`POST`、`PUT`、`DELETE`、`PATCH`；可送出的 header 僅 `accept`、`authorization`、`content-type`、`if-modified-since`、`if-none-match`、`x-api-key`。Request body 最多 256 KB。回應只保留 `content-type`、`etag`、`last-modified`、`retry-after`；二進位 body 以 base64 字串回傳並設 `isBase64Encoded: true`。`requestHost` 的 reason 為 1–120 字。
+`ui.postMessage` 與 `ui.onMessage` 在插件 Worker 和已開啟的面板頁之間交換 JSON 資料。每則訊息最多 256 KB；每個插件、每個方向每秒最多 20 則。面板關閉時 Worker 訊息會以 `{delivered:false}` 成功回傳且不排隊。面板頁 API 子集與瀏覽器限制見[自訂面板頁](panel-view.zh-TW.md)。

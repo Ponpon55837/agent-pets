@@ -1020,15 +1020,42 @@ onUnmounted(() => {
 
 <style scoped>
 .plugin-panel { display: flex; flex-direction: column; gap: var(--space-4); }
-.plugin-panel-view-frame { display: flex; min-width: 0; min-height: 0; height: 100%; flex: 1 1 auto; flex-direction: column; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-raised); }
-.plugin-panel-view-chrome { position: relative; z-index: 1; display: flex; min-height: 52px; flex: 0 0 52px; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); border-bottom: 1px solid var(--border-subtle); background: var(--surface-base); color: var(--text-primary); }
-.plugin-panel-view-chrome img, .plugin-panel-view-icon { display: grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; border-radius: var(--radius-sm); object-fit: contain; background: var(--surface-raised); color: var(--text-muted); }
+.plugin-panel-view-frame { display: flex; min-width: 0; min-height: 0; height: 100%; flex: 1 1 auto; flex-direction: column; overflow: hidden; border: 1px solid var(--organic-border-soft, var(--border-subtle)); border-radius: var(--radius-md); background: var(--organic-bg, Canvas); color: var(--organic-text, CanvasText); }
+.plugin-panel-view-chrome { position: relative; z-index: 1; display: flex; min-height: 52px; flex: 0 0 52px; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); border-bottom: 1px solid var(--organic-border-soft, var(--border-subtle)); background: var(--organic-surface, Canvas); color: var(--organic-text, CanvasText); }
+.plugin-panel-view-chrome img, .plugin-panel-view-icon { display: grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; border-radius: var(--radius-sm); object-fit: contain; background: var(--organic-surface-2, Canvas); color: var(--organic-text-muted, CanvasText); }
 .plugin-panel-view-title { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; }
 .plugin-panel-view-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plugin-panel-view-title span { color: var(--text-muted); font-size: var(--font-xs); }
-.plugin-panel-view-close { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); cursor: pointer; font: inherit; font-size: 20px; }
-.plugin-panel-view-close:hover { background: var(--surface-secondary); color: var(--text-primary); }
-.plugin-panel-view-content { min-width: 0; min-height: 0; flex: 1 1 auto; background: var(--surface-base); }
+.plugin-panel-view-title span { color: var(--organic-text-muted, var(--text-muted)); font-size: var(--font-xs); }
+.plugin-panel-view-close { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--organic-text-secondary, var(--text-secondary)); cursor: pointer; font: inherit; font-size: 20px; }
+.plugin-panel-view-close:hover { background: var(--organic-surface-2, var(--surface-raised)); color: var(--organic-text, var(--text-primary)); }
+.plugin-panel-view-close:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.plugin-panel-view-content { min-width: 0; min-height: 0; flex: 1 1 auto; background: var(--organic-bg, Canvas); }
+@media (prefers-color-scheme: dark) {
+  .plugin-panel-view-frame {
+    color-scheme: dark;
+    --organic-bg: Canvas;
+    --organic-surface: Canvas;
+    --organic-surface-2: Canvas;
+    --organic-text: CanvasText;
+    --organic-text-secondary: CanvasText;
+    --organic-text-muted: CanvasText;
+    --organic-border-soft: CanvasText;
+  }
+}
+@media (prefers-contrast: more) {
+  .plugin-panel-view-frame { border-width: 2px; }
+  .plugin-panel-view-chrome { border-bottom-width: 2px; }
+}
+@media (forced-colors: active) {
+  .plugin-panel-view-frame { border: 1px solid CanvasText; }
+  .plugin-panel-view-chrome { border-bottom: 1px solid CanvasText; background: Canvas; color: CanvasText; }
+  .plugin-panel-view-chrome img, .plugin-panel-view-icon { background: Canvas; color: CanvasText; }
+  .plugin-panel-view-close { color: ButtonText; }
+  .plugin-panel-view-close:hover { background: Highlight; color: HighlightText; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plugin-panel-view-frame, .plugin-panel-view-chrome, .plugin-panel-view-close { animation: none; transition: none; }
+}
 .plugin-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
 .plugin-toolbar-actions { display: flex; gap: var(--space-2); }
 .plugin-message { margin: 0; }

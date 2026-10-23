@@ -24,6 +24,20 @@ export interface PluginFeedResult {
   delivery: 'bubble' | 'center'
 }
 
+export interface PluginLocalizedText {
+  'zh-TW': string
+  'en-US': string
+}
+
+export interface PluginPanelViewContribution {
+  entry: string
+  title: PluginLocalizedText
+  preferredSize?: {
+    width: number
+    height: number
+  }
+}
+
 export interface PetStatusChange {
   petId: string
   name: string
@@ -177,7 +191,33 @@ export interface AgentPetsPluginApi {
   }
 }
 
+/** API exposed by `window.agentPetsPlugin` inside a contributed panel page. */
+export interface AgentPetsPluginPanelApi {
+  feed: { notify(item: PluginFeedInput): Promise<PluginFeedResult> }
+  pet: { status(): Promise<PetStatusChange[]> }
+  storage: {
+    get(key: string): Promise<{ found: boolean; value: unknown }>
+    set(key: string, value: unknown): Promise<{ stored: true }>
+    remove(key: string): Promise<{ removed: boolean }>
+  }
+  settings: { get(): Promise<PluginSettings> }
+  log: {
+    info(...values: unknown[]): Promise<{ logged: true }>
+    warn(...values: unknown[]): Promise<{ logged: true }>
+    error(...values: unknown[]): Promise<{ logged: true }>
+  }
+  net: { fetch(url: string, options?: NetRequestOptions): Promise<NetResponse> }
+  ui: {
+    postMessage(data: PluginJsonValue): Promise<{ delivered: boolean }>
+    onMessage(callback: (data: PluginJsonValue) => void): () => void
+  }
+}
+
 declare global {
   /** The API passed to a plugin's `activate(api)` function. */
   type AgentPetsPlugin = AgentPetsPluginApi
+  interface Window {
+    /** The restricted API exposed inside the plugin's panelView page. */
+    agentPetsPlugin: AgentPetsPluginPanelApi
+  }
 }

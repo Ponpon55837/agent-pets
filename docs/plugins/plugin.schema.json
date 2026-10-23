@@ -48,6 +48,7 @@
           }
         },
         "panelView": {
+          "description": "Optional HTML page rendered in a separate sandboxed host view. The page can load files from this plugin package and the read-only shared tokens stylesheet.",
           "type": "object",
           "additionalProperties": false,
           "required": ["entry", "title"],
@@ -55,6 +56,7 @@
             "entry": { "$ref": "#/$defs/htmlPath" },
             "title": { "$ref": "#/$defs/localizedText" },
             "preferredSize": {
+              "description": "Optional initial window size. Runtime clamps width to 320–960 px and height to 240–800 px, then limits it to the display work area.",
               "type": "object", "additionalProperties": false, "required": ["width", "height"],
               "properties": { "width": { "type": "integer" }, "height": { "type": "integer" } }
             }

@@ -14,7 +14,7 @@ import { pluginHostAssets } from '../electron/plugin-host-assets.ts'
 import type { PluginManifest } from '../src/types/plugin.ts'
 
 const fixtureRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'plugins')
-const FIXTURE_IDS = ['ok-notify', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network'] as const
+const FIXTURE_IDS = ['ok-notify', 'ok-panel', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel'] as const
 
 function readFixture(pluginId: string): { manifest: PluginManifest; files: Record<string, Uint8Array> } {
   const sourceDirectory = path.join(fixtureRoot, pluginId)
@@ -77,10 +77,38 @@ test('plugin fixture sources have bounded manifests, entry points, and PNG icons
 })
 
 test('every evil fixture records a host log entry for its runtime probe', () => {
-  for (const pluginId of ['evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network']) {
+  for (const pluginId of ['evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel']) {
     const source = Buffer.from(readFixture(pluginId).files['dist/main.js']!).toString('utf8')
     assert.match(source, /api\.log\.info/, `${pluginId} must leave inspectable evidence`)
   }
+})
+
+test('panel fixtures declare valid isolated pages and the worker-panel message probe', () => {
+  for (const pluginId of ['ok-panel', 'evil-panel']) {
+    const { manifest, files } = readFixture(pluginId)
+    assert.ok(manifest.contributes.panelView, `${pluginId} must contribute a panelView`)
+    assert.ok(files[manifest.contributes.panelView!.entry], `${pluginId} panel entry must be packaged`)
+    assert.ok(files['ui/panel.js'], `${pluginId} panel script must be packaged`)
+  }
+  const okWorker = Buffer.from(readFixture('ok-panel').files['dist/main.js']!).toString('utf8')
+  const okPanel = Buffer.from(readFixture('ok-panel').files['ui/panel.js']!).toString('utf8')
+  assert.match(okWorker, /api\.ui\.onMessage/)
+  assert.match(okWorker, /api\.ui\.postMessage/)
+  assert.match(okPanel, /api\.ui\.postMessage/)
+  assert.match(okPanel, /api\.ui\.onMessage/)
+})
+
+test('evil-panel fixture attempts each forbidden panel action and renders a fake confirmation surface', () => {
+  const fixture = readFixture('evil-panel')
+  const source = Buffer.from(fixture.files['ui/panel.js']!).toString('utf8')
+  const html = Buffer.from(fixture.files['ui/index.html']!).toString('utf8')
+  for (const marker of [
+    'fetch(', 'new XMLHttpRequest()', 'new WebSocket(', 'otherPluginFile', 'window.open(',
+    'window.location.assign(', 'navigationStayedOnPluginPage', 'window.parent', 'window.top',
+    'parentCanSeeHostFrame', 'fakeDialogRendered', 'secretsExposed', 'requestHostExposed',
+    'downloadAttempted', 'getUserMedia', 'geolocation', "new DragEvent('drop'",
+  ]) assert.ok(source.includes(marker), `evil-panel missing probe: ${marker}`)
+  assert.ok(html.includes('fake-permission-dialog'), 'evil-panel page must render a fake confirmation surface')
 })
 
 test('evil-network exercises a successful declared public host and each forbidden URL class', () => {
