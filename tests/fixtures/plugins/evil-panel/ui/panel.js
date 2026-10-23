@@ -1,5 +1,11 @@
 const api = window.agentPetsPlugin
 const status = document.querySelector('#probe-status')
+window.__evilPanelDropEventCount = 0
+window.__evilPanelDroppedFileCount = 0
+window.addEventListener('drop', event => {
+  window.__evilPanelDropEventCount += 1
+  window.__evilPanelDroppedFileCount += event.dataTransfer?.files?.length ?? 0
+}, true)
 
 window.runPanelSecurityProbes = async () => {
   const outcomes = {}
@@ -47,27 +53,17 @@ window.runPanelSecurityProbes = async () => {
   outcomes.fakeDialogRendered = Boolean(fakeDialog && getComputedStyle(fakeDialog).position === 'fixed')
 
   try {
-    await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-    outcomes.media = 'unexpected-success'
-  } catch (error) {
-    outcomes.media = error?.name ?? 'rejected'
-  }
+    outcomes.permissionCamera = (await navigator.permissions.query({ name: 'camera' })).state
+  } catch (error) { outcomes.permissionCamera = error?.name ?? 'rejected' }
   try {
-    outcomes.geolocation = await new Promise(resolve => {
-      const timeout = setTimeout(() => resolve('timeout'), 500)
-      navigator.geolocation.getCurrentPosition(
-        () => { clearTimeout(timeout); resolve('unexpected-success') },
-        error => { clearTimeout(timeout); resolve(error?.code === 1 ? 'blocked' : error?.message ?? 'rejected') },
-        { maximumAge: 0, timeout: 400 },
-      )
-    })
-  } catch (error) {
-    outcomes.geolocation = error?.name ?? 'rejected'
-  }
+    outcomes.permissionGeolocation = (await navigator.permissions.query({ name: 'geolocation' })).state
+  } catch (error) { outcomes.permissionGeolocation = error?.name ?? 'rejected' }
+  try { outcomes.notificationPermission = await Notification.requestPermission() }
+  catch (error) { outcomes.notificationPermission = error?.name ?? 'rejected' }
 
   const drop = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: new DataTransfer() })
   document.dispatchEvent(drop)
-  outcomes.dropPrevented = drop.defaultPrevented
+  outcomes.syntheticDropPrevented = drop.defaultPrevented
 
   const download = document.createElement('a')
   download.href = './index.html'

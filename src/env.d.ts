@@ -25,6 +25,7 @@ import type {
   PluginPanelSettingsSnapshot,
   PluginPanelResult,
   PluginPanelSnapshot,
+  PluginPanelViewClosedEvent,
   PluginPreferences,
   PluginSettingScalar,
 } from '@/types/plugin'
@@ -52,9 +53,10 @@ declare global {
       completePluginFeed: (itemId: string) => Promise<boolean>
       openPluginFeedLink: (itemId: string) => Promise<boolean>
       getPluginPanelSnapshot: () => Promise<PluginPanelResult<PluginPanelSnapshot>>
-      openPluginPanelView: (pluginId: string) => Promise<PluginPanelResult<{ opened: true }>>
-      closePluginPanelView: () => void
-      setPluginPanelViewBounds: (frame: unknown, content: unknown) => void
+      openPluginPanelView: (pluginId: string, frame: unknown, content: unknown) => Promise<PluginPanelResult<{ opened: true; openToken: number }>>
+      closePluginPanelView: (openToken: number) => void
+      setPluginPanelViewBounds: (openToken: number, frame: unknown, content: unknown) => void
+      onPluginPanelViewClosed: (callback: (event: PluginPanelViewClosedEvent) => void) => () => void
       openPluginPanelFromPet: (pluginId: string) => Promise<boolean>
       getPluginSettings: (pluginId: string) => Promise<PluginPanelResult<PluginPanelSettingsSnapshot>>
       setPluginSettings: (pluginId: string, value: Record<string, PluginSettingScalar>) => Promise<PluginPanelResult<Record<string, PluginSettingScalar>>>

@@ -5,6 +5,21 @@ export type PluginLocalizedText = {
 
 export type PluginSettingScalar = string | number | boolean
 
+export type PluginPanelViewCloseReason =
+  | 'closed'
+  | 'replaced'
+  | 'load_failed'
+  | 'renderer_crashed'
+  | 'destroyed'
+  | 'disabled'
+  | 'renderer_unavailable'
+
+export interface PluginPanelViewClosedEvent {
+  pluginId: string
+  openToken: number
+  reason: PluginPanelViewCloseReason
+}
+
 export interface PluginSettingDefinition {
   type: 'string' | 'number' | 'boolean'
   title?: PluginLocalizedText | string

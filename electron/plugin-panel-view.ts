@@ -1,5 +1,6 @@
 import { createPluginPanelProtocolHandler, type PluginProtocolRequestLike } from './plugin-protocol.ts'
 import type { PluginPanelApiMethod } from './plugin-panel-view-bridge.ts'
+import type { PluginPanelViewClosedEvent, PluginPanelViewCloseReason } from '../src/types/plugin.ts'
 import { dispatchPluginUiMessage, PLUGIN_UI_MESSAGE_MAX_BYTES, PluginUiMessageGuard } from './plugin-ui-messages.ts'
 
 export const PLUGIN_PANEL_PARTITION_PREFIX = 'plugin-ui-'
@@ -15,12 +16,14 @@ const PANEL_ERROR_CODES = new Set([
   'not_permitted', 'rate_limited', 'invalid_request', 'too_large', 'timeout', 'host_not_allowed',
   'disabled', 'queue_full', 'duplicate', 'not_found', 'too_many_enabled', 'host_unavailable',
   'too_many_redirects', 'secret_unavailable', 'secret_not_found', 'settings_invalid',
-  'schedule_invalid', 'agent_status_unavailable', 'denied',
+  'schedule_invalid', 'agent_status_unavailable', 'denied', 'panel_load_failed',
 ])
 
 export interface PluginPanelViewDescriptor {
   pluginId: string
   entry: string
+  openToken: number
+  bounds: { x: number; y: number; width: number; height: number }
 }
 
 export interface PluginPanelViewWebPreferences {
@@ -84,7 +87,8 @@ export interface PluginPanelViewControllerOptions {
   pluginRootForToken: (token: string) => string | null
   messageGuard: PluginUiMessageGuard
   onApiRequest: (pluginId: string, request: { id: string; method: string; args: unknown[] }) => unknown | Promise<unknown>
-  onClosed?: (pluginId: string) => void
+  onClosed?: (event: PluginPanelViewClosedEvent) => void
+  onBlockedRequest?: (url: string) => void
 }
 
 interface ActivePanelView {
@@ -92,6 +96,8 @@ interface ActivePanelView {
   token: string
   parent: PluginPanelViewParent
   view: PluginPanelNativeView
+  openToken: number
+  attached: boolean
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -152,18 +158,22 @@ export class PluginPanelViewController {
   private readonly configuredPartitions = new Set<string>()
   private readonly activeTokens = new Map<string, string>()
   private active: ActivePanelView | null = null
+  private lastOpenToken = 0
   private requestSequence = 0
 
   constructor(options: PluginPanelViewControllerOptions) {
     this.options = options
   }
 
-  async open(descriptor: PluginPanelViewDescriptor): Promise<{ ok: true; value: { opened: true } } | { ok: false; error: string }> {
+  async open(descriptor: PluginPanelViewDescriptor): Promise<{ ok: true; value: { opened: true; openToken: number } } | { ok: false; error: string }> {
     if (!isRecord(descriptor) || typeof descriptor.pluginId !== 'string' || !PLUGIN_ID.test(descriptor.pluginId)
-      || !isPanelEntry(descriptor.entry)) return errorResult('invalid_request')
+      || !isPanelEntry(descriptor.entry) || !Number.isSafeInteger(descriptor.openToken)
+      || (descriptor.openToken as number) <= this.lastOpenToken || !isValidBounds(descriptor.bounds)) return errorResult('invalid_request')
     const parent = this.options.getParentWindow()
     if (!parent || parent.isDestroyed()) return errorResult('disabled')
-    this.close()
+    const openToken = descriptor.openToken as number
+    this.lastOpenToken = openToken
+    this.close('replaced')
 
     const pluginId = descriptor.pluginId
     let token: string
@@ -190,43 +200,52 @@ export class PluginPanelViewController {
           devTools: false,
         },
       })
-      const active: ActivePanelView = { pluginId, token, parent, view }
+      const active: ActivePanelView = { pluginId, token, parent, view, openToken, attached: false }
       this.active = active
-      view.setBounds({ x: 0, y: 0, width: 1, height: 1 })
+      view.setBounds(descriptor.bounds)
+      view.setVisible(false)
       parent.addChildView(view)
+      active.attached = true
       this.configureWebContents(active)
       const entry = descriptor.entry.split('/').map(segment => encodeURIComponent(segment)).join('/')
       await view.webContents.loadURL(`agent-pets://plugin/${token}/${entry}`)
+      if (this.active !== active) return errorResult('disabled')
       view.setVisible(true)
-      return { ok: true, value: { opened: true } }
+      return { ok: true, value: { opened: true, openToken } }
     } catch {
-      if (view && this.active?.view !== view) {
+      const active = this.active
+      if (active?.view === view) {
+        this.close('load_failed', openToken)
+        return errorResult('panel_load_failed')
+      }
+      if (view && !view.webContents.isDestroyed()) {
         try { view.webContents.destroy() } catch {}
       }
-      this.close()
       try { this.options.revokeToken(pluginId, token) } catch {}
       return errorResult('disabled')
     }
   }
 
-  close(): void {
+  close(reason: PluginPanelViewCloseReason = 'closed', openToken?: number): void {
     const active = this.active
-    if (!active) return
+    if (!active || (openToken !== undefined && active.openToken !== openToken)) return
     this.active = null
     this.activeTokens.delete(active.pluginId)
     try { this.options.revokeToken(active.pluginId, active.token) } catch {}
     try { active.view.setVisible(false) } catch {}
-    try { active.parent.removeChildView(active.view) } catch {}
+    if (active.attached) {
+      try { active.parent.removeChildView(active.view) } catch {}
+      active.attached = false
+    }
     try {
       if (!active.view.webContents.isDestroyed()) active.view.webContents.destroy()
     } catch {}
-    try { this.options.onClosed?.(active.pluginId) } catch {}
+    try { this.options.onClosed?.({ pluginId: active.pluginId, openToken: active.openToken, reason }) } catch {}
   }
 
-  setBounds(bounds: { x: number; y: number; width: number; height: number }): boolean {
+  setBounds(openToken: number, bounds: { x: number; y: number; width: number; height: number }): boolean {
     const active = this.active
-    if (!active || ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)
-      || bounds.width < 1 || bounds.height < 1 || bounds.width > 4_000 || bounds.height > 4_000) return false
+    if (!active || active.openToken !== openToken || !isValidBounds(bounds)) return false
     active.view.setBounds({
       x: Math.round(bounds.x),
       y: Math.round(bounds.y),
@@ -238,11 +257,15 @@ export class PluginPanelViewController {
   }
 
   closeIfNotAllowed(isAllowed: (pluginId: string) => boolean): void {
-    if (this.active && !isAllowed(this.active.pluginId)) this.close()
+    if (this.active && !isAllowed(this.active.pluginId)) this.close('disabled')
   }
 
   closeForPlugin(pluginId: string): void {
-    if (this.active?.pluginId === pluginId) this.close()
+    if (this.active?.pluginId === pluginId) this.close('disabled')
+  }
+
+  canOpenToken(openToken: number): boolean {
+    return Number.isSafeInteger(openToken) && openToken > this.lastOpenToken
   }
 
   postMessage(pluginId: string, data: unknown): { ok: true; value: { delivered: boolean } } | { ok: false; error: string } {
@@ -296,7 +319,11 @@ export class PluginPanelViewController {
     pluginSession.setPermissionCheckHandler(() => false)
     pluginSession.on('will-download', event => event.preventDefault())
     pluginSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
-      callback({ cancel: !isPluginPanelResourceAllowed(details.url, this.activeTokens.get(pluginId) ?? null, details.method ?? 'GET') })
+      const blocked = !isPluginPanelResourceAllowed(details.url, this.activeTokens.get(pluginId) ?? null, details.method ?? 'GET')
+      if (blocked) {
+        try { this.options.onBlockedRequest?.(details.url) } catch {}
+      }
+      callback({ cancel: blocked })
     })
     this.configuredPartitions.add(pluginId)
   }
@@ -308,10 +335,18 @@ export class PluginPanelViewController {
       contents.on(eventName, event => event?.preventDefault())
     }
     contents.on('render-process-gone', () => {
-      if (this.active === active) this.close()
+      if (this.active === active) this.close('renderer_crashed', active.openToken)
     })
     contents.on('destroyed', () => {
-      if (this.active === active) this.close()
+      if (this.active === active) this.close('destroyed', active.openToken)
     })
   }
+}
+
+function isValidBounds(value: unknown): value is { x: number; y: number; width: number; height: number } {
+  if (!isRecord(value)) return false
+  const { x, y, width, height } = value
+  if (typeof x !== 'number' || typeof y !== 'number' || typeof width !== 'number' || typeof height !== 'number'
+    || ![x, y, width, height].every(Number.isFinite)) return false
+  return width >= 1 && height >= 1 && width <= 4_000 && height <= 4_000
 }

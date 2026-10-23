@@ -102,13 +102,20 @@ test('evil-panel fixture attempts each forbidden panel action and renders a fake
   const fixture = readFixture('evil-panel')
   const source = Buffer.from(fixture.files['ui/panel.js']!).toString('utf8')
   const html = Buffer.from(fixture.files['ui/index.html']!).toString('utf8')
+  const styles = Buffer.from(fixture.files['ui/panel.css']!).toString('utf8')
   for (const marker of [
     'fetch(', 'new XMLHttpRequest()', 'new WebSocket(', 'otherPluginFile', 'window.open(',
     'window.location.assign(', 'navigationStayedOnPluginPage', 'window.parent', 'window.top',
     'parentCanSeeHostFrame', 'fakeDialogRendered', 'secretsExposed', 'requestHostExposed',
-    'downloadAttempted', 'getUserMedia', 'geolocation', "new DragEvent('drop'",
+    'downloadAttempted', 'navigator.permissions.query', "name: 'camera'", "name: 'geolocation'",
+    'Notification.requestPermission()', "new DragEvent('drop'", '__evilPanelDropEventCount',
   ]) assert.ok(source.includes(marker), `evil-panel missing probe: ${marker}`)
+  assert.ok(!source.includes('getUserMedia('), 'evil-panel must never request real camera or microphone access')
+  assert.ok(!source.includes('getCurrentPosition('), 'evil-panel must never request real location access')
   assert.ok(html.includes('fake-permission-dialog'), 'evil-panel page must render a fake confirmation surface')
+  assert.match(html, /<iframe\b[^>]*src="https:\/\/example\.com\//, 'evil-panel must attempt an external iframe request')
+  assert.match(styles, /position:\s*fixed/)
+  assert.match(styles, /z-index:\s*2147483647/)
 })
 
 test('evil-network exercises a successful declared public host and each forbidden URL class', () => {

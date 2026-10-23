@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { locale, t, type TranslationKey } from '@/i18n'
+import { isCurrentPluginPanelViewClose, pluginPanelViewCloseError } from '@/utils/plugin-panel-view'
 import type {
   PluginBrokerDiagnostic,
   PluginBrokerLogEntry,
@@ -10,6 +11,7 @@ import type {
   PluginPanelPlugin,
   PluginPanelSettingsSnapshot,
   PluginPanelSnapshot,
+  PluginPanelViewClosedEvent,
   PluginResourceLimits,
   PluginInstancePreferences,
   PluginPreferences,
@@ -33,6 +35,7 @@ const settingsDraft = ref<Record<string, PluginSettingScalar>>({})
 const secretDrafts = ref<Record<string, string>>({})
 const selectedPluginId = ref('')
 const panelViewPluginId = ref('')
+const panelViewOpenToken = ref(0)
 const panelViewFrame = ref<HTMLElement | null>(null)
 const panelViewContent = ref<HTMLElement | null>(null)
 const busy = ref(false)
@@ -44,7 +47,9 @@ const pendingRemove = ref<PluginPanelPlugin | null>(null)
 const pendingSecretConsentKey = ref('')
 const keepData = ref(false)
 let removeNotificationsListener: (() => void) | null = null
+let removePanelClosedListener: (() => void) | null = null
 let panelViewBoundsObserver: ResizeObserver | null = null
+let panelViewRequestSequence = 0
 
 const plugins = computed(() => snapshot.value?.plugins ?? [])
 const selectedPlugin = computed(() => plugins.value.find(plugin => plugin.id === selectedPluginId.value) ?? null)
@@ -79,13 +84,21 @@ function pluginIconUrl(plugin: PluginPanelPlugin): string | null {
   return `agent-pets://plugin/${plugin.id}/${icon.split('/').map(encodeURIComponent).join('/')}`
 }
 
-function sendPluginPanelViewBounds(): void {
+function readPluginPanelViewBounds(): { frame: DOMRect; content: DOMRect } | null {
   const frame = panelViewFrame.value?.getBoundingClientRect()
   const content = panelViewContent.value?.getBoundingClientRect()
-  if (!frame || !content) return
+  if (!frame || !content || frame.width < 1 || frame.height < 1 || content.width < 1 || content.height < 1) return null
+  return { frame, content }
+}
+
+function sendPluginPanelViewBounds(): void {
+  const openToken = panelViewOpenToken.value
+  const bounds = readPluginPanelViewBounds()
+  if (!openToken || !bounds) return
   window.electronAPI?.setPluginPanelViewBounds(
-    { x: frame.left, y: frame.top, width: frame.width, height: frame.height },
-    { x: content.left, y: content.top, width: content.width, height: content.height },
+    openToken,
+    { x: bounds.frame.left, y: bounds.frame.top, width: bounds.frame.width, height: bounds.frame.height },
+    { x: bounds.content.left, y: bounds.content.top, width: bounds.content.width, height: bounds.content.height },
   )
 }
 
@@ -95,28 +108,60 @@ async function openPluginPanelView(pluginId: string): Promise<void> {
     setError('disabled')
     return
   }
+  const requestSequence = ++panelViewRequestSequence
+  const previousOpenToken = panelViewOpenToken.value
+  panelViewOpenToken.value = 0
+  if (previousOpenToken) window.electronAPI?.closePluginPanelView(previousOpenToken)
   selectedPluginId.value = pluginId
   panelViewPluginId.value = pluginId
   errorMessage.value = ''
   await nextTick()
+  if (requestSequence !== panelViewRequestSequence) return
+  const bounds = readPluginPanelViewBounds()
+  if (!bounds) {
+    panelViewPluginId.value = ''
+    setError('panel_unavailable')
+    return
+  }
   try {
-    const result = await window.electronAPI?.openPluginPanelView(pluginId)
+    const result = await window.electronAPI?.openPluginPanelView(
+      pluginId,
+      { x: bounds.frame.left, y: bounds.frame.top, width: bounds.frame.width, height: bounds.frame.height },
+      { x: bounds.content.left, y: bounds.content.top, width: bounds.content.width, height: bounds.content.height },
+    )
+    if (requestSequence !== panelViewRequestSequence) {
+      if (result?.ok) window.electronAPI?.closePluginPanelView(result.value.openToken)
+      return
+    }
     if (!result?.ok) {
       panelViewPluginId.value = ''
       setError(result && !result.ok ? result.error : 'plugin_service_unavailable')
       return
     }
+    panelViewOpenToken.value = result.value.openToken
     await nextTick()
     sendPluginPanelViewBounds()
   } catch {
+    if (requestSequence !== panelViewRequestSequence) return
     panelViewPluginId.value = ''
     setError('plugin_service_unavailable')
   }
 }
 
 function closePluginPanelView(): void {
+  panelViewRequestSequence += 1
+  const openToken = panelViewOpenToken.value
+  panelViewOpenToken.value = 0
   panelViewPluginId.value = ''
-  window.electronAPI?.closePluginPanelView()
+  if (openToken) window.electronAPI?.closePluginPanelView(openToken)
+}
+
+function handlePluginPanelViewClosed(event: PluginPanelViewClosedEvent): void {
+  if (!isCurrentPluginPanelViewClose(event, panelViewPluginId.value, panelViewOpenToken.value)) return
+  panelViewRequestSequence += 1
+  panelViewOpenToken.value = 0
+  panelViewPluginId.value = ''
+  setError(pluginPanelViewCloseError(event.reason))
 }
 
 function pluginStatusLabel(plugin: PluginPanelPlugin): string {
@@ -139,6 +184,10 @@ function localizedError(code: string): string {
   }
   const keys: Record<string, TranslationKey> = {
     disabled: 'pluginPanelUnavailable',
+    panel_unavailable: 'pluginPanelViewUnavailable',
+    panel_load_failed: 'pluginPanelViewLoadFailed',
+    panel_crashed: 'pluginPanelViewCrashed',
+    panel_closed: 'pluginPanelViewClosed',
     preferences_unsafe: 'pluginPreferencesUnsafe',
     plugin_service_unavailable: 'pluginServiceUnavailable',
     archive_too_large: 'pluginArchiveTooLarge',
@@ -637,6 +686,8 @@ watch(selectedPluginId, pluginId => {
 watch(panelViewPluginId, async pluginId => {
   panelViewBoundsObserver?.disconnect()
   panelViewBoundsObserver = null
+  window.removeEventListener('resize', sendPluginPanelViewBounds)
+  window.removeEventListener('scroll', sendPluginPanelViewBounds, true)
   if (!pluginId) return
   await nextTick()
   const frame = panelViewFrame.value
@@ -658,6 +709,7 @@ watch(() => props.requestedPluginId, pluginId => {
 onMounted(() => {
   void refreshPanel()
   void loadPetOptions()
+  removePanelClosedListener = window.electronAPI?.onPluginPanelViewClosed(handlePluginPanelViewClosed) ?? null
   removeNotificationsListener = window.electronAPI?.onPluginNotificationsChanged(() => {
     void refreshNotifications()
   }) ?? null
@@ -665,10 +717,12 @@ onMounted(() => {
 
 onUnmounted(() => {
   removeNotificationsListener?.()
+  removePanelClosedListener?.()
   panelViewBoundsObserver?.disconnect()
   window.removeEventListener('resize', sendPluginPanelViewBounds)
   window.removeEventListener('scroll', sendPluginPanelViewBounds, true)
-  if (panelViewPluginId.value) window.electronAPI?.closePluginPanelView()
+  panelViewRequestSequence += 1
+  if (panelViewOpenToken.value) window.electronAPI?.closePluginPanelView(panelViewOpenToken.value)
 })
 </script>
 

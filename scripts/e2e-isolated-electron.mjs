@@ -53,7 +53,13 @@ if (!fake || !isolated) {
   console.error('AGENT_PETS_E2E_ABORT fake=' + fake + ' isolated=' + isolated)
   process.exit(1)
 }
-globalThis.__agentPetsE2E = { root, userData, calls }
+globalThis.__agentPetsE2E = {
+  root,
+  userData,
+  calls,
+  panelViewBlockedRequests: 0,
+  panelViewExampleComBlockedRequests: 0,
+}
 console.log('AGENT_PETS_E2E_READY ' + JSON.stringify({ root, userData: app.getPath('userData'), home: require('node:os').homedir(), fakeSafeStorage: fake }))
 require(${JSON.stringify(mainBundle)})
 `)

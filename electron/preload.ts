@@ -18,6 +18,7 @@ import type {
   PluginPanelSettingsSnapshot,
   PluginPanelResult,
   PluginPanelSnapshot,
+  PluginPanelViewClosedEvent,
   PluginPreferences,
   PluginSettingScalar,
 } from '../src/types/plugin.ts'
@@ -67,9 +68,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   completePluginFeed: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-complete', itemId),
   openPluginFeedLink: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-open-link', itemId),
   getPluginPanelSnapshot: (): Promise<PluginPanelResult<PluginPanelSnapshot>> => ipcRenderer.invoke('plugin-panel-snapshot'),
-  openPluginPanelView: (pluginId: string): Promise<PluginPanelResult<{ opened: true }>> => ipcRenderer.invoke('plugin-panel-view-open', pluginId),
-  closePluginPanelView: (): void => ipcRenderer.send('plugin-panel-view-close'),
-  setPluginPanelViewBounds: (frame: unknown, content: unknown): void => ipcRenderer.send('plugin-panel-view-bounds', { frame, content }),
+  openPluginPanelView: (pluginId: string, frame: unknown, content: unknown): Promise<PluginPanelResult<{ opened: true; openToken: number }>> => ipcRenderer.invoke('plugin-panel-view-open', pluginId, { frame, content }),
+  closePluginPanelView: (openToken: number): void => ipcRenderer.send('plugin-panel-view-close', openToken),
+  setPluginPanelViewBounds: (openToken: number, frame: unknown, content: unknown): void => ipcRenderer.send('plugin-panel-view-bounds', { openToken, frame, content }),
+  onPluginPanelViewClosed: (callback: (event: PluginPanelViewClosedEvent) => void) => {
+    const handler = (_event: unknown, data: PluginPanelViewClosedEvent) => callback(data)
+    ipcRenderer.on('plugin-panel-view-closed', handler)
+    return () => ipcRenderer.removeListener('plugin-panel-view-closed', handler)
+  },
   openPluginPanelFromPet: (pluginId: string): Promise<boolean> => ipcRenderer.invoke('plugin-panel-view-open-from-pet', pluginId),
   getPluginSettings: (pluginId: string): Promise<PluginPanelResult<PluginPanelSettingsSnapshot>> => ipcRenderer.invoke('plugin-settings-get', pluginId),
   setPluginSettings: (pluginId: string, value: Record<string, PluginSettingScalar>): Promise<PluginPanelResult<Record<string, PluginSettingScalar>>> => ipcRenderer.invoke('plugin-settings-set', pluginId, value),

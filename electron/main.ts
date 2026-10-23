@@ -88,6 +88,7 @@ import {
 } from './permission-adapter-server'
 import type { DesktopPreferences } from '../src/types/desktop'
 import { locale, setLocale, t } from '../src/i18n'
+import tokensCss from '../src/styles/tokens.css?raw'
 import type { ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
@@ -167,6 +168,7 @@ let pluginSecretConsentStore: PluginSecretConsentStore | null = null
 let pluginSettingsStore: PluginSettingsStore | null = null
 let pluginHostWindow: PluginHostWindowController | null = null
 let pluginPanelViewController: PluginPanelViewController | null = null
+let pluginPanelViewOpenSequence = 0
 const pluginUiMessageGuard = new PluginUiMessageGuard()
 const pluginPanelWindowSizer = new PluginPanelWindowSizer()
 let programmaticPluginPanelSize: { width: number; height: number } | null = null
@@ -395,6 +397,16 @@ function clamp(value: number, min: number, max: number): number {
 
 function finiteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function readPluginPanelRect(value: unknown): PluginPanelRect | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const rect = value as Record<string, unknown>
+  const x = finiteNumber(rect.x)
+  const y = finiteNumber(rect.y)
+  const width = finiteNumber(rect.width)
+  const height = finiteNumber(rect.height)
+  return x === null || y === null || width === null || height === null ? null : { x, y, width, height }
 }
 
 function isTrustedRendererUrl(rawUrl: string): boolean {
@@ -1026,7 +1038,6 @@ function createPluginServices(): void {
       return perPlugin * activePluginCount
     },
   })
-  const tokensCss = readRegularFileWithin(app.getAppPath(), 'src/styles/tokens.css', 256 * 1024)?.toString('utf8') ?? ''
   pluginPanelViewController = new PluginPanelViewController({
     preloadPath: join(__dirname, 'plugin-ui-preload.js'),
     tokensCss,
@@ -1060,7 +1071,25 @@ function createPluginServices(): void {
       }
       return pluginBroker?.handle(pluginId, request) ?? { ok: false, error: 'disabled' }
     },
-    onClosed: pluginId => restorePluginPanelWindowSize(pluginId),
+    onClosed: event => {
+      restorePluginPanelWindowSize(event.pluginId)
+      if (panelWindow && !panelWindow.isDestroyed()) {
+        panelWindow.webContents.send('plugin-panel-view-closed', event)
+      }
+    },
+    onBlockedRequest: url => {
+      const e2e = (globalThis as typeof globalThis & {
+        __agentPetsE2E?: { panelViewBlockedRequests?: number; panelViewExampleComBlockedRequests?: number }
+      }).__agentPetsE2E
+      if (e2e) {
+        e2e.panelViewBlockedRequests = (e2e.panelViewBlockedRequests ?? 0) + 1
+        try {
+          if (new URL(url).hostname === 'example.com') {
+            e2e.panelViewExampleComBlockedRequests = (e2e.panelViewExampleComBlockedRequests ?? 0) + 1
+          }
+        } catch {}
+      }
+    },
   })
 
   ipcMain.handle('plugin-feed-unread-count', event => {
@@ -1093,10 +1122,13 @@ function createPluginServices(): void {
     assertPluginPanelSender(event)
     return pluginPanelSnapshot()
   })
-  ipcMain.handle('plugin-panel-view-open', async (event, pluginId: unknown) => {
+  ipcMain.handle('plugin-panel-view-open', async (event, pluginId: unknown, payload: unknown) => {
     assertPluginPanelSender(event)
-    if (!isPluginPanelPluginId(pluginId)) return { ok: false, error: 'invalid_request' }
-    return openPluginPanelViewForPlugin(pluginId)
+    if (!isPluginPanelPluginId(pluginId) || !payload || typeof payload !== 'object' || Array.isArray(payload)
+      || pluginPanelViewOpenSequence >= Number.MAX_SAFE_INTEGER) return { ok: false, error: 'invalid_request' }
+    const bounds = payload as Record<string, unknown>
+    const openToken = ++pluginPanelViewOpenSequence
+    return openPluginPanelViewForPlugin(pluginId, openToken, bounds.frame, bounds.content)
   })
   ipcMain.handle('plugin-panel-view-open-from-pet', (event, pluginId: unknown) => {
     if (!isTrustedIpcSender(event, petWindow) || !isPluginPanelPluginId(pluginId)) return false
@@ -1111,30 +1143,23 @@ function createPluginServices(): void {
     const data = payload && typeof payload === 'object' && !Array.isArray(payload)
       ? payload as Record<string, unknown>
       : {}
-    const readRect = (value: unknown): PluginPanelRect | null => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-      const rect = value as Record<string, unknown>
-      const x = finiteNumber(rect.x)
-      const y = finiteNumber(rect.y)
-      const width = finiteNumber(rect.width)
-      const height = finiteNumber(rect.height)
-      return x === null || y === null || width === null || height === null ? null : { x, y, width, height }
-    }
+    const openToken = finiteNumber(data.openToken)
+    if (openToken === null || !Number.isSafeInteger(openToken)) return
     const contentBounds = panelWindow.getContentBounds()
     const bounds = validatePluginPanelViewBounds(
-      readRect(data.frame) ?? { x: -1, y: -1, width: 0, height: 0 },
-      readRect(data.content) ?? { x: -1, y: -1, width: 0, height: 0 },
+      readPluginPanelRect(data.frame) ?? { x: -1, y: -1, width: 0, height: 0 },
+      readPluginPanelRect(data.content) ?? { x: -1, y: -1, width: 0, height: 0 },
       { width: contentBounds.width, height: contentBounds.height },
     )
     if (!bounds) {
-      pluginPanelViewController.setBounds({ x: 0, y: 0, width: 1, height: 1 })
+      pluginPanelViewController.close('renderer_unavailable', openToken)
       return
     }
-    pluginPanelViewController.setBounds(bounds)
+    pluginPanelViewController.setBounds(openToken, bounds)
   })
-  ipcMain.on('plugin-panel-view-close', event => {
+  ipcMain.on('plugin-panel-view-close', (event, openToken: unknown) => {
     assertPluginPanelSender(event)
-    pluginPanelViewController?.close()
+    if (typeof openToken === 'number' && Number.isSafeInteger(openToken)) pluginPanelViewController?.close('closed', openToken)
   })
   ipcMain.handle('plugin-panel-api', (event, method: unknown, args: unknown) => {
     if (event.senderFrame !== event.sender.mainFrame) return { ok: false, error: 'not_permitted' }
@@ -1961,13 +1986,27 @@ function restorePluginPanelWindowSize(pluginId: string): void {
   setPluginPanelWindowBounds(computePanelBounds(baseSize.height, baseSize.width))
 }
 
-async function openPluginPanelViewForPlugin(pluginId: string) {
+async function openPluginPanelViewForPlugin(
+  pluginId: string,
+  openToken: number,
+  frameValue: unknown,
+  contentValue: unknown,
+) {
   const context = pluginRuntimeContexts.get(pluginId)
   const panelView = context?.manifest.contributes.panelView
   if (!isPluginPanelPluginId(pluginId) || !panelView || !context?.pluginsEnabled || !context.enabled
     || !enabledPluginRoot(pluginId) || !panelWindow || panelWindow.isDestroyed() || !pluginPanelViewController) {
     return { ok: false as const, error: panelView ? 'disabled' : 'not_permitted' }
   }
+  if (!pluginPanelViewController.canOpenToken(openToken)) return { ok: false as const, error: 'invalid_request' }
+  const contentBounds = panelWindow.getContentBounds()
+  const bounds = validatePluginPanelViewBounds(
+    readPluginPanelRect(frameValue) ?? { x: -1, y: -1, width: 0, height: 0 },
+    readPluginPanelRect(contentValue) ?? { x: -1, y: -1, width: 0, height: 0 },
+    { width: contentBounds.width, height: contentBounds.height },
+  )
+  if (!bounds) return { ok: false as const, error: 'panel_unavailable' }
+  pluginPanelViewController.close('replaced')
   const [currentWidth, currentHeight] = panelWindow.getSize()
   const workArea = screen.getDisplayMatching(panelWindow.getBounds()).workArea
   const size = pluginPanelWindowSizer.begin(pluginId, { width: currentWidth, height: currentHeight }, panelView.preferredSize, workArea)
@@ -1975,7 +2014,7 @@ async function openPluginPanelViewForPlugin(pluginId: string) {
   panelWindow.setMinimumSize(Math.min(320, workArea.width), Math.min(240, workArea.height))
   panelWindow.setMaximumSize(Math.min(960, workArea.width), Math.min(800, workArea.height))
   setPluginPanelWindowBounds(computePanelBounds(size.height, size.width))
-  const result = await pluginPanelViewController.open({ pluginId, entry: panelView.entry })
+  const result = await pluginPanelViewController.open({ pluginId, entry: panelView.entry, openToken, bounds })
   if (!result.ok) restorePluginPanelWindowSize(pluginId)
   return result
 }
