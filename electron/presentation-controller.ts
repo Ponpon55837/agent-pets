@@ -165,6 +165,8 @@ export function normalizePresentationStatus(value: unknown): PresentationStatusS
       activePets.push({
         petId,
         name: name || petId,
+        agentFamily: candidate.agentFamily === 'codex' || candidate.agentFamily === 'claude-code' || candidate.agentFamily === 'opencode'
+          ? candidate.agentFamily : null,
         mood: normalizeMood(candidate.mood),
         level: clampLevel(candidate.level),
         visibleState: normalizeVisibleState(candidate.visibleState),
