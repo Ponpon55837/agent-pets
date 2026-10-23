@@ -109,3 +109,24 @@ R1–R8 修完後，在 `pnpm dev` 下：
 3. 開啟完成提示泡泡，讓 Agent 完成一次工作：完成 toast 出現、倒數後切換為 activity 文字時有淡出淡入。
 4. 有 toast 時用 Presentation MCP 送一則 `pet_say`：`pet_say` 先顯示（與 Phase 12 前相同）。
 5. 觸發一次權限請求：權限泡泡蓋過其他泡泡。
+
+## 修正複檢與手動驗收結果（2026-10-23）
+
+- 複檢對象：`0c0ed36..4230f57`（R1–R8）。
+- 重跑檢查：`vue-tsc` 通過、`pnpm test:unit` 192/192、`vite build` 通過、`git diff --check` 通過。
+- 探測腳本：`0x7f.1`、`127.1` 已被拒；隱藏 60 秒後恢復會補顯示最新一則；DND 期間通知進通知中心。
+- 結論：**R1–R8 全部修正，Phase 12 通過**，可進 Phase 13。
+
+### Electron 手動驗收方式
+
+無法操作原生畫面，改以隔離環境啟動 `HEAD`（4230f57）的 `vite build` 產物：`HOME` 與 `--user-data-dir` 都指向暫存資料夾，未碰觸使用者已安裝並執行中的 Agent Pets 與 `~/.desktop-pet`；以 `--inspect` 連主程序、`--remote-debugging-port` 連兩個視窗。選檔視窗以主程序端替換 `dialog.showOpenDialog` 回傳測試 zip 路徑，再由面板呼叫 `electronAPI.importPetZip()`；泡泡以寵物視窗的 Pinia store 注入狀態並讀取 DOM。
+
+| # | 項目 | 結果 |
+|---|---|---|
+| 1 | 一般寵物 zip（pet.json + spritesheet.webp）匯入 | 通過：回傳 `ok`、檔案寫入、spritesheet 與來源逐位元組相同、重新載入後寵物正確顯示 |
+| 2 | macOS 風格 zip（含資料夾、`__MACOSX/._*`、`.DS_Store`、`notes: v2.txt`）匯入 | 通過：匯入成功，選到的是真正的 spritesheet（逐位元組相同），重新載入後正確顯示 |
+| 3 | 完成 toast 切到 activity 的過場 | 通過：觀察到 toast 的 `toast-leave-active` 後 activity 才 `toast-enter-active`（out-in） |
+| 4 | toast 存在時送 `pet_say` | 通過：顯示 `pet_say`；清除 say 後回到 toast |
+| 5 | 權限請求蓋過其他泡泡 | 通過：toast + say 同時存在時注入權限請求，只顯示權限泡泡；移除後回到 say |
+
+觀察：從面板直接呼叫匯入 API 後，寵物視窗要重新載入才看得到新寵物；這是測試繞過面板 UI 刷新流程造成的，且該流程不在 Phase 12 變更範圍內，不列為缺陷。
