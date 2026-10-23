@@ -66,6 +66,7 @@ Phase 最後一個 checkpoint 必須：
    - 每個 §0.4 檢查的實際指令與結果（測試數量、通過／失敗）。
    - 安全檢查（照 `.agents/skills/pet-skill/references/phase-gates.md` 的 Security gate 逐項）。
    - 實際 Electron 驗證步驟與結果（`pnpm dev` 下實際操作了什麼、看到什麼）。沒驗到的寫「未驗證」，不要寫通過。
+   - 「手動驗收步驟」清單：無法自己操作 Electron 視窗時，寫出複檢者可以直接照做的步驟與每一步的預期結果。
    - 殘餘風險、未測平台（例如只在 macOS 驗證，Windows 未驗證）。
    - 待決問題。
 2. 更新工作記錄（見 §0.7）。
@@ -158,8 +159,8 @@ Phase 最後一個 checkpoint 必須：
 - 新增 `src/utils/feed-arbiter.ts`：`selectBubble(candidates): BubbleSelection`。候選與優先順序照規劃文件 §3.3：
   1. permission request
   2. permission notice
-  3. Agent timed toast
-  4. Presentation MCP say
+  3. Presentation MCP say（複檢 R6 修正：維持 Phase 12 前順序）
+  4. Agent timed toast
   5. plugin feed（normal）
   6. activity 文字／plugin feed（low）
 - 把 `DesktopPet.vue` 現有的 `v-if / v-else-if` 鏈改為依 `selectBubble` 的結果渲染（插件候選目前永遠是空的）。**所有現有條件要原封保留**（例如 `permissionBubbleActive`、`bubbleActive`、`!isMultiPet && activityText`），只是搬進純函式。
@@ -249,6 +250,7 @@ Phase 最後一個 checkpoint 必須：
 - 顯示在哪隻寵物：`targetPetId`，`null` 時為主寵物（目前選定的寵物；多寵物模式下最左邊那一隻）。
 - 可見性：Mini／Edge、`desktop-visibility` 隱藏、全螢幕偵測為隱藏時，視為不可見；Edge 把手顯示未讀數（沿用 Edge handle 的現有樣式加一個小數字徽章，數字 > 99 顯示 `99+`）。
 - 所有新 IPC handler 都用 `assertTrustedIpcSender`，並驗證 payload。
+- 接線 `PluginFeedController` 時：泡泡顯示結束（倒數到期或使用者關閉）要呼叫 `complete(itemId)`，否則佇列會卡住；寵物可見性（Mini／Edge／隱藏／全螢幕）每次改變都要呼叫 `onVisibilityChanged()`；DND 狀態改變時也呼叫一次。
 - 注意 phase-gates 的「Hot-path synchronous I/O」：通知路徑上不要做同步檔案寫入。
 
 ### P13.5 設定面板「插件」分頁
@@ -428,7 +430,8 @@ Phase 最後一個 checkpoint 必須：
 - 寵物選擇 UI：插件外觀顯示「來自插件：<插件名稱>」標籤；不能重新命名、不能單獨刪除（要移除插件）。
 - 插件停用或移除時，若某隻寵物正在使用它的外觀：改回預設寵物，並在通知中心記一則系統訊息。XP／進度記錄沿用既有 pet id 對應方式，**不要刪除** 任何進度資料。
 - **既有的寵物 zip 匯入與單張 spritesheet 匯入維持不變**（規劃文件的「整併」在 v1 只代表共用驗證邏輯，不移除舊功能）。
-- 新增測試：plugin skin id 驗證、`availablePetIds` 包含已啟用插件外觀、停用後不包含。
+- `electron/plugin-preferences.ts` 的 `targetPetId` 驗證目前只收 `[A-Za-z0-9._-]`，要擴充為也接受合法的 `plugin:<pluginId>:<skinId>`（用同一個專用驗證函式）。
+- 新增測試：plugin skin id 驗證、`availablePetIds` 包含已啟用插件外觀、停用後不包含、`targetPetId` 可設為插件外觀 id。
 
 ### P16.6 Phase 16 收尾與整體收尾
 

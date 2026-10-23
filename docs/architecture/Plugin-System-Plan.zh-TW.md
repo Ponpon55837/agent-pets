@@ -177,8 +177,8 @@ interface PluginApi {
 ```text
 優先級（高 → 低）
 1. Permission request / notice          （不可被插件覆蓋，與 §11.3 相同）
-2. Agent 完成／錯誤 toast（現有 timed toast）
-3. Presentation MCP pet_say
+2. Presentation MCP pet_say             （維持 Phase 12 前的既有順序）
+3. Agent 完成／錯誤 toast（現有 timed toast）
 4. Plugin feed（normal）
 5. Agent activity 文字 / Plugin feed（low）
 ```
