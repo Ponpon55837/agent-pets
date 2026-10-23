@@ -1,7 +1,8 @@
+import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { PluginInstancePreferences, PluginPreferences, PluginResourceLimits } from '../src/types/plugin.ts'
 import { isValidPluginNetworkHost } from './plugin-manifest.ts'
-import { readBoundedJson, writeJsonAtomic } from './desktop-preferences.ts'
+import { writeJsonAtomic } from './desktop-preferences.ts'
 
 export const PLUGIN_PREFERENCES_FILENAME = 'plugin-preferences.json'
 export const PLUGIN_PREFERENCES_MAX_BYTES = 1024 * 1024
@@ -38,7 +39,6 @@ export const DEFAULT_PLUGIN_PREFERENCES = Object.freeze({
 const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 const PET_ID = /^[A-Za-z0-9._-]{1,64}$/
 const RESOURCE_KEYS = Object.keys(PLUGIN_RESOURCE_BOUNDS) as (keyof PluginResourceLimits)[]
-const ROOT_KEYS = new Set(['pluginsEnabled', 'developerMode', 'resources', 'plugins'])
 const PLUGIN_PREFERENCE_KEYS = new Set(['enabled', 'muted', 'rateLimitPer10Min', 'targetPetId', 'grantedHosts'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -86,8 +86,22 @@ function parseResourceValues(value: unknown, base: PluginResourceLimits): Plugin
   return result
 }
 
+function parseStoredResourceValues(value: unknown): PluginResourceLimits {
+  if (!isRecord(value)) return { ...DEFAULT_PLUGIN_RESOURCES }
+  const result = { ...DEFAULT_PLUGIN_RESOURCES }
+  for (const key of RESOURCE_KEYS) {
+    const raw = value[key]
+    if (raw === undefined) continue
+    const bounds = PLUGIN_RESOURCE_BOUNDS[key]
+    if (typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= bounds.min && raw <= bounds.max) {
+      result[key] = raw
+    }
+  }
+  return result
+}
+
 function parseStoredPluginPreference(value: unknown): PluginInstancePreferences | null {
-  if (!isRecord(value) || Object.keys(value).some(key => !PLUGIN_PREFERENCE_KEYS.has(key))) return null
+  if (!isRecord(value)) return null
   const defaults = defaultPluginPreference()
   const enabled = value.enabled === undefined ? defaults.enabled : value.enabled
   const muted = value.muted === undefined ? defaults.muted : value.muted
@@ -112,27 +126,73 @@ function parseStoredPluginPreference(value: unknown): PluginInstancePreferences 
 }
 
 function parseStoredPreferences(value: unknown): PluginPreferences | null {
-  if (!isRecord(value) || Object.keys(value).some(key => !ROOT_KEYS.has(key))) return null
-  const pluginsEnabled = value.pluginsEnabled === undefined ? false : value.pluginsEnabled
-  const developerMode = value.developerMode === undefined ? false : value.developerMode
-  if (typeof pluginsEnabled !== 'boolean' || typeof developerMode !== 'boolean') return null
-
-  const resources = value.resources === undefined
-    ? { ...DEFAULT_PLUGIN_RESOURCES }
-    : parseResourceValues(value.resources, DEFAULT_PLUGIN_RESOURCES)
-  if (!resources) return null
+  if (!isRecord(value)) return null
+  const pluginsEnabled = typeof value.pluginsEnabled === 'boolean' ? value.pluginsEnabled : false
+  const developerMode = typeof value.developerMode === 'boolean' ? value.developerMode : false
+  const resources = parseStoredResourceValues(value.resources)
 
   const plugins: Record<string, PluginInstancePreferences> = {}
-  const storedPlugins = value.plugins === undefined ? {} : value.plugins
-  if (!isRecord(storedPlugins)) return null
-  for (const [pluginId, rawPreference] of Object.entries(storedPlugins)) {
-    if (!isPluginId(pluginId)) return null
-    const preference = parseStoredPluginPreference(rawPreference)
-    if (!preference) return null
-    plugins[pluginId] = preference
+  if (isRecord(value.plugins)) {
+    for (const [pluginId, rawPreference] of Object.entries(value.plugins)) {
+      if (!isPluginId(pluginId)) continue
+      const preference = parseStoredPluginPreference(rawPreference)
+      if (preference) plugins[pluginId] = preference
+    }
   }
 
   return { pluginsEnabled, developerMode, resources, plugins }
+}
+
+interface StoredPreferencesRead {
+  value: unknown | undefined
+  backupRequired: boolean
+  unsafe: boolean
+}
+
+function isErrorCode(error: unknown, code: string): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === code)
+}
+
+function readStoredPreferences(filePath: string): StoredPreferencesRead {
+  let linkStat: fs.Stats
+  try {
+    linkStat = fs.lstatSync(filePath)
+  } catch (error) {
+    return isErrorCode(error, 'ENOENT')
+      ? { value: undefined, backupRequired: false, unsafe: false }
+      : { value: undefined, backupRequired: false, unsafe: true }
+  }
+  if (linkStat.isSymbolicLink() || !linkStat.isFile()) {
+    return { value: undefined, backupRequired: false, unsafe: true }
+  }
+  if (linkStat.size > PLUGIN_PREFERENCES_MAX_BYTES) {
+    return { value: undefined, backupRequired: true, unsafe: false }
+  }
+
+  let descriptor: number | null = null
+  try {
+    const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0
+    descriptor = fs.openSync(filePath, fs.constants.O_RDONLY | noFollow)
+    const fileStat = fs.fstatSync(descriptor)
+    if (!fileStat.isFile()) return { value: undefined, backupRequired: false, unsafe: true }
+    if (fileStat.size > PLUGIN_PREFERENCES_MAX_BYTES) {
+      return { value: undefined, backupRequired: true, unsafe: false }
+    }
+    const contents = fs.readFileSync(descriptor, 'utf8')
+    try {
+      return { value: JSON.parse(contents) as unknown, backupRequired: false, unsafe: false }
+    } catch {
+      return { value: undefined, backupRequired: true, unsafe: false }
+    }
+  } catch (error) {
+    if (isErrorCode(error, 'ENOENT')) return { value: undefined, backupRequired: false, unsafe: false }
+    if (isErrorCode(error, 'ELOOP')) return { value: undefined, backupRequired: false, unsafe: true }
+    return { value: undefined, backupRequired: false, unsafe: true }
+  } finally {
+    if (descriptor !== null) {
+      try { fs.closeSync(descriptor) } catch {}
+    }
+  }
 }
 
 function parseGlobalPatch(value: unknown): {
@@ -214,6 +274,8 @@ function parsePluginPatch(value: unknown): Partial<PluginInstancePreferences> {
 export class PluginPreferencesStore {
   private readonly filePath: string
   private stored: PluginPreferences | null = null
+  private corruptBackupRequired = false
+  private unsafeFile = false
 
   constructor(userDataDirectory: string) {
     if (!path.isAbsolute(userDataDirectory)) throw new TypeError('Plugin preferences require an absolute userData directory')
@@ -276,13 +338,43 @@ export class PluginPreferencesStore {
 
   private load(): PluginPreferences {
     if (this.stored === null) {
-      const parsed = parseStoredPreferences(readBoundedJson(this.filePath, PLUGIN_PREFERENCES_MAX_BYTES))
+      const read = readStoredPreferences(this.filePath)
+      this.corruptBackupRequired = read.backupRequired
+      this.unsafeFile = read.unsafe
+      const parsed = parseStoredPreferences(read.value)
+      this.corruptBackupRequired ||= read.value !== undefined && parsed === null
       this.stored = parsed ?? clonePluginPreferences(DEFAULT_PLUGIN_PREFERENCES)
     }
     return this.stored
   }
 
+  private backupCorruptFile(): void {
+    if (!this.corruptBackupRequired) return
+    let stat: fs.Stats
+    try {
+      stat = fs.lstatSync(this.filePath)
+    } catch (error) {
+      if (isErrorCode(error, 'ENOENT')) {
+        this.corruptBackupRequired = false
+        return
+      }
+      throw error
+    }
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new TypeError('Plugin preferences file is unsafe')
+
+    let timestamp = Date.now()
+    let backupPath = `${this.filePath}.corrupt-${timestamp}`
+    while (fs.existsSync(backupPath)) {
+      timestamp += 1
+      backupPath = `${this.filePath}.corrupt-${timestamp}`
+    }
+    fs.renameSync(this.filePath, backupPath)
+    this.corruptBackupRequired = false
+  }
+
   private persist(value: PluginPreferences): void {
+    if (this.unsafeFile) throw new TypeError('Plugin preferences file is unsafe')
+    this.backupCorruptFile()
     writeJsonAtomic(this.filePath, value)
     this.stored = clonePluginPreferences(value)
   }

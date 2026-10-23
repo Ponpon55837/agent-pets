@@ -132,28 +132,79 @@ test('returned preference objects cannot mutate the cached state', () => {
   })
 })
 
-test('corrupt, oversized, and symlink preference files fail closed to disabled defaults', () => {
+test('stored preferences ignore unknown fields and discard only an invalid plugin entry', () => {
   withUserData((userData) => {
     const filePath = path.join(userData, PLUGIN_PREFERENCES_FILENAME)
     fs.writeFileSync(filePath, JSON.stringify({
       pluginsEnabled: true,
-      resources: { ...DEFAULT_PLUGIN_RESOURCES, maxEnabledPlugins: 51 },
-      plugins: { sample: { enabled: true } },
+      developerMode: 'invalid',
+      resources: { maxEnabledPlugins: 25, memoryMbPerPlugin: 'invalid', futureResource: 99 },
+      futureRoot: true,
+      plugins: {
+        sample: { enabled: true, futurePluginField: 'ignored' },
+        broken: { enabled: 'yes' },
+        another: { muted: true },
+      },
     }))
+    const store = new PluginPreferencesStore(userData)
+    const loaded = store.get()
+    assert.equal(loaded.pluginsEnabled, true)
+    assert.equal(loaded.developerMode, false)
+    assert.equal(loaded.resources.maxEnabledPlugins, 25)
+    assert.equal(loaded.resources.memoryMbPerPlugin, DEFAULT_PLUGIN_RESOURCES.memoryMbPerPlugin)
+    assert.equal(loaded.plugins.sample?.enabled, true)
+    assert.equal(store.getPlugin('broken').enabled, false)
+    assert.equal(loaded.plugins.another?.muted, true)
+
+    store.updateGlobal({ pluginsEnabled: false })
+    const persisted = JSON.parse(fs.readFileSync(filePath, 'utf8')) as {
+      futureRoot?: unknown
+      resources: Record<string, unknown>
+      plugins: Record<string, Record<string, unknown>>
+    }
+    assert.equal(persisted.futureRoot, undefined)
+    assert.equal(persisted.resources.futureResource, undefined)
+    assert.equal(persisted.plugins.sample.futurePluginField, undefined)
+    assert.equal(persisted.plugins.broken, undefined)
+  })
+})
+
+test('malformed and oversized preference files are backed up before the first write', () => {
+  withUserData((userData) => {
+    const filePath = path.join(userData, PLUGIN_PREFERENCES_FILENAME)
+    const malformed = '{bad json'
+    fs.writeFileSync(filePath, malformed)
     const corrupt = new PluginPreferencesStore(userData)
     assert.equal(corrupt.get().pluginsEnabled, false)
-    assert.equal(corrupt.getPlugin('sample').enabled, false)
+    corrupt.updateGlobal({ pluginsEnabled: true })
+    const corruptBackup = fs.readdirSync(userData).find(name => name.startsWith(`${PLUGIN_PREFERENCES_FILENAME}.corrupt-`))
+    assert.ok(corruptBackup)
+    assert.equal(fs.readFileSync(path.join(userData, corruptBackup!), 'utf8'), malformed)
+    assert.equal(new PluginPreferencesStore(userData).get().pluginsEnabled, true)
 
     fs.writeFileSync(filePath, 'x'.repeat(PLUGIN_PREFERENCES_MAX_BYTES + 1))
     const oversized = new PluginPreferencesStore(userData)
     assert.equal(oversized.get().pluginsEnabled, false)
+    oversized.updateGlobal({ developerMode: true })
+    const backups = fs.readdirSync(userData).filter(name => name.startsWith(`${PLUGIN_PREFERENCES_FILENAME}.corrupt-`))
+    assert.equal(backups.length, 2)
+    assert.equal(backups.filter(name => fs.statSync(path.join(userData, name)).size === PLUGIN_PREFERENCES_MAX_BYTES + 1).length, 1)
+    assert.equal(new PluginPreferencesStore(userData).get().developerMode, true)
+  })
+})
 
-    fs.rmSync(filePath, { force: true })
+test('symlink preference files fail closed without being renamed or replaced', () => {
+  withUserData((userData) => {
+    const filePath = path.join(userData, PLUGIN_PREFERENCES_FILENAME)
     const outside = path.join(userData, 'outside.json')
     fs.writeFileSync(outside, JSON.stringify({ pluginsEnabled: true }))
     fs.symlinkSync(outside, filePath)
     const symlinked = new PluginPreferencesStore(userData)
     assert.equal(symlinked.get().pluginsEnabled, false)
+    assert.throws(() => symlinked.updateGlobal({ pluginsEnabled: true }), /unsafe/)
+    assert.equal(fs.lstatSync(filePath).isSymbolicLink(), true)
+    assert.equal(fs.readdirSync(userData).some(name => name.startsWith(`${PLUGIN_PREFERENCES_FILENAME}.corrupt-`)), false)
+    assert.equal(JSON.parse(fs.readFileSync(outside, 'utf8')).pluginsEnabled, true)
   })
 })
 
