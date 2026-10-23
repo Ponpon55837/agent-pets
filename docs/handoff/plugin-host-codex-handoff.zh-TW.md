@@ -42,6 +42,32 @@ git diff --check
 
 注意：不要跑 `pnpm build`（它會執行清理本機 Agent Pets 程序的 preflight 並打包），除非該 checkpoint 明確要求。
 
+§0.4 是 **每個 checkpoint 的最低要求**，不是唯一允許的指令。下列 §0.4a、§0.4b 在 Phase 的最後一個 checkpoint（或複檢修正收尾）**必須執行**。
+
+### 0.4a Electron 實機驗證（必做）
+
+Phase 13 複檢證明：單元測試全過，但插件在真實 Electron 中完全跑不起來。所以每個 Phase 收尾都要實際啟動 Electron 驗證。不需要操作畫面，用下面的隔離方式即可：
+
+1. `pnpm exec vite build`
+2. 建立暫存資料夾（例如 `mktemp -d`），裡面建 `home/` 與 `ud/`。
+3. 以隔離環境啟動，**不能碰使用者已安裝的 Agent Pets 與 `~/.desktop-pet`**：
+   ```bash
+   HOME=<tmp>/home ./node_modules/.bin/electron --inspect=9349 --remote-debugging-port=9348 --user-data-dir=<tmp>/ud .
+   ```
+   （本機 17373–17375 埠被已安裝的 App 佔用時會印出 already in use，屬正常。）
+4. `curl http://127.0.0.1:9348/json/list` 取得各視窗的 WebSocket；`curl http://127.0.0.1:9349/json/list` 取得主程序。用 Node 內建 `WebSocket` 送 CDP `Runtime.evaluate`（`awaitPromise: true, returnByValue: true`）。
+5. 需要選檔時，在主程序執行
+   `process.mainModule.require('electron').dialog.showOpenDialog = async () => ({ canceled: false, filePaths: ['<套件路徑>'] })`，再在面板呼叫 `window.electronAPI.selectPluginArchive()` 等 API。
+6. 寵物視窗的狀態可用 `document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('agent')` 讀寫；截圖用 CDP `Page.captureScreenshot`。
+7. 驗完用 `pkill -f "user-data-dir=<tmp>/ud"` 關閉，並重新 `pnpm exec vite build`（若曾修改建置輸出）。
+
+phase report 的「Electron 驗證」一節要寫出實際執行的步驟與觀察到的結果；真的做不到的項目才寫「未驗證」並說明原因。
+
+### 0.4b 安全檢查（必做）
+
+- `pnpm audit --prod --audit-level moderate`，記錄結果。
+- 對本 Phase 的 diff 做 secret pattern 掃描（私鑰、GitHub／OpenAI／Slack token、AWS key、Google API key），記錄結果。
+
 ### 0.5 commit 訊息格式
 
 ```
