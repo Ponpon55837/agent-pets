@@ -36,3 +36,10 @@ test('public manifest schema required keys and enums match the runtime validator
   assert.equal(parsePluginManifest({ ...base, apiVersion: '2' }).ok, false)
   assert.equal(parsePluginManifest({ ...base, extra: true }).ok, false)
 })
+
+test('getting-started tutorial writes its package outside the watched source folder', () => {
+  for (const suffix of ['.zh-TW', '']) {
+    const content = fs.readFileSync(path.join(docsDirectory, `getting-started${suffix}.md`), 'utf8')
+    assert.match(content, /zip -r \.\.\/hello-feed\.agentpet-plugin plugin\.json dist\//)
+  }
+})

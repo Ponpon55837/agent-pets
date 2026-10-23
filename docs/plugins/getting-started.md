@@ -57,7 +57,7 @@ Change the `body` in `dist/main.js` to `Edited and reloaded.` and save. The watc
 From inside `hello-feed`, run:
 
 ```sh
-zip -r hello-feed.agentpet-plugin plugin.json dist/
+zip -r ../hello-feed.agentpet-plugin plugin.json dist/
 ```
 
 Choose **Install plugin…**, select the package, and confirm. Folder loading and package installation share manifest, path, size, and file-count validation. See [Packaging and versioning](packaging-and-versioning.md).

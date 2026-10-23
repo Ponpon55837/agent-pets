@@ -230,3 +230,9 @@ test('evil-escape logs isolation probes and Host API results are unwrapped', () 
   assert.match(hostPreload, /window\.postMessage\('agent-pets-plugin-host-port', window\.location\.origin, \[port\]\)/)
   assert.doesNotMatch(hostPreload, /contextBridge/)
 })
+
+test('optional Host API arguments are omitted from RPC instead of serializing undefined', () => {
+  const bootstrap = pluginHostAssets['worker-bootstrap.js'] ?? ''
+  assert.ok(bootstrap.includes("react: (reaction, options) => rpc('pet.react', options === undefined ? [reaction] : [reaction, options])"))
+  assert.ok(bootstrap.includes("fetch: (url, options) => rpc('net.fetch', options === undefined ? [url] : [url, options])"))
+})

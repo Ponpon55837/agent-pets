@@ -141,7 +141,7 @@ function clearSchedules() {
 const api = Object.freeze({
   feed: Object.freeze({ notify: (item) => rpc('feed.notify', [item]) }),
   pet: Object.freeze({
-    react: (reaction, options) => rpc('pet.react', [reaction, options]),
+    react: (reaction, options) => rpc('pet.react', options === undefined ? [reaction] : [reaction, options]),
     status: () => rpc('pet.status', []),
     onStatusChange: (callback) => {
       if (!agentStatusEnabled) throw Object.assign(new Error('not_permitted'), { code: 'not_permitted' })
@@ -151,7 +151,7 @@ const api = Object.freeze({
     },
   }),
   net: Object.freeze({
-    fetch: (url, options) => rpc('net.fetch', [url, options]),
+    fetch: (url, options) => rpc('net.fetch', options === undefined ? [url] : [url, options]),
     requestHost: (host, reason) => rpc('net.requestHost', [host, reason]),
   }),
   secrets: Object.freeze({ get: (key) => rpc('secrets.get', [key]) }),

@@ -54,11 +54,11 @@ export default {
 
 ## 4. 打包安裝
 
-在 `hello-feed` 的上一層執行：
+從 `hello-feed` 目錄建立套件，輸出到上一層，避免監看器把套件檔當成插件內容：
 
 ```sh
 cd hello-feed
-zip -r hello-feed.agentpet-plugin plugin.json dist/
+zip -r ../hello-feed.agentpet-plugin plugin.json dist/
 ```
 
 回到插件面板按「安裝插件…」選擇套件並確認。資料夾載入與套件安裝都使用同一個 manifest、檔案路徑、大小和檔案數驗證。詳見[打包規則](packaging-and-versioning.zh-TW.md)。
