@@ -35,8 +35,8 @@ export interface BubbleCandidates {
 export function selectBubble(candidates: BubbleCandidates): BubbleKind | null {
   if (candidates.permissionRequest) return 'permission-request'
   if (candidates.permissionNotice) return 'permission-notice'
-  if (candidates.agentToast) return 'agent-toast'
   if (candidates.presentationSay) return 'presentation-say'
+  if (candidates.agentToast) return 'agent-toast'
 
   const plugin = candidates.pluginFeed
   const pluginCanShow = Boolean(

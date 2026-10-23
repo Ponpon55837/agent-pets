@@ -25,8 +25,8 @@ const candidatesFor = (kind: BubbleKind): BubbleCandidates => {
 const PRIORITY: BubbleKind[] = [
   'permission-request',
   'permission-notice',
-  'agent-toast',
   'presentation-say',
+  'agent-toast',
   'plugin-feed-normal',
   'activity',
   'plugin-feed-low',
