@@ -48,6 +48,8 @@ import { canEnablePluginWithinLimit, selectEnabledPluginDescriptors } from './pl
 import { PluginBroker, type PluginBrokerContext, type PluginReactionRequest } from './plugin-broker.ts'
 import { PluginFeedController } from './plugin-feed.ts'
 import { PluginNetworkClient } from './plugin-net.ts'
+import { isPublicPluginNetworkHost } from './plugin-net.ts'
+import { PluginHostGrantController, sanitizePluginHostRequestReason } from './plugin-host-grants.ts'
 import {
   isPluginPanelInstallConfirmation,
   isPluginPanelNotificationId,
@@ -142,6 +144,7 @@ let pluginPreferences: PluginPreferencesStore | null = null
 let pluginHostWindow: PluginHostWindowController | null = null
 let pluginBroker: PluginBroker | null = null
 let pluginNetworkClient: PluginNetworkClient | null = null
+let pluginHostGrantController: PluginHostGrantController | null = null
 let pluginFeedController: PluginFeedController | null = null
 const pendingPluginPlanIds = new Map<string, string>()
 const pluginRootsByToken = new Map<string, string>()
@@ -671,6 +674,7 @@ function createPluginServices(): void {
   const userDataDirectory = app.getPath('userData')
   pluginRegistry = new PluginRegistry(userDataDirectory)
   pluginPreferences = new PluginPreferencesStore(userDataDirectory)
+  pluginHostGrantController = new PluginHostGrantController()
   refreshPluginRuntimeContexts()
   pluginFeedController = new PluginFeedController({
     emit: item => {
@@ -709,6 +713,50 @@ function createPluginServices(): void {
     network: pluginNetworkClient ??= new PluginNetworkClient({
       fetch: (url, init) => session.fromPartition('plugin-network').fetch(url, init),
     }),
+    onRequestHost: async (pluginId, rawHost, rawReason) => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      const reason = sanitizePluginHostRequestReason(rawReason)
+      if (!context || !context.manifest.permissions.network?.userGranted || !reason || !pluginHostGrantController || !pluginPreferences) {
+        return { ok: false, error: context?.manifest.permissions.network?.userGranted ? 'invalid_request' : 'not_permitted' }
+      }
+      const decision = pluginHostGrantController.begin(pluginId, rawHost, reason, context.grantedHosts)
+      if (!decision.ok) return decision
+      if (decision.alreadyGranted) return { granted: true, host: decision.host }
+      if (!await isPublicPluginNetworkHost(decision.host)) {
+        pluginHostGrantController.finish(pluginId, decision.host, true)
+        return { ok: false, error: 'host_not_allowed' }
+      }
+      try {
+        const name = context.manifest.name[locale.value]
+        const options = {
+          type: 'question' as const,
+          title: t('pluginNetworkRequestTitle'),
+          message: t('pluginNetworkRequestMessage', { name, host: decision.host, reason }),
+          buttons: [t('pluginNetworkAllow'), t('pluginNetworkDeny')],
+          defaultId: 1,
+          cancelId: 1,
+          noLink: true,
+        }
+        const parent = panelWindow && !panelWindow.isDestroyed() ? panelWindow
+          : petWindow && !petWindow.isDestroyed() ? petWindow : undefined
+        const response = parent
+          ? await dialog.showMessageBox(parent, options)
+          : await dialog.showMessageBox(options)
+        if (response.response !== 0) {
+          pluginHostGrantController.finish(pluginId, decision.host, false)
+          return { ok: false, error: 'denied' }
+        }
+        const storedHosts = pluginPreferences.getPlugin(pluginId).grantedHosts
+        const grantedHosts = [...new Set([...storedHosts, decision.host])]
+        pluginPreferences.updatePlugin(pluginId, { grantedHosts })
+        pluginHostGrantController.finish(pluginId, decision.host, true)
+        syncPluginHost()
+        return { granted: true, host: decision.host }
+      } catch {
+        pluginHostGrantController.finish(pluginId, decision.host, true)
+        return { ok: false, error: 'disabled' }
+      }
+    },
     onReaction: (pluginId, request: PluginReactionRequest) => {
       const result = presentationController?.submitPluginReaction(pluginId, request)
       if (result?.accepted) return { ok: true }

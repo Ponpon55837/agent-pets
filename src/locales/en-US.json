@@ -394,5 +394,12 @@
   "pluginHostUnavailableTitle": "Plugin execution environment could not start",
   "pluginHostUnavailableBody": "{name}'s plugin execution environment failed to start repeatedly and was disabled.",
   "pluginTooManyEnabled": "The plugin limit ({limit}) is reached. Disable another plugin or adjust the limit in Plugin settings → Advanced.",
+  "pluginNetworkRequestTitle": "Plugin network access request",
+  "pluginNetworkRequestMessage": "{name} requests a connection to {host}. Reason: {reason}",
+  "pluginNetworkAllow": "Allow",
+  "pluginNetworkDeny": "Deny",
+  "pluginHostRequestDenied": "You denied this host request. It will not be shown again for 24 hours.",
+  "pluginHostRequestLimited": "A plugin can request network access up to 3 times in 10 minutes.",
+  "pluginHostRequestNotPublic": "This host did not resolve to a public address, so the request was denied.",
   "system": "System integration"
 }

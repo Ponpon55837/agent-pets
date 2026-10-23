@@ -1,6 +1,7 @@
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import type { PluginErrorCode } from '../src/types/plugin.ts'
+import { isValidPluginNetworkHost } from './plugin-manifest.ts'
 
 export const PLUGIN_NET_MAX_REDIRECTS = 3
 export const PLUGIN_NET_MAX_REQUEST_BYTES = 256 * 1024
@@ -121,6 +122,31 @@ export function validatePluginNetUrl(value: unknown, allowedHosts: readonly stri
     return url
   } catch {
     return null
+  }
+}
+
+export async function isPublicPluginNetworkHost(
+  host: string,
+  lookupAll: PluginNetDependencies['lookupAll'] = async value => lookup(value, { all: true, verbatim: true }),
+): Promise<boolean> {
+  if (!isValidHostnameForRequest(host)) return false
+  try {
+    const addresses = await lookupAll(host)
+    return addresses.length > 0 && addresses.every(item => !isPluginNetIpBlocked(item.address))
+  } catch {
+    return false
+  }
+}
+
+function isValidHostnameForRequest(host: string): boolean {
+  if (typeof host !== 'string' || isIP(host) !== 0 || !isValidPluginNetworkHost(host, false)) return false
+  try {
+    const url = new URL(`https://${host}`)
+    return url.hostname === host.toLowerCase() && url.username === '' && url.password === ''
+      && !host.includes('*') && host === host.trim() && host.length <= 253
+      && host.split('.').length >= 2 && !/[\s/@?#:]/.test(host)
+  } catch {
+    return false
   }
 }
 

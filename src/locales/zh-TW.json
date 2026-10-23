@@ -394,5 +394,12 @@
   "pluginHostUnavailableTitle": "插件執行環境無法啟動",
   "pluginHostUnavailableBody": "{name} 的插件執行環境連續啟動失敗，已停用。",
   "pluginTooManyEnabled": "已達插件啟用上限（{limit} 個）。請先停用其他插件，或到插件設定的「進階」調整上限。",
+  "pluginNetworkRequestTitle": "插件要求網路權限",
+  "pluginNetworkRequestMessage": "{name} 要求連線至 {host}。理由：{reason}",
+  "pluginNetworkAllow": "允許",
+  "pluginNetworkDeny": "拒絕",
+  "pluginHostRequestDenied": "你已拒絕這個網域的申請；24 小時內不會再次詢問。",
+  "pluginHostRequestLimited": "此插件在 10 分鐘內最多可申請 3 次網域權限。",
+  "pluginHostRequestNotPublic": "此網域未解析為可公開連線的位址，申請已拒絕。",
   "system": "系統整合"
 }

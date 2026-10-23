@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   isPluginNetHostAllowed,
   isPluginNetIpBlocked,
+  isPublicPluginNetworkHost,
   PluginNetworkClient,
   validatePluginNetUrl,
 } from '../electron/plugin-net.ts'
@@ -33,6 +34,15 @@ test('URL validation rejects http, credentials, ports, IP and unlisted hosts', (
     'https://localhost/', 'https://unlisted.example.com/',
   ]) assert.equal(validatePluginNetUrl(url, allowed), null, url)
   assert.equal(validatePluginNetUrl('https://api.example.com:443/v1', allowed)?.hostname, 'api.example.com')
+})
+
+test('requestHost DNS validation requires every address to be public', async () => {
+  assert.equal(await isPublicPluginNetworkHost('api.example.com', async () => [
+    { address: '93.184.216.34', family: 4 }, { address: '2606:4700:4700::1111', family: 6 },
+  ]), true)
+  assert.equal(await isPublicPluginNetworkHost('api.example.com', async () => [
+    { address: '93.184.216.34', family: 4 }, { address: '10.0.0.4', family: 4 },
+  ]), false)
 })
 
 test('fetch rechecks DNS after every redirect and blocks a private target', async () => {

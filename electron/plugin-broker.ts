@@ -48,6 +48,7 @@ export interface PluginBrokerOptions {
   onReaction: (pluginId: string, request: PluginReactionRequest) => { ok: boolean; error?: PluginErrorCode }
   now?: () => number
   network?: PluginNetworkClient
+  onRequestHost?: (pluginId: string, host: unknown, reason: unknown) => Promise<unknown> | unknown
 }
 
 type RpcResponse = { id: string; ok: true; value: unknown } | { id: string; ok: false; error: PluginErrorCode }
@@ -63,7 +64,7 @@ const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 const STORAGE_KEY_FORBIDDEN = new Set(['__proto__', 'prototype', 'constructor'])
 const KNOWN_METHODS = new Set([
   'feed.notify', 'pet.react', 'storage.get', 'storage.set', 'storage.remove',
-  'log.info', 'log.warn', 'log.error', 'net.fetch',
+  'log.info', 'log.warn', 'log.error', 'net.fetch', 'net.requestHost',
 ])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -132,6 +133,7 @@ export class PluginBroker {
   private readonly feed: PluginFeedController
   private readonly onReaction: PluginBrokerOptions['onReaction']
   private readonly network: PluginBrokerOptions['network']
+  private readonly onRequestHost: PluginBrokerOptions['onRequestHost']
   private readonly now: () => number
   private readonly storage = new Map<string, PluginStorageState>()
   private readonly storageTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -145,6 +147,7 @@ export class PluginBroker {
     this.feed = options.feed
     this.onReaction = options.onReaction
     this.network = options.network
+    this.onRequestHost = options.onRequestHost
     this.now = options.now ?? Date.now
   }
 
@@ -288,6 +291,12 @@ export class PluginBroker {
       }
       return this.network.fetch(pluginId, args[0], args[1], context.grantedHosts ?? context.manifest.permissions.network.hosts, context.netLimits)
         .then(result => result.ok ? result.value : { ok: false, error: result.error })
+    }
+    if (method === 'net.requestHost') {
+      if (!context.manifest.permissions.network?.userGranted) return { ok: false, error: 'not_permitted' }
+      if (args.length !== 2) return { ok: false, error: 'invalid_request' }
+      if (!this.onRequestHost) return { ok: false, error: 'disabled' }
+      return this.onRequestHost(pluginId, args[0], args[1])
     }
     if (method.startsWith('storage.')) {
       if (!context.manifest.permissions.storage || args.length !== (method === 'storage.set' ? 2 : 1)) {

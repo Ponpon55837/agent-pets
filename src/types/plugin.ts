@@ -141,6 +141,7 @@ export type PluginErrorCode =
   | 'settings_invalid'
   | 'schedule_invalid'
   | 'agent_status_unavailable'
+  | 'denied'
 
 export type PluginRuntimeState = 'installed' | 'enabled' | 'disabled_crashed' | 'incompatible'
 
