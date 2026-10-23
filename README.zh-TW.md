@@ -43,7 +43,7 @@
 
 ### 安裝（macOS）
 
-下載 `Agent Pets.dmg`，打開後把 app 拖到「應用程式」資料夾。
+從 [Releases](https://github.com/Ponpon55837/agent-pets/releases) 頁面下載 `AgentPets-<版本>-arm64.dmg`（Apple Silicon）或 `AgentPets-<版本>-x64.dmg`（Intel），打開後把 app 拖到「應用程式」資料夾。
 
 ### 第一次執行
 
@@ -394,6 +394,10 @@ pnpm build
 ```
 
 輸出會在 `release/` 目錄下。
+
+### 發版
+
+發版由 `.github/workflows/release.yml` 自動處理。當修改 `package.json` 中 `version` 的 commit 進到 `main`，且尚未存在 `v<版本>` tag 時，GitHub Actions 會先跑型別檢查與單元測試，再打包 macOS（arm64 + x64 `.dmg`）與 Windows（可攜式 `.exe`），最後建立 `v<版本>` tag 與附上兩個平台安裝檔、自動產生說明的 GitHub Release。不需要手動打 tag 或在本機打包。也可以在 Actions 頁面按 **Run workflow** 重新執行；已有 tag 的版本會自動略過。目前產出的安裝檔尚未簽章。
 
 ### 單元測試
 
