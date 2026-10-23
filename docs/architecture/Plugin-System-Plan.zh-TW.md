@@ -1,6 +1,6 @@
 # Agent Pets 插件系統規劃（Plugin System v1）
 
-> 狀態：規劃草案，尚未實作。基準版本 `1.2.4`。
+> 狀態：規劃定案，實作範圍為 Phase 12–16（交接：`docs/handoff/plugin-host-codex-handoff.zh-TW.md`）。基準版本 `1.2.4`。
 > 範圍：把寵物做成 **插件宿主（Plugin Host）**，讓第三方以「安裝插件」的方式，把資訊與行為插入寵物的各個介面（狀態泡泡、反應、狀態列、設定頁、Tray…），同時不破壞既有的 Permission／XP／History 安全邊界。
 >
 > **本專案只做宿主端，不開發任何插件。** 我們負責：插入點、Host API、安裝／權限／沙箱、泡泡仲裁，以及公開給第三方的對接規格。插件本身（例如下面的推文提醒）由其他人開發。
@@ -362,8 +362,8 @@ tibo-watch-1.0.0.agentpet-plugin   (zip)
 - 先補 panelView 專屬 threat model（`docs/security/`）再實作。
 - 驗收：測試插件頁嘗試連外、`window.open`、導覽、讀取父視窗、偽裝權限對話框，全部失敗；面板視窗縮放、深淺色、高對比下外框正確。
 
-### Phase 16 — 更多插入點
-- `badge`、`tray`、`commands`、`skins`（把現有寵物匯入整併為插件型別）。
+### Phase 16 — 更多插入點（納入本次範圍）
+- `badge`、`tray`、`commands`、`skins`。`skins` 與既有寵物匯入共用驗證邏輯，既有匯入功能保留；只有 `skins` 的插件可以沒有 `entry`。
 
 ### Phase 17 — 散佈（之後再評估）
 - 插件目錄（registry JSON）、作者簽章（ed25519）、自動更新檢查、評分／回報機制。

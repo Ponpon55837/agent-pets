@@ -1,4 +1,4 @@
-# 交接：插件宿主（Plugin Host）Phase 12–15 實作
+# 交接：插件宿主（Plugin Host）Phase 12–16 實作
 
 > 給執行者（Codex）的完整指示。請 **從頭到尾讀完** 再開始。
 > 設計依據：`docs/architecture/Plugin-System-Plan.zh-TW.md`（以下稱「規劃文件」）。本文件與規劃文件衝突時，以本文件為準，並在 phase report 記錄衝突。
@@ -10,7 +10,7 @@
 ### 0.1 分支與合併
 
 - 分支：`feat/plugin-host`（已建立，基於 `main` 的 `a4567d6`）。所有工作都 commit 在這個分支。
-- **不要開 PR、不要合併、不要 rebase、不要 force push。** 整個 Phase 12–15 完成並經使用者確認後，才由使用者開 PR 合併。
+- **不要開 PR、不要合併、不要 rebase、不要 force push。** 整個 Phase 12–16 完成並經使用者確認後，才由使用者開 PR 合併。
 - 每完成一個 checkpoint：跑完 §0.4 的檢查 → commit → `git push origin feat/plugin-host`。
 
 ### 0.2 一次執行一個 Phase，Phase 結束就停
@@ -60,7 +60,7 @@ Checkpoint: P12.1
 Phase 最後一個 checkpoint 必須：
 
 1. 寫 `docs/phase-reports/phase-<N>-<slug>.md`（格式參考 `docs/phase-reports/phase-6-presentation-mcp.md`），內容包含：
-   - 日期、目前版本（不改）、階段狀態、建議版本（整個 Phase 12–15 建議 minor `1.3.0`，但 **不要改**）。
+   - 日期、目前版本（不改）、階段狀態、建議版本（整個 Phase 12–16 建議 minor `1.3.0`，但 **不要改**）。
    - checkpoint 表：編號、內容、commit SHA、結果。
    - Acceptance criteria 表（本文件每個 Phase 的「驗收」逐條對應）。
    - 每個 §0.4 檢查的實際指令與結果（測試數量、通過／失敗）。
@@ -374,17 +374,79 @@ Phase 最後一個 checkpoint 必須：
 - 在 `pnpm dev` 實測並記錄每一項。
 - 視覺：外框在深色／淺色、高對比、reduced motion 下正確；面板縮放時 `WebContentsView` bounds 正確。
 - 寫 `docs/phase-reports/phase-15-plugin-panel-view.md`。
-- **整體收尾**（Phase 15 的最後一個 checkpoint 一起做）：
+- 停止並回報。
+
+---
+
+## 7. Phase 16 — 徽章、指令、Tray、寵物外觀
+
+目標：補齊規劃文件中 v2 的四個插入點。全部沿用前面 Phase 的 RPC、權限、偏好與 UI 架構，不要另起一套。
+
+### P16.1 manifest 擴充
+
+- `contributes` 新增：
+  - `commands?: Array<{ id: string; title: LocalizedText }>`：最多 10 個；`id` 符合 `^[a-z][a-z0-9-]{0,31}$`、插件內不可重複；title ≤ 32 字。
+  - `tray?: { commands: string[] }`：最多 5 個，每個必須是 `commands` 裡已宣告的 id。
+  - `badge?: boolean`。
+  - `skins?: Array<{ id; displayName: LocalizedText; spritesheet: string; kind: 'person' | 'animal'; behaviorManifest?: unknown }>`：最多 5 個；`id` 符合 `^[a-z0-9-]{1,32}$`；`spritesheet` 為套件內 `.webp`/`.png` 相對路徑；`behaviorManifest` 交給既有 `parsePetBehaviorManifest`（`electron/pet-behavior-manifest.ts`）清理。
+- `entry` 改為選填，規則：**沒有 `entry` 時，除了 `contributes.skins` 以外不得宣告任何 contribution 或 permission**（違反就拒絕安裝）；有 `entry` 時照舊。沒有 `entry` 的插件不建立 Worker。加正反向測試。
+- 套件大小：有 `skins` 時總大小上限放寬到 25MB、單一 spritesheet ≤ 20MB（與既有寵物匯入的 `MAX_PET_IMAGE_BYTES` 一致）；沒有 `skins` 仍是 5MB。
+- 同步更新 `docs/plugins/plugin.schema.json`、`agent-pets-plugin.d.ts`、規格文件。
+- 權限同意框新增對應的人話描述（「在 Tray 選單新增項目」「在寵物狀態列顯示徽章」「提供 N 個寵物外觀」）。
+
+### P16.2 commands
+
+- Host API：`api.commands.onInvoke(cb: (commandId: string) => void): Disposable`。
+- 觸發來源只有使用者操作：Tray 選單（P16.3）與面板該插件頁的「指令」清單（按鈕）。插件不能自己觸發、不能呼叫別的插件的指令。
+- Main 收到觸發 → 確認插件啟用、指令已宣告 → 送給該插件 Worker。插件未執行時（例如剛被停用）回報失敗並在面板顯示。
+- 每個指令 1 秒內只送一次（防連點）。
+
+### P16.3 Tray
+
+- `electron/desktop-tray.ts` 的選單在既有項目之後、「結束」之前新增「插件」子選單：只列出 **已啟用** 且有 `contributes.tray` 的插件，每個插件一個子選單，裡面是它的指令；全部插件項目合計最多 30 個，超過的不顯示並在面板診斷說明。
+- 標籤用插件名稱與指令 title（依目前語系），純文字、超過 32 字截斷加省略號。
+- 插件總開關關閉或沒有任何項目時，不顯示「插件」子選單。
+- 插件安裝／移除／啟停、語系變更時呼叫 `rebuild()`。
+- `DesktopTrayActions` 新增取得插件選單項目與觸發指令的 callback，Tray 本身不直接依賴 registry（保持現有的注入寫法）。
+
+### P16.4 徽章（badge）
+
+- Host API：`api.badge.set(badge: { text: string; tone?: 'neutral' | 'info' | 'warning' } | null)`。
+  - `text` ≤ 6 個字（以 `Intl.Segmenter` 或 `Array.from` 計算字元，不要用 `.length`），淨化規則同通知；`null` 清除。
+  - 每插件每秒最多 1 次，超過回 `rate_limited`。
+- 顯示：在該插件 `targetPetId`（預設主寵物）的狀態列旁（單寵物：`DesktopPet.vue` 約 706 行的 `status-lines`；多寵物：該寵物的 `multi-pet-status-line`）。每隻寵物最多顯示 2 個插件徽章，其餘合併成 `+N`；hover／focus 顯示 tooltip「插件名稱：文字」。
+- 寵物看不到時（Mini／Edge／隱藏）不顯示，也不計入未讀。
+- 插件停用、移除、崩潰時自動清除。
+- 視覺：小型膠囊，沿用 tokens；`warning` 用既有警示色 token；不要做成新的 glass 層（glass-on-glass）。長文字已有字數上限，但仍要 `min-width: 0` 與省略號防溢出。
+- 新增 `tests/plugin-badge.test.mts`：字數計算（含 emoji、CJK）、速率、`+N` 合併邏輯（抽成純函式）。
+
+### P16.5 寵物外觀（skins）
+
+- 安裝時驗證每個 spritesheet：存在於套件內、`isSupportedRasterImage`、大小上限。
+- 列表：`load-pets` 回傳的寵物清單加入「來自插件」的外觀，id 用 `plugin:<pluginId>:<skinId>`（`availablePetIds()` 與所有使用 pet id 的驗證都要認得這個格式；`sanitizePetId` 目前不允許 `:`，**新增專用的驗證函式**，不要放寬 `sanitizePetId`）。
+- 圖片經 `agent-pets://plugin/<id>/<spritesheet>` 提供，依實際 bytes 判斷 content-type（參考 `rasterContentType`）。只有插件 **已啟用** 時才提供與列出。
+- 寵物選擇 UI：插件外觀顯示「來自插件：<插件名稱>」標籤；不能重新命名、不能單獨刪除（要移除插件）。
+- 插件停用或移除時，若某隻寵物正在使用它的外觀：改回預設寵物，並在通知中心記一則系統訊息。XP／進度記錄沿用既有 pet id 對應方式，**不要刪除** 任何進度資料。
+- **既有的寵物 zip 匯入與單張 spritesheet 匯入維持不變**（規劃文件的「整併」在 v1 只代表共用驗證邏輯，不移除舊功能）。
+- 新增測試：plugin skin id 驗證、`availablePetIds` 包含已啟用插件外觀、停用後不包含。
+
+### P16.6 Phase 16 收尾與整體收尾
+
+- 測試插件：`ok-commands`（宣告 2 個指令與 tray、收到指令時送通知並更新徽章）、`ok-skin`（只有 skins、沒有 entry）、`evil-badge`（超長文字、每 10ms 設定一次）、`evil-skin`（spritesheet 是改副檔名的非圖片、超過大小）。
+- `pnpm dev` 實測：Tray 子選單出現與消失、指令觸發、徽章顯示與 `+N`、外觀出現在選擇清單並可套用、停用插件後外觀退回預設。
+- 寫 `docs/phase-reports/phase-16-plugin-contributions.md`。
+- **整體收尾**（Phase 12–16）：
   - 更新 `README.md` 與 `README.zh-TW.md`：插件功能說明、安裝方式、安全說明、指向 `docs/plugins/`。
   - 更新 `.agents/skills/pet-skill/references/project-map.md`：新增插件相關模組與安全控制。
-  - 更新規劃文件狀態為「已實作（Phase 12–15）」，並列出實作與規劃的差異。
-  - 執行一次 `pnpm build:fast`（會打包；確認打包後插件功能可用，至少安裝 `ok-notify` 驗證一次），在報告記錄。
+  - 更新規劃文件狀態為「已實作（Phase 12–16）」，並列出實作與規劃的差異。
+  - 執行一次 `pnpm build:fast`（會打包；確認打包後插件功能可用，至少安裝 `ok-notify` 與 `ok-skin` 驗證），在報告記錄。
+  - 另寫 `docs/phase-reports/plugin-host-summary.md`：Phase 12–16 總覽、所有 checkpoint commit、整體殘餘風險、建議版本 `1.3.0`。
 - 停止並回報。**不要改版本號**；版本由使用者確認後另外處理。
 
 ---
 
-## 7. 不在本次範圍
+## 8. 不在本次範圍
 
-- Phase 16（`badge`、`tray`、`commands`、`skins`）與 Phase 17（插件目錄、簽章、自動更新、`eventSource`）。
-- 系統通知、泡泡自訂按鈕。
+- Phase 17（插件目錄、簽章、自動更新）與 `eventSource`。
+- 系統通知、泡泡自訂按鈕、`sounds`。
 - 每插件精確記憶體隔離（列為殘餘風險）。
