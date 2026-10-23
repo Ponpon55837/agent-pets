@@ -52,6 +52,8 @@ declare global {
       completePluginFeed: (itemId: string) => Promise<boolean>
       openPluginFeedLink: (itemId: string) => Promise<boolean>
       getPluginPanelSnapshot: () => Promise<PluginPanelResult<PluginPanelSnapshot>>
+      openPluginPanelView: (pluginId: string) => Promise<PluginPanelResult<{ opened: true }>>
+      closePluginPanelView: () => void
       getPluginSettings: (pluginId: string) => Promise<PluginPanelResult<PluginPanelSettingsSnapshot>>
       setPluginSettings: (pluginId: string, value: Record<string, PluginSettingScalar>) => Promise<PluginPanelResult<Record<string, PluginSettingScalar>>>
       getPluginSecretConsent: () => Promise<PluginPanelResult<boolean>>

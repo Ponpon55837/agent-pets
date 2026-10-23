@@ -6,14 +6,16 @@ import test from 'node:test'
 import {
   handlePluginProtocolRequest,
   createPluginHostProtocolHandler,
+  createPluginPanelProtocolHandler,
   PLUGIN_CONTENT_SECURITY_POLICY,
+  PLUGIN_PANEL_CONTENT_SECURITY_POLICY,
   PLUGIN_WORKER_CONTENT_SECURITY_POLICY,
 } from '../electron/plugin-protocol.ts'
 import { pluginHostAssets } from '../electron/plugin-host-assets.ts'
 
-function withPluginRoot(run: (root: string) => void): void {
+async function withPluginRoot(run: (root: string) => void | Promise<void>): Promise<void> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-protocol-'))
-  try { run(root) } finally { fs.rmSync(root, { recursive: true, force: true }) }
+  try { await run(root) } finally { fs.rmSync(root, { recursive: true, force: true }) }
 }
 
 test('plugin protocol serves only current plugin files with the required CSP and MIME headers', async () => {
@@ -52,9 +54,9 @@ test('plugin protocol serves embedded host resources and denies uninstalled or d
   }
 })
 
-test('plugin protocol refuses symlink files and non-regular file paths', () => {
+test('plugin protocol refuses symlink files and non-regular file paths', async () => {
   if (process.platform === 'win32') return
-  withPluginRoot((userData) => {
+  await withPluginRoot((userData) => {
     const root = path.join(userData, 'sample-plugin', '1.0.0')
     fs.mkdirSync(root, { recursive: true })
     const outside = path.join(userData, 'outside.js')
@@ -66,8 +68,8 @@ test('plugin protocol refuses symlink files and non-regular file paths', () => {
   })
 })
 
-test('plugin-host partition handler serves only token-scoped plugin files and embedded host assets', () => {
-  withPluginRoot(userData => {
+test('plugin-host partition handler serves only token-scoped plugin files and embedded host assets', async () => {
+  await withPluginRoot(userData => {
     const root = path.join(userData, 'sample-plugin', '1.0.0')
     fs.mkdirSync(path.join(root, 'dist'), { recursive: true })
     fs.writeFileSync(path.join(root, 'dist', 'main.js'), 'export default 1')
@@ -96,5 +98,68 @@ test('plugin-host partition handler serves only token-scoped plugin files and em
     assert.equal(workerBootstrap.headers.get('content-security-policy'), PLUGIN_WORKER_CONTENT_SECURITY_POLICY)
     assert.match(PLUGIN_CONTENT_SECURITY_POLICY, /worker-src agent-pets:\/\/plugin/)
     assert.match(PLUGIN_WORKER_CONTENT_SECURITY_POLICY, /worker-src 'none'/)
+  })
+})
+
+test('plugin panel protocol serves only token-scoped plugin files and read-only shared tokens.css', async () => {
+  await withPluginRoot(async userData => {
+    const root = path.join(userData, 'sample-plugin', '1.0.0')
+    fs.mkdirSync(path.join(root, 'ui'), { recursive: true })
+    fs.writeFileSync(path.join(root, 'ui', 'index.html'), '<main>ok</main>')
+    fs.writeFileSync(path.join(root, 'ui', 'app.js'), 'globalThis.started = true')
+    fs.writeFileSync(path.join(root, 'notes.txt'), 'private package note')
+    const token = '123e4567-e89b-42d3-a456-426614174000'
+    let currentRoot: string | null = root
+    const handler = createPluginPanelProtocolHandler({
+      pluginRootForToken: value => value === token ? currentRoot : null,
+      tokensCss: ':root { --pet-ui-test: 1; }',
+    })
+
+    const entry = handler({ url: `agent-pets://plugin/${token}/ui/index.html`, method: 'GET' })
+    assert.equal(entry.status, 200)
+    assert.equal(entry.headers.get('content-security-policy'), PLUGIN_PANEL_CONTENT_SECURITY_POLICY)
+    assert.equal(entry.headers.get('cache-control'), 'no-store')
+    assert.equal(await entry.text(), '<main>ok</main>')
+
+    const script = handler({ url: `agent-pets://plugin/${token}/ui/app.js`, method: 'GET' })
+    assert.equal(script.status, 200)
+    assert.equal(await script.text(), 'globalThis.started = true')
+
+    const shared = handler({ url: 'agent-pets://plugin/_shared/tokens.css', method: 'GET' })
+    assert.equal(shared.status, 200)
+    assert.equal(shared.headers.get('content-type'), 'text/css; charset=utf-8')
+    assert.equal(await shared.text(), ':root { --pet-ui-test: 1; }')
+
+    for (const request of [
+      { url: `agent-pets://plugin/${token}/notes.txt`, method: 'GET' },
+      { url: `agent-pets://plugin/${token}/../notes.txt`, method: 'GET' },
+      { url: `agent-pets://plugin/${token}/ui/index.html?x=1`, method: 'GET' },
+      { url: 'agent-pets://plugin/_shared/other.css', method: 'GET' },
+      { url: 'agent-pets://plugin/sample-plugin/ui/index.html', method: 'GET' },
+      { url: `agent-pets://plugin/${token}/ui/index.html`, method: 'POST' },
+      { url: 'https://example.com/', method: 'GET' },
+    ]) assert.notEqual(handler(request).status, 200)
+
+    currentRoot = null
+    assert.equal(handler({ url: `agent-pets://plugin/${token}/ui/index.html`, method: 'GET' }).status, 404)
+  })
+})
+
+test('plugin panel protocol refuses symlinks and encoded traversal', async () => {
+  if (process.platform === 'win32') return
+  await withPluginRoot(userData => {
+    const root = path.join(userData, 'sample-plugin', '1.0.0')
+    fs.mkdirSync(path.join(root, 'ui'), { recursive: true })
+    const outside = path.join(userData, 'outside.html')
+    fs.writeFileSync(outside, '<p>outside</p>')
+    fs.symlinkSync(outside, path.join(root, 'ui', 'link.html'))
+    const token = '123e4567-e89b-42d3-a456-426614174000'
+    const handler = createPluginPanelProtocolHandler({
+      pluginRootForToken: value => value === token ? root : null,
+      tokensCss: '',
+    })
+    assert.equal(handler({ url: `agent-pets://plugin/${token}/ui/link.html`, method: 'GET' }).status, 404)
+    assert.equal(handler({ url: `agent-pets://plugin/${token}/%2e%2e/outside.html`, method: 'GET' }).status, 404)
+    assert.equal(handler({ url: `agent-pets://plugin/${token}/ui/link.html`, method: 'GET' }).status, 404)
   })
 })

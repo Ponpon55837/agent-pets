@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  WebContentsView,
   screen,
   ipcMain,
   dialog,
@@ -59,6 +60,11 @@ import { PluginSettingsStore, publishPluginSettingsChanged } from './plugin-sett
 import { PluginAgentStatusController } from './plugin-agent-status.ts'
 import { effectivePluginScheduleMinimum } from './plugin-schedule.ts'
 import { PluginDeveloperModeWatcher } from './plugin-developer-mode.ts'
+import {
+  PluginPanelViewController,
+  type PluginPanelNativeView,
+  type PluginPanelViewSession,
+} from './plugin-panel-view.ts'
 import {
   isPluginPanelInstallConfirmation,
   isPluginPanelNotificationId,
@@ -154,6 +160,7 @@ let pluginSecretsStore: PluginSecretsStore | null = null
 let pluginSecretConsentStore: PluginSecretConsentStore | null = null
 let pluginSettingsStore: PluginSettingsStore | null = null
 let pluginHostWindow: PluginHostWindowController | null = null
+let pluginPanelViewController: PluginPanelViewController | null = null
 let pluginBroker: PluginBroker | null = null
 let pluginNetworkClient: PluginNetworkClient | null = null
 let pluginHostGrantController: PluginHostGrantController | null = null
@@ -710,6 +717,10 @@ function syncDeveloperWatchers(): void {
 function syncPluginHost(): void {
   refreshPluginRuntimeContexts()
   syncDeveloperWatchers()
+  pluginPanelViewController?.closeIfNotAllowed(pluginId => {
+    const context = pluginRuntimeContexts.get(pluginId)
+    return Boolean(context?.pluginsEnabled && context.enabled && context.manifest.contributes.panelView && enabledPluginRoot(pluginId))
+  })
   pluginHostWindow?.sync(enabledPluginDescriptors())
 }
 
@@ -990,6 +1001,33 @@ function createPluginServices(): void {
       return perPlugin * activePluginCount
     },
   })
+  const tokensCss = readRegularFileWithin(app.getAppPath(), 'src/styles/tokens.css', 256 * 1024)?.toString('utf8') ?? ''
+  pluginPanelViewController = new PluginPanelViewController({
+    preloadPath: join(__dirname, 'plugin-ui-preload.js'),
+    tokensCss,
+    getParentWindow: () => {
+      const parent = panelWindow
+      if (!parent || parent.isDestroyed()) return null
+      return {
+        isDestroyed: () => parent.isDestroyed(),
+        addChildView: view => parent.contentView.addChildView(view as unknown as WebContentsView),
+        removeChildView: view => parent.contentView.removeChildView(view as unknown as WebContentsView),
+      }
+    },
+    createSession: partition => session.fromPartition(partition) as unknown as PluginPanelViewSession,
+    createView: options => new WebContentsView(options) as unknown as PluginPanelNativeView,
+    createToken: pluginId => {
+      const root = enabledPluginRoot(pluginId)
+      if (!root) throw new Error('Plugin is unavailable')
+      const token = randomUUID()
+      pluginRootsByToken.set(token, root)
+      return token
+    },
+    revokeToken: (_pluginId, token) => { pluginRootsByToken.delete(token) },
+    pluginRootForToken: token => pluginRootsByToken.get(token) ?? null,
+    onApiRequest: (pluginId, request) => pluginBroker?.handle(pluginId, request)
+      ?? { ok: false, error: 'disabled' },
+  })
 
   ipcMain.handle('plugin-feed-unread-count', event => {
     assertTrustedIpcSender(event)
@@ -1020,6 +1058,26 @@ function createPluginServices(): void {
   ipcMain.handle('plugin-panel-snapshot', event => {
     assertPluginPanelSender(event)
     return pluginPanelSnapshot()
+  })
+  ipcMain.handle('plugin-panel-view-open', async (event, pluginId: unknown) => {
+    assertPluginPanelSender(event)
+    if (!isPluginPanelPluginId(pluginId)) return { ok: false, error: 'invalid_request' }
+    const context = pluginRuntimeContexts.get(pluginId)
+    const panelView = context?.manifest.contributes.panelView
+    if (!panelView || !context.pluginsEnabled || !context.enabled || !enabledPluginRoot(pluginId)) {
+      return { ok: false, error: panelView ? 'disabled' : 'not_permitted' }
+    }
+    return pluginPanelViewController?.open({ pluginId, entry: panelView.entry })
+      ?? { ok: false, error: 'disabled' }
+  })
+  ipcMain.on('plugin-panel-view-close', event => {
+    assertPluginPanelSender(event)
+    pluginPanelViewController?.close()
+  })
+  ipcMain.handle('plugin-panel-api', (event, method: unknown, args: unknown) => {
+    if (event.senderFrame !== event.sender.mainFrame) return { ok: false, error: 'not_permitted' }
+    return pluginPanelViewController?.handleApiRequest(event.sender, method, args)
+      ?? Promise.resolve({ ok: false, error: 'disabled' })
   })
   ipcMain.handle('plugin-settings-get', (event, pluginId: unknown) => {
     assertPluginPanelSender(event)
@@ -1725,6 +1783,8 @@ function createPanelWindow() {
     },
   })
 
+  panelWindow.on('hide', () => pluginPanelViewController?.close())
+
   secureRendererWindow(panelWindow)
 
   applyMacFullscreenVisibilityPolicy()
@@ -1747,6 +1807,7 @@ function createPanelWindow() {
   })
 
   panelWindow.on('closed', () => {
+    pluginPanelViewController?.close()
     if (panelBlurHideHandle) clearTimeout(panelBlurHideHandle)
     panelBlurHideHandle = null
     panelWindow = null
@@ -1852,6 +1913,7 @@ function hidePetWindow(): void {
 
 function showPanelWindow(view: 'sessions' | 'settings' = 'sessions'): void {
   if (!ensureDesktopWindows() || !panelWindow) return
+  pluginPanelViewController?.close()
   if (panelBlurHideHandle) clearTimeout(panelBlurHideHandle)
   panelBlurHideHandle = null
   windowsFullscreenAutoHiddenPanel = false
@@ -3589,6 +3651,8 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  pluginPanelViewController?.close()
+  pluginPanelViewController = null
   pluginDeveloperModeWatcher?.destroy()
   pluginDeveloperModeWatcher = null
   pluginBroker?.destroy()

@@ -59,6 +59,10 @@ export default defineConfig(({ mode }) => {
             // its own entry without starting another Electron process.
             onstart: () => {},
           },
+          {
+            input: 'electron/plugin-ui-preload.ts',
+            onstart: () => {},
+          },
         ],
       }),
     ],

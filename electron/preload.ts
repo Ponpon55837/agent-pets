@@ -67,6 +67,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   completePluginFeed: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-complete', itemId),
   openPluginFeedLink: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-open-link', itemId),
   getPluginPanelSnapshot: (): Promise<PluginPanelResult<PluginPanelSnapshot>> => ipcRenderer.invoke('plugin-panel-snapshot'),
+  openPluginPanelView: (pluginId: string): Promise<PluginPanelResult<{ opened: true }>> => ipcRenderer.invoke('plugin-panel-view-open', pluginId),
+  closePluginPanelView: (): void => ipcRenderer.send('plugin-panel-view-close'),
   getPluginSettings: (pluginId: string): Promise<PluginPanelResult<PluginPanelSettingsSnapshot>> => ipcRenderer.invoke('plugin-settings-get', pluginId),
   setPluginSettings: (pluginId: string, value: Record<string, PluginSettingScalar>): Promise<PluginPanelResult<Record<string, PluginSettingScalar>>> => ipcRenderer.invoke('plugin-settings-set', pluginId, value),
   getPluginSecretConsent: (): Promise<PluginPanelResult<boolean>> => ipcRenderer.invoke('plugin-secret-consent-get'),
