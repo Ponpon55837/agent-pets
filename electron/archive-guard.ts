@@ -5,8 +5,8 @@ export interface ArchiveGuardOptions {
   maxFileBytes: number
   maxFiles: number
   allowedExtensions: readonly string[]
-  /** Reject disallowed file extensions. False keeps compatibility by skipping them. */
-  rejectUnsupportedExtensions?: boolean
+  /** Strict rejects unsafe entries; compat skips them while retaining archive limits. */
+  mode?: 'strict' | 'compat'
   /** Optional trusted caller filter. Rejected paths still count toward archive limits. */
   includePath?: (relativePath: string) => boolean
 }
@@ -67,6 +67,7 @@ export function guardArchive(zipBytes: Uint8Array, options: ArchiveGuardOptions)
     || !validLimit(options.maxFiles)
     || !Array.isArray(options.allowedExtensions)
     || options.allowedExtensions.length === 0
+    || (options.mode !== undefined && options.mode !== 'strict' && options.mode !== 'compat')
     || options.allowedExtensions.some(extension => typeof extension !== 'string' || !/^\.[a-z0-9]{1,10}$/i.test(extension))) {
     return { ok: false, error: 'invalid_limits' }
   }
@@ -74,7 +75,7 @@ export function guardArchive(zipBytes: Uint8Array, options: ArchiveGuardOptions)
   const allowedExtensions = new Set(options.allowedExtensions.map(extension => extension.toLowerCase()))
   if (allowedExtensions.size !== options.allowedExtensions.length) return { ok: false, error: 'invalid_limits' }
 
-  const rejectUnsupportedExtensions = options.rejectUnsupportedExtensions !== false
+  const compatibilityMode = options.mode === 'compat'
   const seenPaths = new Set<string>()
   const declaredSizes = new Map<string, number>()
   let fileCount = 0
@@ -86,18 +87,19 @@ export function guardArchive(zipBytes: Uint8Array, options: ArchiveGuardOptions)
     extracted = unzipSync(zipBytes, {
       filter: (entry) => {
         const safe = safeArchivePath(entry.name)
-        if (!safe) {
+        const isDirectory = safe?.directory === true
+          || (typeof entry.name === 'string' && entry.name.endsWith('/'))
+        if (isDirectory) return false
+
+        const comparisonPath = safe?.path.toLowerCase()
+        if (!compatibilityMode && !safe) {
           rejected = 'unsafe_path'
           throw new Error('Archive guard rejected an unsafe path')
         }
-        if (safe.directory) return false
-
-        const comparisonPath = safe.path.toLowerCase()
-        if (seenPaths.has(comparisonPath)) {
+        if (!compatibilityMode && comparisonPath && seenPaths.has(comparisonPath)) {
           rejected = 'duplicate_path'
           throw new Error('Archive guard rejected a duplicate path')
         }
-        seenPaths.add(comparisonPath)
 
         fileCount += 1
         if (fileCount > options.maxFiles) {
@@ -119,9 +121,13 @@ export function guardArchive(zipBytes: Uint8Array, options: ArchiveGuardOptions)
           throw new Error('Archive guard total size exceeded')
         }
 
+        if (!safe || !comparisonPath) return false
+        if (compatibilityMode && seenPaths.has(comparisonPath)) return false
+        seenPaths.add(comparisonPath)
+
         const extension = extensionOf(safe.path)
         if (!allowedExtensions.has(extension)) {
-          if (rejectUnsupportedExtensions) {
+          if (!compatibilityMode) {
             rejected = 'unsupported_extension'
             throw new Error('Archive guard rejected an unsupported extension')
           }

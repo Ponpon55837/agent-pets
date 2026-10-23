@@ -51,17 +51,68 @@ test('archive guard enforces file count, per-file size, and total uncompressed s
   )
 })
 
-test('archive guard rejects unsupported extensions and can safely skip them for compatibility', () => {
+test('archive guard rejects unsupported extensions in strict mode and skips them in compat mode', () => {
   assert.deepEqual(
     guardArchive(makeZip({ 'readme.txt': 'text' }), DEFAULTS),
     { ok: false, error: 'unsupported_extension' },
   )
   const skipped = guardArchive(makeZip({ 'main.js': 'code', 'readme.txt': 'text' }), {
     ...DEFAULTS,
-    rejectUnsupportedExtensions: false,
+    mode: 'compat',
   })
   assert.equal(skipped.ok, true)
   if (skipped.ok) assert.deepEqual([...skipped.files.keys()], ['main.js'])
+})
+
+test('compat mode skips unsafe, duplicate, and filtered pet archive files while counting limits', () => {
+  const zip = makeZip({
+    'pet.json': '{"id":"sample"}',
+    'spritesheet.webp': 'image',
+    'notes: v2.txt': 'note',
+    'cat /x.png': 'unsafe path',
+    '._spritesheet.webp': 'apple metadata',
+    '__MACOSX/._a.webp': 'apple metadata',
+    'DUPLICATE.png': 'first',
+    'duplicate.PNG': 'second',
+  })
+  const result = guardArchive(zip, {
+    maxTotalBytes: 256,
+    maxFileBytes: 128,
+    maxFiles: 12,
+    allowedExtensions: ['.json', '.webp', '.png'],
+    mode: 'compat',
+    includePath: relativePath => !relativePath.split('/').includes('__MACOSX')
+      && !relativePath.split('/').some(segment => segment.startsWith('._')),
+  })
+  assert.equal(result.ok, true)
+  if (result.ok) {
+    assert.deepEqual([...result.files.keys()], ['pet.json', 'spritesheet.webp', 'DUPLICATE.png'])
+    assert.equal(new TextDecoder().decode(result.files.get('DUPLICATE.png')), 'first')
+  }
+
+  assert.deepEqual(guardArchive(zip, {
+    maxTotalBytes: 256,
+    maxFileBytes: 128,
+    maxFiles: 12,
+    allowedExtensions: ['.json', '.webp', '.png'],
+    mode: 'strict',
+  }), { ok: false, error: 'unsafe_path' })
+  assert.deepEqual(guardArchive(makeZip({ 'notes: v2.txt': 'x', 'cat /x.png': 'y' }), {
+    ...DEFAULTS,
+    maxFiles: 1,
+    mode: 'compat',
+  }), { ok: false, error: 'file_limit_exceeded' })
+  assert.deepEqual(guardArchive(makeZip({ 'cat /large.png': '12345' }), {
+    ...DEFAULTS,
+    maxFileBytes: 4,
+    mode: 'compat',
+  }), { ok: false, error: 'file_size_exceeded' })
+  assert.deepEqual(guardArchive(makeZip({ 'notes: a.txt': '1234', 'cat /b.png': '5678' }), {
+    ...DEFAULTS,
+    maxTotalBytes: 7,
+    maxFileBytes: 10,
+    mode: 'compat',
+  }), { ok: false, error: 'total_size_exceeded' })
 })
 
 test('archive guard rejects duplicate paths using case-insensitive comparison', () => {

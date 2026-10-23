@@ -2632,9 +2632,10 @@ app.whenReady().then(() => {
         maxFileBytes: MAX_PET_UNCOMPRESSED_BYTES,
         maxFiles: MAX_PET_ZIP_ENTRIES,
         allowedExtensions: ['.json', '.webp', '.png', '.jpg', '.jpeg'],
-        rejectUnsupportedExtensions: false,
-        includePath: relativePath => /(^|\/)pet\.json$/i.test(relativePath)
-          || /\.(webp|png|jpe?g)$/i.test(relativePath),
+        mode: 'compat',
+        includePath: relativePath => !relativePath.split('/').includes('__MACOSX')
+          && !path.basename(relativePath).startsWith('._')
+          && (/(^|\/)pet\.json$/i.test(relativePath) || /\.(webp|png|jpe?g)$/i.test(relativePath)),
       })
       if (!guarded.ok) {
         const error = guarded.error === 'file_limit_exceeded'
