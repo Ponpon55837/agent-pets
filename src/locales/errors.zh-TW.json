@@ -38,6 +38,7 @@
   "Could not load Codex usage.": "Codex 用量載入失敗。",
   "Claude OAuth credentials are unavailable.": "Claude OAuth 憑證無法使用。",
   "No existing Claude Code subscription session was found. Agent Pets never asks for credentials.": "找不到既有的 Claude Code 訂閱工作階段。Agent Pets 不會要求輸入憑證。",
+  "Claude Code CLI is not signed in to a subscription. Run `claude` in a terminal and sign in with /login.": "Claude Code CLI 尚未登入訂閱帳號。請在終端機執行 `claude`，並以 /login 登入。",
   "The existing Claude Code session expired. Re-authenticate in Claude Code.": "既有的 Claude Code 工作階段已逾時，請在 Claude Code 重新驗證。",
   "The existing Claude Code session cannot access quota. Re-authenticate in Claude Code.": "既有的 Claude Code 工作階段無法存取 Quota，請在 Claude Code 重新驗證。",
   "Claude quota is rate limited. Wait a minute and retry.": "Claude Quota 受到速率限制，請稍候一分鐘再試。",

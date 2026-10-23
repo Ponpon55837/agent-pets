@@ -58,3 +58,29 @@ Claude Quota 只讀 Keychain `Claude Code-credentials`（或 `~/.claude/.credent
 
 - 使用者於 2026-10-23 確認本 phase，應用程式版本 patch 升版 `1.2.2` → `1.2.3`（`pnpm-lock.yaml` 不含根套件版本，無需變更）；升版後重新執行單元測試與型別檢查皆通過。
 - 不建立 Git tag 或發布套件。
+
+## 後續修正（1.2.4）：CLI 未登入訂閱時的提示
+
+日期：2026-10-23
+
+安裝 1.2.3 後，面板顯示「找不到既有的 Claude Code 訂閱工作階段」，但使用者的 Claude Desktop 是登入狀態。調查結果：
+
+- 這台 Mac 的 Claude Code CLI 本身沒有登入訂閱帳號。
+- 1.2.3 先前的本機驗證是在 Claude Desktop 啟動的 session 內執行，Desktop 會把自己的登入交給它啟動的程序，所以 `/usage` 才能讀到用量。
+- 以乾淨環境（`env -i`，等同從 Finder 開啟 App）執行 `claude -p /usage`，只得到 `Total cost: $0.0000` 這類花費摘要，沒有 Session／Weekly 用量。
+
+修正：
+
+- `/usage` 只回花費摘要時，視為 CLI 未登入訂閱，顯示「Claude Code CLI 尚未登入訂閱帳號。請在終端機執行 `claude`，並以 /login 登入。」，不再顯示含糊的錯誤。
+- CLI 輸出 `Invalid API key` 或 `run /login` 時，視為登入失效。
+- 仍不讀取 Claude Desktop 的加密登入，維持既有安全邊界。
+
+驗證：
+
+| 檢查 | 結果 |
+|---|---|
+| `pnpm test:unit` | 通過，122/122（新增未登入訂閱與 zh-TW 翻譯測試） |
+| `vue-tsc --noEmit` | 通過 |
+| 以 `env -i HOME USER PATH=/usr/bin:/bin` 執行 `getQuotaUsage(true)` | 通過，Claude 顯示上述 zh-TW 提示，Codex 不受影響 |
+
+使用者要求 patch 發布，版本 `1.2.3` → `1.2.4`。

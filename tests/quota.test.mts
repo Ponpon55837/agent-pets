@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { parseClaudeCliUsage, parseClaudeResetTime } from '../electron/quota.ts'
+import { setLocale, translateBackendError } from '../src/i18n.ts'
 
 const HOUR = 60 * 60_000
 const DAY = 24 * HOUR
@@ -31,6 +32,7 @@ test('a lapsed Claude Code sign-in is reported instead of an empty reading', () 
     () => parseClaudeCliUsage('OAuth session expired and could not be refreshed. Please run /login.'),
     /Re-authenticate in Claude Code/,
   )
+  assert.throws(() => parseClaudeCliUsage('Invalid API key · Please run /login'), /Re-authenticate in Claude Code/)
   assert.deepEqual(parseClaudeCliUsage('You are currently using your subscription to power your Claude Code usage'), [])
   assert.deepEqual(parseClaudeCliUsage('\u001b[1mCurrent session: 5% used\u001b[0m').map((window) => window.id), ['session'])
 })
@@ -44,4 +46,18 @@ test('Claude reset times without a year or date resolve to the next window end',
   assert.equal(parseClaudeResetTime('3pm (Asia/Taipei)', Date.parse('2026-10-23T03:00:00Z'), 5 * HOUR), '2026-10-23T07:00:00.000Z')
   assert.equal(parseClaudeResetTime('soon', now, 5 * HOUR), undefined)
   assert.equal(parseClaudeResetTime('13pm (UTC)', now, 5 * HOUR), undefined)
+})
+
+test('a CLI without a subscription sign-in asks the user to run /login', () => {
+  const costSummary = [
+    'Total cost:            $0.0000',
+    'Total duration (API):  0s',
+    'Usage:                 0 input, 0 output, 0 cache read, 0 cache write',
+  ].join('\n')
+  assert.throws(() => parseClaudeCliUsage(costSummary), (error: Error) => {
+    assert.match(error.message, /not signed in to a subscription.*\/login/)
+    setLocale('zh-TW')
+    assert.equal(translateBackendError(error.message), 'Claude Code CLI 尚未登入訂閱帳號。請在終端機執行 `claude`，並以 /login 登入。')
+    return true
+  })
 })
