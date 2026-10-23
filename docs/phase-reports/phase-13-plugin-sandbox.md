@@ -96,3 +96,145 @@ P13.6 增加七個原始 fixture 和測試打包器。三次連續崩潰停用�
 2. 依本次命令限制，依賴稽核與 repository secret scan 未執行；不能從四項 build/test gate 推論這兩項檢查通過。
 3. 本階段只執行指定的 pnpm exec vite build，沒有執行完整 packaging；平台封裝後的 sandbox／資源路徑行為未驗證。
 4. 更新／降版手動驗收需複檢者準備同 id、不同版本及權限集合的套件；現有打包器直接封裝來源 fixture，不提供 manifest 變體參數。
+
+## 複檢修正
+
+本節是 2026-10-23 複檢修正的實際結果；它更新上方原始報告對應的「Electron 未驗證」及「audit／secret scan 未執行」狀態。原 P13.1–P13.6 checkpoint 記錄保留為歷史結果。
+
+程式與測試變更 commit：`aa7df60bf8e080e46c72ef23e1d687d15d834b7e`（`fix(plugin): [P13.R] 修正 Host 隔離與崩潰復原`）。
+
+### B／H／M 修正對照
+
+| 項目 | 修正內容 | Commit | 新增測試 |
+|---|---|---|---|
+| B1 | 在 `plugin-host` partition 註冊只服務 token 路徑的協定 handler；其他 host 回 404。 | `aa7df60bf8e080e46c72ef23e1d687d15d834b7e` | `plugin-host partition handler serves only token-scoped plugin files and embedded host assets`。 |
+| B2 | Preload 以 `window.postMessage` 轉交一次性 MessagePort；Host 檢查來源、origin 和訊息內容。 | 同上 | `evil-escape logs isolation probes and Host API results are unwrapped`。實機可見 Host、Worker，且 fixture 能呼叫 RPC。 |
+| B3 | Host 載入／renderer 故障使用退避重試，最多連續三次；重試耗盡時加入系統通知與 `host_unavailable` 診斷。 | 同上 | `host load failures retry with backoff and stop after three failed windows`，驗證 250ms／1s 退避與第三次停止；另有一次 Electron renderer crash 後 Host 重建實測。 |
+| B4 | 只在收到 pong 且穩定執行滿 60 秒後重設故障計數；worker 超時會終止、退避重啟，三次失敗後停用。 | 同上 | `watchdog failure counts reset only after a pong and 60 seconds of runtime`、`an early pong does not reset a failure count before stable runtime reaches 60 seconds`。實機 evil-loop 三次阻塞啟動後進入 `disabled_crashed`。 |
+| H1 | RPC 成功時只回傳 `value`；失敗時 reject 帶相同錯誤碼／訊息的 Error；feed 結果不暴露內部欄位。 | 同上 | `PluginBroker returns clean feed results and records host startup diagnostics`、`evil-escape logs isolation probes and Host API results are unwrapped`。 |
+| H2 | 每個啟動使用新 UUID token；檔案回應套用 `worker-src 'none'` CSP；載入前移除跨插件通道 API。 | 同上 | `plugin-host partition handler serves only token-scoped plugin files and embedded host assets`、`evil-escape logs isolation probes and Host API results are unwrapped`。 |
+| H3 | 啟用超過上限時拒絕新插件，保留較早啟用項目；面板提供可調上限與繁中／英文錯誤。 | 同上 | `enabled plugin selection keeps the earliest plugins when stored preferences exceed the limit`、`invalid enabled plugin limits fail closed without selecting a host descriptor`、`enabling a new plugin is rejected at the configured limit while existing plugins stay enabled`。Electron 面板也實測上限 1 時拒絕第二個插件，第一個仍執行。 |
+| M1 | `evil-fetch`、`evil-spoof` 等 fixture 將探測結果寫入 log，新增 `evil-escape` 覆蓋隔離逃逸探測。 | 同上 | `every evil fixture records a host log entry for its runtime probe`、`evil-escape logs isolation probes and Host API results are unwrapped`。 |
+| M2 | 以 Electron 面板實測版本變更、重新同意、移除資料選項、evil ZIP 與偏好 symlink；Edge 模式實測未讀徽章。 | 同上 | `evil-zip path traversal and excess entries are rejected during planning`；其餘面板流程以本節 Electron 實機結果為驗證。 |
+
+### §0.4 四項檢查與 §0.4b 安全檢查
+
+| 指令 | 實際結果 |
+|---|---|
+| `pnpm exec vue-tsc --noEmit` | 通過，exit code 0。 |
+| `pnpm test:unit` | 通過，233/233；失敗 0。 |
+| `pnpm exec vite build` | 通過；renderer、main、preload、`plugin-host-preload.js` 均建置完成。未執行 `pnpm build`。 |
+| `git diff --check` | 通過，無 whitespace error。 |
+| `pnpm audit --prod --audit-level moderate` | 通過：`No known vulnerabilities found`。 |
+| Secret pattern scan | 對本次變更掃描私鑰、GitHub／OpenAI／Slack token、AWS key、Google API key pattern；無命中。 |
+
+上述四項 §0.4 檢查在程式 commit 前全部通過。報告文件提交前也會重跑四項檢查。
+
+### Electron 實機驗證
+
+使用 §0.4a 指令啟動隔離 Electron：`HOME=/tmp/agent-pets-plugin-review.GJtsHa/home ./node_modules/.bin/electron --inspect=9349 --remote-debugging-port=9348 --user-data-dir=/tmp/agent-pets-plugin-review.GJtsHa/ud .`。`HOME` 與 userData 都在暫存目錄；沒有使用已安裝的 Agent Pets 或 `~/.desktop-pet`。透過兩個 CDP 埠呼叫 Main／renderer 的 `Runtime.evaluate`，所有套件都從隔離面板的 `selectPluginArchive()` 流程選取。驗收後以 Ctrl-C 關閉 Electron，確認 9348 已停止監聽。
+
+| 實測項目 | 步驟與觀察結果 |
+|---|---|
+| B1／B2 Host 與 Worker | 啟用 `ok-notify` 後，CDP 出現 `agent-pets://plugin/_host/index.html` 與 Worker target；插件 RPC 成功寫入 storage 並送出通知。插件 partition 的協定只回應 token 路徑。 |
+| B3 Host 重啟 | 啟用 `evil-fetch` 後對 Host target 呼叫 `Page.crash`。Host target ID 從 `D6470393BDB8537EB2ED05853BA78E4E` 換成 `146DC4F11975E8916BA5255A444F7820`；`evil-fetch` 仍是 enabled，crash 後再次寫入 runtime log。單元測試另覆蓋三次載入失敗停止重試。 |
+| B4 evil-loop | 安裝並啟用後 log 記錄三次 `evil-loop entered its blocking loop`；第三次 watchdog 超時後狀態為 `disabled_crashed`、偏好 `enabled=false`，通知中心出現 `Disabled after repeated crashes`。 |
+| H1 ok-notify | 啟用後通知標題為 `Plugin ready`，body 為 `Storage round-trip passed.`；notification center 顯示未讀。 |
+| H2 evil-escape／evil-fetch／evil-spoof | `evil-escape` log 將 https、loopback、`agent-pets://app`、跨插件 import、巢狀 Worker、BroadcastChannel、indexedDB、prototype RPC 都標成 blocked；storage round-trip 回 `found:true`。`evil-fetch` 的 fetch、WebSocket、importScripts、dynamic import 均 blocked。`evil-spoof` 的 `self.postMessage`、prototype RPC 與未授權 `pet.react` 均 blocked，後者記錄 `invalid_request`。 |
+| H3 啟用上限 | 將面板上限設為 1，透過第二個插件的「Run this plugin」切換啟用；面板顯示 `The plugin limit (1) is reached...`，第二個仍 disabled，原有 `evil-fetch` 保持 enabled。 |
+| M1 所有 evil fixture | `evil-fetch`、`evil-escape`、`evil-spoof`、`evil-spam`、`evil-xss`、`evil-zip`、`evil-loop` 各自都能從診斷 API 讀到 runtime log。`evil-spam` 記錄 accepted 5／rejected 95，並留下 `rate_limited` diagnostics；`evil-xss` payload 以不含 HTML tag 的純文字保存。 |
+| M2 更新／降版／重新同意 | 在面板先安裝 ok-notify 1.0.0；2.0.0 新增 `api.example.com` 權限時計畫明確要求重新同意，確認後版本變為 2.0.0；再選 1.5.0，計畫標示降版，確認後版本變為 1.5.0。 |
+| M2 移除保留資料 | 面板勾選「保留設定與資料」後移除；隔離 userData 的 `plugins/ok-notify/data/storage.json` 仍存在。 |
+| M2 移除不保留資料 | 重新安裝後以未勾選的預設選項移除；`plugins/ok-notify/data` 不存在。 |
+| M2 evil ZIP | 面板選取正常 `evil-zip` 後成功啟用並記錄 activation log；含 `../` traversal 與超量檔案的套件均由 `selectPluginArchive()` 回 `invalid_archive`。 |
+| M2 偏好 symlink | 將隔離 `plugin-preferences.json` 改為 symlink，再操作插件總開關。繁中與英文面板分別顯示對應拒寫訊息；設定面板其他控制項仍可用。 |
+| M2 Edge 未讀徽章 | 在 Desktop 設定啟用 Edge Peek，將寵物視窗停靠螢幕上緣並觸發 drag-end；650ms dwell 後主程序狀態為 `edge/top`。ok-notify 通知進入未讀，API 計數為 2，Edge 把手徽章顯示 `2`，aria-label 為 `2 則未讀插件通知`。 |
+| 插件總開關 | 實際關閉總開關後 Host 與 Worker target 消失；再開啟後 Host 與 Worker target 重建。 |
+
+啟動 log 仍有既有的 `project-pets-get-enabled: Unauthorized IPC sender` 訊息；這是原複檢文件「其他觀察」記載的既存 IPC 問題，未納入本次 B/H/M 修正。
+
+### 手動驗收步驟
+
+以下步驟可在 macOS 專案目錄直接執行；預期結果列於各步。請使用隔離目錄，勿連到已安裝的 Agent Pets userData。
+
+1. 建置與啟動隔離 app：
+   ```bash
+   pnpm exec vite build
+   TMP_DIR="$(mktemp -d)"
+   mkdir -p "$TMP_DIR/home" "$TMP_DIR/ud"
+   HOME="$TMP_DIR/home" ./node_modules/.bin/electron --inspect=9349 --remote-debugging-port=9348 --user-data-dir="$TMP_DIR/ud" .
+   ```
+   預期兩個 CDP 埠可列出 App 頁面；已安裝 App 佔用的 17373–17375 埠可能顯示 already in use，屬已知情況。
+2. 在另一個終端打包並從設定 → 插件安裝正常 fixture：
+   ```bash
+   node scripts/pack-test-plugin.mjs ok-notify /tmp/ok-notify.agentpet-plugin
+   ```
+   預期安裝計畫顯示第三方警告與權限；同意、啟用總開關及插件後，Host 與 Worker target 出現，通知為 `Plugin ready`／`Storage round-trip passed.`。
+3. 在同一面板先安裝 ok-notify 1.0.0，再準備兩個同 id 變體：2.0.0 增加 `network.hosts: ["api.example.com"]`，1.5.0 保持既有權限。選 2.0.0 時預期看到更新及新增權限的重新同意提示；同意後版本顯示 2.0.0。選 1.5.0 時預期提示降版；同意後版本顯示 1.5.0。
+4. 分別以勾選／未勾選「保留設定與資料」移除插件。預期勾選後 `plugins/ok-notify/data/storage.json` 保留；未勾選後 data 目錄移除。
+5. 依序打包並安裝以下 fixture，啟用後在插件診斷查看 log：
+   ```bash
+   for id in evil-fetch evil-loop evil-spam evil-xss evil-spoof evil-zip evil-escape; do
+     node scripts/pack-test-plugin.mjs "$id" "/tmp/$id.agentpet-plugin"
+   done
+   ```
+   預期每個 fixture 都有可讀 log；網路／跨插件通道／偽造 RPC 被拒，XSS 為純文字，spam log 為 accepted 5／rejected 95，evil-loop 三次阻塞後 disabled_crashed 並新增系統通知。
+6. 測 ZIP 拒絕：選正常 evil-zip 預期成功；另外選一個含 `../escape.txt` 的 ZIP 和超過 archive 檔案上限的 ZIP，預期兩者在安裝前回 `invalid_archive`，安裝目錄外沒有新檔案。自動測試 `evil-zip path traversal and excess entries are rejected during planning` 中有可參照的 `fflate` 產生方式。
+7. 在插件面板 Advanced 將同時啟用上限設為 1，啟用第二個插件。預期顯示目前上限錯誤，第二個維持停用，先前啟用的插件繼續執行。之後關閉再打開插件總開關；預期 Host／Worker target 先消失，再重建。
+8. 在 Desktop 設定打開 Edge Peek，把寵物拖到螢幕邊緣並停留超過 650ms；啟用可送通知的 fixture。預期進入 Edge 模式、通知增加未讀數且把手出現相同數字徽章。
+9. 在隔離 userData 把 `plugin-preferences.json` 替換為 symlink，再於插件面板操作總開關；預期面板保持可用並以當前語言顯示偏好檔安全錯誤。將面板語言切換一次，重試操作，預期英文／繁中錯誤各自正確。
+10. B3 crash recovery 可在 CDP 9348 找到 `agent-pets://plugin/_host/index.html` target，送出 `Page.crash`。預期 Host target 以新 ID 重建，啟用中的插件恢復執行並繼續新增 log。
+11. 結束時 Ctrl-C 關閉隔離 Electron，確認 9348／9349 不再監聽。
+
+### 測試套件變體產生指令
+
+在手動驗收第 3 步前，於專案根目錄執行以下命令，產生同 id 的更新／降版套件。2.0.0 新增 `api.example.com` 權限；1.5.0 保留原有權限。
+
+```bash
+node --input-type=module <<'NODE'
+import fs from 'node:fs'
+import path from 'node:path'
+import { zipSync } from 'fflate'
+const root = path.resolve('tests/fixtures/plugins/ok-notify')
+for (const [version, addNetwork] of [['2.0.0', true], ['1.5.0', false]]) {
+  const files = {}
+  function collect(dir, relative = '') {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const name = path.posix.join(relative, entry.name)
+      const absolute = path.join(dir, entry.name)
+      if (entry.isDirectory()) collect(absolute, name)
+      else if (entry.isFile()) files[name] = new Uint8Array(fs.readFileSync(absolute))
+    }
+  }
+  collect(root)
+  const manifest = JSON.parse(new TextDecoder().decode(files['plugin.json']))
+  manifest.version = version
+  if (addNetwork) manifest.permissions.network = { hosts: ['api.example.com'] }
+  files['plugin.json'] = new TextEncoder().encode(JSON.stringify(manifest))
+  fs.writeFileSync(`/tmp/ok-notify-${version}.agentpet-plugin`, zipSync(files, { level: 6 }))
+}
+NODE
+```
+
+手動驗收第 6 步可用以下命令，從正常 evil-zip 產生 traversal 與超量檔案套件（archive 上限為 64 個檔案）：
+
+```bash
+node --input-type=module <<'NODE'
+import fs from 'node:fs'
+import { strToU8, unzipSync, zipSync } from 'fflate'
+const base = unzipSync(new Uint8Array(fs.readFileSync('/tmp/evil-zip.agentpet-plugin')))
+fs.writeFileSync('/tmp/evil-zip-traversal.agentpet-plugin', zipSync({ ...base, '../escape.txt': strToU8('outside') }))
+const overflow = { ...base }
+for (let i = 0; i < 65; i += 1) overflow[`extra/${i}.txt`] = strToU8('x')
+fs.writeFileSync('/tmp/evil-zip-overflow.agentpet-plugin', zipSync(overflow))
+NODE
+```
+
+在設定面板選這兩個檔案，預期都回 `invalid_archive`，不建立安裝計畫。
+
+### 未驗證與待決問題
+
+- Windows Electron 實機驗收未執行；本次隔離實機環境為 macOS。
+- B3 的實際 renderer crash／Host 重建已驗證；三次 protocol load failure 的停止條件以注入時鐘／假 window 測試驗證，未在 Electron 中額外製造三次真實載入失敗。
+- release packaging／安裝包啟動未驗證；本次執行 `pnpm exec vite build` 與隔離 Electron，不執行 `pnpm build`。
+- 原複檢記錄的 `project-pets-get-enabled` 未授權 IPC sender log 是既存觀察，仍待另案處理。
