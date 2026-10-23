@@ -7,6 +7,15 @@ import { writeJsonAtomic } from './desktop-preferences.ts'
 export const PLUGIN_PREFERENCES_FILENAME = 'plugin-preferences.json'
 export const PLUGIN_PREFERENCES_MAX_BYTES = 1024 * 1024
 
+export class PluginPreferencesFileError extends Error {
+  readonly code = 'unsafe_file'
+
+  constructor() {
+    super('Plugin preferences file is unsafe')
+    this.name = 'PluginPreferencesFileError'
+  }
+}
+
 export const PLUGIN_RESOURCE_BOUNDS = Object.freeze({
   maxEnabledPlugins: Object.freeze({ default: 10, min: 1, max: 50 }),
   memoryMbPerPlugin: Object.freeze({ default: 64, min: 16, max: 512 }),
@@ -373,7 +382,13 @@ export class PluginPreferencesStore {
   }
 
   private persist(value: PluginPreferences): void {
-    if (this.unsafeFile) throw new TypeError('Plugin preferences file is unsafe')
+    if (this.unsafeFile) throw new PluginPreferencesFileError()
+    try {
+      const stat = fs.lstatSync(this.filePath)
+      if (stat.isSymbolicLink() || !stat.isFile()) throw new PluginPreferencesFileError()
+    } catch (error) {
+      if (!isErrorCode(error, 'ENOENT')) throw error
+    }
     this.backupCorruptFile()
     writeJsonAtomic(this.filePath, value)
     this.stored = clonePluginPreferences(value)

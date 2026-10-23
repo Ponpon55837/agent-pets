@@ -9,6 +9,7 @@ import {
   PLUGIN_PREFERENCES_FILENAME,
   PLUGIN_PREFERENCES_MAX_BYTES,
   PLUGIN_RESOURCE_BOUNDS,
+  PluginPreferencesFileError,
   PluginPreferencesStore,
 } from '../electron/plugin-preferences.ts'
 
@@ -190,6 +191,24 @@ test('malformed and oversized preference files are backed up before the first wr
     assert.equal(backups.length, 2)
     assert.equal(backups.filter(name => fs.statSync(path.join(userData, name)).size === PLUGIN_PREFERENCES_MAX_BYTES + 1).length, 1)
     assert.equal(new PluginPreferencesStore(userData).get().developerMode, true)
+  })
+})
+
+test('preference writes reject symlinks and non-regular files with a typed error', (t) => {
+  if (process.platform === 'win32') t.skip('symlink creation requires elevated Windows privileges')
+  withUserData((userData) => {
+    const filePath = path.join(userData, PLUGIN_PREFERENCES_FILENAME)
+    const targetPath = path.join(userData, 'target.json')
+    fs.writeFileSync(targetPath, '{"safe":true}')
+    fs.symlinkSync(targetPath, filePath)
+    const symlinkStore = new PluginPreferencesStore(userData)
+    assert.throws(() => symlinkStore.updateGlobal({ pluginsEnabled: true }), PluginPreferencesFileError)
+    assert.equal(fs.readFileSync(targetPath, 'utf8'), '{"safe":true}')
+
+    fs.unlinkSync(filePath)
+    fs.mkdirSync(filePath)
+    const directoryStore = new PluginPreferencesStore(userData)
+    assert.throws(() => directoryStore.updateGlobal({ pluginsEnabled: true }), PluginPreferencesFileError)
   })
 })
 
