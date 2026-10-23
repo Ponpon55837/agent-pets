@@ -282,7 +282,22 @@ test('expired active item no longer blocks a later live queue entry', () => {
   assert.equal(harness.emitted.at(-1)?.id, second.itemId)
 })
 
-test('hidden visibility stores notifications and restores only the latest on becoming visible', () => {
+test('hidden notification is restored with a fresh TTL after its original TTL expires', () => {
+  const harness = createHarness({ visible: false })
+  const result = submitValid(harness.controller, 'sample', { ttlMs: 6_000 })
+  assert.equal(result.accepted, true)
+  if (!result.accepted) return
+  assert.equal(harness.emitted.length, 0)
+
+  harness.setNow(harness.now() + 60_000)
+  harness.setVisible(true)
+  harness.controller.onVisibilityChanged()
+  assert.equal(harness.emitted.length, 1)
+  assert.equal(harness.emitted[0]?.id, result.itemId)
+  assert.equal(harness.emitted[0]?.expiresAt, harness.now() + 6_000)
+})
+
+test('hidden visibility stores notifications and restores only the latest after 60 seconds', () => {
   const harness = createHarness({ visible: false, defaultPluginState: { rateLimitPer10Min: 30 } })
   const hiddenItems: string[] = []
   for (let index = 0; index < 3; index += 1) {
@@ -293,10 +308,12 @@ test('hidden visibility stores notifications and restores only the latest on bec
   assert.equal(harness.emitted.length, 0)
   assert.equal(harness.controller.unreadCount(), 3)
 
+  harness.setNow(harness.now() + 60_000)
   harness.setVisible(true)
   harness.controller.onVisibilityChanged()
   assert.equal(harness.emitted.length, 1)
   assert.equal(harness.emitted[0]?.id, hiddenItems.at(-1))
+  assert.equal(harness.emitted[0]?.expiresAt, harness.now() + 6_000)
   assert.equal(harness.controller.unreadCount(), 2)
 })
 

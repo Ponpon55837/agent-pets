@@ -243,9 +243,10 @@ export class PluginFeedController {
   private readonly recentByPlugin = new Map<string, number[]>()
   private readonly recentDedupe = new Map<string, number>()
   private readonly queue: PluginFeedItem[] = []
+  private readonly queueTtlMs = new Map<string, number>()
   private readonly center: CenterRecord[] = []
   private activeId: string | null = null
-  private hiddenLatest: PluginFeedItem | null = null
+  private hiddenLatest: { item: PluginFeedItem; ttlMs: number } | null = null
   private lastVisibility: boolean | null = null
 
   constructor(options: PluginFeedControllerOptions) {
@@ -305,7 +306,7 @@ export class PluginFeedController {
     this.addToCenter(item, false)
 
     if (!this.readVisibility()) {
-      this.hiddenLatest = item
+      this.hiddenLatest = { item, ttlMs: normalized.value.ttlMs }
       return { accepted: true, itemId: item.id, queued: this.queue.length, delivery: 'center' }
     }
     if (this.queue.length >= PLUGIN_FEED_MAX_QUEUE_DEPTH) {
@@ -313,6 +314,7 @@ export class PluginFeedController {
     }
 
     this.queue.push(item)
+    this.queueTtlMs.set(item.id, normalized.value.ttlMs)
     this.emitNext(now)
     return { accepted: true, itemId: item.id, queued: this.queue.length, delivery: 'bubble' }
   }
@@ -334,6 +336,7 @@ export class PluginFeedController {
     const current = this.queue[0]
     if (!current || current.id !== itemId) return false
     this.queue.shift()
+    this.queueTtlMs.delete(itemId)
     this.activeId = null
     this.emitNext(now)
     return true
@@ -528,6 +531,7 @@ export class PluginFeedController {
       const item = this.queue[index]
       if (item && item.expiresAt <= now) {
         if (item.id === this.activeId) this.activeId = null
+        this.queueTtlMs.delete(item.id)
         this.queue.splice(index, 1)
       }
     }
@@ -549,18 +553,25 @@ export class PluginFeedController {
 
     if (this.lastVisibility && !visible) {
       const latestPending = this.queue[this.queue.length - 1] ?? null
-      this.hiddenLatest = latestPending ? cloneFeedItem(latestPending) : null
+      const ttlMs = latestPending ? this.queueTtlMs.get(latestPending.id) : undefined
+      this.hiddenLatest = latestPending && ttlMs !== undefined
+        ? { item: cloneFeedItem(latestPending), ttlMs }
+        : null
       if (latestPending) {
         const record = this.center.find(candidate => candidate.item.id === latestPending.id)
         if (record) record.read = false
       }
       this.queue.length = 0
+      this.queueTtlMs.clear()
       this.activeId = null
     } else if (!this.lastVisibility && visible) {
       const latest = this.hiddenLatest
       this.hiddenLatest = null
-      if (latest && latest.expiresAt > now && this.canDisplay(latest.pluginId)) {
-        this.queue.push(latest)
+      const expiresAt = latest ? now + latest.ttlMs : Number.NaN
+      if (latest && Number.isSafeInteger(expiresAt) && this.canDisplay(latest.item.pluginId)) {
+        const refreshed = { ...latest.item, expiresAt }
+        this.queue.push(refreshed)
+        this.queueTtlMs.set(refreshed.id, latest.ttlMs)
         this.emitNext(now)
       }
     }
@@ -575,6 +586,7 @@ export class PluginFeedController {
       if (!item) return
       if (!this.canDisplay(item.pluginId)) {
         this.queue.shift()
+        this.queueTtlMs.delete(item.id)
         continue
       }
       this.activeId = item.id
@@ -585,6 +597,7 @@ export class PluginFeedController {
       } catch {
         this.activeId = null
         this.queue.shift()
+        this.queueTtlMs.delete(item.id)
       }
     }
   }
