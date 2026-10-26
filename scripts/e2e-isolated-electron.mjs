@@ -148,10 +148,38 @@ safeStorage.decryptString = (value) => {
   if (!text.startsWith('agent-pets-e2e:')) throw new Error('not an e2e ciphertext')
   return text.slice('agent-pets-e2e:'.length)
 }
+// The app reads Claude/Codex credentials through /usr/bin/security (the real login
+// Keychain, which HOME isolation does not cover) and runs the claude/codex CLIs.
+// Redirect those to /usr/bin/false so test runs can never read the user's Keychain
+// or act with their accounts.
+const childProcess = require('node:child_process')
+const blockedExecs = []
+const isBlockedCommand = (file) => typeof file === 'string'
+  && (/(^|\\/)security$/.test(file) || /(^|[\\/\\\\])(claude|codex)(\\.exe|\\.cmd)?$/i.test(file))
+const isBlockedShell = (command) => typeof command === 'string' && /(^|[\\s/])(security|claude|codex)(\\s|$)/.test(command)
+for (const method of ['execFile', 'execFileSync', 'spawn', 'spawnSync']) {
+  const original = childProcess[method]
+  childProcess[method] = function (file, ...rest) {
+    if (!isBlockedCommand(file)) return original.call(this, file, ...rest)
+    blockedExecs.push(path.basename(String(file)))
+    const args = Array.isArray(rest[0]) ? [[], ...rest.slice(1)] : rest
+    return original.call(this, '/usr/bin/false', ...args)
+  }
+}
+for (const method of ['exec', 'execSync']) {
+  const original = childProcess[method]
+  childProcess[method] = function (command, ...rest) {
+    if (!isBlockedShell(command)) return original.call(this, command, ...rest)
+    blockedExecs.push(String(command).trim().split(/\\s+/)[0])
+    return original.call(this, '/usr/bin/false', ...rest)
+  }
+}
 const fake = safeStorage.encryptString.toString().includes('agent-pets-e2e')
   && safeStorage.decryptString.toString().includes('agent-pets-e2e')
   && safeStorage.isEncryptionAvailable.toString().includes('calls')
+  && childProcess.execFile.toString().includes('blockedExecs')
 const isolated = app.getPath('userData') === userData && require('node:os').homedir() === path.join(root, 'home')
+  && !Object.keys(process.env).some(key => /^(CLAUDE|ANTHROPIC|OPENAI|CODEX|OPENCODE)/i.test(key))
 if (!fake || !isolated) {
   console.error('AGENT_PETS_E2E_ABORT fake=' + fake + ' isolated=' + isolated)
   process.exit(1)
@@ -160,6 +188,7 @@ globalThis.__agentPetsE2E = {
   root,
   userData,
   calls,
+  blockedExecs,
   catalogFixture: ${JSON.stringify(catalogFixture)},
   tamperedArchivePath: ${JSON.stringify(tamperedArchivePath)},
   pluginIssueReportBaseUrl: 'https://github.com/example/agent-pets-plugins/issues/new',
@@ -177,7 +206,13 @@ const child = spawn(electronBinary, [
   bootstrap,
 ], {
   cwd: repoRoot,
-  env: { ...process.env, HOME: join(root, 'home') },
+  // Only pass what Electron needs; never the user's tokens, account ids or agent settings.
+  env: {
+    ...Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'USER', 'LOGNAME', 'SHELL', 'DISPLAY', 'XDG_RUNTIME_DIR', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP']
+      .filter(key => process.env[key] !== undefined)
+      .map(key => [key, process.env[key]])),
+    HOME: join(root, 'home'),
+  },
   stdio: ['ignore', 'inherit', 'inherit'],
 })
 console.log(JSON.stringify({ root, appRoot, inspectPort, debugPort, pid: child.pid }))
