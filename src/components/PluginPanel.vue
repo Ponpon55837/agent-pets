@@ -706,6 +706,7 @@ function diagnosticTime(timestamp: number): string {
 function diagnosticCodeLabel(item: PluginBrokerDiagnostic): string {
   if (item.code === 'host_unavailable') return t('pluginHostUnavailableTitle')
   if (item.code === 'too_many_enabled') {
+    if (item.method === 'plugin.tray') return t('pluginTrayOverflowDiagnostic')
     return t('pluginTooManyEnabled', {
       limit: String(snapshot.value?.preferences.resources.maxEnabledPlugins ?? 10),
     })

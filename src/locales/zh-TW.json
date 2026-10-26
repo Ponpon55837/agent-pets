@@ -376,6 +376,8 @@
   "pluginMuted": "靜音通知",
   "pluginDiagnosticsHeading": "插件診斷",
   "pluginDiagnosticsHelp": "顯示最近的純文字記錄、被拒絕的呼叫與宿主錯誤。",
+  "pluginTray": "插件",
+  "pluginTrayOverflowDiagnostic": "Tray 插件項目超過 30 個上限，部分指令未顯示。",
   "pluginRecentLogs": "最近記錄",
   "pluginNoLogs": "尚無記錄。",
   "pluginRejectedCalls": "被拒絕的呼叫",

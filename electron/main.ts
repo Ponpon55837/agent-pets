@@ -28,6 +28,7 @@ import { getQuotaUsage } from './quota'
 import { DesktopPreferencesStore, resolveLoginItemExecutable, writeJsonAtomic } from './desktop-preferences'
 import { DesktopNotificationService } from './desktop-notifications'
 import { DesktopTrayController } from './desktop-tray'
+import type { PluginTrayCommandItem } from './plugin-tray'
 import { desktopVisibilityCapabilitiesForPlatform } from './desktop-visibility'
 import { PermissionBroker } from './permission-broker'
 import { appendPermissionAudit } from './permission-audit'
@@ -176,6 +177,7 @@ let programmaticPluginPanelSize: { width: number; height: number } | null = null
 let pluginPanelResizeResetTimer: ReturnType<typeof setTimeout> | null = null
 let pluginBroker: PluginBroker | null = null
 let pluginCommandController: PluginCommandController | null = null
+const diagnosedPluginTrayOverflowIds = new Set<string>()
 let pluginNetworkClient: PluginNetworkClient | null = null
 let pluginHostGrantController: PluginHostGrantController | null = null
 let pluginFeedController: PluginFeedController | null = null
@@ -747,6 +749,36 @@ function syncPluginHost(): void {
     return Boolean(context?.pluginsEnabled && context.enabled && context.manifest.contributes.panelView && enabledPluginRoot(pluginId))
   })
   pluginHostWindow?.sync(enabledPluginDescriptors())
+  desktopTray?.rebuild()
+}
+
+function pluginTrayCommands(): PluginTrayCommandItem[] {
+  if (!pluginPreferencesSnapshot?.pluginsEnabled) return []
+  const enabledIds = new Set(enabledPluginDescriptors().map(plugin => plugin.id))
+  const candidates: PluginTrayCommandItem[] = []
+  for (const [pluginId, context] of pluginRuntimeContexts) {
+    if (!enabledIds.has(pluginId) || !context.manifest.contributes.tray) continue
+    const commands = new Map((context.manifest.contributes.commands ?? []).map(command => [command.id, command] as const))
+    for (const commandId of context.manifest.contributes.tray.commands) {
+      const command = commands.get(commandId)
+      if (!command) continue
+      candidates.push({
+        pluginId,
+        pluginName: context.manifest.name,
+        commandId,
+        title: command.title,
+      })
+    }
+  }
+  candidates.sort((left, right) => (pluginEnableOrder.get(left.pluginId) ?? 0) - (pluginEnableOrder.get(right.pluginId) ?? 0))
+  const omitted = new Set(candidates.slice(30).map(command => command.pluginId))
+  for (const pluginId of omitted) {
+    if (diagnosedPluginTrayOverflowIds.has(pluginId)) continue
+    diagnosedPluginTrayOverflowIds.add(pluginId)
+    pluginBroker?.recordSystemDiagnostic(pluginId, 'too_many_enabled', 'plugin.tray')
+  }
+  if (omitted.size === 0) diagnosedPluginTrayOverflowIds.clear()
+  return candidates
 }
 
 function broadcastPluginFeedUnreadCount(count = pluginFeedController?.unreadCount() ?? 0): void {
@@ -2700,6 +2732,19 @@ function createDesktopServices(): void {
       openPanel: () => showPanelWindow('sessions'),
       openSettings: () => showPanelWindow('settings'),
       getPetMode: () => petWindowMode,
+      getPluginCommands: pluginTrayCommands,
+      invokePluginCommand: (pluginId, commandId) => {
+        const result = pluginCommandController?.invoke(pluginId, commandId)
+        if (result && !result.ok) pluginBroker?.recordSystemDiagnostic(pluginId, result.error, 'command.tray')
+      },
+      onPluginCommandsOmitted: pluginIds => {
+        if (pluginIds.length === 0) return
+        for (const pluginId of pluginIds) {
+          if (diagnosedPluginTrayOverflowIds.has(pluginId)) continue
+          diagnosedPluginTrayOverflowIds.add(pluginId)
+          pluginBroker?.recordSystemDiagnostic(pluginId, 'too_many_enabled', 'plugin.tray')
+        }
+      },
       toggleMiniMode,
       quit: () => app.quit(),
     },
