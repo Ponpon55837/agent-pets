@@ -78,6 +78,31 @@ test('plugin fixture sources have bounded manifests and include all declared run
   }
 })
 
+test('every fixture and public example entry exports an object with activate(api)', () => {
+  const roots = [fixtureRoot, path.resolve('docs/plugins/examples')]
+  const manifests: string[] = []
+  function collect(directory: string): void {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name)
+      if (entry.isDirectory()) collect(target)
+      else if (entry.isFile() && entry.name === 'plugin.json') manifests.push(target)
+    }
+  }
+  roots.forEach(collect)
+
+  for (const manifestPath of manifests) {
+    const manifestValue = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown
+    const parsed = parsePluginManifest(manifestValue)
+    assert.equal(parsed.ok, true, `${manifestPath} must pass manifest validation`)
+    if (!parsed.ok || !parsed.manifest.entry) continue
+
+    const entryPath = path.join(path.dirname(manifestPath), parsed.manifest.entry)
+    const source = fs.readFileSync(entryPath, 'utf8')
+    assert.match(source, /export\s+default\s*\{[\s\S]*?\bactivate\s*(?:async\s*)?\(/,
+      `${path.relative(process.cwd(), entryPath)} must export an object with activate(api)`)
+  }
+})
+
 test('ok-skin is a skin-only fixture with a valid WebP spritesheet and no worker entry', () => {
   const { manifest, files } = readFixture('ok-skin')
   assert.equal(manifest.entry, undefined)
