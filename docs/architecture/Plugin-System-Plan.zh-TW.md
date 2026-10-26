@@ -373,7 +373,8 @@ tibo-watch-1.0.0.agentpet-plugin   (zip)
 - 插件外觀與既有寵物選擇共用外觀顯示與驗證，但舊有 zip／單張圖匯入功能保留。
 - 公開範例只供開發者參考，不會隨 App 打包；本次沒有開發或隨附第三方插件。
 
-### Phase 17 — 散佈（之後再評估）
+### Phase 17 — 散佈、簽章、更新與 eventSource（規劃中）
+- 2026-10-26 已確認：目錄放在 GitHub repo 的 JSON；ed25519 首次安裝綁定作者金鑰；更新只檢查與提示；只做回報連結、不做評分；eventSource 先寫威脅模型再實作 observe-only。交接：`docs/handoff/plugin-distribution-codex-handoff.zh-TW.md`。
 - 插件目錄（registry JSON）、作者簽章（ed25519）、自動更新檢查、評分／回報機制。
 - `eventSource`（observe-only）另行做 threat model 後再開。
 
