@@ -660,12 +660,12 @@ function enabledPluginDescriptors(): PluginHostDescriptor[] {
   if (!preferences?.pluginsEnabled) return []
   const registryById = new Map((pluginRegistry?.list() ?? []).map(entry => [entry.id, entry] as const))
   const candidates = [...pluginRuntimeContexts.entries()]
-    .filter(([, context]) => context.enabled)
+    .filter(([, context]) => context.enabled && typeof context.manifest.entry === 'string')
     .map(([id, context]) => {
       const registryEntry = registryById.get(id)
       return {
         id,
-        entry: context.manifest.entry,
+        entry: context.manifest.entry!,
         scheduleEnabled: context.manifest.permissions.schedule !== undefined,
         scheduleMinIntervalSec: effectivePluginScheduleMinimum(
           context.manifest.permissions.schedule?.minIntervalSec ?? preferences.resources.scheduleMinIntervalSeconds,

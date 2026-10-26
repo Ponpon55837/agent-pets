@@ -38,6 +38,26 @@ export interface PluginPanelViewContribution {
   }
 }
 
+export interface PluginCommandContribution {
+  id: string
+  title: PluginLocalizedText
+}
+
+export interface PluginSkinContribution {
+  id: string
+  displayName: PluginLocalizedText
+  spritesheet: string
+  kind: 'person' | 'animal'
+  behaviorManifest?: Partial<Record<'walk' | 'sleep', { row: number; frames?: number; frameDurations?: number[] }>>
+}
+
+export interface PluginContributions {
+  commands?: PluginCommandContribution[]
+  tray?: { commands: string[] }
+  badge?: boolean
+  skins?: PluginSkinContribution[]
+}
+
 export interface PetStatusChange {
   petId: string
   name: string

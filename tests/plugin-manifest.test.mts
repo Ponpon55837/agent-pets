@@ -65,7 +65,7 @@ test('manifest rejects unknown top-level, permission, contribution, and settings
   for (const result of [
     withManifest(manifest => Object.assign(manifest, { runtime: true })),
     withManifest(manifest => Object.assign(manifest.permissions, { filesystem: true })),
-    withManifest(manifest => Object.assign(manifest.contributes, { commands: [] })),
+    withManifest(manifest => Object.assign(manifest.contributes, { unknownContribution: true })),
     withManifest(manifest => Object.assign(manifest.contributes.settings!.properties.username, { pattern: '.*' })),
   ]) assert.equal(result.ok, false)
 })
@@ -186,4 +186,48 @@ test('optional manifest structures reject malformed shapes and nonboolean flags'
   assert.equal(withManifest(manifest => { manifest.permissions.network = { hosts: ['api.example.com'], userGranted: 1 } as never }).ok, false)
   assert.equal(withManifest(manifest => { manifest.contributes.panelView!.title = 'Panel' as never }).ok, false)
   assert.equal(withManifest(manifest => { manifest.contributes.settings = { type: 'array', properties: {} } as never }).ok, false)
+})
+
+
+test('manifest validates commands, tray references, badge, and localized skins', () => {
+  const result = withManifest(manifest => {
+    manifest.contributes.commands = [
+      { id: 'start', title: { 'zh-TW': '開始', 'en-US': 'Start' } },
+      { id: 'stop', title: { 'zh-TW': '停止', 'en-US': 'Stop' } },
+    ] as never
+    manifest.contributes.tray = { commands: ['start'] } as never
+    manifest.contributes.badge = true as never
+    manifest.contributes.skins = [{
+      id: 'winter-cat', displayName: { 'zh-TW': '冬日貓', 'en-US': 'Winter Cat' },
+      spritesheet: 'skins/winter.webp', kind: 'animal', behaviorManifest: { walk: { row: 1, frames: 4 } },
+    }] as never
+  })
+  assert.equal(result.ok, true)
+  if (result.ok) {
+    assert.equal(result.manifest.contributes.commands?.length, 2)
+    assert.deepEqual(result.manifest.contributes.tray?.commands, ['start'])
+    assert.equal(result.manifest.contributes.skins?.[0]?.behaviorManifest?.walk?.frames, 4)
+  }
+})
+
+test('manifest rejects malformed commands, undeclared tray commands, and invalid skin paths', () => {
+  for (const result of [
+    withManifest(manifest => { manifest.contributes.commands = Array.from({ length: 11 }, (_, index) => ({ id: `c${index}`, title: { 'zh-TW': '命令', 'en-US': 'Command' } })) as never }),
+    withManifest(manifest => { manifest.contributes.commands = [{ id: 'Bad_ID', title: { 'zh-TW': '命令', 'en-US': 'Command' } }] as never }),
+    withManifest(manifest => { manifest.contributes.commands = [{ id: 'start', title: { 'zh-TW': '命令', 'en-US': 'x'.repeat(33) } }] as never }),
+    withManifest(manifest => { manifest.contributes.commands = [{ id: 'start', title: { 'zh-TW': '命令', 'en-US': 'Start' } }, { id: 'start', title: { 'zh-TW': '重複', 'en-US': 'Duplicate' } }] as never }),
+    withManifest(manifest => { manifest.contributes.tray = { commands: ['undeclared'] } as never }),
+    withManifest(manifest => { manifest.contributes.skins = [{ id: 'cat', displayName: { 'zh-TW': '貓', 'en-US': 'Cat' }, spritesheet: '../cat.webp', kind: 'animal' }] as never }),
+  ]) assert.equal(result.ok, false)
+})
+
+test('entry may be omitted only for a permission-free skin-only plugin', () => {
+  const skinOnly = {
+    id: 'skin-pack', name: { 'zh-TW': '外觀包', 'en-US': 'Skin Pack' }, version: '1.0.0', apiVersion: '1', author: 'Example',
+    permissions: {}, contributes: { skins: [{ id: 'fox', displayName: { 'zh-TW': '狐狸', 'en-US': 'Fox' }, spritesheet: 'fox.webp', kind: 'animal' }] },
+  }
+  assert.equal(parsePluginManifest(skinOnly).ok, true)
+  assert.equal(parsePluginManifest({ ...skinOnly, contributes: { feed: true, skins: skinOnly.contributes.skins } }).ok, false)
+  assert.equal(parsePluginManifest({ ...skinOnly, permissions: { storage: true } }).ok, false)
+  assert.equal(parsePluginManifest({ ...skinOnly, contributes: {} }).ok, false)
 })

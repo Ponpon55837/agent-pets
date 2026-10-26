@@ -7,6 +7,8 @@ import { parsePluginManifest } from './plugin-manifest.ts'
 import type { PluginManifest, PluginRuntimeState } from '../src/types/plugin.ts'
 
 export const PLUGIN_ARCHIVE_MAX_BYTES = 5 * 1024 * 1024
+export const PLUGIN_ARCHIVE_SKIN_MAX_BYTES = 25 * 1024 * 1024
+export const PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES = 20 * 1024 * 1024
 export const PLUGIN_ARCHIVE_MAX_FILES = 64
 export const PLUGIN_REGISTRY_FILENAME = 'registry.json'
 
@@ -102,6 +104,10 @@ function permissionUnits(manifest: PluginManifest): string[] {
   if (manifest.contributes.feed) result.add('contributes:feed')
   if (manifest.contributes.reaction) result.add('contributes:reaction')
   if (manifest.contributes.panelView) result.add('contributes:panelView')
+  if (manifest.contributes.commands?.length) result.add('contributes:commands')
+  if (manifest.contributes.tray?.commands.length) result.add('contributes:tray')
+  if (manifest.contributes.badge) result.add('contributes:badge')
+  if (manifest.contributes.skins?.length) result.add(`contributes:skins:${manifest.contributes.skins.length}`)
   return [...result].sort()
 }
 
@@ -251,12 +257,12 @@ export class PluginRegistry {
   }
 
   planInstall(archive: Uint8Array): PluginRegistryResult<PluginInstallPlan> {
-    if (!(archive instanceof Uint8Array) || archive.byteLength > PLUGIN_ARCHIVE_MAX_BYTES) {
+    if (!(archive instanceof Uint8Array) || archive.byteLength > PLUGIN_ARCHIVE_SKIN_MAX_BYTES) {
       return { ok: false, error: 'archive_too_large' }
     }
     const guarded = guardArchive(archive, {
-      maxTotalBytes: PLUGIN_ARCHIVE_MAX_BYTES,
-      maxFileBytes: PLUGIN_ARCHIVE_MAX_BYTES,
+      maxTotalBytes: PLUGIN_ARCHIVE_SKIN_MAX_BYTES,
+      maxFileBytes: PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES,
       maxFiles: PLUGIN_ARCHIVE_MAX_FILES,
       allowedExtensions: ALLOWED_EXTENSIONS,
       mode: 'strict',
@@ -287,7 +293,24 @@ export class PluginRegistry {
       return { ok: false, error: 'invalid_manifest' }
     }
     const manifest = parsed.manifest
-    if (!guarded.files.has(manifest.entry)) return { ok: false, error: 'missing_entry' }
+    const skinPaths = new Set((manifest.contributes.skins ?? []).map(skin => skin.spritesheet))
+    const totalBytes = [...guarded.files.values()].reduce((total, bytes) => total + bytes.byteLength, 0)
+    const archiveLimit = skinPaths.size > 0 ? PLUGIN_ARCHIVE_SKIN_MAX_BYTES : PLUGIN_ARCHIVE_MAX_BYTES
+    if (totalBytes > archiveLimit || (archive.byteLength > PLUGIN_ARCHIVE_MAX_BYTES && skinPaths.size === 0)) {
+      return { ok: false, error: 'archive_too_large' }
+    }
+    for (const [name, bytes] of guarded.files) {
+      const fileLimit = skinPaths.has(name) ? PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES : PLUGIN_ARCHIVE_MAX_BYTES
+      if (bytes.byteLength > fileLimit) return { ok: false, error: 'archive_too_large' }
+    }
+    if (manifest.entry && !guarded.files.has(manifest.entry)) return { ok: false, error: 'missing_entry' }
+    for (const skin of manifest.contributes.skins ?? []) {
+      const spritesheet = guarded.files.get(skin.spritesheet)
+      if (!spritesheet) return { ok: false, error: 'invalid_manifest' }
+      if (spritesheet.byteLength > PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES || !hasRasterSignature(spritesheet)) {
+        return { ok: false, error: 'invalid_manifest' }
+      }
+    }
     if (manifest.icon) {
       const icon = guarded.files.get(manifest.icon)
       if (!icon) return { ok: false, error: 'missing_icon' }
@@ -367,9 +390,9 @@ export class PluginRegistry {
         }
         if (!stat.isFile()) return false
         fileCount += 1
-        if (fileCount > PLUGIN_ARCHIVE_MAX_FILES || stat.size > PLUGIN_ARCHIVE_MAX_BYTES) return false
+        if (fileCount > PLUGIN_ARCHIVE_MAX_FILES || stat.size > PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES) return false
         totalBytes += stat.size
-        if (!Number.isSafeInteger(totalBytes) || totalBytes > PLUGIN_ARCHIVE_MAX_BYTES) return false
+        if (!Number.isSafeInteger(totalBytes) || totalBytes > PLUGIN_ARCHIVE_SKIN_MAX_BYTES) return false
         let descriptor: number | null = null
         try {
           const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0

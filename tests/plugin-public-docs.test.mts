@@ -24,10 +24,10 @@ test('public manifest schema required keys and enums match the runtime validator
     properties: Record<string, { const?: string; enum?: string[]; description?: string; properties?: Record<string, { description?: string; properties?: Record<string, { type?: string; enum?: string[]; const?: string }> }> }>
     $defs: Record<string, { properties?: Record<string, { enum?: string[]; const?: string }> }>
   }
-  assert.deepEqual(schema.required, ['id', 'name', 'version', 'apiVersion', 'author', 'entry', 'permissions', 'contributes'])
+  assert.deepEqual(schema.required, ['id', 'name', 'version', 'apiVersion', 'author', 'permissions', 'contributes'])
   assert.equal(schema.properties.apiVersion?.const, '1')
   assert.deepEqual(Object.keys(schema.properties.permissions?.properties ?? {}).sort(), ['agentStatus', 'network', 'schedule', 'secrets', 'storage'])
-  assert.deepEqual(Object.keys(schema.properties.contributes?.properties ?? {}).sort(), ['feed', 'panelView', 'reaction', 'settings'])
+  assert.deepEqual(Object.keys(schema.properties.contributes?.properties ?? {}).sort(), ['badge', 'commands', 'feed', 'panelView', 'reaction', 'settings', 'skins', 'tray'])
   const panelView = schema.properties.contributes?.properties?.panelView
   assert.match(panelView?.description ?? '', /sandboxed host view/)
   assert.equal(panelView?.properties?.preferredSize?.properties?.width?.type, 'integer')

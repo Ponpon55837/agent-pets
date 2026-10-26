@@ -205,3 +205,21 @@ test('remove can preserve plugin data while deleting code, or remove all plugin 
     assert.equal(fs.existsSync(path.join(userData, 'plugins', 'sample-plugin')), false)
   })
 })
+
+
+test('plugin registry accepts a valid entry-free skin package and rejects invalid spritesheets', () => {
+  withUserData(userData => {
+    const registry = new PluginRegistry(userData)
+    const manifest = {
+      id: 'sample-plugin', name: { 'zh-TW': '外觀包', 'en-US': 'Skin Pack' }, version: '1.0.0', apiVersion: '1', author: 'Test Author',
+      permissions: {}, contributes: { skins: [{ id: 'fox', displayName: { 'zh-TW': '狐狸', 'en-US': 'Fox' }, spritesheet: 'skins/fox.webp', kind: 'animal' }] },
+    }
+    const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50])
+    const archive = zipSync({ 'plugin.json': strToU8(JSON.stringify(manifest)), 'skins/fox.webp': webp })
+    const planned = registry.planInstall(archive)
+    assert.equal(planned.ok, true, planned.ok ? '' : planned.error)
+    if (planned.ok) assert.equal(registry.install(planned.value.token).ok, true)
+    const invalid = zipSync({ 'plugin.json': strToU8(JSON.stringify(manifest)), 'skins/fox.webp': strToU8('not an image') })
+    assert.deepEqual(registry.planInstall(invalid), { ok: false, error: 'invalid_manifest' })
+  })
+})

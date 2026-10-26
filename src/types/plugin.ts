@@ -36,13 +36,26 @@ export interface PluginSettingsSchema {
   properties: Record<string, PluginSettingDefinition>
 }
 
+export interface PluginCommandContribution {
+  id: string
+  title: PluginLocalizedText
+}
+
+export interface PluginSkinContribution {
+  id: string
+  displayName: PluginLocalizedText
+  spritesheet: string
+  kind: 'person' | 'animal'
+  behaviorManifest?: Record<string, { row: number; frames?: number; frameDurations?: number[] }>
+}
+
 export interface PluginManifest {
   id: string
   name: PluginLocalizedText
   version: string
   apiVersion: '1'
   author: string
-  entry: string
+  entry?: string
   icon?: string
   permissions: {
     network?: {
@@ -68,6 +81,10 @@ export interface PluginManifest {
         height: number
       }
     }
+    commands?: PluginCommandContribution[]
+    tray?: { commands: string[] }
+    badge?: boolean
+    skins?: PluginSkinContribution[]
   }
 }
 

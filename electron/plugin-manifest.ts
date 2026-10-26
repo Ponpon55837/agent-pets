@@ -1,4 +1,5 @@
 import { isIP } from 'node:net'
+import { parsePetBehaviorManifest } from './pet-behavior-manifest.ts'
 import type {
   PluginLocalizedText,
   PluginManifest,
@@ -220,8 +221,8 @@ function parseManifest(value: unknown): PluginManifest {
   if (value.apiVersion !== '1') reject('unsupported_api_version')
   const author = normalizePlainText(value.author, 64)
   if (!author) reject('invalid_author')
-  const entry = normalizeRelativePath(value.entry, ['.js'])
-  if (!entry) reject('invalid_path')
+  const entry = value.entry === undefined ? undefined : normalizeRelativePath(value.entry, ['.js'])
+  if (value.entry !== undefined && !entry) reject('invalid_path')
   const icon = value.icon === undefined ? undefined : normalizeRelativePath(value.icon, ['.png', '.webp'])
   if (value.icon !== undefined && !icon) reject('invalid_path')
 
@@ -266,7 +267,7 @@ function parseManifest(value: unknown): PluginManifest {
   }
   const secretSet = new Set(permissions.secrets ?? [])
 
-  if (!isRecord(value.contributes) || !hasOnlyKeys(value.contributes, ['feed', 'reaction', 'settings', 'panelView'])) {
+  if (!isRecord(value.contributes) || !hasOnlyKeys(value.contributes, ['feed', 'reaction', 'settings', 'panelView', 'commands', 'tray', 'badge', 'skins'])) {
     reject('invalid_contributions')
   }
   const contributes: PluginManifest['contributes'] = {}
@@ -310,13 +311,76 @@ function parseManifest(value: unknown): PluginManifest {
     }
   }
 
+  if (value.contributes.commands !== undefined) {
+    const commands = value.contributes.commands
+    if (!Array.isArray(commands) || commands.length > 10) reject('invalid_contributions')
+    const parsedCommands = []
+    const ids = new Set<string>()
+    for (const command of commands) {
+      if (!isRecord(command) || !hasOnlyKeys(command, ['id', 'title'])
+        || typeof command.id !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(command.id) || ids.has(command.id)) {
+        reject('invalid_contributions')
+      }
+      const title = parseLocalizedText(command.title, 32)
+      if (!title) reject('invalid_contributions')
+      ids.add(command.id)
+      parsedCommands.push({ id: command.id, title })
+    }
+    contributes.commands = parsedCommands
+  }
+  if (value.contributes.tray !== undefined) {
+    const tray = value.contributes.tray
+    const commandIds = new Set((contributes.commands ?? []).map(command => command.id))
+    if (!isRecord(tray) || !hasOnlyKeys(tray, ['commands']) || !Array.isArray(tray.commands)
+      || tray.commands.length > 5 || tray.commands.some(id => typeof id !== 'string' || !commandIds.has(id))
+      || new Set(tray.commands).size !== tray.commands.length) reject('invalid_contributions')
+    contributes.tray = { commands: [...tray.commands] as string[] }
+  }
+  if (value.contributes.badge !== undefined) {
+    if (typeof value.contributes.badge !== 'boolean') reject('invalid_contributions')
+    contributes.badge = value.contributes.badge
+  }
+  if (value.contributes.skins !== undefined) {
+    const skins = value.contributes.skins
+    if (!Array.isArray(skins) || skins.length === 0 || skins.length > 5) reject('invalid_contributions')
+    const parsedSkins = []
+    const ids = new Set<string>()
+    for (const skin of skins) {
+      if (!isRecord(skin) || !hasOnlyKeys(skin, ['id', 'displayName', 'spritesheet', 'kind', 'behaviorManifest'])
+        || typeof skin.id !== 'string' || !/^[a-z0-9-]{1,32}$/.test(skin.id) || ids.has(skin.id)
+        || (skin.kind !== 'person' && skin.kind !== 'animal')) reject('invalid_contributions')
+      const displayName = parseLocalizedText(skin.displayName, 48)
+      const spritesheet = normalizeRelativePath(skin.spritesheet, ['.webp', '.png'])
+      if (!displayName || !spritesheet) reject('invalid_contributions')
+      let behaviorManifest
+      if (skin.behaviorManifest !== undefined) {
+        behaviorManifest = parsePetBehaviorManifest(skin.behaviorManifest)
+        if (!behaviorManifest) reject('invalid_contributions')
+      }
+      ids.add(skin.id)
+      parsedSkins.push({
+        id: skin.id,
+        displayName,
+        spritesheet,
+        kind: skin.kind as 'person' | 'animal',
+        ...(behaviorManifest ? { behaviorManifest } : {}),
+      })
+    }
+    contributes.skins = parsedSkins
+  }
+  if (!entry) {
+    const onlySkinContribution = Object.keys(value.contributes).every(key => key === 'skins')
+      && (contributes.skins?.length ?? 0) > 0
+    if (!onlySkinContribution || Object.keys(value.permissions).length > 0) reject('invalid_contributions')
+  }
+
   return {
     id: value.id,
     name,
     version,
     apiVersion: '1',
     author,
-    entry,
+    ...(entry ? { entry } : {}),
     ...(icon ? { icon } : {}),
     permissions,
     contributes,
