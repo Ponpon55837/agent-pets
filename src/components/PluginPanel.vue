@@ -228,6 +228,7 @@ function localizedError(code: string): string {
     filesystem_unsafe: 'pluginFilesystemUnsafe',
     plan_not_found: 'pluginPlanExpired',
     plugin_not_found: 'pluginNotFound',
+    report_unavailable: 'pluginReportUnavailable',
     invalid_request: 'pluginActionFailed',
     secret_unavailable: 'pluginSecretUnavailable',
     secret_not_found: 'pluginSecretNotFound',
@@ -531,6 +532,25 @@ async function installCatalogPlugin(item: PluginCatalogPanelItem): Promise<void>
       return
     }
     pendingPlan.value = result.value
+  } catch {
+    setError('plugin_action_failed')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function reportPluginIssue(pluginId: string): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  errorMessage.value = ''
+  statusMessage.value = ''
+  try {
+    const result = await window.electronAPI?.reportInstalledPluginIssue(pluginId)
+    if (!result?.ok) {
+      if (result && !result.ok) setError(result.error)
+      return
+    }
+    statusMessage.value = t('pluginReportOpened')
   } catch {
     setError('plugin_action_failed')
   } finally {
@@ -1088,6 +1108,9 @@ onUnmounted(() => {
             </label>
             <Button variant="danger" size="sm" :disabled="busy" @click="requestRemove(plugin)">
               {{ t('remove') }}
+            </Button>
+            <Button variant="secondary" size="sm" :disabled="busy" @click="reportPluginIssue(plugin.id)">
+              {{ t('pluginReportIssue') }}
             </Button>
             <Button
               v-if="plugin.manifest?.contributes.panelView"

@@ -77,6 +77,7 @@ import {
   PLUGIN_CATALOG_MAX_PACKAGE_BYTES,
   selectLatestCompatiblePluginVersion,
 } from './plugin-catalog.ts'
+import { buildPluginIssueReportUrl } from './plugin-report.ts'
 import {
   buildPluginCatalogPanelItems,
   PluginCatalogAutoCheckSchedule,
@@ -1611,6 +1612,32 @@ function createPluginServices(): void {
     }
     pendingPluginPlanIds.set(planned.value.token, plugin.id)
     return { ok: true, value: { ...planned.value, source: 'catalog' as const } }
+  })
+  ipcMain.handle('plugin-report-issue', async (event, pluginId: unknown) => {
+    assertPluginPanelSender(event)
+    if (!pluginRegistry || !pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
+    if (!isPluginPanelPluginId(pluginId)) return { ok: false, error: 'invalid_request' }
+    const installed = pluginRegistry.list().find(plugin => plugin.id === pluginId)
+    if (!installed) return { ok: false, error: 'plugin_not_found' }
+    let preferences: ReturnType<PluginPreferencesStore['get']>
+    try { preferences = pluginPreferences.get() }
+    catch { return { ok: false, error: 'preferences_unsafe' } }
+    const catalog = pluginCatalogCache?.url === preferences.catalogUrl ? pluginCatalogCache.document : null
+    const localInstall = !catalog?.plugins.some(plugin => plugin.id === installed.id)
+    const e2e = (globalThis as typeof globalThis & {
+      __agentPetsE2E?: { pluginIssueReportBaseUrl?: string }
+    }).__agentPetsE2E
+    const baseUrl = Object.prototype.hasOwnProperty.call(globalThis, '__agentPetsE2E')
+      ? (typeof e2e?.pluginIssueReportBaseUrl === 'string' ? e2e.pluginIssueReportBaseUrl : '')
+      : process.env.AGENT_PETS_PLUGIN_ISSUE_REPORT_URL ?? ''
+    const url = buildPluginIssueReportUrl(baseUrl, installed.id, installed.currentVersion, localInstall)
+    if (!url) return { ok: false, error: 'report_unavailable' }
+    try {
+      await shell.openExternal(url)
+      return { ok: true, value: { opened: true } }
+    } catch {
+      return { ok: false, error: 'plugin_action_failed' }
+    }
   })
   ipcMain.handle('plugin-preferences-instance-set', (event, pluginId: unknown, patch: unknown) => {
     assertPluginPanelSender(event)

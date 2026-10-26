@@ -100,6 +100,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setPluginGlobalPreferences: (patch: PluginGlobalPreferencesPatch): Promise<PluginPanelResult<PluginPreferences>> => ipcRenderer.invoke('plugin-preferences-global-set', patch),
   listPluginCatalog: (): Promise<PluginPanelResult<PluginCatalogPanelItem[]>> => ipcRenderer.invoke('plugin-catalog-list'),
   installPluginFromCatalog: (pluginId: string, version: string): Promise<PluginPanelResult<PluginInstallPlan>> => ipcRenderer.invoke('plugin-catalog-install', pluginId, version),
+  reportInstalledPluginIssue: (pluginId: string): Promise<PluginPanelResult<{ opened: true }>> => ipcRenderer.invoke('plugin-report-issue', pluginId),
   setPluginInstancePreferences: (pluginId: string, patch: unknown): Promise<PluginPanelResult<PluginPreferences>> => ipcRenderer.invoke('plugin-preferences-instance-set', pluginId, patch),
   selectPluginArchive: (): Promise<PluginPanelResult<PluginInstallPlan>> => ipcRenderer.invoke('plugin-install-select'),
   selectPluginFolder: (): Promise<PluginPanelResult<PluginInstallPlan>> => ipcRenderer.invoke('plugin-install-select-folder'),

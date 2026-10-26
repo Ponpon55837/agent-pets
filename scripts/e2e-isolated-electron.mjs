@@ -36,12 +36,14 @@ mkdirSync(join(root, 'ud'))
 const bootstrap = join(root, 'bootstrap.cjs')
 writeFileSync(bootstrap, `
 const path = require('node:path')
-const { app, safeStorage } = require('electron')
+const { app, safeStorage, shell } = require('electron')
 const root = ${JSON.stringify(root)}
 const userData = path.join(root, 'ud')
 app.setPath('userData', userData)
 if (typeof app.setAppPath === 'function') app.setAppPath(${JSON.stringify(appRoot)})
 const calls = { isEncryptionAvailable: 0, encryptString: 0, decryptString: 0 }
+const shellOpenExternalCalls = []
+shell.openExternal = async (url) => { shellOpenExternalCalls.push(String(url)) }
 safeStorage.isEncryptionAvailable = () => { calls.isEncryptionAvailable += 1; return true }
 safeStorage.encryptString = (value) => { calls.encryptString += 1; return Buffer.from('agent-pets-e2e:' + value, 'utf8') }
 safeStorage.decryptString = (value) => {
@@ -63,6 +65,8 @@ globalThis.__agentPetsE2E = {
   userData,
   calls,
   catalogFixture: null,
+  pluginIssueReportBaseUrl: 'https://github.com/example/agent-pets-plugins/issues/new',
+  shellOpenExternalCalls,
   panelViewBlockedRequests: 0,
 }
 console.log('AGENT_PETS_E2E_READY ' + JSON.stringify({ root, userData: app.getPath('userData'), home: require('node:os').homedir(), fakeSafeStorage: fake }))

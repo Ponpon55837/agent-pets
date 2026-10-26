@@ -73,6 +73,7 @@ declare global {
       setPluginGlobalPreferences: (patch: PluginGlobalPreferencesPatch) => Promise<PluginPanelResult<PluginPreferences>>
       listPluginCatalog: () => Promise<PluginPanelResult<PluginCatalogPanelItem[]>>
       installPluginFromCatalog: (pluginId: string, version: string) => Promise<PluginPanelResult<PluginInstallPlan>>
+      reportInstalledPluginIssue: (pluginId: string) => Promise<PluginPanelResult<{ opened: true }>>
       setPluginInstancePreferences: (pluginId: string, patch: unknown) => Promise<PluginPanelResult<PluginPreferences>>
       selectPluginArchive: () => Promise<PluginPanelResult<PluginInstallPlan>>
       selectPluginFolder: () => Promise<PluginPanelResult<PluginInstallPlan>>
