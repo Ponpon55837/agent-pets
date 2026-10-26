@@ -18,7 +18,7 @@
 | P17.2 | 線上目錄、下載大小與 SHA-256 驗證 | `96bd21fe59dca6d2024cd6e6ca10ff1b255a74a2` | 通過檢查；360/360 單元測試 |
 | P17.3 | 手動更新與選用的每日目錄檢查 | `8b84ff69cacfbdec858e40e432453aaf7d4f0a06` | 通過檢查；366/366 單元測試 |
 | P17.4 | 插件問題回報 | `b629497d79cd0b4d0e7f996607ec2155d97f679f` | 通過檢查；369/369 單元測試；隔離 Electron 與打包內容驗收 |
-| P17.5 | eventSource 威脅模型 | `e11732d3b06d7db9cc4cd722047c7feaed677d89` | 威脅模型完成，等待複檢 |
+| P17.5 | eventSource 威脅模型（設計與 checkpoint） | `e11732d3b06d7db9cc4cd722047c7feaed677d89`、`a420a743815349373ce009cb301b42a31858c512` | 威脅模型通過複檢，並作為 P17.6 實作契約 |
 | P17.R | 複檢修正 R1–R4 | `8c9347400cdcad3a1ecfc500da5ba2215619d353` | 預設目錄、固定回報網址、停用插件圖示與更新權限文案修正 |
 | P17.6 | 隔離的插件 eventSource | `85d762aceee0e82f28c2570a2bf4b78deccd9ca3` | 威脅模型契約落地；不共用 Generic HTTP ingress |
 | P17.7 | 簽章／更新／eventSource fixtures、作者文件與驗收 | `530a47d79f4a9c185fdf52055680a6a6a7029a7c` | 實作與文件完成；本報告由最後的 P17.7 收尾 commit 一併提交 |
