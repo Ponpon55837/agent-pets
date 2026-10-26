@@ -1,6 +1,7 @@
 import { isIP } from 'node:net'
 import { parsePetBehaviorManifest } from './pet-behavior-manifest.ts'
 import { normalizePluginEventSourceFamily } from './plugin-event-source.ts'
+import { PLUGIN_CONTRIBUTION_REGISTRY } from '../src/types/plugin.ts'
 import type {
   PluginLocalizedText,
   PluginManifest,
@@ -274,7 +275,7 @@ function parseManifest(value: unknown): PluginManifest {
   }
   const secretSet = new Set(permissions.secrets ?? [])
 
-  if (!isRecord(value.contributes) || !hasOnlyKeys(value.contributes, ['feed', 'reaction', 'settings', 'panelView', 'commands', 'tray', 'badge', 'skins', 'eventSource'])) {
+  if (!isRecord(value.contributes) || !hasOnlyKeys(value.contributes, Object.keys(PLUGIN_CONTRIBUTION_REGISTRY))) {
     reject('invalid_contributions')
   }
   const contributes: PluginManifest['contributes'] = {}
@@ -384,7 +385,11 @@ function parseManifest(value: unknown): PluginManifest {
     contributes.eventSource = { family, displayName }
   }
   if (!entry) {
-    const onlySkinContribution = Object.keys(value.contributes).every(key => key === 'skins')
+    const workerlessContributionIds = Object.entries(PLUGIN_CONTRIBUTION_REGISTRY)
+      .filter(([, definition]) => 'allowsWorkerlessPlugin' in definition && definition.allowsWorkerlessPlugin === true)
+      .map(([id]) => id)
+    const onlySkinContribution = Object.keys(value.contributes).length === 1
+      && Object.keys(value.contributes).every(key => workerlessContributionIds.includes(key))
       && (contributes.skins?.length ?? 0) > 0
     if (!onlySkinContribution || Object.keys(value.permissions).length > 0) reject('invalid_contributions')
   }

@@ -1,6 +1,6 @@
 # Host API 參考（apiVersion 1）
 
-每個成功呼叫直接回傳下表的值；失敗會 reject 一個 `Error`，其 `code` 為下列錯誤字串。不要依賴錯誤訊息以外的內部資料。完整 TypeScript 宣告見 [`agent-pets-plugin.d.ts`](agent-pets-plugin.d.ts)。
+每個成功呼叫直接回傳下表的值；失敗會 reject 一個 `Error`，其 `code` 為下列錯誤字串。不要依賴錯誤訊息以外的內部資料。完整 TypeScript 宣告見 [`agent-pets-plugin.d.ts`](agent-pets-plugin.d.ts)，完整錯誤碼表見[這裡](../security/ipc-error-codes.zh-TW.md)。
 
 | 方法 | 權限／回傳 | 失敗與可複製範例 |
 |---|---|---|

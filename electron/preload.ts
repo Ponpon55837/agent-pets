@@ -1,4 +1,6 @@
 import { IPC_CHANNELS } from './ipc/channels'
+import type { ElectronAPI } from '../src/types/electron-api'
+import type { AdapterDiagnoseIpcResult, AdapterInstallIpcResult, AdapterUninstallIpcResult } from '../src/types/ipc'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
 import type { PermissionDecisionValue, PermissionRequestView } from '../src/types/permission'
@@ -32,14 +34,9 @@ import type {
   ProjectMcpSetupSummary,
 } from '../src/types/project-mcp'
 import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from '../src/types/project-pet'
-import type {
-  AdapterDetection,
-  AdapterRuntimeStatus,
-  AgentAdapterId,
-  DiagnosticReport,
-} from '../src/types/agent-adapter'
+import type { AgentAdapterId } from '../src/types/agent-adapter'
 
-contextBridge.exposeInMainWorld('electronAPI', {
+const electronAPI: ElectronAPI = {
   onAgentStatusEvent: (callback: (event: unknown) => void) => {
     const handler = (_event: unknown, data: unknown) => {
       if (Array.isArray(data)) {
@@ -308,27 +305,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke(IPC_CHANNELS.integrationStatus)
   },
 
-  diagnoseAdapter: (id: AgentAdapterId): Promise<{
-    ok: boolean
-    report?: DiagnosticReport
-    error?: string
-  }> => {
+  diagnoseAdapter: (id: AgentAdapterId): Promise<AdapterDiagnoseIpcResult> => {
     return ipcRenderer.invoke(IPC_CHANNELS.adapterDiagnose, id)
   },
 
-  installAdapter: (id: AgentAdapterId): Promise<{
-    ok: boolean
-    status?: AdapterDetection
-    error?: string
-  }> => {
+  installAdapter: (id: AgentAdapterId): Promise<AdapterInstallIpcResult> => {
     return ipcRenderer.invoke(IPC_CHANNELS.adapterInstall, id)
   },
 
-  uninstallAdapter: (id: AgentAdapterId): Promise<{
-    ok: boolean
-    status?: AdapterDetection
-    error?: string
-  }> => {
+  uninstallAdapter: (id: AgentAdapterId): Promise<AdapterInstallIpcResult> => {
     return ipcRenderer.invoke(IPC_CHANNELS.adapterUninstall, id)
   },
 
@@ -450,4 +435,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   importPetZip: () => {
     return ipcRenderer.invoke(IPC_CHANNELS.importPetZip)
   },
-})
+}
+
+contextBridge.exposeInMainWorld('electronAPI', electronAPI)

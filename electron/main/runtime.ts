@@ -65,6 +65,7 @@ import type { AchievementUnlock } from '../../src/types/achievement'
 import type { HistorySummary } from '../../src/types/history'
 import type { PresentationIntent } from '../../src/types/presentation'
 import type { PluginEventSourceStatusView, PluginPanelPlugin, PluginPanelResult, PluginPanelSnapshot } from '../../src/types/plugin'
+import type { IpcErrorCode } from '../../src/types/ipc'
 
 import type { PetEdge, PetWindowMode, PetWindowModeState } from '../../src/types/pet-window'
 import { createPluginSkinPetId, isPluginSkinPetId, isValidPetId, isValidRegularPetId } from '../../src/utils/pet-id.ts'
@@ -292,7 +293,7 @@ export function assertPluginPanelSender(event: IpcMainEvent | IpcMainInvokeEvent
   assertTrustedIpcSender(event, mainState.panelWindow)
 }
 
-export function pluginPanelError(error: unknown): string {
+export function pluginPanelError(error: unknown): IpcErrorCode {
   return pluginPanelErrorCode(error)
 }
 
@@ -775,9 +776,10 @@ export function requestPluginNetwork(
         }
       }
       const status = response.statusCode || 200
+      // Node's bundled declarations model IncomingMessage as a different Readable/ReadableStream version than Response accepts; at runtime IncomingMessage is a Node Readable and toWeb produces the corresponding web stream.
       const body = status === 204 || status === 205 || status === 304
         ? null
-        : Readable.toWeb(response as unknown as Readable) as ReadableStream<Uint8Array>
+        : Readable.toWeb(response as unknown as Readable) as unknown as ReadableStream<Uint8Array>
       try {
         const result = new Response(body, { status, headers: responseHeaders })
         finish(() => resolve(result))
@@ -1152,11 +1154,17 @@ export async function createPluginServices(): Promise<void> {
       return {
         isDestroyed: () => parent.isDestroyed(),
         isVisible: () => parent.isVisible(),
+        // The controller exposes a structural test seam; this adapter only receives the WebContentsView it creates.
+        // This asserted boundary is limited to the real WebContentsView created below; the controller interface stays structural for unit tests.
         addChildView: view => parent.contentView.addChildView(view as unknown as WebContentsView),
+        // The controller exposes a structural test seam; this adapter only receives the WebContentsView it creates.
+        // This asserted boundary is limited to the real WebContentsView created below; the controller interface stays structural for unit tests.
         removeChildView: view => parent.contentView.removeChildView(view as unknown as WebContentsView),
       }
     },
-    createSession: partition => session.fromPartition(partition) as unknown as PluginPanelViewSession,
+    // Electron's concrete Session satisfies the narrower controller seam; keep the seam independently mockable in tests.
+    createSession: partition => session.fromPartition(partition) as PluginPanelViewSession,
+    // The structural controller seam intentionally omits Electron's full event surface; the factory always creates the native type.
     createView: options => new WebContentsView(options) as unknown as PluginPanelNativeView,
     createToken: pluginId => {
       const root = enabledPluginRoot(pluginId)

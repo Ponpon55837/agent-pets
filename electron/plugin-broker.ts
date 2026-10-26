@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { PluginErrorCode, PluginManifest } from '../src/types/plugin.ts'
+import { isPluginErrorCode, type PluginErrorCode, type PluginManifest } from '../src/types/plugin.ts'
 import { isValidPetId } from '../src/utils/pet-id.ts'
 import { PRESENTATION_REACTIONS, type PresentationReaction } from '../src/types/presentation.ts'
 import { writeJsonAtomic } from './desktop-preferences.ts'
@@ -193,28 +193,29 @@ export class PluginBroker {
     }
     let context: PluginBrokerContext | null = null
     try { context = this.getContext(pluginId) } catch {}
+    const method = rawRequest.method
     if (!context || !context.pluginsEnabled || !context.enabled || context.manifest.id !== pluginId) {
-      return this.reject(pluginId, id, 'disabled', rawRequest.method)
+      return this.reject(pluginId, id, 'disabled', method)
     }
     try {
-      const value = this.dispatch(pluginId, context, rawRequest.method, rawRequest.args)
+      const value = this.dispatch(pluginId, context, method, rawRequest.args)
       const finish = (resolved: unknown): RpcResponse => {
         if (resolved && typeof resolved === 'object' && 'ok' in resolved && resolved.ok === false && 'error' in resolved) {
-          const error = resolved.error as PluginErrorCode
-          this.recordDiagnostic(pluginId, error, rawRequest.method as string)
+          const error = isPluginErrorCode(resolved.error) ? resolved.error : 'invalid_request'
+          this.recordDiagnostic(pluginId, error, method)
           return { id, ok: false, error }
         }
         return { id, ok: true, value: resolved }
       }
       if (value && typeof value === 'object' && 'then' in value && typeof value.then === 'function') {
         return Promise.resolve(value).then(finish).catch(() => {
-          this.recordDiagnostic(pluginId, 'invalid_request', rawRequest.method as string)
+          this.recordDiagnostic(pluginId, 'invalid_request', method)
           return { id, ok: false, error: 'invalid_request' }
         })
       }
       return finish(value)
     } catch {
-      this.recordDiagnostic(pluginId, 'invalid_request', rawRequest.method)
+      this.recordDiagnostic(pluginId, 'invalid_request', method)
       return { id, ok: false, error: 'invalid_request' }
     }
   }

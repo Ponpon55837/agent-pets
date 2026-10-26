@@ -17,7 +17,7 @@ const channelPaths = [
 const channelDefinitions = new Map([...source(resolve(root, 'electron/ipc/channels.ts')).matchAll(/^\s{2}([A-Za-z_$][\w$]*): '([^']+)',$/gm)]
   .map(match => [match[1], match[2]]))
 const inventoryPath = resolve(root, 'docs/security/ipc-inventory.md')
-const envTypesPath = resolve(root, 'src/env.d.ts')
+const envTypesPath = resolve(root, 'src/types/electron-api.ts')
 
 function source(path) {
   return readFileSync(path, 'utf8')
@@ -61,8 +61,8 @@ function collectPreloadApis() {
 function compareRendererTypes() {
   const preload = source(preloadPaths[0])
   const typeSource = source(envTypesPath)
-  const typeStart = typeSource.indexOf('electronAPI?: {')
-  const typeEnd = typeSource.indexOf('\n    }', typeStart)
+  const typeStart = typeSource.indexOf('export interface ElectronAPI {')
+  const typeEnd = typeSource.indexOf('\n}', typeStart)
   const apiTypes = typeSource.slice(typeStart, typeEnd)
   const preloadNames = new Set([...preload.matchAll(/^  ([A-Za-z_$][\w$]*):/gm)].map(match => match[1]))
   const typeNames = new Set([...apiTypes.matchAll(/^      ([A-Za-z_$][\w$]*):/gm)].map(match => match[1]))

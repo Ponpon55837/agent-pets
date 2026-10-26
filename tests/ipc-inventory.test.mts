@@ -13,6 +13,7 @@ const pluginUiPreloadSource = readFileSync(path.resolve('electron/plugin-ui-prel
 const pluginUiBridgeSource = readFileSync(path.resolve('electron/plugin-panel-view-bridge.ts'), 'utf8')
 const preloadSource = readFileSync(path.resolve('electron/preload.ts'), 'utf8')
 const pluginHostPreloadSource = readFileSync(path.resolve('electron/plugin-host-preload.ts'), 'utf8')
+const sharedElectronApiSource = readFileSync(path.resolve('src/types/electron-api.ts'), 'utf8')
 
 test('IPC inventory matches main registrations, preload APIs, and sender guards', () => {
   const inventory = analyzeIpcInventory()
@@ -34,6 +35,7 @@ test('IPC inventory matches main registrations, preload APIs, and sender guards'
   assert.doesNotMatch(pluginHostPreloadSource, /ipcRenderer\.(?:invoke|send|on|removeListener)\(\s*['"]/)
   assert.doesNotMatch(pluginUiPreloadSource, /ipcRenderer\.(?:invoke|send|on|removeListener)\(\s*['"]/)
   assert.equal(readFileSync(path.resolve('docs/security/ipc-inventory.md'), 'utf8'), renderIpcInventory())
+  assert.match(sharedElectronApiSource, /export interface ElectronAPI \{/)
   assert.match(pluginUiPreloadSource, /contextBridge\.exposeInMainWorld\('agentPetsPlugin', api\)/)
   assert.match(pluginUiBridgeSource, /export interface PluginPanelPublicApi/)
 })

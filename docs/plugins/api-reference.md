@@ -1,6 +1,6 @@
 # Host API reference (apiVersion 1)
 
-Successful calls return the values listed below directly. A failure rejects an `Error` whose `code` is one of the listed strings. Do not depend on internal error details. See [`agent-pets-plugin.d.ts`](agent-pets-plugin.d.ts) for TypeScript declarations.
+Successful calls return the values listed below directly. A failure rejects an `Error` whose `code` is one of the listed strings. Do not depend on internal error details. See [`agent-pets-plugin.d.ts`](agent-pets-plugin.d.ts) for TypeScript declarations and the [complete error-code tables](../security/ipc-error-codes.md).
 
 | Method | Permission / result | Errors and copyable example |
 |---|---|---|

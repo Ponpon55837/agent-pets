@@ -3,6 +3,8 @@ import { isIP } from 'node:net'
 import { validatePluginNetUrl } from './plugin-net.ts'
 import type { PluginCatalogDocument, PluginCatalogPlugin, PluginCatalogVersion } from '../src/types/plugin-catalog.ts'
 import type { PluginLocalizedText } from '../src/types/plugin.ts'
+import type { PluginCatalogError } from '../src/types/ipc.ts'
+export type { PluginCatalogError } from '../src/types/ipc.ts'
 
 export const PLUGIN_CATALOG_MAX_BYTES = 1024 * 1024
 export const PLUGIN_CATALOG_MAX_PLUGINS = 500
@@ -20,17 +22,6 @@ const CATALOG_PLUGIN_KEYS = new Set(['id', 'name', 'description', 'author', 'hom
 const CATALOG_VERSION_KEYS = new Set(['version', 'apiVersion', 'url', 'sha256', 'size', 'publishedAt'])
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/
-
-export type PluginCatalogError =
-  | 'catalog_disabled'
-  | 'catalog_url_invalid'
-  | 'catalog_unavailable'
-  | 'catalog_not_found'
-  | 'catalog_invalid'
-  | 'host_not_allowed'
-  | 'download_mismatch'
-  | 'signature_mismatch'
-  | 'plugin_not_in_catalog'
 
 export type PluginCatalogResult<T> = { ok: true; value: T } | { ok: false; error: PluginCatalogError }
 

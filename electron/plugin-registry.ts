@@ -6,6 +6,7 @@ import { guardArchive } from './archive-guard.ts'
 import { parsePluginManifest } from './plugin-manifest.ts'
 import { verifyPluginSignature } from './plugin-signature.ts'
 import type { PluginManifest, PluginRuntimeState } from '../src/types/plugin.ts'
+import type { PluginRegistryError } from '../src/types/ipc.ts'
 
 export const PLUGIN_ARCHIVE_MAX_BYTES = 5 * 1024 * 1024
 export const PLUGIN_ARCHIVE_SKIN_MAX_BYTES = 25 * 1024 * 1024
@@ -46,24 +47,7 @@ export interface PluginInstallPlan {
   developerMode?: boolean
 }
 
-export type PluginRegistryError =
-  | 'archive_too_large'
-  | 'invalid_archive'
-  | 'invalid_manifest'
-  | 'incompatible'
-  | 'missing_entry'
-  | 'missing_icon'
-  | 'missing_panel_entry'
-  | 'invalid_html_location'
-  | 'invalid_icon'
-  | 'registry_unavailable'
-  | 'plan_not_found'
-  | 'permission_reconsent_required'
-  | 'signature_invalid'
-  | 'signature_confirmation_required'
-  | 'filesystem_unsafe'
-  | 'install_failed'
-  | 'plugin_not_found'
+export type { PluginRegistryError } from '../src/types/ipc.ts'
 
 export type PluginRegistryResult<T> = { ok: true; value: T } | { ok: false; error: PluginRegistryError }
 

@@ -73,6 +73,48 @@ export interface PluginEventSourceContribution {
   displayName: PluginLocalizedText
 }
 
+export interface PluginPanelViewContribution {
+  entry: string
+  title: PluginLocalizedText
+  preferredSize?: { width: number; height: number }
+}
+
+/** One registry row owns the contribution identifier, implementation entry point, and public API mapping. */
+export const PLUGIN_CONTRIBUTION_REGISTRY = Object.freeze({
+  feed: { implementationFile: 'electron/plugin-feed.ts', hostApi: 'feed.notify' },
+  reaction: { implementationFile: 'electron/plugin-broker.ts', hostApi: 'pet.react' },
+  settings: { implementationFile: 'electron/plugin-settings.ts', hostApi: 'settings.get' },
+  panelView: { implementationFile: 'electron/plugin-panel-view.ts', hostApi: 'ui.postMessage' },
+  commands: { implementationFile: 'electron/plugin-commands.ts', hostApi: 'commands.onInvoke' },
+  tray: { implementationFile: 'electron/plugin-tray.ts', hostApi: null },
+  badge: { implementationFile: 'electron/plugin-badges.ts', hostApi: 'badge.set' },
+  skins: { implementationFile: 'electron/plugin-skins.ts', hostApi: null, allowsWorkerlessPlugin: true },
+  eventSource: { implementationFile: 'electron/plugin-event-source.ts', hostApi: 'agent.emit' },
+} as const)
+
+export type PluginContributionId = keyof typeof PLUGIN_CONTRIBUTION_REGISTRY
+
+export interface PluginContributionValueMap {
+  feed: boolean
+  reaction: boolean
+  settings: PluginSettingsSchema
+  panelView: PluginPanelViewContribution
+  commands: PluginCommandContribution[]
+  tray: { commands: string[] }
+  badge: boolean
+  skins: PluginSkinContribution[]
+  eventSource: PluginEventSourceContribution
+}
+
+type AssertPluginContributionKeysMatch<T extends true> = T
+type PluginContributionRegistryCoverage = AssertPluginContributionKeysMatch<
+  [Exclude<PluginContributionId, keyof PluginContributionValueMap>, Exclude<keyof PluginContributionValueMap, PluginContributionId>] extends [never, never]
+    ? true
+    : false
+>
+
+export type PluginContributions = Partial<Pick<PluginContributionValueMap, PluginContributionId>>
+
 export interface PluginEventSourceStatusView {
   key: number
   pluginName: PluginLocalizedText
@@ -101,24 +143,7 @@ export interface PluginManifest {
     storage?: boolean
     agentStatus?: boolean
   }
-  contributes: {
-    feed?: boolean
-    reaction?: boolean
-    settings?: PluginSettingsSchema
-    panelView?: {
-      entry: string
-      title: PluginLocalizedText
-      preferredSize?: {
-        width: number
-        height: number
-      }
-    }
-    commands?: PluginCommandContribution[]
-    tray?: { commands: string[] }
-    badge?: boolean
-    skins?: PluginSkinContribution[]
-    eventSource?: PluginEventSourceContribution
-  }
+  contributes: PluginContributions
 }
 
 export interface FeedItemInput {
@@ -195,26 +220,18 @@ export interface PluginGlobalPreferencesPatch {
   resources?: Partial<PluginResourceLimits>
 }
 
-export type PluginErrorCode =
-  | 'not_permitted'
-  | 'rate_limited'
-  | 'invalid_request'
-  | 'too_large'
-  | 'timeout'
-  | 'host_not_allowed'
-  | 'disabled'
-  | 'queue_full'
-  | 'duplicate'
-  | 'not_found'
-  | 'too_many_enabled'
-  | 'host_unavailable'
-  | 'too_many_redirects'
-  | 'secret_unavailable'
-  | 'secret_not_found'
-  | 'settings_invalid'
-  | 'schedule_invalid'
-  | 'agent_status_unavailable'
-  | 'denied'
+export const PLUGIN_ERROR_CODES = Object.freeze([
+  'not_permitted', 'rate_limited', 'invalid_request', 'too_large', 'timeout', 'host_not_allowed', 'disabled',
+  'queue_full', 'duplicate', 'not_found', 'too_many_enabled', 'host_unavailable', 'too_many_redirects',
+  'secret_unavailable', 'secret_not_found', 'settings_invalid', 'schedule_invalid', 'agent_status_unavailable', 'denied',
+] as const)
+
+export type PluginErrorCode = typeof PLUGIN_ERROR_CODES[number]
+
+const pluginErrorCodeSet: ReadonlySet<string> = new Set(PLUGIN_ERROR_CODES)
+export function isPluginErrorCode(value: unknown): value is PluginErrorCode {
+  return typeof value === 'string' && pluginErrorCodeSet.has(value)
+}
 
 export type PluginRuntimeState = 'installed' | 'enabled' | 'disabled_crashed' | 'incompatible'
 
@@ -283,4 +300,4 @@ export interface PluginNotificationRecord {
   read: boolean
 }
 
-export type PluginPanelResult<T> = { ok: true; value: T } | { ok: false; error: string; cancelled?: boolean }
+export type PluginPanelResult<T> = { ok: true; value: T } | { ok: false; error: import('./ipc').IpcErrorCode; cancelled?: boolean }

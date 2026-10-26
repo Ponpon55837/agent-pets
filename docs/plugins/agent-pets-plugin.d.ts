@@ -63,7 +63,27 @@ export interface PluginEventSourceEvent {
   state: PluginEventSourceState
 }
 
+export interface PluginSettingDefinition {
+  type: 'string' | 'number' | 'boolean'
+  title?: PluginLocalizedText | string
+  enum?: Array<string | number | boolean>
+  maxLength?: number
+  minimum?: number
+  maximum?: number
+  format?: 'secret'
+  default?: string | number | boolean
+}
+
+export interface PluginSettingsSchema {
+  type: 'object'
+  properties: Record<string, PluginSettingDefinition>
+}
+
 export interface PluginContributions {
+  feed?: boolean
+  reaction?: boolean
+  settings?: PluginSettingsSchema
+  panelView?: PluginPanelViewContribution
   commands?: PluginCommandContribution[]
   tray?: { commands: string[] }
   badge?: boolean

@@ -2,11 +2,9 @@ export type PluginPanelApiMethod =
   | 'feed.notify' | 'pet.status' | 'storage.get' | 'storage.set' | 'storage.remove'
   | 'settings.get' | 'log.info' | 'log.warn' | 'log.error' | 'net.fetch' | 'ui.postMessage'
 
-export type PluginPanelApiErrorCode =
-  | 'not_permitted' | 'rate_limited' | 'invalid_request' | 'too_large' | 'timeout'
-  | 'host_not_allowed' | 'disabled' | 'queue_full' | 'duplicate' | 'not_found'
-  | 'too_many_enabled' | 'host_unavailable' | 'too_many_redirects' | 'secret_unavailable'
-  | 'secret_not_found' | 'settings_invalid' | 'schedule_invalid' | 'agent_status_unavailable' | 'denied'
+import { isPluginErrorCode, type PluginErrorCode } from '../src/types/plugin.ts'
+
+export type PluginPanelApiErrorCode = PluginErrorCode
 
 export interface PluginPanelApiTransport {
   invoke: (method: PluginPanelApiMethod, args: unknown[]) => Promise<unknown>
@@ -39,12 +37,6 @@ const PANEL_METHODS = new Set<PluginPanelApiMethod>([
   'settings.get', 'log.info', 'log.warn', 'log.error', 'net.fetch', 'ui.postMessage',
 ])
 
-const ERROR_CODES = new Set<PluginPanelApiErrorCode>([
-  'not_permitted', 'rate_limited', 'invalid_request', 'too_large', 'timeout',
-  'host_not_allowed', 'disabled', 'queue_full', 'duplicate', 'not_found',
-  'too_many_enabled', 'host_unavailable', 'too_many_redirects', 'secret_unavailable',
-  'secret_not_found', 'settings_invalid', 'schedule_invalid', 'agent_status_unavailable', 'denied',
-])
 
 function codedError(code: PluginPanelApiErrorCode): Error & { code: PluginPanelApiErrorCode } {
   return Object.assign(new Error(code), { code })
@@ -57,9 +49,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function unwrapResponse(response: unknown): unknown {
   if (!isRecord(response) || typeof response.ok !== 'boolean') throw codedError('invalid_request')
   if (response.ok) return response.value
-  const code = typeof response.error === 'string' && ERROR_CODES.has(response.error as PluginPanelApiErrorCode)
-    ? response.error as PluginPanelApiErrorCode
-    : 'invalid_request'
+  const code = isPluginErrorCode(response.error) ? response.error : 'invalid_request'
   throw codedError(code)
 }
 
@@ -67,7 +57,7 @@ export function createPluginPanelPublicApi(transport: PluginPanelApiTransport): 
   const invoke = async (method: PluginPanelApiMethod, args: unknown[]): Promise<unknown> => {
     if (!PANEL_METHODS.has(method)) throw codedError('not_permitted')
     try { return unwrapResponse(await transport.invoke(method, args)) } catch (error) {
-      if (error && typeof error === 'object' && 'code' in error && ERROR_CODES.has(error.code as PluginPanelApiErrorCode)) throw error
+      if (error && typeof error === 'object' && 'code' in error && isPluginErrorCode(error.code)) throw error
       throw codedError('disabled')
     }
   }

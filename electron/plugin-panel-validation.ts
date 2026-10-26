@@ -1,3 +1,5 @@
+import type { IpcErrorCode } from '../src/types/ipc.ts'
+import { isPluginErrorCode } from '../src/types/plugin.ts'
 export function isPluginPanelPluginId(value: unknown): value is string {
   return typeof value === 'string' && /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/.test(value)
 }
@@ -29,13 +31,13 @@ export function isPluginPanelInstallConfirmation(
     && typeof acceptSignatureChange === 'boolean'
 }
 
-export function pluginPanelErrorCode(error: unknown): string {
+export function pluginPanelErrorCode(error: unknown): IpcErrorCode {
   if (error && typeof error === 'object' && 'code' in error && error.code === 'unsafe_file') {
     return 'preferences_unsafe'
   }
-  if (error && typeof error === 'object' && 'code' in error
-    && ['secret_unavailable', 'secret_not_found', 'settings_invalid', 'too_large', 'not_permitted'].includes(String(error.code))) {
-    return String(error.code)
+  if (error && typeof error === 'object' && 'code' in error && isPluginErrorCode(error.code)
+    && ['secret_unavailable', 'secret_not_found', 'settings_invalid', 'too_large', 'not_permitted'].includes(error.code)) {
+    return error.code
   }
   if (error instanceof TypeError && error.message === 'Plugin catalog URL is invalid') return 'catalog_url_invalid'
   if (error instanceof TypeError) return 'invalid_request'
