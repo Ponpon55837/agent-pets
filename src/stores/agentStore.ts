@@ -1390,10 +1390,11 @@ export const useAgentStore = defineStore('agent', () => {
       }
     } finally {
       petsLoaded.value = true
-      void refreshProjectPets()
     }
   }
 
+  // Project-pet IPC is panel-only (main.ts rejects other senders), and the pet
+  // window also calls loadPets(), so panel callers refresh this explicitly.
   async function refreshProjectPets(): Promise<ProjectPetView[]> {
     if (window.electronAPI?.getProjectPetsEnabled) {
       try {
