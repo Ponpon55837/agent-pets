@@ -32,6 +32,7 @@ export interface PluginPanelViewWebPreferences {
   contextIsolation: true
   nodeIntegration: false
   webviewTag: false
+  webSecurity: true
   partition: string
   devTools: false
 }
@@ -201,6 +202,7 @@ export class PluginPanelViewController {
           contextIsolation: true,
           nodeIntegration: false,
           webviewTag: false,
+          webSecurity: true,
           partition,
           devTools: false,
         },

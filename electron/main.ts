@@ -1171,6 +1171,8 @@ function createPluginServices(): void {
     ),
   })
   const pluginNetworkSession = session.fromPartition('plugin-network')
+  pluginNetworkSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+  pluginNetworkSession.setPermissionCheckHandler(() => false)
   pluginNetworkSession.webRequest.onBeforeSendHeaders((details, callback) => {
     callback({ requestHeaders: filterPluginRequestHeaders(details.requestHeaders) })
   })
@@ -2189,6 +2191,7 @@ function createPetWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      webSecurity: true,
       webviewTag: false,
       devTools: !app.isPackaged,
     },
@@ -2277,6 +2280,7 @@ function createPanelWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      webSecurity: true,
       webviewTag: false,
       devTools: !app.isPackaged,
     },

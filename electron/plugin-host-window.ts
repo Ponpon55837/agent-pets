@@ -170,6 +170,7 @@ export class PluginHostWindowController {
         contextIsolation: true,
         nodeIntegration: false,
         webviewTag: false,
+        webSecurity: true,
         partition: 'plugin-host',
         devTools: !app.isPackaged,
       },
