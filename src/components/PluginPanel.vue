@@ -17,6 +17,7 @@ import type {
   PluginPreferences,
   PluginSettingScalar,
 } from '@/types/plugin'
+import { isValidPetId } from '@/utils/pet-id'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -259,8 +260,13 @@ async function refreshPanel(): Promise<void> {
 async function loadPetOptions(): Promise<void> {
   try {
     const pets = await window.electronAPI?.loadPets()
-    petOptions.value = (pets ?? []).filter(pet => /^[A-Za-z0-9._-]{1,64}$/.test(pet.id))
-      .map(pet => ({ id: pet.id, displayName: pet.displayName || pet.id }))
+    petOptions.value = (pets ?? []).filter(pet => isValidPetId(pet.id, 64))
+      .map(pet => ({
+        id: pet.id,
+        displayName: pet.pluginSkin
+          ? `${pet.displayName || pet.id} · ${t('pluginPetFromPlugin', { name: pet.pluginSkin.pluginName })}`
+          : pet.displayName || pet.id,
+      }))
   } catch {
     petOptions.value = []
   }

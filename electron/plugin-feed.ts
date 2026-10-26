@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { PluginErrorCode, PluginFeedItem, PluginLocalizedText } from '../src/types/plugin.ts'
+import { isValidPetId } from '../src/utils/pet-id.ts'
 import { isValidPluginNetworkHost } from './plugin-manifest.ts'
 import { normalizePresentationMessage } from './presentation-controller.ts'
 
@@ -472,8 +473,7 @@ export class PluginFeedController {
       const rate = safeRateLimit(state.rateLimitPer10Min, PLUGIN_FEED_DEFAULT_PLUGIN_RATE, 1, 30)
       if (!name || rate === null) return null
       const targetPetId = state.targetPetId === undefined ? null : state.targetPetId
-      if (targetPetId !== null && (typeof targetPetId !== 'string'
-        || !/^[A-Za-z0-9._-]{1,64}$/.test(targetPetId) || targetPetId.includes('..'))) return null
+      if (targetPetId !== null && !isValidPetId(targetPetId, 64)) return null
       return { enabled: state.enabled, muted: state.muted, targetPetId, rateLimitPer10Min: rate, name }
     } catch {
       return null

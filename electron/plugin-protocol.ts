@@ -15,6 +15,7 @@ export interface PluginProtocolAssets {
 export interface PluginProtocolOptions {
   pluginRootForId: (pluginId: string) => string | null
   hostAssets: PluginProtocolAssets
+  pluginSkinAssetForId?: (pluginId: string, relativePath: string) => { data: Uint8Array; contentType: string } | null | undefined
 }
 
 export interface PluginHostProtocolOptions {
@@ -89,6 +90,18 @@ function pluginResponse(relativePath: string, bytes: Uint8Array): Response {
       'content-type': contentType(relativePath),
       'x-content-type-options': 'nosniff',
       'content-security-policy': PLUGIN_CONTENT_SECURITY_POLICY,
+    },
+  })
+}
+
+function pluginSkinResponse(bytes: Uint8Array, type: string): Response {
+  return new Response(Uint8Array.from(bytes), {
+    status: 200,
+    headers: {
+      'content-type': type,
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': PLUGIN_CONTENT_SECURITY_POLICY,
+      'cache-control': 'no-store',
     },
   })
 }
@@ -210,8 +223,18 @@ export function handlePluginProtocolRequest(requestUrl: string, options: PluginP
   try {
     const url = new URL(requestUrl)
     if (url.protocol !== 'agent-pets:' || url.hostname !== 'plugin' || url.username || url.password || url.port
-      || url.search || url.hash || url.pathname.includes('%')) return new Response('Not found', { status: 404 })
-    const pathname = decodeURIComponent(url.pathname)
+      || url.search || url.hash || url.pathname.includes('\\')) return new Response('Not found', { status: 404 })
+    const encodedSegments = url.pathname.startsWith('/') ? url.pathname.slice(1).split('/') : []
+    if (encodedSegments.length < 2 || encodedSegments.some(segment => segment.length === 0)) return new Response('Not found', { status: 404 })
+    const segments: string[] = []
+    for (const segment of encodedSegments) {
+      let decoded: string
+      try { decoded = decodeURIComponent(segment) } catch { return new Response('Not found', { status: 404 }) }
+      if (!decoded || decoded === '.' || decoded === '..' || decoded.includes('/') || decoded.includes('\\')
+        || decoded.includes('%') || /[\u0000-\u001f\u007f]/.test(decoded)) return new Response('Not found', { status: 404 })
+      segments.push(decoded)
+    }
+    const pathname = `/${segments.join('/')}`
     const match = pathname.match(/^\/([^/]+)\/(.+)$/)
     if (!match) return new Response('Not found', { status: 404 })
     const id = match[1] ?? ''
@@ -224,6 +247,9 @@ export function handlePluginProtocolRequest(requestUrl: string, options: PluginP
     if (!PLUGIN_ID.test(id)) return new Response('Not found', { status: 404 })
     const root = options.pluginRootForId(id)
     if (!root) return new Response('Not found', { status: 404 })
+    const skinAsset = options.pluginSkinAssetForId?.(id, relativePath)
+    if (skinAsset === null) return new Response('Not found', { status: 404 })
+    if (skinAsset) return pluginSkinResponse(skinAsset.data, skinAsset.contentType)
     const data = readRegularFileWithin(root, relativePath)
     if (!data) return new Response('Not found', { status: 404 })
     return pluginResponse(relativePath, data)

@@ -110,6 +110,10 @@ test('per-plugin target, host grants, and notification rate are bounded and cano
     assert.deepEqual(updated.plugins.sample?.grantedHosts, ['api.example.com', 'feeds.example.net'])
     assert.equal(updated.plugins.sample?.targetPetId, null)
     assert.equal(updated.plugins.sample?.rateLimitPer10Min, 30)
+
+    const skinTarget = store.updatePlugin('sample', { targetPetId: 'plugin:skin-pack:winter-fox' })
+    assert.equal(skinTarget.plugins.sample?.targetPetId, 'plugin:skin-pack:winter-fox')
+    assert.throws(() => store.updatePlugin('sample', { targetPetId: 'plugin:skin-pack:../fox' }), /target pet id/)
   })
 })
 

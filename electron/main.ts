@@ -46,7 +46,12 @@ import {
 } from './presentation-controller'
 import { ProjectMcpRegistryStore } from './project-mcp-registry'
 import { ProjectRoutingStore } from './project-routing'
-import { PluginRegistry, PLUGIN_ARCHIVE_MAX_BYTES } from './plugin-registry'
+import {
+  PluginRegistry,
+  PLUGIN_ARCHIVE_MAX_BYTES,
+  PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES,
+  PLUGIN_ARCHIVE_SKIN_MAX_BYTES,
+} from './plugin-registry'
 import { PluginPreferencesStore } from './plugin-preferences'
 import { PluginHostWindowController, type PluginHostDescriptor } from './plugin-host-window'
 import { canEnablePluginWithinLimit, selectEnabledPluginDescriptors } from './plugin-host-selection'
@@ -100,6 +105,8 @@ import type { PluginPanelPlugin, PluginPanelResult, PluginPanelSettingsSnapshot,
 import type { ProjectMcpRegistrySnapshot, ProjectMcpRemovalSummary } from '../src/types/project-mcp'
 import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from '../src/types/project-pet'
 import type { PetEdge, PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
+import { createPluginSkinPetId, isPluginSkinPetId, isValidPetId, isValidRegularPetId } from '../src/utils/pet-id.ts'
+import { availablePluginSkinPetIds } from './plugin-skins.ts'
 import {
   EDGE_DWELL_MS,
   EDGE_TRIGGER_DISTANCE_PX,
@@ -191,6 +198,12 @@ const developerReloadsInFlight = new Set<string>()
 const pluginRootsByToken = new Map<string, string>()
 const pluginEnableOrder = new Map<string, number>()
 const diagnosedPluginLimitIds = new Set<string>()
+interface PluginSkinFallbackInfo {
+  pluginId: string
+  pluginName: { 'zh-TW': string; 'en-US': string }
+  skinName: { 'zh-TW': string; 'en-US': string }
+}
+const pendingPluginSkinFallbacks = new Map<string, PluginSkinFallbackInfo>()
 let nextPluginEnableOrder = 0
 let pluginRuntimeContexts = new Map<string, PluginBrokerContext & { muted: boolean; rateLimitPer10Min: number; targetPetId: string | null; grantedHosts: string[] }>()
 let pluginPreferencesSnapshot: ReturnType<PluginPreferencesStore['get']> | null = null
@@ -583,6 +596,16 @@ function configureSecureProtocol(): void {
         return handlePluginProtocolRequest(request.url, {
           pluginRootForId: enabledPluginRoot,
           hostAssets: pluginHostAssets,
+          pluginSkinAssetForId: (pluginId, relativePath) => {
+            const context = pluginRuntimeContexts.get(pluginId)
+            const skin = context?.manifest.contributes.skins?.find(candidate => candidate.spritesheet === relativePath)
+            if (!skin) return undefined
+            const root = enabledPluginRoot(pluginId)
+            if (!root) return null
+            const data = readRegularFileWithin(root, relativePath, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES)
+            const type = data ? rasterContentType(data) : null
+            return data && type ? { data, contentType: type } : null
+          },
         })
       }
       if (url.hostname === 'app') {
@@ -743,8 +766,63 @@ function syncDeveloperWatchers(): void {
   }
 }
 
+function enabledPluginSkinRecords(): Map<string, PluginSkinFallbackInfo & { spritesheet: string; version: string }> {
+  const records = new Map<string, PluginSkinFallbackInfo & { spritesheet: string; version: string }>()
+  if (!pluginPreferencesSnapshot?.pluginsEnabled) return records
+  const versions = new Map((pluginRegistry?.list() ?? []).map(entry => [entry.id, entry.currentVersion] as const))
+  for (const [pluginId, context] of pluginRuntimeContexts) {
+    if (!context.enabled) continue
+    for (const skin of context.manifest.contributes.skins ?? []) {
+      const petId = createPluginSkinPetId(pluginId, skin.id)
+      if (!petId) continue
+      records.set(petId, {
+        pluginId,
+        pluginName: { ...context.manifest.name },
+        skinName: { ...skin.displayName },
+        spritesheet: skin.spritesheet,
+        version: versions.get(pluginId) ?? '',
+      })
+    }
+  }
+  return records
+}
+
+function broadcastPluginSkinsChanged(removedPetIds: string[]): void {
+  const petIds = [...new Set(removedPetIds)]
+  for (const window of [petWindow, panelWindow]) {
+    if (window && !window.isDestroyed()) window.webContents.send('plugin-skins-changed', petIds)
+  }
+}
+
 function syncPluginHost(): void {
+  const previousSkins = enabledPluginSkinRecords()
   refreshPluginRuntimeContexts()
+  const currentSkins = enabledPluginSkinRecords()
+  const removedPetIds: string[] = []
+  for (const [petId, info] of previousSkins) {
+    if (currentSkins.has(petId)) continue
+    pendingPluginSkinFallbacks.set(petId, info)
+    removedPetIds.push(petId)
+  }
+  for (const petId of currentSkins.keys()) pendingPluginSkinFallbacks.delete(petId)
+  while (pendingPluginSkinFallbacks.size > 250) {
+    const oldest = pendingPluginSkinFallbacks.keys().next().value as string | undefined
+    if (!oldest) break
+    pendingPluginSkinFallbacks.delete(oldest)
+  }
+  const catalogChanged = previousSkins.size !== currentSkins.size
+    || [...previousSkins].some(([petId, previous]) => {
+      const current = currentSkins.get(petId)
+      return !current || current.spritesheet !== previous.spritesheet || current.version !== previous.version
+        || current.pluginName['zh-TW'] !== previous.pluginName['zh-TW']
+        || current.pluginName['en-US'] !== previous.pluginName['en-US']
+        || current.skinName['zh-TW'] !== previous.skinName['zh-TW']
+        || current.skinName['en-US'] !== previous.skinName['en-US']
+    })
+  if (catalogChanged) {
+    availablePetIdsCache = null
+    broadcastPluginSkinsChanged(removedPetIds)
+  }
   pluginBadgeController?.syncEnabledPlugins()
   syncDeveloperWatchers()
   pluginPanelViewController?.closeIfNotAllowed(pluginId => {
@@ -1165,6 +1243,32 @@ function createPluginServices(): void {
     assertTrustedIpcSender(event, petWindow)
     return pluginBadgeController?.list() ?? []
   })
+  ipcMain.handle('plugin-skin-fallback-notify', (event, petIds: unknown) => {
+    assertTrustedIpcSender(event)
+    if (!Array.isArray(petIds) || petIds.length > 250 || petIds.some(petId => !isPluginSkinPetId(petId))) return 0
+    const currentlyEnabled = enabledPluginSkinRecords()
+    let added = 0
+    for (const petId of new Set(petIds as string[])) {
+      const info = pendingPluginSkinFallbacks.get(petId)
+      if (!info) continue
+      if (currentlyEnabled.has(petId)) {
+        pendingPluginSkinFallbacks.delete(petId)
+        continue
+      }
+      pendingPluginSkinFallbacks.delete(petId)
+      if (pluginFeedController?.addSystemNotification(
+        info.pluginId,
+        info.pluginName,
+        t('pluginSkinFallbackTitle'),
+        t('pluginSkinFallbackBody', {
+          plugin: info.pluginName[locale.value],
+          skin: info.skinName[locale.value],
+        }),
+      )) added += 1
+    }
+    if (added > 0) broadcastPluginFeedUnreadCount()
+    return added
+  })
   ipcMain.handle('plugin-feed-complete', (event, itemId: unknown) => {
     assertTrustedIpcSender(event, petWindow)
     if (typeof itemId !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(itemId)) return false
@@ -1385,7 +1489,7 @@ function createPluginServices(): void {
       if (!archivePath) return { ok: false, error: 'invalid_archive' }
       const stat = fs.lstatSync(archivePath)
       if (!stat.isFile() || stat.isSymbolicLink()) return { ok: false, error: 'invalid_archive' }
-      if (stat.size > PLUGIN_ARCHIVE_MAX_BYTES) return { ok: false, error: 'archive_too_large' }
+      if (stat.size > PLUGIN_ARCHIVE_SKIN_MAX_BYTES) return { ok: false, error: 'archive_too_large' }
       const planned = pluginRegistry.planInstall(fs.readFileSync(archivePath))
       if (!planned.ok) return { ok: false, error: planned.error }
       if (planned.value.pluginId && planned.value.kind !== 'incompatible') {
@@ -2646,7 +2750,7 @@ function reconcileAchievementsFromHistory(): void {
 }
 
 function isProgressionPetId(value: unknown): value is string {
-  return typeof value === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(value)
+  return isValidPetId(value, 128)
 }
 
 function setActiveProgressionPet(petId: string): ProgressionSnapshot | null {
@@ -2794,7 +2898,7 @@ function availablePetIds(): Set<string> {
     const raw = JSON.parse(fs.readFileSync(getPetsJsonPath(), 'utf-8'))
     if (Array.isArray(raw)) {
       for (const pet of raw) {
-        if (pet && typeof pet.id === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(pet.id)) ids.add(pet.id)
+        if (pet && isValidRegularPetId(pet.id, 128)) ids.add(pet.id)
       }
     }
   } catch {}
@@ -2802,16 +2906,25 @@ function availablePetIds(): Set<string> {
   const customBase = path.resolve(hookScriptDeployPath(), 'custom')
   try {
     for (const entry of fs.readdirSync(customBase, { withFileTypes: true })) {
-      if (!entry.isDirectory() || !/^[A-Za-z0-9._-]{1,128}$/.test(entry.name)) continue
+      if (!entry.isDirectory() || !isValidRegularPetId(entry.name, 128)) continue
       const petJsonPath = safeJoin(customBase, entry.name, 'pet.json')
       if (!petJsonPath || !fs.existsSync(petJsonPath)) continue
       try {
         const pet = JSON.parse(fs.readFileSync(petJsonPath, 'utf-8'))
         const id = typeof pet.id === 'string' ? pet.id : entry.name
-        if (/^[A-Za-z0-9._-]{1,128}$/.test(id)) ids.add(id)
+        if (isValidRegularPetId(id, 128)) ids.add(id)
       } catch {}
     }
   } catch {}
+  const pluginSkinIds = availablePluginSkinPetIds(
+    [...pluginRuntimeContexts].map(([pluginId, context]) => ({
+      pluginId,
+      enabled: context.enabled,
+      skinIds: (context.manifest.contributes.skins ?? []).map(skin => skin.id),
+    })),
+    pluginPreferencesSnapshot?.pluginsEnabled === true,
+  )
+  for (const petId of pluginSkinIds) ids.add(petId)
   ids.add('aang-airbender')
   return ids
 }
@@ -3475,7 +3588,7 @@ app.whenReady().then(() => {
     if (!/^[a-f0-9]{32}$/.test(projectId)) return { ok: false, error: 'invalid_project' }
     if (petId === undefined) return { ok: false, error: 'invalid_pet' }
     const available = availablePetIds()
-    if (petId !== null && (!/^[A-Za-z0-9._-]{1,128}$/.test(petId) || !available.has(petId))) {
+    if (petId !== null && (!isValidPetId(petId, 128) || !available.has(petId))) {
       return { ok: false, error: 'invalid_pet' }
     }
     try {
@@ -3637,6 +3750,7 @@ app.whenReady().then(() => {
       folder: string
       builtIn: boolean
       behaviorManifest?: SanitizedPetBehaviorManifest
+      pluginSkin?: { pluginId: string; pluginName: string; spriteUrl: string; cacheKey: string; kind: 'person' | 'animal' }
     }> = []
     try {
       const raw = fs.readFileSync(builtinPath, 'utf-8')
@@ -3659,6 +3773,7 @@ app.whenReady().then(() => {
       folder: string
       builtIn: boolean
       behaviorManifest?: SanitizedPetBehaviorManifest
+      pluginSkin?: { pluginId: string; pluginName: string; spriteUrl: string; cacheKey: string; kind: 'person' | 'animal' }
     }> = []
     if (fs.existsSync(customBase)) {
       const entries = fs.readdirSync(customBase, { withFileTypes: true })
@@ -3682,7 +3797,45 @@ app.whenReady().then(() => {
       }
     }
 
-    return [...builtin, ...custom]
+    const pluginSkins: Array<{
+      id: string
+      displayName: string
+      folder: string
+      builtIn: boolean
+      behaviorManifest?: SanitizedPetBehaviorManifest
+      pluginSkin: { pluginId: string; pluginName: string; spriteUrl: string; cacheKey: string; kind: 'person' | 'animal' }
+    }> = []
+    if (pluginPreferencesSnapshot?.pluginsEnabled) {
+      for (const [pluginId, context] of pluginRuntimeContexts) {
+        if (!context.enabled) continue
+        const root = enabledPluginRoot(pluginId)
+        if (!root) continue
+        for (const skin of context.manifest.contributes.skins ?? []) {
+          const id = createPluginSkinPetId(pluginId, skin.id)
+          if (!id) continue
+          const image = readRegularFileWithin(root, skin.spritesheet, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES)
+          if (!image || !rasterContentType(image)) continue
+          const encodedPath = skin.spritesheet.split('/').map(segment => encodeURIComponent(segment)).join('/')
+          const behaviorManifest = parsePetBehaviorManifest(skin.behaviorManifest)
+          pluginSkins.push({
+            id,
+            displayName: skin.displayName[locale.value],
+            folder: '',
+            builtIn: false,
+            ...(behaviorManifest ? { behaviorManifest } : {}),
+            pluginSkin: {
+              pluginId,
+              pluginName: context.manifest.name[locale.value],
+              spriteUrl: `agent-pets://plugin/${pluginId}/${encodedPath}`,
+              cacheKey: `${pluginId}:${pluginRegistry?.list().find(entry => entry.id === pluginId)?.currentVersion ?? ''}:${skin.spritesheet}`,
+              kind: skin.kind,
+            },
+          })
+        }
+      }
+    }
+
+    return [...builtin, ...custom, ...pluginSkins]
   })
 
   ipcMain.handle('add-custom-pet', (event, petData: unknown) => {

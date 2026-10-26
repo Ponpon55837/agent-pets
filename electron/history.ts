@@ -17,6 +17,7 @@ import {
   type HistoryTokenQuality,
 } from '../src/types/history.ts'
 import { StatementCache } from './sqlite-statements.ts'
+import { isValidPetId } from '../src/utils/pet-id.ts'
 
 type SqliteRow = Record<string, unknown>
 
@@ -79,7 +80,7 @@ function safeText(value: unknown, fallback = ''): string {
 }
 
 function safePetId(value: string | undefined): string {
-  return typeof value === 'string' && SAFE_ID.test(value) ? value : DEFAULT_PET_ID
+  return isValidPetId(value, 128) ? value : DEFAULT_PET_ID
 }
 
 function digest(value: string, length = 24): string {

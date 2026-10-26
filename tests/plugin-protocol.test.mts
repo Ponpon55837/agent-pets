@@ -54,6 +54,33 @@ test('plugin protocol serves embedded host resources and denies uninstalled or d
   }
 })
 
+test('plugin skin assets use byte-detected MIME and remain unavailable while the plugin is disabled', async () => {
+  await withPluginRoot(async userData => {
+    const root = path.join(userData, 'skin-pack', '1.0.0')
+    fs.mkdirSync(path.join(root, 'skins'), { recursive: true })
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00])
+    fs.writeFileSync(path.join(root, 'skins', 'winter fox.webp'), png)
+    let enabled = true
+    const options = {
+      pluginRootForId: (pluginId: string) => enabled && pluginId === 'skin-pack' ? root : null,
+      pluginSkinAssetForId: (pluginId: string, relativePath: string) => {
+        if (pluginId !== 'skin-pack' || relativePath !== 'skins/winter fox.webp') return undefined
+        const data = fs.readFileSync(path.join(root, relativePath))
+        return { data, contentType: 'image/png' }
+      },
+      hostAssets: pluginHostAssets,
+    }
+    const url = 'agent-pets://plugin/skin-pack/skins/winter%20fox.webp'
+    const response = handlePluginProtocolRequest(url, options)
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get('content-type'), 'image/png')
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
+    assert.deepEqual(await response.arrayBuffer().then(value => Buffer.from(value)), png)
+    enabled = false
+    assert.equal(handlePluginProtocolRequest(url, options).status, 404)
+  })
+})
+
 test('plugin protocol refuses symlink files and non-regular file paths', async () => {
   if (process.platform === 'win32') return
   await withPluginRoot((userData) => {

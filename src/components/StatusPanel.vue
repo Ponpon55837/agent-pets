@@ -1191,10 +1191,15 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
                   @keydown.enter="store.setPet(pet.id)"
                   @keydown.space.prevent="store.setPet(pet.id)"
                 >
-                  <span class="pet-name">{{ pet.displayName }}</span>
+                  <span class="pet-copy">
+                    <span class="pet-name">{{ pet.displayName }}</span>
+                    <small v-if="pet.pluginSkin" class="pet-plugin-source">
+                      {{ t('pluginPetFromPlugin', { name: pet.pluginSkin.pluginName }) }}
+                    </small>
+                  </span>
                   <span class="pet-actions">
                     <Button
-                      v-if="!pet.builtIn"
+                      v-if="!pet.builtIn && !pet.pluginSkin"
                       variant="ghost"
                       size="sm"
                       :title="t('rename')"
@@ -1204,7 +1209,7 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
                       <Icon name="edit" :size="13" />
                     </Button>
                     <Button
-                      v-if="pet.id !== store.defaultPetId"
+                      v-if="pet.id !== store.defaultPetId && !pet.pluginSkin"
                       variant="ghost"
                       size="sm"
                       :title="pet.builtIn ? t('hide') : t('remove')"

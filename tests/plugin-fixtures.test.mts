@@ -14,7 +14,7 @@ import { pluginHostAssets } from '../electron/plugin-host-assets.ts'
 import type { PluginManifest } from '../src/types/plugin.ts'
 
 const fixtureRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'plugins')
-const FIXTURE_IDS = ['ok-notify', 'ok-panel', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel'] as const
+const FIXTURE_IDS = ['ok-notify', 'ok-panel', 'ok-skin', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel'] as const
 
 function readFixture(pluginId: string): { manifest: PluginManifest; files: Record<string, Uint8Array> } {
   const sourceDirectory = path.join(fixtureRoot, pluginId)
@@ -34,8 +34,8 @@ function readFixture(pluginId: string): { manifest: PluginManifest; files: Recor
   }
   collect(sourceDirectory)
   assert.ok(files['plugin.json'])
-  assert.ok(files['dist/main.js'])
-  assert.ok(files['assets/icon.png'])
+  if (parsed.manifest.entry) assert.ok(files[parsed.manifest.entry])
+  if (parsed.manifest.icon) assert.ok(files[parsed.manifest.icon])
   return { manifest: parsed.manifest, files }
 }
 
@@ -67,13 +67,26 @@ function createFeed(pluginId: string, manifest: PluginManifest, rateLimitPer10Mi
   return { feed, emitted }
 }
 
-test('plugin fixture sources have bounded manifests, entry points, and PNG icons', () => {
+test('plugin fixture sources have bounded manifests and include all declared runtime assets', () => {
   for (const pluginId of FIXTURE_IDS) {
     const { manifest, files } = readFixture(pluginId)
     assert.equal(manifest.id, pluginId)
-    assert.ok(files[manifest.entry])
-    assert.deepEqual([...files['assets/icon.png']!.slice(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    if (manifest.entry) assert.ok(files[manifest.entry])
+    if (manifest.icon) {
+      assert.deepEqual([...files[manifest.icon]!.slice(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    }
   }
+})
+
+test('ok-skin is a skin-only fixture with a valid WebP spritesheet and no worker entry', () => {
+  const { manifest, files } = readFixture('ok-skin')
+  assert.equal(manifest.entry, undefined)
+  assert.equal(manifest.contributes.skins?.[0]?.id, 'winter-fox')
+  const spritesheet = files['skins/winter-fox.webp']
+  assert.ok(spritesheet)
+  assert.equal(Buffer.from(spritesheet!.subarray(0, 4)).toString('ascii'), 'RIFF')
+  assert.equal(Buffer.from(spritesheet!.subarray(8, 12)).toString('ascii'), 'WEBP')
+  assert.equal(files['dist/main.js'], undefined)
 })
 
 test('every evil fixture records a host log entry for its runtime probe', () => {

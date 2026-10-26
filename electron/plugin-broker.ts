@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { PluginErrorCode, PluginManifest } from '../src/types/plugin.ts'
+import { isValidPetId } from '../src/utils/pet-id.ts'
 import { PRESENTATION_REACTIONS, type PresentationReaction } from '../src/types/presentation.ts'
 import { writeJsonAtomic } from './desktop-preferences.ts'
 import type { PluginFeedController } from './plugin-feed.ts'
@@ -121,7 +122,7 @@ function normalizeReactionArgs(args: unknown[]): PluginReactionRequest | null {
   if (typeof ttlMs !== 'number' || !Number.isSafeInteger(ttlMs) || ttlMs < 1_000 || ttlMs > 15_000) return null
   let petId: string | undefined
   if (options.petId !== undefined) {
-    if (typeof options.petId !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(options.petId) || options.petId.includes('..')) return null
+    if (!isValidPetId(options.petId, 64)) return null
     petId = options.petId
   }
   return {

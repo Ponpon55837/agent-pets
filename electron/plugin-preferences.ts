@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { PluginInstancePreferences, PluginPreferences, PluginResourceLimits } from '../src/types/plugin.ts'
+import { isValidPetId } from '../src/utils/pet-id.ts'
 import { isValidPluginNetworkHost } from './plugin-manifest.ts'
 import { writeJsonAtomic } from './desktop-preferences.ts'
 
@@ -46,7 +47,6 @@ export const DEFAULT_PLUGIN_PREFERENCES = Object.freeze({
 }) as PluginPreferences
 
 const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
-const PET_ID = /^[A-Za-z0-9._-]{1,64}$/
 const RESOURCE_KEYS = Object.keys(PLUGIN_RESOURCE_BOUNDS) as (keyof PluginResourceLimits)[]
 const PLUGIN_PREFERENCE_KEYS = new Set(['enabled', 'muted', 'rateLimitPer10Min', 'targetPetId', 'grantedHosts'])
 
@@ -120,7 +120,7 @@ function parseStoredPluginPreference(value: unknown): PluginInstancePreferences 
   if (typeof enabled !== 'boolean' || typeof muted !== 'boolean'
     || typeof rateLimitPer10Min !== 'number' || !Number.isSafeInteger(rateLimitPer10Min)
     || rateLimitPer10Min < 1 || rateLimitPer10Min > 30) return null
-  if (targetPetId !== null && (typeof targetPetId !== 'string' || !PET_ID.test(targetPetId) || targetPetId.includes('..'))) return null
+  if (targetPetId !== null && !isValidPetId(targetPetId, 64)) return null
   if (!Array.isArray(grantedHosts) || grantedHosts.length > 50) return null
   const normalizedHosts: string[] = []
   const seenHosts = new Set<string>()
@@ -257,7 +257,7 @@ function parsePluginPatch(value: unknown): Partial<PluginInstancePreferences> {
   }
   if (value.targetPetId !== undefined) {
     const targetPetId = value.targetPetId
-    if (targetPetId !== null && (typeof targetPetId !== 'string' || !PET_ID.test(targetPetId) || targetPetId.includes('..'))) {
+    if (targetPetId !== null && !isValidPetId(targetPetId, 64)) {
       throw new TypeError('Plugin target pet id is invalid')
     }
     patch.targetPetId = targetPetId as string | null

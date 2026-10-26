@@ -5,7 +5,7 @@ import type { ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
-import type { PetBehaviorManifest } from '../src/types/pet'
+import type { PetBehaviorManifest, PluginSkinPetSource } from '../src/types/pet'
 import type { PresentationIntent, PresentationStatusUpdate } from '../src/types/presentation'
 import type {
   PluginBadgeView,
@@ -72,6 +72,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('plugin-badges-updated', handler)
     return () => ipcRenderer.removeListener('plugin-badges-updated', handler)
   },
+  onPluginSkinsChanged: (callback: (removedPetIds: string[]) => void) => {
+    const handler = (_event: unknown, petIds: string[]) => callback(petIds)
+    ipcRenderer.on('plugin-skins-changed', handler)
+    return () => ipcRenderer.removeListener('plugin-skins-changed', handler)
+  },
+  notifyPluginSkinFallback: (petIds: string[]): Promise<number> => ipcRenderer.invoke('plugin-skin-fallback-notify', petIds),
   completePluginFeed: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-complete', itemId),
   openPluginFeedLink: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-open-link', itemId),
   getPluginPanelSnapshot: (): Promise<PluginPanelResult<PluginPanelSnapshot>> => ipcRenderer.invoke('plugin-panel-snapshot'),
@@ -398,6 +404,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     folder: string
     builtIn: boolean
     behaviorManifest?: PetBehaviorManifest
+      pluginSkin?: PluginSkinPetSource
   }>> => {
     return ipcRenderer.invoke('load-pets')
   },

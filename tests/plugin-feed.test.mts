@@ -125,6 +125,11 @@ test('PluginFeedController attaches only a validated target pet id to the bubble
   assert.equal(result.accepted, true)
   assert.equal(harness.emitted[0]?.targetPetId, 'custom-pet-1')
 
+  const pluginSkin = createHarness()
+  pluginSkin.setPlugin('sample', { targetPetId: 'plugin:skin-pack:winter-fox' })
+  assert.equal(submitValid(pluginSkin.controller).accepted, true)
+  assert.equal(pluginSkin.emitted[0]?.targetPetId, 'plugin:skin-pack:winter-fox')
+
   const invalid = createHarness()
   invalid.setPlugin('sample', { targetPetId: '../outside' })
   assert.deepEqual(submitValid(invalid.controller), { accepted: false, error: 'disabled' })

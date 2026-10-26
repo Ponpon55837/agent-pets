@@ -9,6 +9,7 @@ import type {
   PresentationStatusSnapshot,
 } from '../src/types/presentation.ts'
 import { PRESENTATION_REACTIONS, type PresentationReaction } from '../src/types/presentation.ts'
+import { isValidPetId } from '../src/utils/pet-id.ts'
 
 export const PRESENTATION_MIN_TTL_MS = 1_000
 export const PRESENTATION_MAX_TTL_MS = 15_000
@@ -48,7 +49,6 @@ export type PresentationValidationResult = {
 }
 
 const SAFE_ID = /^[A-Za-z0-9_-]{8,80}$/
-const SAFE_PET_ID = /^[A-Za-z0-9._-]{1,64}$/
 const SAFE_NAME_LENGTH = 64
 const SAFE_MESSAGE_CONTROL = /[\u0000-\u001f\u007f]/g
 const SAFE_MESSAGE_MARKUP = /[<>]/g
@@ -66,8 +66,7 @@ export function sanitizePresentationClientId(value: unknown): string | null {
 }
 
 export function sanitizePresentationPetId(value: unknown): string | null {
-  if (typeof value !== 'string' || !SAFE_PET_ID.test(value) || value.includes('..')) return null
-  return value
+  return isValidPetId(value, 64) ? value : null
 }
 
 export function normalizePresentationMessage(value: unknown): string | null {

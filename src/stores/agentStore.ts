@@ -17,7 +17,7 @@ import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement
 import { ACHIEVEMENT_DEFINITIONS } from '@/types/achievement'
 import type { PetWindowMode, PetWindowModeState } from '@/types/pet-window'
 import { normalizePetWindowModeState } from '@/types/pet-window'
-import type { PetBehaviorManifest } from '@/types/pet'
+import type { PetBehaviorManifest, PluginSkinPetSource } from '@/types/pet'
 import type { PluginFeedItem } from '@/types/plugin'
 import type { ProjectPetView } from '@/types/project-pet'
 import type {
@@ -29,6 +29,7 @@ import type {
 import { PRESENTATION_REACTIONS } from '@/types/presentation'
 import { formatProject } from '@/utils/format'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
+import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
 import {
   createToastCountdown,
   getToastRemainingMs,
@@ -41,6 +42,7 @@ export interface PetEntry {
   folder: string
   builtIn: boolean
   behaviorManifest?: PetBehaviorManifest
+  pluginSkin?: PluginSkinPetSource
 }
 
 const SUCCESS_DISPLAY_MS = 4_000
@@ -473,8 +475,7 @@ export const useAgentStore = defineStore('agent', () => {
 
     let targetPetId: string | undefined
     if (raw.targetPetId !== undefined) {
-      if (typeof raw.targetPetId !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(raw.targetPetId)
-        || raw.targetPetId.includes('..')) return null
+      if (!isValidPetId(raw.targetPetId, 64)) return null
       targetPetId = raw.targetPetId
     }
 
@@ -583,8 +584,7 @@ export const useAgentStore = defineStore('agent', () => {
     const petId = raw.petId === undefined
       ? undefined
       : typeof raw.petId === 'string'
-        && /^[A-Za-z0-9._-]{1,64}$/.test(raw.petId)
-        && !raw.petId.includes('..')
+        && isValidPetId(raw.petId, 64)
         ? raw.petId
         : null
     if (petId === null) return null
@@ -852,7 +852,7 @@ export const useAgentStore = defineStore('agent', () => {
     if (
       raw.schemaVersion !== 1
       || typeof petId !== 'string'
-      || !/^[A-Za-z0-9._-]{1,128}$/.test(petId)
+      || !isValidPetId(petId, 128)
       || !Number.isSafeInteger(generatedAt)
       || !Array.isArray(raw.achievements)
       || raw.achievements.length !== ACHIEVEMENT_DEFINITIONS.length
@@ -907,7 +907,7 @@ export const useAgentStore = defineStore('agent', () => {
     const tokenQuality = raw.tokenQuality
     if (
       typeof petId !== 'string'
-      || !/^[A-Za-z0-9._-]{1,128}$/.test(petId)
+      || !isValidPetId(petId, 128)
       || !definition
       || raw.version !== definition.version
       || raw.titleKey !== definition.titleKey
@@ -950,13 +950,37 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   async function setProgressionPet(petId: string): Promise<void> {
-    if (!/^[A-Za-z0-9._-]{1,128}$/.test(petId)) return
+    if (!isValidPetId(petId, 128)) return
     try {
       const snapshot = await window.electronAPI?.setProgressionPet(petId)
       if (snapshot) setProgressionSnapshot(snapshot)
       await initializeAchievements()
     } catch {
       // Main remains authoritative; a later broadcast restores the snapshot.
+    }
+  }
+
+  async function handlePluginSkinsChanged(removedPetIds: unknown): Promise<void> {
+    const removed = new Set(Array.isArray(removedPetIds)
+      ? removedPetIds.filter((petId): petId is string => isPluginSkinPetId(petId)).slice(0, 250)
+      : [])
+    const selectedPetId = selectedPet.value
+    const selectedWasRemoved = removed.has(selectedPetId)
+    const removedFamilyEntries = Object.entries(familyPetIds.value)
+      .filter(([, petId]) => removed.has(petId))
+    const routedPetId = highestPrioritySession.value?.routedPetId
+    const routedWasRemoved = Boolean(routedPetId && removed.has(routedPetId))
+    const activeRemovedIds = new Set<string>()
+    if (selectedWasRemoved) activeRemovedIds.add(selectedPetId)
+    for (const [, petId] of removedFamilyEntries) activeRemovedIds.add(petId)
+    if (routedPetId && routedWasRemoved) activeRemovedIds.add(routedPetId)
+
+    await loadPets()
+    if (selectedWasRemoved || routedWasRemoved) setPet(DEFAULT_PET_ID)
+    for (const [familyKey] of removedFamilyEntries) setFamilyPet(familyKey, DEFAULT_PET_ID)
+
+    if (activeRemovedIds.size > 0) {
+      void window.electronAPI?.notifyPluginSkinFallback([...activeRemovedIds])
     }
   }
 
@@ -1715,6 +1739,7 @@ export const useAgentStore = defineStore('agent', () => {
     initializeProgression,
     initializeAchievements,
     setProgressionPet,
+    handlePluginSkinsChanged,
     setPermissionRequests,
     initializePermissionRequests,
     decidePermission,

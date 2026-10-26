@@ -26,6 +26,7 @@ let cleanupPermissionRequests: (() => void) | null = null
 let cleanupPresentationIntent: (() => void) | null = null
 let cleanupPluginFeedItem: (() => void) | null = null
 let cleanupPluginFeedUnreadCount: (() => void) | null = null
+let cleanupPluginSkinsChanged: (() => void) | null = null
 let staleTimer: ReturnType<typeof setInterval> | null = null
 let successTimer: ReturnType<typeof setInterval> | null = null
 let quotaTimer: ReturnType<typeof setInterval> | null = null
@@ -146,6 +147,11 @@ onMounted(() => {
   if (electronAPI?.onPluginFeedUnreadCount) {
     cleanupPluginFeedUnreadCount = electronAPI.onPluginFeedUnreadCount((count: unknown) => {
       store.setPluginFeedUnreadCount(count)
+    })
+  }
+  if (electronAPI?.onPluginSkinsChanged) {
+    cleanupPluginSkinsChanged = electronAPI.onPluginSkinsChanged((removedPetIds: unknown) => {
+      void store.handlePluginSkinsChanged(removedPetIds)
     })
   }
   if (electronAPI?.getPluginFeedUnreadCount) {
@@ -294,6 +300,7 @@ onUnmounted(() => {
   cleanupPresentationIntent?.()
   cleanupPluginFeedItem?.()
   cleanupPluginFeedUnreadCount?.()
+  cleanupPluginSkinsChanged?.()
   window.removeEventListener('mousemove', handlePetMouseMove, true)
   window.removeEventListener('storage', handleStorage)
   if (staleTimer) clearInterval(staleTimer)

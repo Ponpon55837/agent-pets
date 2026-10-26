@@ -6,7 +6,7 @@ import type { ProgressionSnapshot } from '@/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '@/types/history'
 import type { PetWindowMode, PetWindowModeState } from '@/types/pet-window'
-import type { PetBehaviorManifest } from '@/types/pet'
+import type { PetBehaviorManifest, PluginSkinPetSource } from '@/types/pet'
 import type {
   AdapterDetection,
   AdapterRuntimeStatus,
@@ -53,6 +53,8 @@ declare global {
       getPluginFeedUnreadCount: () => Promise<number>
       getPluginBadges: () => Promise<PluginBadgeView[]>
       onPluginBadgesChanged: (callback: (badges: PluginBadgeView[]) => void) => () => void
+      onPluginSkinsChanged: (callback: (removedPetIds: string[]) => void) => () => void
+      notifyPluginSkinFallback: (petIds: string[]) => Promise<number>
       completePluginFeed: (itemId: string) => Promise<boolean>
       openPluginFeedLink: (itemId: string) => Promise<boolean>
       getPluginPanelSnapshot: () => Promise<PluginPanelResult<PluginPanelSnapshot>>
@@ -179,6 +181,7 @@ declare global {
         folder: string
         builtIn: boolean
         behaviorManifest?: PetBehaviorManifest
+        pluginSkin?: PluginSkinPetSource
       }>>
       addCustomPet: (petData: { id: string; displayName: string }) => Promise<boolean>
       renameCustomPet: (petId: string, newName: string) => Promise<boolean>
