@@ -1,20 +1,26 @@
 import {
   app,
   BrowserWindow,
+  WebContentsView,
   screen,
   ipcMain,
   dialog,
+  net,
   session,
   protocol,
   globalShortcut,
   powerMonitor,
+  shell,
+  safeStorage,
 } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { join, resolve } from 'path'
+import { randomUUID } from 'node:crypto'
 import { request as httpRequest, type Server } from 'node:http'
+import { Readable } from 'node:stream'
 import * as fs from 'fs'
 import * as path from 'path'
-import { unzipSync } from 'fflate'
+import { guardArchive } from './archive-guard.ts'
 import { createEventServer } from './event-server'
 import { createAgentAdapterRegistry, isAgentAdapterId, type AgentAdapterRegistry } from './agent-adapter'
 import { createAgentAdapterOperations } from './agent-adapter-operations'
@@ -22,6 +28,7 @@ import { getQuotaUsage } from './quota'
 import { DesktopPreferencesStore, resolveLoginItemExecutable, writeJsonAtomic } from './desktop-preferences'
 import { DesktopNotificationService } from './desktop-notifications'
 import { DesktopTrayController } from './desktop-tray'
+import type { PluginTrayCommandItem } from './plugin-tray'
 import { desktopVisibilityCapabilitiesForPlatform } from './desktop-visibility'
 import { PermissionBroker } from './permission-broker'
 import { appendPermissionAudit } from './permission-audit'
@@ -40,19 +47,66 @@ import {
 import { ProjectMcpRegistryStore } from './project-mcp-registry'
 import { ProjectRoutingStore } from './project-routing'
 import {
+  PluginRegistry,
+  PLUGIN_ARCHIVE_MAX_BYTES,
+  PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES,
+  PLUGIN_ARCHIVE_SKIN_MAX_BYTES,
+} from './plugin-registry'
+import { PluginPreferencesStore } from './plugin-preferences'
+import { PluginHostWindowController, type PluginHostDescriptor } from './plugin-host-window'
+import { canEnablePluginWithinLimit, selectEnabledPluginDescriptors } from './plugin-host-selection'
+import { PluginBroker, type PluginBrokerContext, type PluginReactionRequest } from './plugin-broker.ts'
+import { PluginCommandController } from './plugin-commands.ts'
+import { PluginBadgeController } from './plugin-badges.ts'
+import { PluginFeedController } from './plugin-feed.ts'
+import { filterPluginRequestHeaders, PluginNetworkClient, stripPluginSetCookieHeaders } from './plugin-net.ts'
+import { isPublicPluginNetworkHost } from './plugin-net.ts'
+import { PluginHostGrantController, sanitizePluginHostRequestReason } from './plugin-host-grants.ts'
+import { PluginSecretsStore } from './plugin-secrets.ts'
+import { PluginSecretConsentStore } from './plugin-secret-consent.ts'
+import { PluginSettingsStore, publishPluginSettingsChanged } from './plugin-settings.ts'
+import { PluginAgentStatusController } from './plugin-agent-status.ts'
+import { effectivePluginScheduleMinimum } from './plugin-schedule.ts'
+import { PluginUiMessageGuard } from './plugin-ui-messages.ts'
+import { PluginDeveloperModeWatcher } from './plugin-developer-mode.ts'
+import {
+  PluginPanelViewController,
+  type PluginPanelNativeView,
+  type PluginPanelViewSession,
+} from './plugin-panel-view.ts'
+import {
+  PluginPanelWindowSizer,
+  validatePluginPanelViewBounds,
+  type PluginPanelRect,
+} from './plugin-panel-window.ts'
+import {
+  isPluginPanelInstallConfirmation,
+  isPluginPanelNotificationId,
+  isPluginPanelPluginId,
+  isPluginPanelPreferencePatch,
+  pluginPanelErrorCode,
+} from './plugin-panel-validation.ts'
+import { handlePluginProtocolRequest } from './plugin-protocol'
+import { pluginHostAssets } from './plugin-host-assets'
+import { parsePluginManifest } from './plugin-manifest'
+import {
   createPermissionAdapterServer,
   PERMISSION_ADAPTER_PORT,
   PermissionAdapterRelay,
 } from './permission-adapter-server'
 import type { DesktopPreferences } from '../src/types/desktop'
-import { setLocale, t } from '../src/i18n'
+import { locale, setLocale, t } from '../src/i18n'
+import tokensCss from '../src/styles/tokens.css?raw'
 import type { ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
 import type { PresentationIntent, PresentationStatusSnapshot } from '../src/types/presentation'
+import type { PluginPanelPlugin, PluginPanelResult, PluginPanelSettingsSnapshot, PluginPanelSnapshot } from '../src/types/plugin'
 import type { ProjectMcpRegistrySnapshot, ProjectMcpRemovalSummary } from '../src/types/project-mcp'
 import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from '../src/types/project-pet'
 import type { PetEdge, PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
+import { createPluginSkinPetId, isPluginSkinPetId, isValidPetId, isValidRegularPetId } from '../src/utils/pet-id.ts'
+import { availablePluginSkinPetIds } from './plugin-skins.ts'
 import {
   EDGE_DWELL_MS,
   EDGE_TRIGGER_DISTANCE_PX,
@@ -117,6 +171,43 @@ let presentationController: PresentationController | null = null
 let presentationMcpServer: Server | null = null
 let projectMcpRegistry: ProjectMcpRegistryStore | null = null
 let projectRoutingStore: ProjectRoutingStore | null = null
+let pluginRegistry: PluginRegistry | null = null
+let pluginPreferences: PluginPreferencesStore | null = null
+let pluginSecretsStore: PluginSecretsStore | null = null
+let pluginSecretConsentStore: PluginSecretConsentStore | null = null
+let pluginSettingsStore: PluginSettingsStore | null = null
+let pluginHostWindow: PluginHostWindowController | null = null
+let pluginPanelViewController: PluginPanelViewController | null = null
+let pluginPanelViewOpenSequence = 0
+const pluginUiMessageGuard = new PluginUiMessageGuard()
+const pluginPanelWindowSizer = new PluginPanelWindowSizer()
+let programmaticPluginPanelSize: { width: number; height: number } | null = null
+let pluginPanelResizeResetTimer: ReturnType<typeof setTimeout> | null = null
+let pluginBroker: PluginBroker | null = null
+let pluginCommandController: PluginCommandController | null = null
+let pluginBadgeController: PluginBadgeController | null = null
+const diagnosedPluginTrayOverflowIds = new Set<string>()
+let pluginNetworkClient: PluginNetworkClient | null = null
+let pluginHostGrantController: PluginHostGrantController | null = null
+let pluginFeedController: PluginFeedController | null = null
+let pluginAgentStatusController: PluginAgentStatusController | null = null
+const pendingPluginPlanIds = new Map<string, string>()
+const pendingDeveloperFolders = new Map<string, string>()
+const developerSourceFolders = new Map<string, string>()
+const developerReloadsInFlight = new Set<string>()
+const pluginRootsByToken = new Map<string, string>()
+const pluginEnableOrder = new Map<string, number>()
+const diagnosedPluginLimitIds = new Set<string>()
+interface PluginSkinFallbackInfo {
+  pluginId: string
+  pluginName: { 'zh-TW': string; 'en-US': string }
+  skinName: { 'zh-TW': string; 'en-US': string }
+}
+const pendingPluginSkinFallbacks = new Map<string, PluginSkinFallbackInfo>()
+let nextPluginEnableOrder = 0
+let pluginRuntimeContexts = new Map<string, PluginBrokerContext & { muted: boolean; rateLimitPer10Min: number; targetPetId: string | null; grantedHosts: string[] }>()
+let pluginPreferencesSnapshot: ReturnType<PluginPreferencesStore['get']> | null = null
+let pluginDeveloperModeWatcher: PluginDeveloperModeWatcher | null = null
 let presentationStatusProjection: PresentationStatusSnapshot = {
   activePets: [],
   dnd: false,
@@ -188,8 +279,8 @@ if (!hasSingleInstanceLock) {
 }
 
 const PANEL_WIDTH = 460
-const PANEL_MIN_WIDTH = 340
-const PANEL_MAX_WIDTH = 760
+const PANEL_MIN_WIDTH = 320
+const PANEL_MAX_WIDTH = 960
 const PANEL_GAP = 6
 // petWindow's actual bounds include a fixed, unscaled band of transparent
 // space reserved above the visible sprite for the quota tooltip to pop
@@ -327,6 +418,16 @@ function finiteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+function readPluginPanelRect(value: unknown): PluginPanelRect | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const rect = value as Record<string, unknown>
+  const x = finiteNumber(rect.x)
+  const y = finiteNumber(rect.y)
+  const width = finiteNumber(rect.width)
+  const height = finiteNumber(rect.height)
+  return x === null || y === null || width === null || height === null ? null : { x, y, width, height }
+}
+
 function isTrustedRendererUrl(rawUrl: string): boolean {
   try {
     const candidate = new URL(rawUrl)
@@ -370,6 +471,44 @@ function assertTrustedIpcSender(
 ): void {
   if (!isTrustedIpcSender(event, requiredWindow)) {
     throw new Error('Unauthorized IPC sender')
+  }
+}
+
+function assertPluginPanelSender(event: IpcMainEvent | IpcMainInvokeEvent): void {
+  if (!panelWindow || panelWindow.isDestroyed() || event.sender !== panelWindow.webContents) {
+    throw new Error('Unauthorized plugin panel IPC sender')
+  }
+  assertTrustedIpcSender(event, panelWindow)
+}
+
+function pluginPanelError(error: unknown): string {
+  return pluginPanelErrorCode(error)
+}
+
+function pluginPanelSnapshot(): PluginPanelResult<PluginPanelSnapshot> {
+  if (!pluginRegistry || !pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
+  try {
+    const preferences = pluginPreferences.get()
+    const plugins: PluginPanelPlugin[] = pluginRegistry.list().map(entry => {
+      const root = resolve(app.getPath('userData'), 'plugins', entry.id, entry.currentVersion)
+      const source = readRegularFileWithin(root, 'plugin.json', 256 * 1024)
+      let manifest: PluginPanelPlugin['manifest'] = null
+      if (source) {
+        try {
+          const parsed = parsePluginManifest(JSON.parse(source.toString('utf8')) as unknown)
+          if (parsed.ok && parsed.manifest.id === entry.id) manifest = parsed.manifest
+        } catch {}
+      }
+      return {
+        ...entry,
+        manifest,
+        development: developerSourceFolders.has(entry.id),
+        preference: preferences.plugins[entry.id] ?? pluginPreferences!.getPlugin(entry.id),
+      }
+    })
+    return { ok: true, value: { preferences, plugins } }
+  } catch (error) {
+    return { ok: false, error: pluginPanelError(error) }
   }
 }
 
@@ -453,6 +592,22 @@ function configureSecureProtocol(): void {
     try {
       const url = new URL(request.url)
       const pathname = decodeURIComponent(url.pathname)
+      if (url.hostname === 'plugin') {
+        return handlePluginProtocolRequest(request.url, {
+          pluginRootForId: enabledPluginRoot,
+          hostAssets: pluginHostAssets,
+          pluginSkinAssetForId: (pluginId, relativePath) => {
+            const context = pluginRuntimeContexts.get(pluginId)
+            const skin = context?.manifest.contributes.skins?.find(candidate => candidate.spritesheet === relativePath)
+            if (!skin) return undefined
+            const root = enabledPluginRoot(pluginId)
+            if (!root) return null
+            const data = readRegularFileWithin(root, relativePath, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES)
+            const type = data ? rasterContentType(data) : null
+            return data && type ? { data, contentType: type } : null
+          },
+        })
+      }
       if (url.hostname === 'app') {
         const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
         const data = readRegularFileWithin(resolve(join(__dirname, '../dist')), relativePath, 25 * 1024 * 1024)
@@ -483,6 +638,1003 @@ function configureSecureProtocol(): void {
   })
 }
 
+function enabledPluginRoot(pluginId: string): string | null {
+  const context = pluginRuntimeContexts.get(pluginId)
+  if (!context?.pluginsEnabled || !context.enabled) return null
+  const entry = pluginRegistry?.list().find(plugin => plugin.id === pluginId)
+  if (!entry || (entry.status !== 'installed' && entry.status !== 'enabled')) return null
+  return resolve(app.getPath('userData'), 'plugins', entry.id, entry.currentVersion)
+}
+
+function refreshPluginRuntimeContexts(): void {
+  let preferences: ReturnType<PluginPreferencesStore['get']> | null = null
+  try { preferences = pluginPreferences?.get() ?? null } catch {}
+  pluginPreferencesSnapshot = preferences
+  const next = new Map<string, PluginBrokerContext & { muted: boolean; rateLimitPer10Min: number; targetPetId: string | null; grantedHosts: string[] }>()
+  for (const entry of pluginRegistry?.list() ?? []) {
+    if (entry.status !== 'installed' && entry.status !== 'enabled') continue
+    const preference = preferences?.plugins[entry.id]
+    if (!preference) continue
+    const root = resolve(app.getPath('userData'), 'plugins', entry.id, entry.currentVersion)
+    const source = readRegularFileWithin(root, 'plugin.json', 256 * 1024)
+    if (!source) continue
+    try {
+      const parsed = parsePluginManifest(JSON.parse(source.toString('utf8')) as unknown)
+      if (!parsed.ok || parsed.manifest.id !== entry.id) continue
+      next.set(entry.id, {
+        manifest: parsed.manifest,
+        enabled: preference.enabled,
+        pluginsEnabled: preferences?.pluginsEnabled === true,
+        dndEnabled: currentDesktopPreferences().dndEnabled,
+        storageBytesPerPlugin: preferences?.resources.storageBytesPerPlugin ?? 0,
+        netLimits: {
+          maxResponseBytes: preferences?.resources.netMaxResponseBytes ?? 0,
+          timeoutMs: (preferences?.resources.netTimeoutSeconds ?? 0) * 1_000,
+          requestsPerMinute: preferences?.resources.netRequestsPerMinute ?? 0,
+        },
+        muted: preference.muted,
+        rateLimitPer10Min: preference.rateLimitPer10Min,
+        targetPetId: preference.targetPetId,
+        grantedHosts: [...(parsed.manifest.permissions.network?.hosts ?? []), ...preference.grantedHosts],
+      })
+    } catch {
+      // A malformed manifest remains unavailable to the runtime until reinstalled.
+    }
+  }
+  pluginRuntimeContexts = next
+}
+
+function enabledPluginDescriptors(): PluginHostDescriptor[] {
+  const preferences = pluginPreferencesSnapshot
+  if (!preferences?.pluginsEnabled) return []
+  const registryById = new Map((pluginRegistry?.list() ?? []).map(entry => [entry.id, entry] as const))
+  const candidates = [...pluginRuntimeContexts.entries()]
+    .filter(([, context]) => context.enabled && typeof context.manifest.entry === 'string')
+    .map(([id, context]) => {
+      const registryEntry = registryById.get(id)
+      return {
+        id,
+        entry: context.manifest.entry!,
+        commandIds: (context.manifest.contributes.commands ?? []).map(command => command.id),
+        scheduleEnabled: context.manifest.permissions.schedule !== undefined,
+        scheduleMinIntervalSec: effectivePluginScheduleMinimum(
+          context.manifest.permissions.schedule?.minIntervalSec ?? preferences.resources.scheduleMinIntervalSeconds,
+          preferences.resources.scheduleMinIntervalSeconds,
+        ),
+        agentStatusEnabled: context.manifest.permissions.agentStatus === true,
+        ...(registryEntry ? { revision: `${registryEntry.currentVersion}:${registryEntry.installedAt}` } : {}),
+      }
+    })
+  for (const descriptor of candidates) {
+    if (!pluginEnableOrder.has(descriptor.id)) pluginEnableOrder.set(descriptor.id, nextPluginEnableOrder++)
+  }
+  candidates.sort((left, right) => (pluginEnableOrder.get(left.id) ?? 0) - (pluginEnableOrder.get(right.id) ?? 0))
+  const selection = selectEnabledPluginDescriptors(candidates, preferences.resources.maxEnabledPlugins)
+  for (const plugin of selection.skipped) {
+    if (diagnosedPluginLimitIds.has(plugin.id)) continue
+    diagnosedPluginLimitIds.add(plugin.id)
+    pluginBroker?.recordSystemDiagnostic(plugin.id, 'too_many_enabled', 'plugin.limit')
+  }
+  if (selection.skipped.length === 0) diagnosedPluginLimitIds.clear()
+  return selection.selected
+}
+
+async function reloadDeveloperPlugin(pluginId: string, sourceFolder: string): Promise<void> {
+  if (developerReloadsInFlight.has(pluginId)) return
+  if (!pluginRegistry || !pluginPreferences || developerSourceFolders.get(pluginId) !== sourceFolder
+    || pluginPreferencesSnapshot?.developerMode !== true) return
+  developerReloadsInFlight.add(pluginId)
+  try {
+    const planned = pluginRegistry.planInstallDirectory(sourceFolder)
+    if (!planned.ok) {
+      pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
+      return
+    }
+    if (planned.value.pluginId !== pluginId || planned.value.kind === 'incompatible') {
+      pluginRegistry.discardPlan(planned.value.token)
+      pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
+      return
+    }
+    if (planned.value.requiresReconsent) {
+      pluginRegistry.discardPlan(planned.value.token)
+      pluginBroker?.recordSystemDiagnostic(pluginId, 'not_permitted', 'developer.reload')
+      return
+    }
+    const installed = pluginRegistry.install(planned.value.token, false)
+    if (!installed.ok) {
+      pluginRegistry.discardPlan(planned.value.token)
+      pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
+      return
+    }
+    syncPluginHost()
+  } catch {
+    pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
+  } finally {
+    developerReloadsInFlight.delete(pluginId)
+  }
+}
+
+function syncDeveloperWatchers(): void {
+  if (!pluginDeveloperModeWatcher) return
+  if (pluginPreferencesSnapshot?.developerMode !== true) {
+    pluginDeveloperModeWatcher.clear()
+    return
+  }
+  for (const [pluginId, folder] of developerSourceFolders) {
+    if (pluginDeveloperModeWatcher.isWatching(pluginId, folder)) continue
+    pluginDeveloperModeWatcher.watch(pluginId, folder, () => reloadDeveloperPlugin(pluginId, folder))
+  }
+}
+
+function enabledPluginSkinRecords(): Map<string, PluginSkinFallbackInfo & { spritesheet: string; version: string }> {
+  const records = new Map<string, PluginSkinFallbackInfo & { spritesheet: string; version: string }>()
+  if (!pluginPreferencesSnapshot?.pluginsEnabled) return records
+  const versions = new Map((pluginRegistry?.list() ?? []).map(entry => [entry.id, entry.currentVersion] as const))
+  for (const [pluginId, context] of pluginRuntimeContexts) {
+    if (!context.enabled) continue
+    for (const skin of context.manifest.contributes.skins ?? []) {
+      const petId = createPluginSkinPetId(pluginId, skin.id)
+      if (!petId) continue
+      records.set(petId, {
+        pluginId,
+        pluginName: { ...context.manifest.name },
+        skinName: { ...skin.displayName },
+        spritesheet: skin.spritesheet,
+        version: versions.get(pluginId) ?? '',
+      })
+    }
+  }
+  return records
+}
+
+function broadcastPluginSkinsChanged(removedPetIds: string[]): void {
+  const petIds = [...new Set(removedPetIds)]
+  for (const window of [petWindow, panelWindow]) {
+    if (window && !window.isDestroyed()) window.webContents.send('plugin-skins-changed', petIds)
+  }
+}
+
+function syncPluginHost(): void {
+  const previousSkins = enabledPluginSkinRecords()
+  refreshPluginRuntimeContexts()
+  const currentSkins = enabledPluginSkinRecords()
+  const removedPetIds: string[] = []
+  for (const [petId, info] of previousSkins) {
+    if (currentSkins.has(petId)) continue
+    pendingPluginSkinFallbacks.set(petId, info)
+    removedPetIds.push(petId)
+  }
+  for (const petId of currentSkins.keys()) pendingPluginSkinFallbacks.delete(petId)
+  while (pendingPluginSkinFallbacks.size > 250) {
+    const oldest = pendingPluginSkinFallbacks.keys().next().value as string | undefined
+    if (!oldest) break
+    pendingPluginSkinFallbacks.delete(oldest)
+  }
+  const catalogChanged = previousSkins.size !== currentSkins.size
+    || [...previousSkins].some(([petId, previous]) => {
+      const current = currentSkins.get(petId)
+      return !current || current.spritesheet !== previous.spritesheet || current.version !== previous.version
+        || current.pluginName['zh-TW'] !== previous.pluginName['zh-TW']
+        || current.pluginName['en-US'] !== previous.pluginName['en-US']
+        || current.skinName['zh-TW'] !== previous.skinName['zh-TW']
+        || current.skinName['en-US'] !== previous.skinName['en-US']
+    })
+  if (catalogChanged) {
+    availablePetIdsCache = null
+    broadcastPluginSkinsChanged(removedPetIds)
+  }
+  pluginBadgeController?.syncEnabledPlugins()
+  syncDeveloperWatchers()
+  pluginPanelViewController?.closeIfNotAllowed(pluginId => {
+    const context = pluginRuntimeContexts.get(pluginId)
+    return Boolean(context?.pluginsEnabled && context.enabled && context.manifest.contributes.panelView && enabledPluginRoot(pluginId))
+  })
+  pluginHostWindow?.sync(enabledPluginDescriptors())
+  desktopTray?.rebuild()
+}
+
+function pluginTrayCommands(): PluginTrayCommandItem[] {
+  if (!pluginPreferencesSnapshot?.pluginsEnabled) return []
+  const enabledIds = new Set(enabledPluginDescriptors().map(plugin => plugin.id))
+  const candidates: PluginTrayCommandItem[] = []
+  for (const [pluginId, context] of pluginRuntimeContexts) {
+    if (!enabledIds.has(pluginId) || !context.manifest.contributes.tray) continue
+    const commands = new Map((context.manifest.contributes.commands ?? []).map(command => [command.id, command] as const))
+    for (const commandId of context.manifest.contributes.tray.commands) {
+      const command = commands.get(commandId)
+      if (!command) continue
+      candidates.push({
+        pluginId,
+        pluginName: context.manifest.name,
+        commandId,
+        title: command.title,
+      })
+    }
+  }
+  candidates.sort((left, right) => (pluginEnableOrder.get(left.pluginId) ?? 0) - (pluginEnableOrder.get(right.pluginId) ?? 0))
+  const omitted = new Set(candidates.slice(30).map(command => command.pluginId))
+  for (const pluginId of omitted) {
+    if (diagnosedPluginTrayOverflowIds.has(pluginId)) continue
+    diagnosedPluginTrayOverflowIds.add(pluginId)
+    pluginBroker?.recordSystemDiagnostic(pluginId, 'too_many_enabled', 'plugin.tray')
+  }
+  if (omitted.size === 0) diagnosedPluginTrayOverflowIds.clear()
+  return candidates
+}
+
+function broadcastPluginFeedUnreadCount(count = pluginFeedController?.unreadCount() ?? 0): void {
+  for (const window of [petWindow, panelWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('plugin-feed-unread-count', count)
+      window.webContents.send('plugin-notifications-changed')
+    }
+  }
+}
+
+function broadcastPluginBadges(badges = pluginBadgeController?.list() ?? []): void {
+  if (petWindow && !petWindow.isDestroyed()) petWindow.webContents.send('plugin-badges-updated', badges)
+}
+
+function isPluginFeedVisible(): boolean {
+  return Boolean(petWindow && !petWindow.isDestroyed() && petWindow.isVisible()
+    && petWindowMode === 'normal' && !windowsFullscreenAutoHiddenPet
+    && !windowsFullscreenState.petDisplayFullscreen)
+}
+
+function isPluginLinkHostAllowed(pluginId: string, host: string): boolean {
+  const context = pluginRuntimeContexts.get(pluginId)
+  if (!context) return false
+  return context.grantedHosts.some((allowedHost) => {
+    const normalized = allowedHost.toLowerCase()
+    if (normalized.startsWith('*.')) {
+      const suffix = normalized.slice(2)
+      return host !== suffix && host.endsWith(`.${suffix}`)
+    }
+    return host === normalized
+  })
+}
+
+function requestPluginNetwork(
+  networkSession: Electron.Session,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const headers = Object.fromEntries(new Headers(init.headers).entries())
+    const request = net.request({
+      url,
+      method: init.method ?? 'GET',
+      headers,
+      session: networkSession,
+      useSessionCookies: false,
+      credentials: 'omit',
+      redirect: 'manual',
+      cache: 'no-store',
+    })
+    let settled = false
+    const signal = init.signal
+    let onAbort = () => {}
+    const cleanup = () => signal?.removeEventListener('abort', onAbort)
+    const finish = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      callback()
+    }
+    onAbort = () => {
+      try { request.abort() } catch {}
+      finish(() => reject(new Error('Plugin network request aborted')))
+    }
+
+    request.removeHeader('Cookie')
+    request.removeHeader('Accept-Language')
+    request.setHeader('User-Agent', 'AgentPetsPlugin/1')
+    request.on('redirect', (status, _method, redirectUrl) => {
+      try { request.abort() } catch {}
+      finish(() => resolve(new Response(null, { status, headers: { location: redirectUrl } })))
+    })
+    request.on('response', response => {
+      const responseHeaders = new Headers()
+      for (const [name, rawValue] of Object.entries(response.headers)) {
+        if (name.toLowerCase() === 'set-cookie' || name.toLowerCase() === 'set-cookie2') continue
+        const values = Array.isArray(rawValue) ? rawValue : typeof rawValue === 'string' ? [rawValue] : []
+        for (const value of values) {
+          try { responseHeaders.append(name, value) } catch {}
+        }
+      }
+      const status = response.statusCode || 200
+      const body = status === 204 || status === 205 || status === 304
+        ? null
+        : Readable.toWeb(response as unknown as Readable) as ReadableStream<Uint8Array>
+      try {
+        const result = new Response(body, { status, headers: responseHeaders })
+        finish(() => resolve(result))
+      } catch (error) {
+        finish(() => reject(error))
+      }
+    })
+    request.on('error', error => finish(() => reject(error)))
+    if (signal?.aborted) {
+      onAbort()
+      return
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (typeof init.body === 'string') request.write(init.body)
+    request.end()
+  })
+}
+
+function createPluginServices(): void {
+  if (pluginRegistry || pluginPreferences || pluginHostWindow) return
+  const userDataDirectory = app.getPath('userData')
+  pluginRegistry = new PluginRegistry(userDataDirectory)
+  pluginDeveloperModeWatcher = new PluginDeveloperModeWatcher(500)
+  pluginPreferences = new PluginPreferencesStore(userDataDirectory)
+  pluginSecretsStore = new PluginSecretsStore(userDataDirectory, safeStorage)
+  pluginSecretConsentStore = new PluginSecretConsentStore(userDataDirectory)
+  pluginSettingsStore = new PluginSettingsStore(userDataDirectory)
+  pluginHostGrantController = new PluginHostGrantController()
+  pluginBadgeController = new PluginBadgeController({
+    getContext: pluginId => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      return context ? {
+        enabled: context.enabled,
+        pluginsEnabled: context.pluginsEnabled,
+        contributesBadge: context.manifest.contributes.badge === true,
+        pluginName: context.manifest.name,
+        targetPetId: context.targetPetId,
+      } : null
+    },
+    onChanged: badges => broadcastPluginBadges(badges),
+  })
+  pluginAgentStatusController = new PluginAgentStatusController({
+    emit: change => {
+      for (const [pluginId, context] of pluginRuntimeContexts) {
+        if (context.enabled && context.pluginsEnabled && context.manifest.permissions.agentStatus) {
+          pluginHostWindow?.notifyStatusChanged(pluginId, [change])
+        }
+      }
+    },
+  })
+  refreshPluginRuntimeContexts()
+  pluginFeedController = new PluginFeedController({
+    emit: item => {
+      if (petWindow && !petWindow.isDestroyed()) {
+        const panelViewAvailable = Boolean(pluginRuntimeContexts.get(item.pluginId)?.manifest.contributes.panelView)
+        petWindow.webContents.send('plugin-feed-item', { ...item, ...(panelViewAvailable ? { panelViewAvailable: true } : {}) })
+      }
+    },
+    onNotificationsChanged: count => broadcastPluginFeedUnreadCount(count),
+    isPetVisible: isPluginFeedVisible,
+    getGlobalState: () => ({
+      pluginsEnabled: pluginPreferencesSnapshot?.pluginsEnabled === true,
+      dndEnabled: currentDesktopPreferences().dndEnabled,
+      rateLimitPer10Min: pluginPreferencesSnapshot?.resources.globalFeedPer10Min,
+    }),
+    getPluginState: pluginId => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      if (!context) return null
+      return {
+        enabled: context.enabled,
+        muted: context.muted,
+        targetPetId: context.targetPetId,
+        rateLimitPer10Min: context.rateLimitPer10Min,
+        name: context.manifest.name,
+      }
+    },
+    isLinkHostAllowed: isPluginLinkHostAllowed,
+    resolveIconUrl: (pluginId, relativePath) => (
+      pluginRuntimeContexts.has(pluginId) ? `agent-pets://plugin/${pluginId}/${relativePath}` : null
+    ),
+  })
+  const pluginNetworkSession = session.fromPartition('plugin-network')
+  pluginNetworkSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    callback({ requestHeaders: filterPluginRequestHeaders(details.requestHeaders) })
+  })
+  pluginNetworkSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({ responseHeaders: stripPluginSetCookieHeaders(details.responseHeaders) })
+  })
+  pluginBroker = new PluginBroker({
+    userDataDirectory,
+    getContext: pluginId => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      return context ? { ...context, dndEnabled: currentDesktopPreferences().dndEnabled } : null
+    },
+    feed: pluginFeedController,
+    network: pluginNetworkClient ??= new PluginNetworkClient({
+      request: (url, init) => requestPluginNetwork(pluginNetworkSession, url, init),
+    }),
+    onRequestHost: async (pluginId, rawHost, rawReason) => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      const reason = sanitizePluginHostRequestReason(rawReason)
+      if (!context || !context.manifest.permissions.network?.userGranted || !reason || !pluginHostGrantController || !pluginPreferences) {
+        return { ok: false, error: context?.manifest.permissions.network?.userGranted ? 'invalid_request' : 'not_permitted' }
+      }
+      const decision = pluginHostGrantController.begin(pluginId, rawHost, reason, context.grantedHosts)
+      if (!decision.ok) return decision
+      if (decision.alreadyGranted) return { granted: true, host: decision.host }
+      if (!await isPublicPluginNetworkHost(decision.host)) {
+        pluginHostGrantController.finish(pluginId, decision.host, true)
+        return { ok: false, error: 'host_not_allowed' }
+      }
+      try {
+        const name = context.manifest.name[locale.value]
+        const options = {
+          type: 'question' as const,
+          title: t('pluginNetworkRequestTitle'),
+          message: t('pluginNetworkRequestMessage', { name, host: decision.host, reason }),
+          buttons: [t('pluginNetworkAllow'), t('pluginNetworkDeny')],
+          defaultId: 1,
+          cancelId: 1,
+          noLink: true,
+        }
+        const parent = panelWindow && !panelWindow.isDestroyed() ? panelWindow
+          : petWindow && !petWindow.isDestroyed() ? petWindow : undefined
+        const response = parent
+          ? await dialog.showMessageBox(parent, options)
+          : await dialog.showMessageBox(options)
+        if (response.response !== 0) {
+          pluginHostGrantController.finish(pluginId, decision.host, false)
+          return { ok: false, error: 'denied' }
+        }
+        const storedHosts = pluginPreferences.getPlugin(pluginId).grantedHosts
+        const grantedHosts = [...new Set([...storedHosts, decision.host])]
+        pluginPreferences.updatePlugin(pluginId, { grantedHosts })
+        pluginHostGrantController.finish(pluginId, decision.host, true)
+        syncPluginHost()
+        return { granted: true, host: decision.host }
+      } catch {
+        pluginHostGrantController.finish(pluginId, decision.host, true)
+        return { ok: false, error: 'disabled' }
+      }
+    },
+    onSecretGet: (pluginId, key) => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      if (!context || !pluginSecretsStore) return { ok: false, error: 'disabled' }
+      try {
+        return pluginSecretsStore.get(pluginId, key, context.manifest.permissions.secrets ?? [])
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error ? error.code : null
+        return { ok: false, error: code === 'secret_unavailable' || code === 'secret_not_found' || code === 'not_permitted'
+          ? code : 'secret_unavailable' }
+      }
+    },
+    onSettingsGet: pluginId => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      if (!context || !pluginSettingsStore) return { ok: false, error: 'disabled' }
+      try { return pluginSettingsStore.get(pluginId, context.manifest) } catch {
+        return { ok: false, error: 'settings_invalid' }
+      }
+    },
+    onAgentStatusGet: pluginId => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      if (!context?.manifest.permissions.agentStatus) return { ok: false, error: 'not_permitted' }
+      return pluginAgentStatusController?.getStatus() ?? { ok: false, error: 'agent_status_unavailable' }
+    },
+    onBadgeSet: (pluginId, badge) => {
+      const result = pluginBadgeController?.set(pluginId, badge)
+      return result?.ok ? result.value : { ok: false, error: result?.error ?? 'disabled' }
+    },
+    onReaction: (pluginId, request: PluginReactionRequest) => {
+      const result = presentationController?.submitPluginReaction(pluginId, request)
+      if (result?.accepted) return { ok: true }
+      const error = result?.error
+      return {
+        ok: false,
+        error: error === 'invalid_request' || error === 'queue_full' || error === 'rate_limited'
+          || error === 'not_found' ? error : 'disabled',
+      }
+    },
+  })
+  pluginHostWindow = new PluginHostWindowController({
+    onRpc: (pluginId, request) => {
+      const data = request && typeof request === 'object' && !Array.isArray(request)
+        ? request as Record<string, unknown>
+        : {}
+      if (data.method === 'ui.postMessage') {
+        if (!Array.isArray(data.args) || data.args.length !== 1) return { ok: false, error: 'invalid_request' }
+        if (typeof data.id !== 'string') return { ok: false, error: 'invalid_request' }
+        const response = pluginPanelViewController?.postMessage(pluginId, data.args[0])
+          ?? { ok: true as const, value: { delivered: false } }
+        return { id: data.id, ...response }
+      }
+      return pluginBroker?.handle(pluginId, request) ?? { ok: false, error: 'disabled' }
+    },
+    createPluginToken: pluginId => {
+      const root = enabledPluginRoot(pluginId)
+      if (!root) throw new Error('Plugin is unavailable')
+      const token = randomUUID()
+      pluginRootsByToken.set(token, root)
+      return token
+    },
+    revokePluginToken: (_pluginId, token) => {
+      pluginRootsByToken.delete(token)
+    },
+    pluginRootForToken: token => pluginRootsByToken.get(token) ?? null,
+    messageGuard: pluginUiMessageGuard,
+    onPluginCrash: (pluginId, consecutiveCrashes, reason) => {
+      pluginBadgeController?.clearPlugin(pluginId)
+      if (consecutiveCrashes >= 3) {
+        const name = pluginRuntimeContexts.get(pluginId)?.manifest.name ?? { 'zh-TW': pluginId, 'en-US': pluginId }
+        if (reason === 'host') pluginBroker?.recordHostUnavailable(pluginId)
+        pluginFeedController?.addSystemNotification(
+          pluginId,
+          name,
+          reason === 'host' ? t('pluginHostUnavailableTitle') : t('pluginCrashDisabledTitle'),
+          reason === 'host'
+            ? t('pluginHostUnavailableBody', { name: name[locale.value] })
+            : t('pluginCrashDisabledBody', { name: name[locale.value] }),
+        )
+        try { pluginRegistry?.setStatus(pluginId, 'disabled_crashed') } catch {}
+        try { pluginPreferences?.updatePlugin(pluginId, { enabled: false }) } catch {}
+        pluginEnableOrder.delete(pluginId)
+        setTimeout(() => syncPluginHost(), 0)
+      }
+    },
+    getMemoryBudgetMb: activePluginCount => {
+      const perPlugin = pluginPreferencesSnapshot?.resources.memoryMbPerPlugin ?? 0
+      return perPlugin * activePluginCount
+    },
+  })
+  pluginCommandController = new PluginCommandController({
+    getContext: pluginId => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      return context ? {
+        enabled: context.enabled,
+        pluginsEnabled: context.pluginsEnabled,
+        commandIds: (context.manifest.contributes.commands ?? []).map(command => command.id),
+      } : null
+    },
+    dispatch: (pluginId, commandId) => pluginHostWindow?.invokeCommand(pluginId, commandId) ?? false,
+  })
+  pluginPanelViewController = new PluginPanelViewController({
+    preloadPath: join(__dirname, 'plugin-ui-preload.js'),
+    tokensCss,
+    getParentWindow: () => {
+      const parent = panelWindow
+      if (!parent || parent.isDestroyed()) return null
+      return {
+        isDestroyed: () => parent.isDestroyed(),
+        isVisible: () => parent.isVisible(),
+        addChildView: view => parent.contentView.addChildView(view as unknown as WebContentsView),
+        removeChildView: view => parent.contentView.removeChildView(view as unknown as WebContentsView),
+      }
+    },
+    createSession: partition => session.fromPartition(partition) as unknown as PluginPanelViewSession,
+    createView: options => new WebContentsView(options) as unknown as PluginPanelNativeView,
+    createToken: pluginId => {
+      const root = enabledPluginRoot(pluginId)
+      if (!root) throw new Error('Plugin is unavailable')
+      const token = randomUUID()
+      pluginRootsByToken.set(token, root)
+      return token
+    },
+    revokeToken: (_pluginId, token) => { pluginRootsByToken.delete(token) },
+    pluginRootForToken: token => pluginRootsByToken.get(token) ?? null,
+    messageGuard: pluginUiMessageGuard,
+    onApiRequest: (pluginId, request) => {
+      if (request.method === 'ui.postMessage') {
+        if (request.args.length !== 1) return { ok: false, error: 'invalid_request' }
+        const response = pluginHostWindow?.postUiMessageToWorker(pluginId, request.args[0])
+          ?? { ok: false as const, error: 'disabled' }
+        return { id: request.id, ...response }
+      }
+      return pluginBroker?.handle(pluginId, request) ?? { ok: false, error: 'disabled' }
+    },
+    onClosed: event => {
+      restorePluginPanelWindowSize(event.pluginId)
+      if (panelWindow && !panelWindow.isDestroyed()) {
+        panelWindow.webContents.send('plugin-panel-view-closed', event)
+      }
+    },
+    onBlockedRequest: () => {
+      const e2e = (globalThis as typeof globalThis & {
+        __agentPetsE2E?: { panelViewBlockedRequests?: number }
+      }).__agentPetsE2E
+      if (e2e) e2e.panelViewBlockedRequests = (e2e.panelViewBlockedRequests ?? 0) + 1
+    },
+  })
+
+  ipcMain.handle('plugin-feed-unread-count', event => {
+    assertTrustedIpcSender(event)
+    return pluginFeedController?.unreadCount() ?? 0
+  })
+  ipcMain.handle('plugin-badges-get', event => {
+    assertTrustedIpcSender(event, petWindow)
+    return pluginBadgeController?.list() ?? []
+  })
+  ipcMain.handle('plugin-skin-fallback-notify', (event, petIds: unknown) => {
+    assertTrustedIpcSender(event)
+    if (!Array.isArray(petIds) || petIds.length > 250 || petIds.some(petId => !isPluginSkinPetId(petId))) return 0
+    const currentlyEnabled = enabledPluginSkinRecords()
+    let added = 0
+    for (const petId of new Set(petIds as string[])) {
+      const info = pendingPluginSkinFallbacks.get(petId)
+      if (!info) continue
+      if (currentlyEnabled.has(petId)) {
+        pendingPluginSkinFallbacks.delete(petId)
+        continue
+      }
+      pendingPluginSkinFallbacks.delete(petId)
+      if (pluginFeedController?.addSystemNotification(
+        info.pluginId,
+        info.pluginName,
+        t('pluginSkinFallbackTitle'),
+        t('pluginSkinFallbackBody', {
+          plugin: info.pluginName[locale.value],
+          skin: info.skinName[locale.value],
+        }),
+      )) added += 1
+    }
+    if (added > 0) broadcastPluginFeedUnreadCount()
+    return added
+  })
+  ipcMain.handle('plugin-feed-complete', (event, itemId: unknown) => {
+    assertTrustedIpcSender(event, petWindow)
+    if (typeof itemId !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(itemId)) return false
+    return pluginFeedController?.complete(itemId) ?? false
+  })
+  ipcMain.handle('plugin-feed-open-link', async (event, itemId: unknown) => {
+    assertTrustedIpcSender(event)
+    if (typeof itemId !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(itemId)) return false
+    const item = pluginFeedController?.listNotifications().find(record => record.item.id === itemId)?.item
+    if (!item?.link || !pluginRuntimeContexts.has(item.pluginId)) return false
+    let url: URL
+    try { url = new URL(item.link) } catch { return false }
+    if (url.protocol !== 'https:' || url.username || url.password || url.port
+      || !isPluginLinkHostAllowed(item.pluginId, url.hostname.toLowerCase())) return false
+    try {
+      await shell.openExternal(url.href)
+      return true
+    } catch {
+      return false
+    }
+  })
+
+  ipcMain.handle('plugin-panel-snapshot', event => {
+    assertPluginPanelSender(event)
+    return pluginPanelSnapshot()
+  })
+  ipcMain.handle('plugin-command-invoke', (event, pluginId: unknown, commandId: unknown) => {
+    assertPluginPanelSender(event)
+    return pluginCommandController?.invoke(pluginId, commandId)
+      ?? { ok: false, error: 'disabled' }
+  })
+  ipcMain.handle('plugin-panel-view-open', async (event, pluginId: unknown, payload: unknown) => {
+    assertPluginPanelSender(event)
+    if (!isPluginPanelPluginId(pluginId) || !payload || typeof payload !== 'object' || Array.isArray(payload)
+      || pluginPanelViewOpenSequence >= Number.MAX_SAFE_INTEGER) return { ok: false, error: 'invalid_request' }
+    const bounds = payload as Record<string, unknown>
+    const openToken = ++pluginPanelViewOpenSequence
+    return openPluginPanelViewForPlugin(pluginId, openToken, bounds.frame, bounds.content)
+  })
+  ipcMain.handle('plugin-panel-view-open-from-pet', (event, pluginId: unknown) => {
+    if (!isTrustedIpcSender(event, petWindow) || !isPluginPanelPluginId(pluginId)) return false
+    const context = pluginRuntimeContexts.get(pluginId)
+    if (!context?.pluginsEnabled || !context.enabled || !context.manifest.contributes.panelView || !enabledPluginRoot(pluginId)) return false
+    showPanelWindow('settings', pluginId)
+    return true
+  })
+  ipcMain.on('plugin-panel-view-bounds', (event, payload: unknown) => {
+    assertPluginPanelSender(event)
+    if (!panelWindow || panelWindow.isDestroyed() || !pluginPanelViewController) return
+    const data = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : {}
+    const openToken = finiteNumber(data.openToken)
+    if (openToken === null || !Number.isSafeInteger(openToken)) return
+    if (!panelWindow.isVisible()) {
+      pluginPanelViewController.onPanelWindowHidden()
+      return
+    }
+    const contentBounds = panelWindow.getContentBounds()
+    const bounds = validatePluginPanelViewBounds(
+      readPluginPanelRect(data.frame) ?? { x: -1, y: -1, width: 0, height: 0 },
+      readPluginPanelRect(data.content) ?? { x: -1, y: -1, width: 0, height: 0 },
+      { width: contentBounds.width, height: contentBounds.height },
+    )
+    if (!bounds) {
+      pluginPanelViewController.close('renderer_unavailable', openToken)
+      return
+    }
+    pluginPanelViewController.setBounds(openToken, bounds)
+  })
+  ipcMain.on('plugin-panel-view-close', (event, openToken: unknown) => {
+    assertPluginPanelSender(event)
+    if (typeof openToken === 'number' && Number.isSafeInteger(openToken)) pluginPanelViewController?.close('closed', openToken)
+  })
+  ipcMain.handle('plugin-panel-api', (event, method: unknown, args: unknown) => {
+    if (event.senderFrame !== event.sender.mainFrame) return { ok: false, error: 'not_permitted' }
+    return pluginPanelViewController?.handleApiRequest(event.sender, method, args)
+      ?? Promise.resolve({ ok: false, error: 'disabled' })
+  })
+  ipcMain.handle('plugin-settings-get', (event, pluginId: unknown) => {
+    assertPluginPanelSender(event)
+    if (!isPluginPanelPluginId(pluginId)) return { ok: false, error: 'invalid_request' }
+    const context = pluginRuntimeContexts.get(pluginId)
+    if (!context || !pluginSettingsStore || !pluginSecretsStore) return { ok: false, error: 'plugin_not_found' }
+    if (!context.manifest.contributes.settings) return { ok: false, error: 'not_permitted' }
+    try {
+      const value: PluginPanelSettingsSnapshot = {
+        values: pluginSettingsStore.get(pluginId, context.manifest),
+        secrets: pluginSecretsStore.listConfigured(pluginId, context.manifest.permissions.secrets ?? []),
+      }
+      return { ok: true, value }
+    } catch (error) {
+      return { ok: false, error: error && typeof error === 'object' && 'code' in error && error.code === 'plugin_data_unsafe'
+        ? 'settings_invalid' : pluginPanelError(error) }
+    }
+  })
+  ipcMain.handle('plugin-settings-set', (event, pluginId: unknown, value: unknown) => {
+    assertPluginPanelSender(event)
+    if (!isPluginPanelPluginId(pluginId)) return { ok: false, error: 'invalid_request' }
+    const context = pluginRuntimeContexts.get(pluginId)
+    if (!context || !pluginSettingsStore) return { ok: false, error: 'plugin_not_found' }
+    if (!context.manifest.contributes.settings) return { ok: false, error: 'not_permitted' }
+    try {
+      const values = pluginSettingsStore.set(pluginId, context.manifest, value)
+      publishPluginSettingsChanged(pluginId, context.manifest, pluginSettingsStore,
+        (changedPluginId, changedValues) => pluginHostWindow?.notifySettingsChanged(changedPluginId, changedValues))
+      return { ok: true, value: values }
+    } catch (error) {
+      return { ok: false, error: error && typeof error === 'object' && 'code' in error && error.code === 'plugin_data_unsafe'
+        ? 'settings_invalid' : pluginPanelError(error) }
+    }
+  })
+  ipcMain.handle('plugin-secret-consent-get', event => {
+    assertPluginPanelSender(event)
+    if (!pluginSecretConsentStore) return { ok: false, error: 'plugin_service_unavailable' }
+    return { ok: true, value: pluginSecretConsentStore.hasAccepted() }
+  })
+  ipcMain.handle('plugin-secret-consent-accept', event => {
+    assertPluginPanelSender(event)
+    if (!pluginSecretConsentStore) return { ok: false, error: 'plugin_service_unavailable' }
+    try {
+      pluginSecretConsentStore.accept()
+      return { ok: true, value: true }
+    } catch {
+      return { ok: false, error: 'plugin_action_failed' }
+    }
+  })
+  ipcMain.handle('plugin-secret-set', (event, pluginId: unknown, key: unknown, value: unknown) => {
+    assertPluginPanelSender(event)
+    if (!isPluginPanelPluginId(pluginId) || typeof key !== 'string' || typeof value !== 'string') {
+      return { ok: false, error: 'invalid_request' }
+    }
+    const context = pluginRuntimeContexts.get(pluginId)
+    if (!context || !pluginSecretsStore) return { ok: false, error: 'plugin_not_found' }
+    const definition = context.manifest.contributes.settings?.properties[key]
+    const declared = context.manifest.permissions.secrets ?? []
+    if (!definition || definition.format !== 'secret' || !declared.includes(key)) return { ok: false, error: 'not_permitted' }
+    if (value.length > (definition.maxLength ?? 4_096)) return { ok: false, error: 'settings_invalid' }
+    if (value.length > 0 && pluginSecretConsentStore?.hasAccepted() !== true) {
+      return { ok: false, error: 'secret_consent_required' }
+    }
+    try {
+      pluginSecretsStore.set(pluginId, key, value, declared)
+      try {
+        if (pluginSettingsStore) {
+          publishPluginSettingsChanged(pluginId, context.manifest, pluginSettingsStore,
+            (changedPluginId, changedValues) => pluginHostWindow?.notifySettingsChanged(changedPluginId, changedValues))
+        }
+      } catch {}
+      return { ok: true, value: { configured: pluginSecretsStore.has(pluginId, key) } }
+    } catch (error) {
+      return { ok: false, error: error && typeof error === 'object' && 'code' in error && error.code === 'plugin_data_unsafe'
+        ? 'secret_unavailable' : pluginPanelError(error) }
+    }
+  })
+  ipcMain.handle('plugin-preferences-global-set', (event, patch: unknown) => {
+    assertPluginPanelSender(event)
+    if (!pluginPreferences || !isPluginPanelPreferencePatch(patch)) {
+      return { ok: false, error: pluginPreferences ? 'invalid_request' : 'plugin_service_unavailable' }
+    }
+    try {
+      const preferences = pluginPreferences.updateGlobal(patch)
+      syncPluginHost()
+      return { ok: true, value: preferences }
+    } catch (error) {
+      return { ok: false, error: pluginPanelError(error) }
+    }
+  })
+  ipcMain.handle('plugin-preferences-instance-set', (event, pluginId: unknown, patch: unknown) => {
+    assertPluginPanelSender(event)
+    if (!pluginRegistry || !pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
+    if (!isPluginPanelPluginId(pluginId) || !isPluginPanelPreferencePatch(patch)
+      || !pluginRegistry.list().some(entry => entry.id === pluginId)) {
+      return { ok: false, error: 'invalid_request' }
+    }
+    try {
+      if (patch.enabled === true && pluginRuntimeContexts.get(pluginId)?.enabled !== true) {
+        const limit = pluginPreferencesSnapshot?.resources.maxEnabledPlugins ?? 0
+        const enabledCount = [...pluginRuntimeContexts.values()].filter(context => context.enabled).length
+        if (!canEnablePluginWithinLimit(false, enabledCount, limit)) return { ok: false, error: 'too_many_enabled' }
+      }
+      const preferences = pluginPreferences.updatePlugin(pluginId, patch)
+      if (typeof patch.enabled === 'boolean') {
+        pluginRegistry.setStatus(pluginId, patch.enabled ? 'enabled' : 'installed')
+        if (patch.enabled) pluginEnableOrder.set(pluginId, nextPluginEnableOrder++)
+        else pluginEnableOrder.delete(pluginId)
+      }
+      syncPluginHost()
+      return { ok: true, value: preferences }
+    } catch (error) {
+      return { ok: false, error: pluginPanelError(error) }
+    }
+  })
+  ipcMain.handle('plugin-install-select', async (event) => {
+    assertPluginPanelSender(event)
+    if (!pluginRegistry || !panelWindow || panelWindow.isDestroyed()) {
+      return { ok: false, error: 'plugin_service_unavailable' }
+    }
+    if (dialogOpen) return { ok: false, error: 'dialog_unavailable' }
+    dialogOpen = true
+    let selection: Electron.OpenDialogReturnValue
+    try {
+      selection = await dialog.showOpenDialog(panelWindow, {
+        title: t('pluginNativePickerTitle'),
+        filters: [{ name: 'Agent Pets Plugins', extensions: ['agentpet-plugin'] }],
+        properties: ['openFile'],
+      })
+    } catch {
+      return { ok: false, error: 'plugin_action_failed' }
+    } finally {
+      dialogOpen = false
+    }
+    if (selection.canceled || selection.filePaths.length === 0) {
+      return { ok: false, error: 'cancelled', cancelled: true }
+    }
+    try {
+      const archivePath = selection.filePaths[0]
+      if (!archivePath) return { ok: false, error: 'invalid_archive' }
+      const stat = fs.lstatSync(archivePath)
+      if (!stat.isFile() || stat.isSymbolicLink()) return { ok: false, error: 'invalid_archive' }
+      if (stat.size > PLUGIN_ARCHIVE_SKIN_MAX_BYTES) return { ok: false, error: 'archive_too_large' }
+      const planned = pluginRegistry.planInstall(fs.readFileSync(archivePath))
+      if (!planned.ok) return { ok: false, error: planned.error }
+      if (planned.value.pluginId && planned.value.kind !== 'incompatible') {
+        while (pendingPluginPlanIds.size >= 20) {
+          const oldest = pendingPluginPlanIds.keys().next().value as string | undefined
+          if (oldest === undefined) break
+          pendingPluginPlanIds.delete(oldest)
+          pendingDeveloperFolders.delete(oldest)
+        }
+        pendingPluginPlanIds.set(planned.value.token, planned.value.pluginId)
+      }
+      return { ok: true, value: planned.value }
+    } catch {
+      return { ok: false, error: 'invalid_archive' }
+    }
+  })
+  ipcMain.handle('plugin-install-select-folder', async (event) => {
+    assertPluginPanelSender(event)
+    if (!pluginRegistry || !pluginPreferences || !panelWindow || panelWindow.isDestroyed()) {
+      return { ok: false, error: 'plugin_service_unavailable' }
+    }
+    if (pluginPreferences.get().developerMode !== true) return { ok: false, error: 'not_permitted' }
+    if (dialogOpen) return { ok: false, error: 'dialog_unavailable' }
+    dialogOpen = true
+    let selection: Electron.OpenDialogReturnValue
+    try {
+      selection = await dialog.showOpenDialog(panelWindow, {
+        title: t('pluginDeveloperFolderPickerTitle'),
+        properties: ['openDirectory'],
+      })
+    } catch {
+      return { ok: false, error: 'plugin_action_failed' }
+    } finally {
+      dialogOpen = false
+    }
+    if (selection.canceled || selection.filePaths.length === 0) {
+      return { ok: false, error: 'cancelled', cancelled: true }
+    }
+    try {
+      const sourceFolder = selection.filePaths[0]
+      if (!sourceFolder) return { ok: false, error: 'invalid_archive' }
+      const planned = pluginRegistry.planInstallDirectory(sourceFolder)
+      if (!planned.ok) return { ok: false, error: planned.error }
+      if (planned.value.pluginId && planned.value.kind !== 'incompatible') {
+        while (pendingPluginPlanIds.size >= 20) {
+          const oldest = pendingPluginPlanIds.keys().next().value as string | undefined
+          if (oldest === undefined) break
+          pendingPluginPlanIds.delete(oldest)
+          pendingDeveloperFolders.delete(oldest)
+        }
+        pendingPluginPlanIds.set(planned.value.token, planned.value.pluginId)
+        pendingDeveloperFolders.set(planned.value.token, sourceFolder)
+      }
+      return { ok: true, value: planned.value }
+    } catch {
+      return { ok: false, error: 'invalid_archive' }
+    }
+  })
+  ipcMain.handle('plugin-install-confirm', (event, token: unknown, acceptAdditionalPermissions: unknown) => {
+    assertPluginPanelSender(event)
+    if (!pluginRegistry || !pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
+    if (!isPluginPanelInstallConfirmation(token, acceptAdditionalPermissions)
+      || typeof acceptAdditionalPermissions !== 'boolean') return { ok: false, error: 'invalid_request' }
+    const pluginId = pendingPluginPlanIds.get(token)
+    const developerFolder = pendingDeveloperFolders.get(token)
+    if (!pluginId) return { ok: false, error: 'plan_not_found' }
+    try {
+      // Persist the default preference row before installation so an unsafe
+      // preference path cannot leave an installed plugin outside the panel.
+      pluginPreferences.updatePlugin(pluginId, {})
+    } catch (error) {
+      return { ok: false, error: pluginPanelError(error) }
+    }
+    const installed = pluginRegistry.install(token, acceptAdditionalPermissions)
+    if (!installed.ok) return { ok: false, error: installed.error }
+    pendingPluginPlanIds.delete(token)
+    pendingDeveloperFolders.delete(token)
+    if (developerFolder) developerSourceFolders.set(pluginId, developerFolder)
+    else {
+      developerSourceFolders.delete(pluginId)
+      pluginDeveloperModeWatcher?.unwatch(pluginId)
+    }
+    syncPluginHost()
+    const snapshot = pluginPanelSnapshot()
+    if (!snapshot.ok) return snapshot
+    const plugin = snapshot.value.plugins.find(item => item.id === pluginId)
+    return plugin ? { ok: true, value: plugin } : { ok: false, error: 'plugin_action_failed' }
+  })
+  ipcMain.handle('plugin-remove', (event, pluginId: unknown, keepData: unknown) => {
+    assertPluginPanelSender(event)
+    if (!pluginRegistry || !pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
+    if (!isPluginPanelPluginId(pluginId) || typeof keepData !== 'boolean') return { ok: false, error: 'invalid_request' }
+    if (!pluginRegistry.list().some(entry => entry.id === pluginId)) return { ok: false, error: 'plugin_not_found' }
+    try { pluginSecretsStore?.remove(pluginId) } catch (error) {
+      return { ok: false, error: pluginPanelError(error) }
+    }
+    if (!keepData) {
+      try { pluginPreferences.updatePlugin(pluginId, {}) } catch (error) {
+        return { ok: false, error: pluginPanelError(error) }
+      }
+    }
+    const removed = pluginRegistry.remove(pluginId, keepData)
+    if (!removed.ok) return { ok: false, error: removed.error }
+    developerSourceFolders.delete(pluginId)
+    pluginDeveloperModeWatcher?.unwatch(pluginId)
+    pluginBroker?.removePlugin(pluginId, keepData)
+    pluginHostGrantController?.clearPlugin(pluginId)
+    if (!keepData) {
+      try { pluginPreferences.removePlugin(pluginId) } catch (error) {
+        return { ok: false, error: pluginPanelError(error) }
+      }
+      pluginFeedController?.clear(pluginId)
+    }
+    syncPluginHost()
+    return { ok: true, value: removed.value }
+  })
+  ipcMain.handle('plugin-diagnostics', (event, pluginId: unknown) => {
+    assertPluginPanelSender(event)
+    if (!isPluginPanelPluginId(pluginId) || !pluginRegistry?.list().some(entry => entry.id === pluginId)) {
+      return { ok: false, error: 'invalid_request' }
+    }
+    return {
+      ok: true,
+      value: {
+        logs: pluginBroker?.listLogs(pluginId) ?? [],
+        diagnostics: pluginBroker?.listDiagnostics(pluginId) ?? [],
+      },
+    }
+  })
+  ipcMain.handle('plugin-notifications-list', event => {
+    assertPluginPanelSender(event)
+    return { ok: true, value: pluginFeedController?.listNotifications() ?? [] }
+  })
+  ipcMain.handle('plugin-notifications-read', (event, itemId: unknown) => {
+    assertPluginPanelSender(event)
+    if (!isPluginPanelNotificationId(itemId)) return { ok: false, error: 'invalid_request' }
+    return { ok: true, value: { read: pluginFeedController?.markRead(itemId) ?? false } }
+  })
+  ipcMain.handle('plugin-notifications-clear', (event, pluginId: unknown) => {
+    assertPluginPanelSender(event)
+    if (pluginId !== undefined && !isPluginPanelPluginId(pluginId)) return { ok: false, error: 'invalid_request' }
+    return { ok: true, value: { removed: pluginFeedController?.clear(pluginId) ?? 0 } }
+  })
+}
+
 function clearEdgeDwell(): void {
   if (edgeDwellHandle) clearTimeout(edgeDwellHandle)
   edgeDwellHandle = null
@@ -496,6 +1648,7 @@ function petModeState(): PetWindowModeState {
 }
 
 function broadcastPetWindowMode(): void {
+  pluginFeedController?.onVisibilityChanged()
   const state = petModeState()
   for (const window of [petWindow, panelWindow]) {
     if (window && !window.isDestroyed()) {
@@ -812,6 +1965,8 @@ function createPetWindow() {
   })
   petCaptureProtectionApplied = null
 
+  petWindow.once('ready-to-show', syncPluginHost)
+
   secureRendererWindow(petWindow)
 
   petWindow.setIgnoreMouseEvents(false)
@@ -839,10 +1994,12 @@ function createPetWindow() {
     hidePetWindow()
   })
   petWindow.on('show', () => {
+    pluginFeedController?.onVisibilityChanged()
     desktopTray?.rebuild()
     schedulePermissionUiSync()
   })
   petWindow.on('hide', () => {
+    pluginFeedController?.onVisibilityChanged()
     desktopTray?.rebuild()
     schedulePermissionUiSync()
   })
@@ -895,6 +2052,28 @@ function createPanelWindow() {
     },
   })
 
+  panelWindow.on('hide', () => pluginPanelViewController?.onPanelWindowHidden())
+  panelWindow.webContents.on('did-start-loading', () => pluginPanelViewController?.onPanelRendererReload())
+  panelWindow.on('resize', () => {
+    if (!panelWindow || panelWindow.isDestroyed()) return
+    const pluginId = pluginPanelWindowSizer.activePluginId()
+    if (!pluginId) return
+    const [width, height] = panelWindow.getSize()
+    if (programmaticPluginPanelSize) {
+      if (programmaticPluginPanelSize.width === width && programmaticPluginPanelSize.height === height) {
+        programmaticPluginPanelSize = null
+        if (pluginPanelResizeResetTimer) clearTimeout(pluginPanelResizeResetTimer)
+        pluginPanelResizeResetTimer = null
+        return
+      }
+      programmaticPluginPanelSize = null
+      if (pluginPanelResizeResetTimer) clearTimeout(pluginPanelResizeResetTimer)
+      pluginPanelResizeResetTimer = null
+    }
+    const workArea = screen.getDisplayMatching(panelWindow.getBounds()).workArea
+    pluginPanelWindowSizer.recordManualSize(pluginId, { width, height }, workArea)
+  })
+
   secureRendererWindow(panelWindow)
 
   applyMacFullscreenVisibilityPolicy()
@@ -917,6 +2096,7 @@ function createPanelWindow() {
   })
 
   panelWindow.on('closed', () => {
+    pluginPanelViewController?.close()
     if (panelBlurHideHandle) clearTimeout(panelBlurHideHandle)
     panelBlurHideHandle = null
     panelWindow = null
@@ -966,6 +2146,61 @@ function computePanelBounds(height: number, width = PANEL_WIDTH) {
   y = clamp(y, workArea.y, maxY)
 
   return { x, y, width: panelWidth, height }
+}
+
+function setPluginPanelWindowBounds(bounds: ReturnType<typeof computePanelBounds>): void {
+  if (!panelWindow || panelWindow.isDestroyed()) return
+  programmaticPluginPanelSize = { width: bounds.width, height: bounds.height }
+  if (pluginPanelResizeResetTimer) clearTimeout(pluginPanelResizeResetTimer)
+  pluginPanelResizeResetTimer = setTimeout(() => {
+    programmaticPluginPanelSize = null
+    pluginPanelResizeResetTimer = null
+  }, 500)
+  panelWindow.setBounds(bounds)
+}
+
+function restorePluginPanelWindowSize(pluginId: string): void {
+  if (pluginPanelWindowSizer.activePluginId() !== pluginId) return
+  const baseSize = pluginPanelWindowSizer.finish()
+  if (!baseSize || !panelWindow || panelWindow.isDestroyed()) return
+  panelWindow.setResizable(false)
+  panelWindow.setMinimumSize(0, 0)
+  panelWindow.setMaximumSize(0, 0)
+  setPluginPanelWindowBounds(computePanelBounds(baseSize.height, baseSize.width))
+}
+
+async function openPluginPanelViewForPlugin(
+  pluginId: string,
+  openToken: number,
+  frameValue: unknown,
+  contentValue: unknown,
+) {
+  const context = pluginRuntimeContexts.get(pluginId)
+  const panelView = context?.manifest.contributes.panelView
+  if (!isPluginPanelPluginId(pluginId) || !panelView || !context?.pluginsEnabled || !context.enabled
+    || !enabledPluginRoot(pluginId) || !panelWindow || panelWindow.isDestroyed() || !pluginPanelViewController) {
+    return { ok: false as const, error: panelView ? 'disabled' : 'not_permitted' }
+  }
+  if (!panelWindow.isVisible()) return { ok: false as const, error: 'panel_unavailable' }
+  if (!pluginPanelViewController.canOpenToken(openToken)) return { ok: false as const, error: 'invalid_request' }
+  const contentBounds = panelWindow.getContentBounds()
+  const bounds = validatePluginPanelViewBounds(
+    readPluginPanelRect(frameValue) ?? { x: -1, y: -1, width: 0, height: 0 },
+    readPluginPanelRect(contentValue) ?? { x: -1, y: -1, width: 0, height: 0 },
+    { width: contentBounds.width, height: contentBounds.height },
+  )
+  if (!bounds) return { ok: false as const, error: 'panel_unavailable' }
+  pluginPanelViewController.close('replaced')
+  const [currentWidth, currentHeight] = panelWindow.getSize()
+  const workArea = screen.getDisplayMatching(panelWindow.getBounds()).workArea
+  const size = pluginPanelWindowSizer.begin(pluginId, { width: currentWidth, height: currentHeight }, panelView.preferredSize, workArea)
+  panelWindow.setResizable(true)
+  panelWindow.setMinimumSize(Math.min(320, workArea.width), Math.min(240, workArea.height))
+  panelWindow.setMaximumSize(Math.min(960, workArea.width), Math.min(800, workArea.height))
+  setPluginPanelWindowBounds(computePanelBounds(size.height, size.width))
+  const result = await pluginPanelViewController.open({ pluginId, entry: panelView.entry, openToken, bounds })
+  if (!result.ok) restorePluginPanelWindowSize(pluginId)
+  return result
 }
 
 // Status-line count can flap as agents come and go, so coalesce the writes
@@ -1020,8 +2255,9 @@ function hidePetWindow(): void {
   desktopTray?.rebuild()
 }
 
-function showPanelWindow(view: 'sessions' | 'settings' = 'sessions'): void {
+function showPanelWindow(view: 'sessions' | 'settings' = 'sessions', pluginViewPluginId?: string): void {
   if (!ensureDesktopWindows() || !panelWindow) return
+  pluginPanelViewController?.close()
   if (panelBlurHideHandle) clearTimeout(panelBlurHideHandle)
   panelBlurHideHandle = null
   windowsFullscreenAutoHiddenPanel = false
@@ -1040,6 +2276,7 @@ function showPanelWindow(view: 'sessions' | 'settings' = 'sessions'): void {
     if (!panelWindow || panelWindow.isDestroyed()) return
     panelWindow.webContents.send('panel-opened')
     if (view === 'settings') panelWindow.webContents.send('panel-open-settings')
+    if (view === 'settings' && pluginViewPluginId) panelWindow.webContents.send('panel-open-plugin-view', pluginViewPluginId)
   }
   if (panelWindow.webContents.isLoading()) {
     panelWindow.webContents.once('did-finish-load', notifyRenderer)
@@ -1179,6 +2416,7 @@ function schedulePanelBlurHide(): void {
 
 function applyWindowsFullscreenAutoHideState(state: WindowsFullscreenState): void {
   windowsFullscreenState = state
+  pluginFeedController?.onVisibilityChanged()
   if (process.platform !== 'win32') return
 
   const preferences = syncDesktopVisibilityCapabilities() ?? currentDesktopPreferences()
@@ -1227,8 +2465,10 @@ function createWindowsFullscreenServices(): void {
 
 function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   if (!desktopPreferences) throw new Error('Desktop preferences are not ready')
-  const achievementsWereEnabled = desktopPreferences.get().achievementsEnabled
+  const previousPreferences = desktopPreferences.get()
+  const achievementsWereEnabled = previousPreferences.achievementsEnabled
   const preferences = desktopPreferences.update(patch)
+  if (previousPreferences.dndEnabled !== preferences.dndEnabled) pluginFeedController?.onVisibilityChanged()
   setLocale(preferences.locale)
   if (!preferences.edgeModeEnabled && petWindowMode === 'edge') applyNormalPetBounds()
   applyPetCaptureProtection()
@@ -1510,7 +2750,7 @@ function reconcileAchievementsFromHistory(): void {
 }
 
 function isProgressionPetId(value: unknown): value is string {
-  return typeof value === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(value)
+  return isValidPetId(value, 128)
 }
 
 function setActiveProgressionPet(petId: string): ProgressionSnapshot | null {
@@ -1625,6 +2865,19 @@ function createDesktopServices(): void {
       openPanel: () => showPanelWindow('sessions'),
       openSettings: () => showPanelWindow('settings'),
       getPetMode: () => petWindowMode,
+      getPluginCommands: pluginTrayCommands,
+      invokePluginCommand: (pluginId, commandId) => {
+        const result = pluginCommandController?.invoke(pluginId, commandId)
+        if (result && !result.ok) pluginBroker?.recordSystemDiagnostic(pluginId, result.error, 'command.tray')
+      },
+      onPluginCommandsOmitted: pluginIds => {
+        if (pluginIds.length === 0) return
+        for (const pluginId of pluginIds) {
+          if (diagnosedPluginTrayOverflowIds.has(pluginId)) continue
+          diagnosedPluginTrayOverflowIds.add(pluginId)
+          pluginBroker?.recordSystemDiagnostic(pluginId, 'too_many_enabled', 'plugin.tray')
+        }
+      },
       toggleMiniMode,
       quit: () => app.quit(),
     },
@@ -1645,7 +2898,7 @@ function availablePetIds(): Set<string> {
     const raw = JSON.parse(fs.readFileSync(getPetsJsonPath(), 'utf-8'))
     if (Array.isArray(raw)) {
       for (const pet of raw) {
-        if (pet && typeof pet.id === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(pet.id)) ids.add(pet.id)
+        if (pet && isValidRegularPetId(pet.id, 128)) ids.add(pet.id)
       }
     }
   } catch {}
@@ -1653,16 +2906,25 @@ function availablePetIds(): Set<string> {
   const customBase = path.resolve(hookScriptDeployPath(), 'custom')
   try {
     for (const entry of fs.readdirSync(customBase, { withFileTypes: true })) {
-      if (!entry.isDirectory() || !/^[A-Za-z0-9._-]{1,128}$/.test(entry.name)) continue
+      if (!entry.isDirectory() || !isValidRegularPetId(entry.name, 128)) continue
       const petJsonPath = safeJoin(customBase, entry.name, 'pet.json')
       if (!petJsonPath || !fs.existsSync(petJsonPath)) continue
       try {
         const pet = JSON.parse(fs.readFileSync(petJsonPath, 'utf-8'))
         const id = typeof pet.id === 'string' ? pet.id : entry.name
-        if (/^[A-Za-z0-9._-]{1,128}$/.test(id)) ids.add(id)
+        if (isValidRegularPetId(id, 128)) ids.add(id)
       } catch {}
     }
   } catch {}
+  const pluginSkinIds = availablePluginSkinPetIds(
+    [...pluginRuntimeContexts].map(([pluginId, context]) => ({
+      pluginId,
+      enabled: context.enabled,
+      skinIds: (context.manifest.contributes.skins ?? []).map(skin => skin.id),
+    })),
+    pluginPreferencesSnapshot?.pluginsEnabled === true,
+  )
+  for (const petId of pluginSkinIds) ids.add(petId)
   ids.add('aang-airbender')
   return ids
 }
@@ -1748,6 +3010,7 @@ app.whenReady().then(() => {
     join(app.getPath('userData'), 'project-mcp-registry.json'),
   )
   createProjectRoutingServices()
+  createPluginServices()
   const permissionToken = ensurePermissionToken()
   const presentationToken = ensurePresentationToken()
   configureSecureProtocol()
@@ -1761,6 +3024,7 @@ app.whenReady().then(() => {
   powerMonitor.on('on-ac', broadcastPowerSaveState)
   broadcastPowerSaveState()
   createPresentationServices(presentationToken)
+  syncPluginHost()
   screen.on('display-added', rehomePetWindowForDisplayChange)
   screen.on('display-removed', rehomePetWindowForDisplayChange)
   screen.on('display-metrics-changed', rehomePetWindowForDisplayChange)
@@ -2081,6 +3345,7 @@ app.whenReady().then(() => {
   ipcMain.on('presentation-status-update', (event, payload: unknown) => {
     if (!petWindow || !isTrustedIpcSender(event, petWindow)) return
     presentationStatusProjection = normalizePresentationStatus(payload)
+    pluginAgentStatusController?.update(presentationStatusProjection)
   })
 
   ipcMain.handle('progression-init', (event, petId?: unknown) => {
@@ -2323,7 +3588,7 @@ app.whenReady().then(() => {
     if (!/^[a-f0-9]{32}$/.test(projectId)) return { ok: false, error: 'invalid_project' }
     if (petId === undefined) return { ok: false, error: 'invalid_pet' }
     const available = availablePetIds()
-    if (petId !== null && (!/^[A-Za-z0-9._-]{1,128}$/.test(petId) || !available.has(petId))) {
+    if (petId !== null && (!isValidPetId(petId, 128) || !available.has(petId))) {
       return { ok: false, error: 'invalid_pet' }
     }
     try {
@@ -2485,6 +3750,7 @@ app.whenReady().then(() => {
       folder: string
       builtIn: boolean
       behaviorManifest?: SanitizedPetBehaviorManifest
+      pluginSkin?: { pluginId: string; pluginName: string; spriteUrl: string; cacheKey: string; kind: 'person' | 'animal' }
     }> = []
     try {
       const raw = fs.readFileSync(builtinPath, 'utf-8')
@@ -2507,6 +3773,7 @@ app.whenReady().then(() => {
       folder: string
       builtIn: boolean
       behaviorManifest?: SanitizedPetBehaviorManifest
+      pluginSkin?: { pluginId: string; pluginName: string; spriteUrl: string; cacheKey: string; kind: 'person' | 'animal' }
     }> = []
     if (fs.existsSync(customBase)) {
       const entries = fs.readdirSync(customBase, { withFileTypes: true })
@@ -2530,7 +3797,45 @@ app.whenReady().then(() => {
       }
     }
 
-    return [...builtin, ...custom]
+    const pluginSkins: Array<{
+      id: string
+      displayName: string
+      folder: string
+      builtIn: boolean
+      behaviorManifest?: SanitizedPetBehaviorManifest
+      pluginSkin: { pluginId: string; pluginName: string; spriteUrl: string; cacheKey: string; kind: 'person' | 'animal' }
+    }> = []
+    if (pluginPreferencesSnapshot?.pluginsEnabled) {
+      for (const [pluginId, context] of pluginRuntimeContexts) {
+        if (!context.enabled) continue
+        const root = enabledPluginRoot(pluginId)
+        if (!root) continue
+        for (const skin of context.manifest.contributes.skins ?? []) {
+          const id = createPluginSkinPetId(pluginId, skin.id)
+          if (!id) continue
+          const image = readRegularFileWithin(root, skin.spritesheet, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES)
+          if (!image || !rasterContentType(image)) continue
+          const encodedPath = skin.spritesheet.split('/').map(segment => encodeURIComponent(segment)).join('/')
+          const behaviorManifest = parsePetBehaviorManifest(skin.behaviorManifest)
+          pluginSkins.push({
+            id,
+            displayName: skin.displayName[locale.value],
+            folder: '',
+            builtIn: false,
+            ...(behaviorManifest ? { behaviorManifest } : {}),
+            pluginSkin: {
+              pluginId,
+              pluginName: context.manifest.name[locale.value],
+              spriteUrl: `agent-pets://plugin/${pluginId}/${encodedPath}`,
+              cacheKey: `${pluginId}:${pluginRegistry?.list().find(entry => entry.id === pluginId)?.currentVersion ?? ''}:${skin.spritesheet}`,
+              kind: skin.kind,
+            },
+          })
+        }
+      }
+    }
+
+    return [...builtin, ...custom, ...pluginSkins]
   })
 
   ipcMain.handle('add-custom-pet', (event, petData: unknown) => {
@@ -2627,33 +3932,37 @@ app.whenReady().then(() => {
         return { ok: false, error: 'Zip must be no larger than 10 MB' }
       }
 
-      let entryCount = 0
-      let uncompressedBytes = 0
-      const entries = unzipSync(new Uint8Array(zipBuf), {
-        filter: (entry) => {
-          entryCount += 1
-          if (entryCount > MAX_PET_ZIP_ENTRIES) {
-            throw new Error('Zip contains too many entries')
-          }
-          if (!Number.isFinite(entry.originalSize) || entry.originalSize < 0) {
-            throw new Error('Zip contains an invalid entry size')
-          }
-          uncompressedBytes += entry.originalSize
-          if (uncompressedBytes > MAX_PET_UNCOMPRESSED_BYTES) {
-            throw new Error('Zip expands beyond the 25 MB safety limit')
-          }
-          const baseName = path.basename(entry.name)
-          return /^pet\.json$/i.test(baseName) || /\.(webp|png|jpe?g)$/i.test(baseName)
-        },
+      const guarded = guardArchive(new Uint8Array(zipBuf), {
+        maxTotalBytes: MAX_PET_UNCOMPRESSED_BYTES,
+        maxFileBytes: MAX_PET_UNCOMPRESSED_BYTES,
+        maxFiles: MAX_PET_ZIP_ENTRIES,
+        allowedExtensions: ['.json', '.webp', '.png', '.jpg', '.jpeg'],
+        mode: 'compat',
+        includePath: relativePath => !relativePath.split('/').includes('__MACOSX')
+          && !path.basename(relativePath).startsWith('._')
+          && (/(^|\/)pet\.json$/i.test(relativePath) || /\.(webp|png|jpe?g)$/i.test(relativePath)),
       })
+      if (!guarded.ok) {
+        const error = guarded.error === 'file_limit_exceeded'
+          ? 'Zip contains too many entries'
+          : guarded.error === 'total_size_exceeded' || guarded.error === 'file_size_exceeded'
+            ? 'Zip expands beyond the 25 MB safety limit'
+            : guarded.error === 'unsafe_path' || guarded.error === 'duplicate_path'
+              ? 'Zip contains an unsafe or duplicate path'
+              : 'Invalid zip archive'
+        return { ok: false, error }
+      }
+      const entries = guarded.files
+      const entryNames = [...entries.keys()]
 
-      const petJsonName = Object.keys(entries).find((name) => /(^|\/)pet\.json$/i.test(name))
+      const petJsonName = entryNames.find((name) => /(^|\/)pet\.json$/i.test(name))
       if (!petJsonName) return { ok: false, error: 'No pet.json found in this zip' }
-      if (entries[petJsonName].byteLength > MAX_PET_JSON_BYTES) {
+      const petJsonBytes = entries.get(petJsonName)
+      if (!petJsonBytes || petJsonBytes.byteLength > MAX_PET_JSON_BYTES) {
         return { ok: false, error: 'pet.json exceeds the 256 KB safety limit' }
       }
 
-      const petData = JSON.parse(Buffer.from(entries[petJsonName]).toString('utf-8'))
+      const petData = JSON.parse(Buffer.from(petJsonBytes).toString('utf-8'))
       const rawId = String(petData.id || petData.displayName || `imported-${Date.now()}`)
       const safeId = sanitizePetId(rawId) || sanitizePetId(`pet-${Date.now()}`)
       if (!safeId) return { ok: false, error: 'Could not derive a valid pet id' }
@@ -2663,10 +3972,11 @@ app.whenReady().then(() => {
         ? path.basename(String(petData.spritesheetPath)).toLowerCase()
         : null
       const spriteName =
-        Object.keys(entries).find((name) => path.basename(name).toLowerCase() === wantedBase) ??
-        Object.keys(entries).find((name) => imageExt.test(name))
+        entryNames.find((name) => path.basename(name).toLowerCase() === wantedBase) ??
+        entryNames.find((name) => imageExt.test(name))
       if (!spriteName) return { ok: false, error: 'No spritesheet image found in this zip' }
-      const spriteData = entries[spriteName]
+      const spriteData = entries.get(spriteName)
+      if (!spriteData) return { ok: false, error: 'No spritesheet image found in this zip' }
       if (spriteData.byteLength > MAX_PET_IMAGE_BYTES) {
         return { ok: false, error: 'Spritesheet exceeds the 20 MB safety limit' }
       }
@@ -2748,6 +4058,22 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  pluginPanelViewController?.close()
+  pluginPanelViewController = null
+  pluginDeveloperModeWatcher?.destroy()
+  pluginDeveloperModeWatcher = null
+  pluginBroker?.destroy()
+  pluginBroker = null
+  pluginFeedController = null
+  pluginAgentStatusController?.destroy()
+  pluginAgentStatusController = null
+  pluginSecretsStore = null
+  pluginSecretConsentStore = null
+  pluginSettingsStore = null
+  pluginRuntimeContexts.clear()
+  pluginPreferencesSnapshot = null
+  pluginHostWindow?.close()
+  pluginHostWindow = null
   windowsFullscreenDetector?.stop()
   windowsFullscreenDetector = null
   if (panelBlurHideHandle) clearTimeout(panelBlurHideHandle)

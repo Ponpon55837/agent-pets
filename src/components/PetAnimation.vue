@@ -396,11 +396,12 @@ async function loadImage() {
 
   const targetId = pet ? id : 'qitian-dasheng'
 
-  const cached = imageCache.get(targetId)
+  const imageCacheKey = pet?.pluginSkin?.cacheKey ?? targetId
+  const cached = imageCache.get(imageCacheKey)
   if (cached) {
     imgRef.value = cached
-    auraTint = auraTintCache.get(targetId) || deriveAuraTint(cached)
-    auraTintCache.set(targetId, auraTint)
+    auraTint = auraTintCache.get(imageCacheKey) || deriveAuraTint(cached)
+    auraTintCache.set(imageCacheKey, auraTint)
     currentFrame = 0
     draw()
     return
@@ -408,7 +409,9 @@ async function loadImage() {
 
   const img = new Image()
 
-  if (pet && !pet.builtIn) {
+  if (pet?.pluginSkin) {
+    img.src = pet.pluginSkin.spriteUrl
+  } else if (pet && !pet.builtIn) {
     const fileUrl = await window.electronAPI?.getCustomPetSprite(targetId)
     if (!fileUrl) return
     img.src = fileUrl
@@ -417,10 +420,10 @@ async function loadImage() {
   }
 
   img.onload = () => {
-    imageCache.set(targetId, img)
+    imageCache.set(imageCacheKey, img)
     imgRef.value = img
     auraTint = deriveAuraTint(img)
-    auraTintCache.set(targetId, auraTint)
+    auraTintCache.set(imageCacheKey, auraTint)
     currentFrame = 0
     draw()
     if (props.autonomousBehavior === 'walk' || props.autonomousBehavior === 'sleep') {
@@ -524,6 +527,12 @@ function startAnimation() {
 }
 
 watch(() => props.petId, () => {
+  currentFrame = 0
+  loadImage()
+  startAnimation()
+})
+
+watch(() => store.pets.find(pet => pet.id === props.petId)?.pluginSkin?.cacheKey, () => {
   currentFrame = 0
   loadImage()
   startAnimation()

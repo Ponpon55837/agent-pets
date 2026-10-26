@@ -64,7 +64,7 @@
 | **拖曳**寵物     | 移動到新位置（重開 app 後會保留）                                |
 | **右鍵點擊**     | 在 Settings 開啟後可隱藏寵物（Permission 控制項仍可互動）        |
 
-系統匣選單可以顯示／隱藏寵物、開啟面板或 Settings、切換 Mini／Edge Peek 模式／勿擾模式／音效／通知、在打包版本設定登入時啟動、以系統匣圖示標示待處理狀態，以及結束 app。關閉或隱藏寵物視窗後，hooks 與背景狀態仍會運作，直到選擇 **Quit**。
+系統匣選單可以顯示／隱藏寵物、開啟面板或 Settings、切換 Mini／Edge Peek 模式／勿擾模式／音效／通知、在打包版本設定登入時啟動、從 **插件** 子選單執行已啟用插件的指令、以系統匣圖示標示待處理狀態，以及結束 app。關閉或隱藏寵物視窗後，hooks 與背景狀態仍會運作，直到選擇 **Quit**。
 
 寵物下方有一個浮動狀態列，最多顯示 **3 行**，每行對應一個目前活躍的工具家族（Codex / Claude / OpenCode）。同一工具的 CLI 跟 Desktop 版本會合併成一行顯示（例如 `Claude (CLI+Desktop) · Thinking`）。當沒有任何工具在跑時，會顯示一行寵物整體的 idle/offline 狀態。
 
@@ -239,6 +239,12 @@ Setup Wizard 會讀取 runtime Agent Adapter registry，並在你點擊按鈕時
 設定完成的 Adapter 可以點 **Test**，透過目前 app 經 token 驗證的本機 HTTP 接收器送出一筆短暫事件。測試通過會同時驗證 HTTP 204、Adapter 選擇、canonical mapping 與 renderer 收到事件；它不會啟動編程工具，也不代表該工具本身已主動觸發 hook。Generic HTTP 永遠是 observe-only，不能回覆權限。
 
 > 註：目前沒有獨立的「Codex Desktop」hook 安裝項目——只有 Codex CLI 的 hooks 有接上。
+
+## 插件
+
+插件可提供寵物通知、反應、面板與 Tray 指令、狀態徽章、可選的沙箱面板頁，以及可套用的寵物外觀。在 **Settings → Plugins** 安裝 `.agentpet-plugin` 套件；開發者可開啟 **開發者模式** 載入本機資料夾。安裝前請檢查插件要求的權限與貢獻。插件頁面與背景程式都視為不受信任：沒有 Node.js、檔案系統或 shell 存取，網路請求只能送到核准的 HTTPS 網域。插件網路請求不會送出或儲存 Cookie。密鑰由 App 的受保護儲存加密，設定快照不會回傳密鑰值。此版本沒有線上插件目錄或發布者簽章驗證。
+
+請參閱[插件開發索引](docs/plugins/README.zh-TW.md)、[10 分鐘入門](docs/plugins/getting-started.zh-TW.md)、[安全模型](docs/plugins/security.zh-TW.md)、[API 參考](docs/plugins/api-reference.zh-TW.md)與[範例](docs/plugins/examples.zh-TW.md)。
 
 ---
 

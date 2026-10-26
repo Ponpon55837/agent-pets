@@ -91,6 +91,9 @@ jobs:
       # 不走 pnpm build：其 prebuild 會清理本機 Agent Pets 程序，CI 不需要
       - run: pnpm exec vite build
 
+      - name: Check plugin panel tokens bundle
+        run: pnpm check:bundle
+
       - run: pnpm exec electron-builder ${{ matrix.builder-args }} --publish never
 
       - uses: actions/upload-artifact@v7

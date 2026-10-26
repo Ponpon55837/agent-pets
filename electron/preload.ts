@@ -5,8 +5,24 @@ import type { ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
-import type { PetBehaviorManifest } from '../src/types/pet'
+import type { PetBehaviorManifest, PluginSkinPetSource } from '../src/types/pet'
 import type { PresentationIntent, PresentationStatusUpdate } from '../src/types/presentation'
+import type {
+  PluginBadgeView,
+  PluginBrokerDiagnostic,
+  PluginBrokerLogEntry,
+  PluginFeedItem,
+  PluginGlobalPreferencesPatch,
+  PluginInstallPlan,
+  PluginNotificationRecord,
+  PluginPanelPlugin,
+  PluginPanelSettingsSnapshot,
+  PluginPanelResult,
+  PluginPanelSnapshot,
+  PluginPanelViewClosedEvent,
+  PluginPreferences,
+  PluginSettingScalar,
+} from '../src/types/plugin.ts'
 import type {
   ProjectMcpRegistrySnapshot,
   ProjectMcpRemovalSummary,
@@ -34,6 +50,66 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => {
       ipcRenderer.removeListener('presentation-intent', handler)
     }
+  },
+  onPluginFeedItem: (callback: (item: PluginFeedItem) => void) => {
+    const handler = (_event: unknown, item: PluginFeedItem) => callback(item)
+    ipcRenderer.on('plugin-feed-item', handler)
+    return () => {
+      ipcRenderer.removeListener('plugin-feed-item', handler)
+    }
+  },
+  onPluginFeedUnreadCount: (callback: (count: number) => void) => {
+    const handler = (_event: unknown, count: number) => callback(count)
+    ipcRenderer.on('plugin-feed-unread-count', handler)
+    return () => {
+      ipcRenderer.removeListener('plugin-feed-unread-count', handler)
+    }
+  },
+  getPluginFeedUnreadCount: (): Promise<number> => ipcRenderer.invoke('plugin-feed-unread-count'),
+  getPluginBadges: (): Promise<PluginBadgeView[]> => ipcRenderer.invoke('plugin-badges-get'),
+  onPluginBadgesChanged: (callback: (badges: PluginBadgeView[]) => void) => {
+    const handler = (_event: unknown, badges: PluginBadgeView[]) => callback(badges)
+    ipcRenderer.on('plugin-badges-updated', handler)
+    return () => ipcRenderer.removeListener('plugin-badges-updated', handler)
+  },
+  onPluginSkinsChanged: (callback: (removedPetIds: string[]) => void) => {
+    const handler = (_event: unknown, petIds: string[]) => callback(petIds)
+    ipcRenderer.on('plugin-skins-changed', handler)
+    return () => ipcRenderer.removeListener('plugin-skins-changed', handler)
+  },
+  notifyPluginSkinFallback: (petIds: string[]): Promise<number> => ipcRenderer.invoke('plugin-skin-fallback-notify', petIds),
+  completePluginFeed: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-complete', itemId),
+  openPluginFeedLink: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-open-link', itemId),
+  getPluginPanelSnapshot: (): Promise<PluginPanelResult<PluginPanelSnapshot>> => ipcRenderer.invoke('plugin-panel-snapshot'),
+  invokePluginCommand: (pluginId: string, commandId: string): Promise<PluginPanelResult<{ accepted: true }>> => ipcRenderer.invoke('plugin-command-invoke', pluginId, commandId),
+  openPluginPanelView: (pluginId: string, frame: unknown, content: unknown): Promise<PluginPanelResult<{ opened: true; openToken: number }>> => ipcRenderer.invoke('plugin-panel-view-open', pluginId, { frame, content }),
+  closePluginPanelView: (openToken: number): void => ipcRenderer.send('plugin-panel-view-close', openToken),
+  setPluginPanelViewBounds: (openToken: number, frame: unknown, content: unknown): void => ipcRenderer.send('plugin-panel-view-bounds', { openToken, frame, content }),
+  onPluginPanelViewClosed: (callback: (event: PluginPanelViewClosedEvent) => void) => {
+    const handler = (_event: unknown, data: PluginPanelViewClosedEvent) => callback(data)
+    ipcRenderer.on('plugin-panel-view-closed', handler)
+    return () => ipcRenderer.removeListener('plugin-panel-view-closed', handler)
+  },
+  openPluginPanelFromPet: (pluginId: string): Promise<boolean> => ipcRenderer.invoke('plugin-panel-view-open-from-pet', pluginId),
+  getPluginSettings: (pluginId: string): Promise<PluginPanelResult<PluginPanelSettingsSnapshot>> => ipcRenderer.invoke('plugin-settings-get', pluginId),
+  setPluginSettings: (pluginId: string, value: Record<string, PluginSettingScalar>): Promise<PluginPanelResult<Record<string, PluginSettingScalar>>> => ipcRenderer.invoke('plugin-settings-set', pluginId, value),
+  getPluginSecretConsent: (): Promise<PluginPanelResult<boolean>> => ipcRenderer.invoke('plugin-secret-consent-get'),
+  acceptPluginSecretConsent: (): Promise<PluginPanelResult<boolean>> => ipcRenderer.invoke('plugin-secret-consent-accept'),
+  setPluginSecret: (pluginId: string, key: string, value: string): Promise<PluginPanelResult<{ configured: boolean }>> => ipcRenderer.invoke('plugin-secret-set', pluginId, key, value),
+  setPluginGlobalPreferences: (patch: PluginGlobalPreferencesPatch): Promise<PluginPanelResult<PluginPreferences>> => ipcRenderer.invoke('plugin-preferences-global-set', patch),
+  setPluginInstancePreferences: (pluginId: string, patch: unknown): Promise<PluginPanelResult<PluginPreferences>> => ipcRenderer.invoke('plugin-preferences-instance-set', pluginId, patch),
+  selectPluginArchive: (): Promise<PluginPanelResult<PluginInstallPlan>> => ipcRenderer.invoke('plugin-install-select'),
+  selectPluginFolder: (): Promise<PluginPanelResult<PluginInstallPlan>> => ipcRenderer.invoke('plugin-install-select-folder'),
+  installPluginPlan: (token: string, acceptAdditionalPermissions: boolean): Promise<PluginPanelResult<PluginPanelPlugin>> => ipcRenderer.invoke('plugin-install-confirm', token, acceptAdditionalPermissions),
+  removeInstalledPlugin: (pluginId: string, keepData: boolean): Promise<PluginPanelResult<{ removed: true; keptData: boolean }>> => ipcRenderer.invoke('plugin-remove', pluginId, keepData),
+  getPluginDiagnostics: (pluginId: string): Promise<PluginPanelResult<{ logs: PluginBrokerLogEntry[]; diagnostics: PluginBrokerDiagnostic[] }>> => ipcRenderer.invoke('plugin-diagnostics', pluginId),
+  listPluginNotifications: (): Promise<PluginPanelResult<PluginNotificationRecord[]>> => ipcRenderer.invoke('plugin-notifications-list'),
+  markPluginNotificationRead: (itemId: string): Promise<PluginPanelResult<{ read: boolean }>> => ipcRenderer.invoke('plugin-notifications-read', itemId),
+  clearPluginNotifications: (pluginId?: string): Promise<PluginPanelResult<{ removed: number }>> => ipcRenderer.invoke('plugin-notifications-clear', pluginId),
+  onPluginNotificationsChanged: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('plugin-notifications-changed', handler)
+    return () => ipcRenderer.removeListener('plugin-notifications-changed', handler)
   },
   publishPresentationStatus: (snapshot: PresentationStatusUpdate) => {
     ipcRenderer.send('presentation-status-update', snapshot)
@@ -114,6 +190,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => {
       ipcRenderer.removeListener('panel-open-settings', handler)
     }
+  },
+
+  onPanelOpenPluginView: (callback: (pluginId: string) => void) => {
+    const handler = (_event: unknown, pluginId: string) => callback(pluginId)
+    ipcRenderer.on('panel-open-plugin-view', handler)
+    return () => ipcRenderer.removeListener('panel-open-plugin-view', handler)
   },
 
   initializeDesktopPreferences: (legacySoundEnabled: boolean): Promise<DesktopPreferences> => {
@@ -322,6 +404,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     folder: string
     builtIn: boolean
     behaviorManifest?: PetBehaviorManifest
+      pluginSkin?: PluginSkinPetSource
   }>> => {
     return ipcRenderer.invoke('load-pets')
   },

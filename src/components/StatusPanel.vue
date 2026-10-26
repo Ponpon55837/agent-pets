@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { STATE_LABELS, STATE_LABELS_SHORT, SOURCE_LABELS, STATE_COLORS, STATE_PRIORITY, SOURCE_FAMILIES } from '@/types/agent'
 import { formatProject, quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
@@ -12,6 +12,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Icon from '@/components/ui/Icon.vue'
 import InlinePermissionCard from '@/components/ui/InlinePermissionCard.vue'
 import PetAnimation from '@/components/PetAnimation.vue'
+import PluginPanel from '@/components/PluginPanel.vue'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
 import Select from '@/components/ui/Select.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
@@ -23,17 +24,37 @@ const editName = ref('')
 
 // --- 設定分頁 ----------------------------------------------------------------
 
-type SettingsSection = 'language' | 'appearance' | 'desktop' | 'pets' | 'growth' | 'advanced'
+type SettingsSection = 'language' | 'appearance' | 'desktop' | 'plugins' | 'pets' | 'growth' | 'advanced'
 const settingsTab = ref<SettingsSection>('appearance')
+const requestedPluginViewId = ref('')
 const settingsSections = computed<Array<{ id: SettingsSection; icon: string; label: string; hint: string }>>(() => [
   { id: 'language', icon: 'language', label: t('language'), hint: t('languageHint') },
   { id: 'appearance', icon: 'appearance', label: t('appearance'), hint: t('appearanceHint') },
   { id: 'desktop', icon: 'desktop', label: t('desktop'), hint: t('desktopHint') },
+  { id: 'plugins', icon: 'advanced', label: t('plugins'), hint: t('pluginSettingsHint') },
   { id: 'pets', icon: 'pets', label: t('pets'), hint: t('petsHint') },
   { id: 'growth', icon: 'growth', label: t('growth'), hint: t('growthHint') },
   { id: 'advanced', icon: 'advanced', label: t('advanced'), hint: t('advancedHint') },
 ])
 const activeSettingsSection = computed(() => settingsSections.value.find(section => section.id === settingsTab.value))
+let removePluginViewRequestListener: (() => void) | null = null
+let removePanelSettingsListener: (() => void) | null = null
+
+onMounted(() => {
+  removePanelSettingsListener = window.electronAPI?.onPanelOpenSettings(() => {
+    requestedPluginViewId.value = ''
+  }) ?? null
+  removePluginViewRequestListener = window.electronAPI?.onPanelOpenPluginView(pluginId => {
+    settingsTab.value = 'plugins'
+    requestedPluginViewId.value = ''
+    void nextTick(() => { requestedPluginViewId.value = pluginId })
+  }) ?? null
+})
+
+onUnmounted(() => {
+  removePluginViewRequestListener?.()
+  removePanelSettingsListener?.()
+})
 
 // --- 控制面板分頁（工作階段 / 用量 / 歷史）------------------------------------
 
@@ -1054,6 +1075,10 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
           </Card>
         </template>
 
+        <template v-else-if="settingsTab === 'plugins'">
+          <PluginPanel :requested-plugin-id="requestedPluginViewId" />
+        </template>
+
         <template v-else-if="settingsTab === 'growth'">
           <Card :title="t('petMood')">
             <template #heading>
@@ -1168,10 +1193,15 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
                   @keydown.enter="store.setPet(pet.id)"
                   @keydown.space.prevent="store.setPet(pet.id)"
                 >
-                  <span class="pet-name">{{ pet.displayName }}</span>
+                  <span class="pet-copy">
+                    <span class="pet-name">{{ pet.displayName }}</span>
+                    <small v-if="pet.pluginSkin" class="pet-plugin-source">
+                      {{ t('pluginPetFromPlugin', { name: pet.pluginSkin.pluginName }) }}
+                    </small>
+                  </span>
                   <span class="pet-actions">
                     <Button
-                      v-if="!pet.builtIn"
+                      v-if="!pet.builtIn && !pet.pluginSkin"
                       variant="ghost"
                       size="sm"
                       :title="t('rename')"
@@ -1181,7 +1211,7 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
                       <Icon name="edit" :size="13" />
                     </Button>
                     <Button
-                      v-if="pet.id !== store.defaultPetId"
+                      v-if="pet.id !== store.defaultPetId && !pet.pluginSkin"
                       variant="ghost"
                       size="sm"
                       :title="pet.builtIn ? t('hide') : t('remove')"

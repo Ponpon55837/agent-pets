@@ -9,6 +9,7 @@ import type {
   PresentationStatusSnapshot,
 } from '../src/types/presentation.ts'
 import { PRESENTATION_REACTIONS, type PresentationReaction } from '../src/types/presentation.ts'
+import { isValidPetId } from '../src/utils/pet-id.ts'
 
 export const PRESENTATION_MIN_TTL_MS = 1_000
 export const PRESENTATION_MAX_TTL_MS = 15_000
@@ -48,7 +49,6 @@ export type PresentationValidationResult = {
 }
 
 const SAFE_ID = /^[A-Za-z0-9_-]{8,80}$/
-const SAFE_PET_ID = /^[A-Za-z0-9._-]{1,64}$/
 const SAFE_NAME_LENGTH = 64
 const SAFE_MESSAGE_CONTROL = /[\u0000-\u001f\u007f]/g
 const SAFE_MESSAGE_MARKUP = /[<>]/g
@@ -66,8 +66,7 @@ export function sanitizePresentationClientId(value: unknown): string | null {
 }
 
 export function sanitizePresentationPetId(value: unknown): string | null {
-  if (typeof value !== 'string' || !SAFE_PET_ID.test(value) || value.includes('..')) return null
-  return value
+  return isValidPetId(value, 64) ? value : null
 }
 
 export function normalizePresentationMessage(value: unknown): string | null {
@@ -165,6 +164,8 @@ export function normalizePresentationStatus(value: unknown): PresentationStatusS
       activePets.push({
         petId,
         name: name || petId,
+        agentFamily: candidate.agentFamily === 'codex' || candidate.agentFamily === 'claude-code' || candidate.agentFamily === 'opencode'
+          ? candidate.agentFamily : null,
         mood: normalizeMood(candidate.mood),
         level: clampLevel(candidate.level),
         visibleState: normalizeVisibleState(candidate.visibleState),
@@ -252,6 +253,42 @@ export class PresentationController {
       queued: this.pending.size,
       expiresAt: intent.expiresAt,
     }
+  }
+
+  submitPluginReaction(pluginId: string, input: unknown): PresentationIntentResult {
+    this.cleanupExpired()
+    if (!/^(?!_host$|_shared$)[a-z0-9-]{3,48}$/.test(pluginId)) return { accepted: false, error: 'invalid_request' }
+    const status = normalizePresentationStatus(this.getStatusSnapshot())
+    if (status.dnd) return { accepted: false, error: 'dnd_enabled' }
+    const normalized = normalizePresentationInput({
+      ...(input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {}),
+      kind: 'react',
+    })
+    if (!normalized.ok) return { accepted: false, error: normalized.error }
+    if (normalized.value.kind !== 'react') return { accepted: false, error: 'invalid_request' }
+    if (this.pending.size >= PRESENTATION_MAX_QUEUE_DEPTH) {
+      return { accepted: false, error: 'queue_full', queued: this.pending.size }
+    }
+
+    const now = this.now()
+    const intent: PresentationIntent = {
+      id: this.createId(),
+      kind: 'react',
+      source: 'plugin',
+      ...(normalized.value.petId ? { petId: normalized.value.petId } : {}),
+      ...(normalized.value.reaction ? { reaction: normalized.value.reaction } : {}),
+      createdAt: now,
+      expiresAt: now + normalized.value.ttlMs,
+    }
+    this.pending.set(intent.id, { clientId: `plugin-${pluginId}`, intent })
+    try {
+      this.emitIntent(intent)
+    } catch {
+      this.pending.delete(intent.id)
+      return { accepted: false, error: 'not_found' }
+    }
+    this.scheduleCleanup()
+    return { accepted: true, id: intent.id, queued: this.pending.size, expiresAt: intent.expiresAt }
   }
 
   disconnectClient(clientId: string): number {

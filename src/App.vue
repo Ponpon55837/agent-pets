@@ -24,6 +24,9 @@ let cleanupAchievementUnlock: (() => void) | null = null
 let cleanupQuotaUpdated: (() => void) | null = null
 let cleanupPermissionRequests: (() => void) | null = null
 let cleanupPresentationIntent: (() => void) | null = null
+let cleanupPluginFeedItem: (() => void) | null = null
+let cleanupPluginFeedUnreadCount: (() => void) | null = null
+let cleanupPluginSkinsChanged: (() => void) | null = null
 let staleTimer: ReturnType<typeof setInterval> | null = null
 let successTimer: ReturnType<typeof setInterval> | null = null
 let quotaTimer: ReturnType<typeof setInterval> | null = null
@@ -135,6 +138,26 @@ onMounted(() => {
     cleanupPresentationIntent = electronAPI.onPresentationIntent((intent: unknown) => {
       store.handlePresentationIntent(intent)
     })
+  }
+  if (electronAPI?.onPluginFeedItem) {
+    cleanupPluginFeedItem = electronAPI.onPluginFeedItem((item: unknown) => {
+      store.handlePluginFeedItem(item)
+    })
+  }
+  if (electronAPI?.onPluginFeedUnreadCount) {
+    cleanupPluginFeedUnreadCount = electronAPI.onPluginFeedUnreadCount((count: unknown) => {
+      store.setPluginFeedUnreadCount(count)
+    })
+  }
+  if (electronAPI?.onPluginSkinsChanged) {
+    cleanupPluginSkinsChanged = electronAPI.onPluginSkinsChanged((removedPetIds: unknown) => {
+      void store.handlePluginSkinsChanged(removedPetIds)
+    })
+  }
+  if (electronAPI?.getPluginFeedUnreadCount) {
+    void electronAPI.getPluginFeedUnreadCount()
+      .then((count: unknown) => store.setPluginFeedUnreadCount(count))
+      .catch(() => {})
   }
   if (isPanelWindow && electronAPI?.onPanelOpened) {
     cleanupPanelOpened = electronAPI.onPanelOpened(() => {
@@ -275,6 +298,9 @@ onUnmounted(() => {
   cleanupQuotaUpdated?.()
   cleanupPermissionRequests?.()
   cleanupPresentationIntent?.()
+  cleanupPluginFeedItem?.()
+  cleanupPluginFeedUnreadCount?.()
+  cleanupPluginSkinsChanged?.()
   window.removeEventListener('mousemove', handlePetMouseMove, true)
   window.removeEventListener('storage', handleStorage)
   if (staleTimer) clearInterval(staleTimer)

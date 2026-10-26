@@ -77,6 +77,7 @@ onUnmounted(() => {
       >
         <h2 class="title">{{ title }}</h2>
         <p v-if="message" class="message">{{ message }}</p>
+        <slot />
         <div class="actions">
           <Button variant="secondary" size="sm" @click="emit('cancel')">
             {{ cancelLabel || t('cancel') }}

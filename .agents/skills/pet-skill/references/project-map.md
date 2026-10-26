@@ -25,10 +25,15 @@
 - Window mode geometry: `electron/pet-window-mode.ts`; shared mode snapshot types: `src/types/pet-window.ts`.
 - Agent Adapter SDK: `electron/agent-adapter.ts` owns the runtime registry and canonical ingress selection; `electron/agent-adapter-operations.ts` wraps existing platform installers/detection; shared capability/status contracts live in `src/types/agent-adapter.ts`.
 - Canonical current event types: `src/types/agent.ts`.
+- Plugin Host: `electron/plugin-manifest.ts` validates the public contract; `electron/plugin-registry.ts` safely plans and installs bounded archives; `electron/plugin-broker.ts` validates Worker RPC; focused controllers in `electron/plugin-{feed,command,badge,tray,skin,preferences,net,secrets,settings,schedule,panel-view}.ts` own individual capabilities. `electron/plugin-protocol.ts` and plugin preloads constrain resource access and renderer APIs; public contracts and examples live in `docs/plugins/`.
 
 ## Existing security controls to preserve
 
 - Chromium sandbox and context isolation enabled; Node integration disabled.
+- Plugins are untrusted. Worker Web APIs are reduced, RPC identity is host-owned, manifests and archive paths are validated, plugin storage is scoped, and permission/contribution changes require user review.
+- Plugin network requests require declared or user-approved HTTPS hosts; DNS/IP and each redirect are rechecked. Plugin requests do not send or retain cookies.
+- Custom panel pages use a separate sandboxed WebContentsView and non-persistent partition, with same-plugin resources only and no secrets or host-request capability in the page bridge.
+- Plugin secrets use Electron safeStorage; secret settings are never echoed in snapshots, and no secret value is written to logs or diagnostics.
 - Custom secure `agent-pets://` protocol used instead of privileged renderer file access.
 - External navigation, popups, permission requests, and untrusted IPC senders are rejected.
 - Event server limits body size, text length, rate, sources, and states, and requires a local token.

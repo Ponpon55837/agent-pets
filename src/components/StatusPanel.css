@@ -1218,6 +1218,22 @@
   white-space: nowrap;
 }
 
+.pet-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pet-plugin-source {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-body-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pet-actions {
   display: flex;
   flex: 0 0 auto;
