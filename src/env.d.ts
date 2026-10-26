@@ -53,6 +53,7 @@ declare global {
       completePluginFeed: (itemId: string) => Promise<boolean>
       openPluginFeedLink: (itemId: string) => Promise<boolean>
       getPluginPanelSnapshot: () => Promise<PluginPanelResult<PluginPanelSnapshot>>
+      invokePluginCommand: (pluginId: string, commandId: string) => Promise<PluginPanelResult<{ accepted: true }>>
       openPluginPanelView: (pluginId: string, frame: unknown, content: unknown) => Promise<PluginPanelResult<{ opened: true; openToken: number }>>
       closePluginPanelView: (openToken: number) => void
       setPluginPanelViewBounds: (openToken: number, frame: unknown, content: unknown) => void

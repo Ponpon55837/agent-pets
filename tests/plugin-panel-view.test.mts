@@ -299,7 +299,7 @@ test('plugin panel closes when the host window is hidden', async () => {
   fake.controller.onPanelWindowHidden()
 
   assert.equal(fake.controller.activePluginId(), null)
-  assert.deepEqual(fake.closedEvents, [{ pluginId: 'sample-plugin', openToken: 1, reason: 'renderer_unavailable' }])
+  assert.deepEqual(fake.closedEvents, [{ pluginId: 'sample-plugin', openToken: 1, reason: 'hidden' }])
 })
 
 test('plugin panel closes when its host renderer reloads', async () => {
@@ -396,4 +396,13 @@ test('plugin panel preload bridge exposes only the approved API subset and unwra
   assert.deepEqual(received, [{ type: 'worker' }])
   dispose()
   assert.equal(messages.size, 0)
+})
+
+
+test('hiding the settings panel closes the view with a silent hidden reason', async () => {
+  const fake = fakeController()
+  const result = await fake.controller.open({ pluginId: 'sample-plugin', entry: 'panel/index.html', openToken: 1, bounds: initialBounds })
+  assert.equal(result.ok, true)
+  fake.controller.onPanelWindowHidden()
+  assert.deepEqual(fake.closedEvents, [{ pluginId: 'sample-plugin', openToken: 1, reason: 'hidden' }])
 })

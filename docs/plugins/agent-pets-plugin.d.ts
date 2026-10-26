@@ -195,6 +195,10 @@ export interface AgentPetsPluginApi {
      */
     error(...values: unknown[]): Promise<{ logged: true }>
   }
+  commands: {
+    /** Subscribe to commands triggered by the user from this plugin panel or Tray. Plugins cannot invoke commands themselves. */
+    onInvoke(callback: (commandId: string) => void): () => void
+  }
   ui: {
     /**
      * Send a JSON message to this plugin's open panel page. Requires contributes.panelView.

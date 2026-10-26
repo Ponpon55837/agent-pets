@@ -39,6 +39,7 @@ const panelViewOpenToken = ref(0)
 const panelViewFrame = ref<HTMLElement | null>(null)
 const panelViewContent = ref<HTMLElement | null>(null)
 const busy = ref(false)
+const invokingCommandId = ref('')
 const loading = ref(false)
 const errorMessage = ref('')
 const statusMessage = ref('')
@@ -161,7 +162,7 @@ function handlePluginPanelViewClosed(event: PluginPanelViewClosedEvent): void {
   panelViewRequestSequence += 1
   panelViewOpenToken.value = 0
   panelViewPluginId.value = ''
-  setError(pluginPanelViewCloseError(event.reason))
+  if (event.reason !== 'hidden') setError(pluginPanelViewCloseError(event.reason))
 }
 
 function pluginStatusLabel(plugin: PluginPanelPlugin): string {
@@ -184,6 +185,9 @@ function localizedError(code: string): string {
   }
   const keys: Record<string, TranslationKey> = {
     disabled: 'pluginPanelUnavailable',
+    host_unavailable: 'pluginCommandHostUnavailable',
+    not_permitted: 'pluginCommandNotPermitted',
+    rate_limited: 'pluginCommandRateLimited',
     panel_unavailable: 'pluginPanelViewUnavailable',
     panel_load_failed: 'pluginPanelViewLoadFailed',
     panel_crashed: 'pluginPanelViewCrashed',
@@ -294,6 +298,30 @@ async function refreshPluginSettings(pluginId = selectedPluginId.value): Promise
     secretDrafts.value = Object.fromEntries(Object.keys(result.value.secrets).map(key => [key, '']))
   } catch {
     setError('plugin_action_failed')
+  }
+}
+
+function commandTitle(command: { title: { 'zh-TW': string; 'en-US': string } }): string {
+  return command.title[locale.value]
+}
+
+async function invokePluginCommand(commandId: string): Promise<void> {
+  const plugin = selectedPlugin.value
+  if (!plugin || invokingCommandId.value) return
+  invokingCommandId.value = commandId
+  errorMessage.value = ''
+  statusMessage.value = ''
+  try {
+    const result = await window.electronAPI?.invokePluginCommand(plugin.id, commandId)
+    if (!result?.ok) {
+      setError(result && !result.ok ? result.error : 'plugin_service_unavailable')
+      return
+    }
+    statusMessage.value = t('pluginCommandSent')
+  } catch {
+    setError('plugin_action_failed')
+  } finally {
+    invokingCommandId.value = ''
   }
 }
 
@@ -900,6 +928,22 @@ onUnmounted(() => {
         </Card>
       </div>
     </section>
+
+    <Card v-if="selectedPlugin?.manifest?.contributes.commands?.length" :title="t('pluginCommandsHeading')" class="plugin-section">
+      <p class="plugin-limit-help">{{ t('pluginCommandsHelp') }}</p>
+      <div class="plugin-command-list">
+        <Button
+          v-for="command in selectedPlugin.manifest.contributes.commands"
+          :key="command.id"
+          variant="secondary"
+          size="sm"
+          :disabled="Boolean(invokingCommandId) || !selectedPlugin.preference.enabled || !enabledGlobally"
+          @click="invokePluginCommand(command.id)"
+        >
+          {{ commandTitle(command) }}
+        </Button>
+      </div>
+    </Card>
 
     <Card v-if="selectedPlugin?.manifest?.contributes.settings" :title="t('pluginSettingsHeading')" class="plugin-section">
       <div v-for="(definition, key) in selectedPlugin.manifest.contributes.settings.properties" :key="key" class="plugin-setting-field">

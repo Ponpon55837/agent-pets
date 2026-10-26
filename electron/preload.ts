@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   completePluginFeed: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-complete', itemId),
   openPluginFeedLink: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-open-link', itemId),
   getPluginPanelSnapshot: (): Promise<PluginPanelResult<PluginPanelSnapshot>> => ipcRenderer.invoke('plugin-panel-snapshot'),
+  invokePluginCommand: (pluginId: string, commandId: string): Promise<PluginPanelResult<{ accepted: true }>> => ipcRenderer.invoke('plugin-command-invoke', pluginId, commandId),
   openPluginPanelView: (pluginId: string, frame: unknown, content: unknown): Promise<PluginPanelResult<{ opened: true; openToken: number }>> => ipcRenderer.invoke('plugin-panel-view-open', pluginId, { frame, content }),
   closePluginPanelView: (openToken: number): void => ipcRenderer.send('plugin-panel-view-close', openToken),
   setPluginPanelViewBounds: (openToken: number, frame: unknown, content: unknown): void => ipcRenderer.send('plugin-panel-view-bounds', { openToken, frame, content }),

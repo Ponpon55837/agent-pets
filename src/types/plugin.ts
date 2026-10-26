@@ -13,6 +13,7 @@ export type PluginPanelViewCloseReason =
   | 'destroyed'
   | 'disabled'
   | 'renderer_unavailable'
+  | 'hidden'
 
 export interface PluginPanelViewClosedEvent {
   pluginId: string

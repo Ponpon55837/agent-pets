@@ -70,6 +70,9 @@ window.addEventListener('message', (event) => {
         }
       } else if (data.type === 'rpc-result' && typeof data.pluginId === 'string') {
         workers.get(data.pluginId)?.postMessage({ type: 'rpc-result', result: data.result })
+      } else if (data.type === 'invoke-command' && typeof data.pluginId === 'string' && workers.has(data.pluginId)
+        && typeof data.commandId === 'string' && /^[a-z][a-z0-9-]{0,31}$/.test(data.commandId)) {
+        workers.get(data.pluginId)?.postMessage({ type: 'command-invoke', commandId: data.commandId })
       } else if (data.type === 'ui-message' && typeof data.pluginId === 'string' && workers.has(data.pluginId)) {
         workers.get(data.pluginId)?.postMessage({ type: 'ui-message', value: data.value })
       } else if (data.type === 'settings-changed' && typeof data.pluginId === 'string'
@@ -96,6 +99,7 @@ const schedules = new Map()
 const settingsListeners = new Set()
 const statusListeners = new Set()
 const uiListeners = new Set()
+const commandListeners = new Set()
 let scheduleSequence = 0
 const blockedApis = [
   'indexedDB', 'caches', 'BroadcastChannel', 'Worker', 'SharedWorker', 'WebSocket',
@@ -189,6 +193,13 @@ const api = Object.freeze({
     warn: (...values) => rpc('log.warn', [values]),
     error: (...values) => rpc('log.error', [values]),
   }),
+  commands: Object.freeze({
+    onInvoke: (callback) => {
+      if (typeof callback !== 'function') throw Object.assign(new Error('invalid_request'), { code: 'invalid_request' })
+      commandListeners.add(callback)
+      return () => commandListeners.delete(callback)
+    },
+  }),
   ui: Object.freeze({
     postMessage: (value) => rpc('ui.postMessage', [value]),
     onMessage: (callback) => {
@@ -227,6 +238,8 @@ scope.onmessage = async ({ data }) => {
     for (const item of data.value) {
       for (const listener of statusListeners) { try { listener(item) } catch {} }
     }
+  } else if (data.type === 'command-invoke' && typeof data.commandId === 'string' && /^[a-z][a-z0-9-]{0,31}$/.test(data.commandId)) {
+    for (const listener of commandListeners) { try { listener(data.commandId) } catch {} }
   } else if (data.type === 'ui-message') {
     for (const listener of uiListeners) { try { listener(data.value) } catch {} }
   } else if (data.type === 'ping' && Number.isSafeInteger(data.at)) {
@@ -248,6 +261,7 @@ scope.onmessage = async ({ data }) => {
   } else if (data.type === 'deactivate' && pluginId !== null) {
     clearSchedules()
     uiListeners.clear()
+    commandListeners.clear()
     try {
       if (typeof pluginModule?.default?.deactivate === 'function') await pluginModule.default.deactivate()
     } catch {}

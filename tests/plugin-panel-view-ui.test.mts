@@ -24,4 +24,5 @@ test('panel close events map to localized status error codes', () => {
   assert.equal(pluginPanelViewCloseError('disabled'), 'disabled')
   assert.equal(pluginPanelViewCloseError('closed'), 'panel_closed')
   assert.equal(pluginPanelViewCloseError('destroyed'), 'panel_closed')
+  assert.equal(pluginPanelViewCloseError('hidden'), 'hidden')
 })

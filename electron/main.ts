@@ -50,6 +50,7 @@ import { PluginPreferencesStore } from './plugin-preferences'
 import { PluginHostWindowController, type PluginHostDescriptor } from './plugin-host-window'
 import { canEnablePluginWithinLimit, selectEnabledPluginDescriptors } from './plugin-host-selection'
 import { PluginBroker, type PluginBrokerContext, type PluginReactionRequest } from './plugin-broker.ts'
+import { PluginCommandController } from './plugin-commands.ts'
 import { PluginFeedController } from './plugin-feed.ts'
 import { filterPluginRequestHeaders, PluginNetworkClient, stripPluginSetCookieHeaders } from './plugin-net.ts'
 import { isPublicPluginNetworkHost } from './plugin-net.ts'
@@ -174,6 +175,7 @@ const pluginPanelWindowSizer = new PluginPanelWindowSizer()
 let programmaticPluginPanelSize: { width: number; height: number } | null = null
 let pluginPanelResizeResetTimer: ReturnType<typeof setTimeout> | null = null
 let pluginBroker: PluginBroker | null = null
+let pluginCommandController: PluginCommandController | null = null
 let pluginNetworkClient: PluginNetworkClient | null = null
 let pluginHostGrantController: PluginHostGrantController | null = null
 let pluginFeedController: PluginFeedController | null = null
@@ -666,6 +668,7 @@ function enabledPluginDescriptors(): PluginHostDescriptor[] {
       return {
         id,
         entry: context.manifest.entry!,
+        commandIds: (context.manifest.contributes.commands ?? []).map(command => command.id),
         scheduleEnabled: context.manifest.permissions.schedule !== undefined,
         scheduleMinIntervalSec: effectivePluginScheduleMinimum(
           context.manifest.permissions.schedule?.minIntervalSec ?? preferences.resources.scheduleMinIntervalSeconds,
@@ -1038,6 +1041,17 @@ function createPluginServices(): void {
       return perPlugin * activePluginCount
     },
   })
+  pluginCommandController = new PluginCommandController({
+    getContext: pluginId => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      return context ? {
+        enabled: context.enabled,
+        pluginsEnabled: context.pluginsEnabled,
+        commandIds: (context.manifest.contributes.commands ?? []).map(command => command.id),
+      } : null
+    },
+    dispatch: (pluginId, commandId) => pluginHostWindow?.invokeCommand(pluginId, commandId) ?? false,
+  })
   pluginPanelViewController = new PluginPanelViewController({
     preloadPath: join(__dirname, 'plugin-ui-preload.js'),
     tokensCss,
@@ -1115,6 +1129,11 @@ function createPluginServices(): void {
   ipcMain.handle('plugin-panel-snapshot', event => {
     assertPluginPanelSender(event)
     return pluginPanelSnapshot()
+  })
+  ipcMain.handle('plugin-command-invoke', (event, pluginId: unknown, commandId: unknown) => {
+    assertPluginPanelSender(event)
+    return pluginCommandController?.invoke(pluginId, commandId)
+      ?? { ok: false, error: 'disabled' }
   })
   ipcMain.handle('plugin-panel-view-open', async (event, pluginId: unknown, payload: unknown) => {
     assertPluginPanelSender(event)

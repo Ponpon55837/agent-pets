@@ -277,7 +277,7 @@ export class PluginPanelViewController {
   }
 
   onPanelWindowHidden(): void {
-    this.close('renderer_unavailable')
+    this.close('hidden')
   }
 
   onPanelRendererReload(): void {

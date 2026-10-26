@@ -13,6 +13,7 @@ export interface PluginHostDescriptor {
   scheduleEnabled?: boolean
   scheduleMinIntervalSec?: number
   agentStatusEnabled?: boolean
+  commandIds?: string[]
 }
 
 export interface PluginHostControllerOptions {
@@ -32,6 +33,7 @@ interface PluginHostRuntime {
   startedAt: number
   token: string
   receivedPong: boolean
+  ready: boolean
 }
 
 const PLUGIN_SCHEME_PREFIX = 'agent-pets://plugin/'
@@ -101,6 +103,14 @@ export class PluginHostWindowController {
   notifySettingsChanged(pluginId: string, value: Record<string, unknown>): void {
     if (!this.desired.has(pluginId) || !isRecord(value)) return
     this.post({ type: 'settings-changed', pluginId, value })
+  }
+
+  invokeCommand(pluginId: string, commandId: string): boolean {
+    const runtime = this.runtime.get(pluginId)
+    const descriptor = this.desired.get(pluginId)
+    if (!this.portReady || !this.hostPort || !runtime?.ready || !descriptor?.commandIds?.includes(commandId)) return false
+    this.post({ type: 'invoke-command', pluginId, commandId })
+    return true
   }
 
   notifyStatusChanged(pluginId: string, value: readonly unknown[]): void {
@@ -224,7 +234,7 @@ export class PluginHostWindowController {
       let token: string
       try { token = this.createPluginToken(pluginId) } catch { continue }
       if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(token)) continue
-      this.runtime.set(pluginId, { descriptor, lastPongAt: now, startedAt: now, token, receivedPong: false })
+      this.runtime.set(pluginId, { descriptor, lastPongAt: now, startedAt: now, token, receivedPong: false, ready: false })
       this.post({ type: 'start', pluginId, token, ...descriptor })
     }
   }
@@ -233,7 +243,12 @@ export class PluginHostWindowController {
     if (!isRecord(value) || typeof value.type !== 'string' || typeof value.pluginId !== 'string'
       || !this.desired.has(value.pluginId)) return
     const pluginId = value.pluginId
-    if (value.type === 'worker-started' || value.type === 'worker-ready') return
+    if (value.type === 'worker-started') return
+    if (value.type === 'worker-ready') {
+      const runtime = this.runtime.get(pluginId)
+      if (runtime) runtime.ready = true
+      return
+    }
     if (value.type === 'pong') {
       const runtime = this.runtime.get(pluginId)
       const now = this.readNow()
@@ -331,7 +346,7 @@ export class PluginHostWindowController {
         let token: string
         try { token = this.createPluginToken(pluginId) } catch { return }
         if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(token)) return
-        this.runtime.set(pluginId, { descriptor, lastPongAt: now, startedAt: now, token, receivedPong: false })
+        this.runtime.set(pluginId, { descriptor, lastPongAt: now, startedAt: now, token, receivedPong: false, ready: false })
         this.post({ type: 'start', pluginId, token, ...descriptor })
       }, pluginHostRetryDelay(count))
     }
@@ -395,6 +410,9 @@ export class PluginHostWindowController {
 function isValidDescriptor(value: unknown): value is PluginHostDescriptor {
   if (!isRecord(value) || typeof value.id !== 'string' || !PLUGIN_ID.test(value.id)
     || typeof value.entry !== 'string' || value.entry.length > 512 || !PLUGIN_ENTRY.test(value.entry)) return false
+  if (value.commandIds !== undefined && (!Array.isArray(value.commandIds) || value.commandIds.length > 10
+    || value.commandIds.some(id => typeof id !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(id))
+    || new Set(value.commandIds).size !== value.commandIds.length)) return false
   if (value.revision !== undefined && (typeof value.revision !== 'string' || value.revision.length > 128)) return false
   return !value.entry.split('/').some(segment => !segment || segment === '.' || segment === '..')
 }
