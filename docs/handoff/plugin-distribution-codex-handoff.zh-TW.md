@@ -16,6 +16,7 @@
 - **網路：** 單元測試與隔離 Electron 驗收 **都不可以連到真的 GitHub**。registry 與下載一律可注入（見 P17.2），驗收用本機 fixture。
 - **打包驗證：** 照舊交接 P16.6 的步驟（`CSC_IDENTITY_AUTO_DISCOVERY=false pnpm exec electron-builder --dir ...` → 解開 `app.asar` → `--app-root`）。不要跑 `pnpm build`／`build:fast`，不要直接開啟打包出來的 `.app`。
 - **不新增 runtime 相依：** ed25519 與 SHA-256 一律用 Node 內建 `node:crypto`。
+- **不得上傳使用者個資或環境資訊：** commit、push、文件、報告、工作記錄、issue／PR 內容都不可包含使用者的 email、本機絕對路徑（`/Users/...`、暫存資料夾路徑）、環境變數或 `.env` 內容、token、鑰匙圈／憑證資料、主機名稱或機器識別碼。commit 一律使用 repo 既有的 GitHub noreply 身分。每次 push 前檢查差異；需要這類資訊才能繼續時，停下來回報。
 
 ## 1. 已確認的決策（2026-10-26，使用者）
 
