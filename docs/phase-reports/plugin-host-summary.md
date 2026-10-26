@@ -1,10 +1,9 @@
 # Plugin Host Phase 12–16 總結
 
 - 日期：2026-10-26
-- 目前版本：`1.2.4`（未修改）
-- 建議版本：`1.3.0`（建議 minor；需由使用者確認後另行調整版本）
+- 發布版本：`1.3.0`（Phase 12–16 期間維持 `1.2.4`，合併前由使用者確認升版）
 - 分支：`feat/plugin-host`
-- 總體狀態：Phase 12–15 及其複檢已完成。Phase 16 的 source、測試與文件 checkpoint 已提交；P16.6 隔離 Electron 未到 READY，因此整體實機驗收仍待完成。
+- 總體狀態：Phase 12–16 及其複檢已完成。P16.6 的隔離 Electron 與打包驗收由複檢者完成並通過，見 `docs/reviews/phase-16-review.md`。
 
 ## Phase 摘要
 
@@ -58,4 +57,4 @@
 - 先確認 macOS code-sign identity discovery 的安全設定，避免建置工具查詢使用者系統憑證儲存；不應把憑證名稱、識別碼或本機路徑保存進報告或 commit。
 - 本次未驗證 Windows/Linux；真實鑰匙圈與系統硬體／權限流程也未驗證。
 - 目前沒有每個 Worker 的精確記憶體隔離；線上目錄、發布者簽章、自動更新、`eventSource` 留待 Phase 17。
-- 建議版本 `1.3.0`，但本階段維持 `1.2.4`。
+- 使用者確認版本 `1.3.0`（minor：新增插件公開契約與安全邊界）。
