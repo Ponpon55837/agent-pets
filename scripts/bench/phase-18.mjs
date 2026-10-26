@@ -14,6 +14,7 @@ import { PluginFeedController } from '../../electron/plugin-feed.ts'
 import { PluginNetworkClient } from '../../electron/plugin-net.ts'
 import { selectBubble } from '../../src/utils/feed-arbiter.ts'
 import { createOrderedBatchCoalescer } from '../../electron/ipc/broadcast-coalescer.ts'
+import { AgentSessionIndex } from '../../src/utils/agent-session-index.ts'
 
 const ROOT = new URL('../../', import.meta.url)
 const REPEATS = 30
@@ -123,6 +124,29 @@ function runLegacyAgentState(events) {
     sessions[key] = { key, state: event.state, lastSeenAt: event.timestamp }
   }
   return Object.values(sessions).filter(session => session.state !== 'offline').length
+}
+
+function runIndexedAgentState(events) {
+  const sessions = new Map()
+  const index = new AgentSessionIndex(sessions)
+  for (const event of events) {
+    const key = `${event.source}:${event.sessionId}`
+    const current = index.get(key)
+    if (current) {
+      current.state = event.state
+      current.lastSeenAt = event.timestamp
+      index.updatePriority(key, event.state, event.timestamp)
+      continue
+    }
+    index.upsert({
+      key,
+      source: event.source,
+      sessionId: event.sessionId,
+      state: event.state,
+      lastSeenAt: event.timestamp,
+    }, 1_000)
+  }
+  return [...index.values()].filter(session => session.state !== 'offline').length
 }
 
 function makeFeedController(nowRef, idRef) {
@@ -340,6 +364,94 @@ async function readCounters(port) {
   return typeof value === 'string' ? JSON.parse(value) : null
 }
 
+async function connectCdp(url) {
+  const socket = new WebSocket(url)
+  await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject })
+  let sequence = 0
+  const pending = new Map()
+  socket.onmessage = event => {
+    const message = JSON.parse(event.data)
+    const resolve = pending.get(message.id)
+    if (resolve) { pending.delete(message.id); resolve(message) }
+  }
+  return {
+    socket,
+    send(method, params = {}) {
+      return new Promise(resolve => {
+        const id = ++sequence
+        pending.set(id, resolve)
+        socket.send(JSON.stringify({ id, method, params }))
+      })
+    },
+  }
+}
+
+async function cdpValue(client, expression, awaitPromise = false) {
+  const response = await client.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise })
+  if (response.exceptionDetails) throw new Error(response.exceptionDetails.text)
+  return response.result?.result?.value
+}
+
+async function measurePanelSettingsFirstOpen(debugPort) {
+  const targets = await fetch(`http://127.0.0.1:${debugPort}/json/list`).then(response => response.json())
+  const pageTarget = targets.find(target => target.type === 'page' && target.url.endsWith('#panel'))
+  if (!pageTarget) throw new Error('Settings benchmark panel target is unavailable')
+  const page = await connectCdp(pageTarget.webSocketDebuggerUrl)
+  await page.send('Page.enable')
+  await page.send('Runtime.enable')
+  await page.send('Network.enable')
+  await page.send('Network.setCacheDisabled', { cacheDisabled: true })
+  const samples = []
+  try {
+    for (let index = 0; index < REPEATS; index += 1) {
+      await page.send('Page.reload', { ignoreCache: true })
+      const deadline = Date.now() + 15_000
+      while (Date.now() < deadline) {
+        try {
+          const ready = await cdpValue(page, `document.readyState === 'complete' && Boolean(document.querySelector('button[aria-label="設定"]'))`)
+          if (ready) break
+        } catch {}
+        await new Promise(resolve => setTimeout(resolve, 30))
+      }
+      const elapsed = await cdpValue(page, `(() => {
+        const start = performance.now()
+        const button = document.querySelector('button[aria-label="設定"]')
+        if (!button) throw new Error('Settings trigger did not load')
+        button.click()
+        return new Promise((resolve, reject) => {
+          const deadline = performance.now() + 8_000
+          const check = () => {
+            if (document.querySelector('.settings-layout .scale-options')) {
+              observer.disconnect()
+              resolve(performance.now() - start)
+            } else if (performance.now() > deadline) {
+              observer.disconnect()
+              reject(new Error('Settings first render timed out'))
+            } else requestAnimationFrame(check)
+          }
+          const observer = new MutationObserver(check)
+          observer.observe(document.body, { childList: true, subtree: true })
+          check()
+        })
+      })()`, true)
+      samples.push(Number(elapsed.toFixed(3)))
+    }
+  } finally {
+    await page.send('Network.setCacheDisabled', { cacheDisabled: false })
+    page.socket.close()
+  }
+  const sorted = [...samples].sort((left, right) => left - right)
+  const middle = Math.floor(sorted.length / 2)
+  const median = sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
+  return {
+    name: 'settingsFirstOpen',
+    repeats: samples.length,
+    medianMs: Number(median.toFixed(3)),
+    p95Ms: Number(percentile(samples, 0.95).toFixed(3)),
+    samplesMs: samples,
+  }
+}
+
 function waitForChildClose(child, timeoutMs = 8_000) {
   return new Promise(resolve => {
     const timer = setTimeout(() => {
@@ -413,8 +525,10 @@ async function coldStartSample(index) {
       await new Promise(resolve => setTimeout(resolve, 100))
     }
     if (!pageLoaded) throw new Error('First isolated Electron window did not finish loading')
+    const coldStartMs = Number((performance.now() - start).toFixed(3))
+    const settingsFirstOpen = await measurePanelSettingsFirstOpen(debugPort)
     endCounters = await readCounters(inspectPort)
-    return { ms: Number((performance.now() - start).toFixed(3)), callsStart: startCounters?.calls, callsEnd: endCounters?.calls, blockedStart: startCounters?.blockedExecs, blockedEnd: endCounters?.blockedExecs }
+    return { ms: coldStartMs, settingsFirstOpen, callsStart: startCounters?.calls, callsEnd: endCounters?.calls, blockedStart: startCounters?.blockedExecs, blockedEnd: endCounters?.blockedExecs }
   } finally {
     if (readyTimeout) clearTimeout(readyTimeout)
     child.kill('SIGINT')
@@ -455,7 +569,11 @@ async function main() {
     }
 
     const events = makeAgentEvents()
-    results.agentState10k = await measure('agentState10k', () => runLegacyAgentState(events))
+    results.agentState10kLegacy = await measure('agentState10kLegacy', () => runLegacyAgentState(events))
+    results.agentState10kIndexed = await measure('agentState10kIndexed', () => runIndexedAgentState(events))
+    if (runLegacyAgentState(events) !== runIndexedAgentState(events)) {
+      throw new Error('Indexed Agent state processing diverged from the legacy result')
+    }
     const candidates = Array.from({ length: WORKLOAD }, (_, index) => ({
       presentationSay: index % 17 === 0,
       agentToast: index % 19 === 0,
@@ -494,6 +612,27 @@ async function main() {
       for (let index = 0; index < 5; index += 1) results.coldStart.push(await coldStartSample(index))
     } catch (error) {
       results.coldStartError = error instanceof Error ? error.message : 'Isolated Electron cold start failed'
+    }
+
+    const coldStartSamples = results.coldStart.map(sample => sample.ms)
+    const sortedColdStarts = [...coldStartSamples].sort((left, right) => left - right)
+    const coldStartMiddle = Math.floor(sortedColdStarts.length / 2)
+    results.coldStartSummary = coldStartSamples.length === 0 ? null : {
+      repeats: coldStartSamples.length,
+      medianMs: Number((sortedColdStarts.length % 2 === 0
+        ? (sortedColdStarts[coldStartMiddle - 1] + sortedColdStarts[coldStartMiddle]) / 2
+        : sortedColdStarts[coldStartMiddle]).toFixed(3)),
+      p95Ms: Number(percentile(coldStartSamples, 0.95).toFixed(3)),
+    }
+    const settingsFirstOpenSamples = results.coldStart.flatMap(sample => sample.settingsFirstOpen?.samplesMs ?? [])
+    const sortedSettingsFirstOpen = [...settingsFirstOpenSamples].sort((left, right) => left - right)
+    const settingsFirstOpenMiddle = Math.floor(sortedSettingsFirstOpen.length / 2)
+    results.settingsFirstOpenSummary = settingsFirstOpenSamples.length === 0 ? null : {
+      repeats: settingsFirstOpenSamples.length,
+      medianMs: Number((sortedSettingsFirstOpen.length % 2 === 0
+        ? (sortedSettingsFirstOpen[settingsFirstOpenMiddle - 1] + sortedSettingsFirstOpen[settingsFirstOpenMiddle]) / 2
+        : sortedSettingsFirstOpen[settingsFirstOpenMiddle]).toFixed(3)),
+      p95Ms: Number(percentile(settingsFirstOpenSamples, 0.95).toFixed(3)),
     }
 
     const measureDirectory = directory => {

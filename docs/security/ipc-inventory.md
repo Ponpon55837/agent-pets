@@ -20,7 +20,7 @@
 | `install-integrations` | `handle` | 設定面板 main frame | isIntegrationTarget；無效輸入回安全預設或錯誤 | installIntegrations (invoke) | `tests/ipc-integrations.test.mts` |
 | `uninstall-integrations` | `handle` | 設定面板 main frame | isIntegrationTarget；無效輸入回安全預設或錯誤 | uninstallIntegrations (invoke) | `tests/ipc-integrations.test.mts` |
 | `permission-requests-init` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | initializePermissionRequests (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `permission-decide` | `handle` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | 型別；無效輸入回安全預設或錯誤 | decidePermission (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `permission-decide` | `handle` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | 型別；無效輸入回安全預設或錯誤 | decidePermission (invoke) | `tests/phase-18-renderer-characterization.test.mts` |
 | `add-custom-pet` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | addCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `rename-custom-pet` | `handle` | 設定面板 main frame | 型別；長度／數量上限；isFile, isSymbolicLink；無效輸入回安全預設或錯誤 | renameCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `remove-custom-pet` | `handle` | 設定面板 main frame | isDirectory, isSymbolicLink；無效輸入回安全預設或錯誤 | removeCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
