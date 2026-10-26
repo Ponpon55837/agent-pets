@@ -1,4 +1,5 @@
-import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
@@ -12,6 +13,7 @@ import { PluginEventSourceController } from '../../electron/plugin-event-source.
 import { PluginFeedController } from '../../electron/plugin-feed.ts'
 import { PluginNetworkClient } from '../../electron/plugin-net.ts'
 import { selectBubble } from '../../src/utils/feed-arbiter.ts'
+import { createOrderedBatchCoalescer } from '../../electron/ipc/broadcast-coalescer.ts'
 
 const ROOT = new URL('../../', import.meta.url)
 const REPEATS = 30
@@ -179,6 +181,40 @@ function benchmarkCommands() {
   return dispatched
 }
 
+function benchmarkBroadcastDirect() {
+  let sends = 0
+  for (let index = 0; index < WORKLOAD; index += 1) sends += 1
+  return sends
+}
+
+function benchmarkBroadcastCoalesced() {
+  const scheduled = []
+  let sends = 0
+  let delivered = 0
+  const enqueue = createOrderedBatchCoalescer(events => {
+    sends += 1
+    delivered += events.length
+  }, callback => scheduled.push(callback))
+  for (let index = 0; index < WORKLOAD; index += 1) enqueue(index)
+  while (scheduled.length > 0) scheduled.shift()()
+  if (delivered !== WORKLOAD) throw new Error('Broadcast batch dropped events')
+  return sends
+}
+
+function benchmarkBroadcastCounts() {
+  const directSends = benchmarkBroadcastDirect()
+  const scheduled = []
+  let coalescedSends = 0
+  let deliveredEvents = 0
+  const enqueue = createOrderedBatchCoalescer(events => {
+    coalescedSends += 1
+    deliveredEvents += events.length
+  }, callback => scheduled.push(callback))
+  for (let index = 0; index < WORKLOAD; index += 1) enqueue(index)
+  while (scheduled.length > 0) scheduled.shift()()
+  return { directSends, coalescedSends, deliveredEvents }
+}
+
 function benchmarkEventSource() {
   let now = HISTORY_NOW
   const controller = new PluginEventSourceController({
@@ -305,10 +341,17 @@ async function readCounters(port) {
 }
 
 function waitForChildClose(child, timeoutMs = 8_000) {
-  return Promise.race([
-    new Promise(resolve => child.once('close', resolve)),
-    new Promise(resolve => setTimeout(() => resolve(null), timeoutMs)),
-  ])
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      child.off('close', onClose)
+      resolve(null)
+    }, timeoutMs)
+    const onClose = code => {
+      clearTimeout(timer)
+      resolve(code)
+    }
+    child.once('close', onClose)
+  })
 }
 
 async function coldStartSample(index) {
@@ -322,19 +365,30 @@ async function coldStartSample(index) {
   let output = ''
   let readyResolve
   let readyReject
+  let readySettled = false
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject })
   const onData = chunk => {
     output += chunk.toString()
-    if (output.includes('AGENT_PETS_E2E_READY')) readyResolve()
+    if (output.includes('AGENT_PETS_E2E_READY')) {
+      readySettled = true
+      readyResolve()
+    }
     if (/AGENT_PETS_E2E_ABORT|not found; run/.test(output)) readyReject(new Error('Isolated Electron did not become ready'))
   }
   child.stdout.on('data', onData)
   child.stderr.on('data', onData)
+  child.once('exit', (code, signal) => {
+    if (!readySettled) {
+      readySettled = true
+      readyReject(new Error(`Isolated Electron launcher exited before READY (code=${code ?? 'null'}, signal=${signal ?? 'none'})`))
+    }
+  })
   const start = performance.now()
   let startCounters = null
   let endCounters = null
+  let readyTimeout = null
   try {
-    await Promise.race([ready, new Promise((_, reject) => setTimeout(() => reject(new Error('Isolated Electron READY timeout')), 30_000))])
+    await Promise.race([ready, new Promise((_, reject) => { readyTimeout = setTimeout(() => reject(new Error('Isolated Electron READY timeout')), 30_000) })])
     startCounters = await readCounters(inspectPort)
     const deadline = Date.now() + 30_000
     let pageLoaded = false
@@ -362,6 +416,7 @@ async function coldStartSample(index) {
     endCounters = await readCounters(inspectPort)
     return { ms: Number((performance.now() - start).toFixed(3)), callsStart: startCounters?.calls, callsEnd: endCounters?.calls, blockedStart: startCounters?.blockedExecs, blockedEnd: endCounters?.blockedExecs }
   } finally {
+    if (readyTimeout) clearTimeout(readyTimeout)
     child.kill('SIGINT')
     if (await waitForChildClose(child) === null) {
       child.kill('SIGTERM')
@@ -419,6 +474,14 @@ async function main() {
     results.badgeLimiter10k = await measure('badgeLimiter10k', benchmarkBadges)
     results.eventSourceLimiter10k = await measure('eventSourceLimiter10k', benchmarkEventSource)
     results.commandLimiter10k = await measure('commandLimiter10k', benchmarkCommands)
+    results.broadcastDirect10k = await measure('broadcastDirect10k', benchmarkBroadcastDirect)
+    results.broadcastCoalesced10k = await measure('broadcastCoalesced10k', benchmarkBroadcastCoalesced)
+    results.broadcastMessageCounts = benchmarkBroadcastCounts()
+
+    const userFilePath = join(temporaryRoot, 'bounded-user-file.jsonl')
+    writeFileSync(userFilePath, Buffer.alloc(1024 * 1024, 0x61))
+    results.userFileReadSync1MB = await measure('userFileReadSync1MB', () => readFileSync(userFilePath).byteLength)
+    results.userFileReadAsync1MB = await measure('userFileReadAsync1MB', async () => (await readFile(userFilePath)).byteLength)
 
     const { store, firstProject } = seedHistoryStore(temporaryRoot)
     results.historySevenDay100k = await measure('historySevenDay100k', () => store.getSummary())
@@ -427,7 +490,11 @@ async function main() {
     store.close()
 
     results.coldStart = []
-    for (let index = 0; index < 5; index += 1) results.coldStart.push(await coldStartSample(index))
+    try {
+      for (let index = 0; index < 5; index += 1) results.coldStart.push(await coldStartSample(index))
+    } catch (error) {
+      results.coldStartError = error instanceof Error ? error.message : 'Isolated Electron cold start failed'
+    }
 
     const measureDirectory = directory => {
       let bytes = 0
@@ -445,6 +512,7 @@ async function main() {
     results.bundleSizes = { renderer: measureDirectory('dist/'), main: measureDirectory('dist-electron/') }
     results.workload = { seedBase: 18_000, repetitions: REPEATS, localUsageFiles: 50, localUsageBytes: 200 * 1024 * 1024, agentSessions: 1_000, agentEvents: WORKLOAD, historyEvents: 100_000, callsPerLimiter: WORKLOAD }
     console.log(JSON.stringify(results, null, 2))
+    if (results.coldStartError) process.exitCode = 1
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true })
   }

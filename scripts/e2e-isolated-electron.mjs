@@ -213,8 +213,25 @@ const child = spawn(electronBinary, [
       .map(key => [key, process.env[key]])),
     HOME: join(root, 'home'),
   },
-  stdio: ['ignore', 'inherit', 'inherit'],
+  stdio: ['ignore', 'pipe', 'pipe'],
 })
+let readySeen = false
+let readyTail = ''
+for (const [stream, target] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
+  stream.on('data', chunk => {
+    const text = chunk.toString()
+    const searchable = readyTail + text
+    if (searchable.includes('AGENT_PETS_E2E_READY')) readySeen = true
+    readyTail = searchable.slice(-'AGENT_PETS_E2E_READY'.length)
+    target.write(chunk)
+  })
+}
 console.log(JSON.stringify({ root, appRoot, inspectPort, debugPort, pid: child.pid }))
-child.on('exit', code => process.exit(code ?? 0))
+child.on('exit', (code, signal) => {
+  if (!readySeen) {
+    console.error(`AGENT_PETS_E2E_ABORT electron exited before READY (code=${code ?? 'null'}, signal=${signal ?? 'none'})`)
+    process.exit(code === 0 ? 1 : code ?? 1)
+  }
+  process.exit(code ?? 0)
+})
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal))

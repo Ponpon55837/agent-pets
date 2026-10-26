@@ -11,6 +11,11 @@ function withUserData(run: (directory: string) => void): void {
   try { run(directory) } finally { fs.rmSync(directory, { recursive: true, force: true }) }
 }
 
+async function withUserDataAsync(run: (directory: string) => Promise<void> | void): Promise<void> {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-registry-'))
+  try { await run(directory) } finally { fs.rmSync(directory, { recursive: true, force: true }) }
+}
+
 function makeArchive(options: {
   version?: string
   apiVersion?: string
@@ -67,8 +72,8 @@ test('plugin registry plans and atomically installs a valid archive', () => {
   })
 })
 
-test('plugin registry loads a developer folder through the archive validation path', () => {
-  withUserData((userData) => {
+test('plugin registry loads a developer folder through the archive validation path', async () => {
+  await withUserDataAsync(async (userData) => {
     const source = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-source-'))
     try {
       fs.mkdirSync(path.join(source, 'dist'), { recursive: true })
@@ -78,7 +83,7 @@ test('plugin registry loads a developer folder through the archive validation pa
       }))
       fs.writeFileSync(path.join(source, 'dist', 'main.js'), 'export default { activate() {} }')
       const registry = new PluginRegistry(userData)
-      const planned = registry.planInstallDirectory(source)
+      const planned = await registry.planInstallDirectory(source)
       assert.equal(planned.ok, true)
       if (!planned.ok) return
       const installed = registry.install(planned.value.token)
@@ -90,8 +95,8 @@ test('plugin registry loads a developer folder through the archive validation pa
   })
 })
 
-test('plugin registry refuses symlinks and unsupported files in developer folders', () => {
-  withUserData((userData) => {
+test('plugin registry refuses symlinks and unsupported files in developer folders', async () => {
+  await withUserDataAsync(async (userData) => {
     const source = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-source-'))
     const outside = path.join(source, '..', `${path.basename(source)}-outside.js`)
     try {
@@ -100,10 +105,10 @@ test('plugin registry refuses symlinks and unsupported files in developer folder
       fs.writeFileSync(path.join(source, 'dist', 'main.js'), 'export default {}')
       fs.writeFileSync(outside, 'outside')
       fs.symlinkSync(outside, path.join(source, 'dist', 'linked.js'))
-      assert.deepEqual(new PluginRegistry(userData).planInstallDirectory(source), { ok: false, error: 'invalid_archive' })
+      assert.deepEqual(await new PluginRegistry(userData).planInstallDirectory(source), { ok: false, error: 'invalid_archive' })
       fs.rmSync(path.join(source, 'dist', 'linked.js'))
       fs.writeFileSync(path.join(source, 'notes.txt'), 'not packaged')
-      assert.deepEqual(new PluginRegistry(userData).planInstallDirectory(source), { ok: false, error: 'invalid_archive' })
+      assert.deepEqual(await new PluginRegistry(userData).planInstallDirectory(source), { ok: false, error: 'invalid_archive' })
     } finally {
       fs.rmSync(source, { recursive: true, force: true })
       fs.rmSync(outside, { force: true })
@@ -111,8 +116,8 @@ test('plugin registry refuses symlinks and unsupported files in developer folder
   })
 })
 
-test('invalid developer folder changes do not replace the installed package', () => {
-  withUserData((userData) => {
+test('invalid developer folder changes do not replace the installed package', async () => {
+  await withUserDataAsync(async (userData) => {
     const source = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-source-'))
     try {
       fs.mkdirSync(path.join(source, 'dist'), { recursive: true })
@@ -123,14 +128,14 @@ test('invalid developer folder changes do not replace the installed package', ()
       writeManifest('1.0.0')
       fs.writeFileSync(path.join(source, 'dist', 'main.js'), 'export default { activate() {} }')
       const registry = new PluginRegistry(userData)
-      const first = registry.planInstallDirectory(source)
+      const first = await registry.planInstallDirectory(source)
       assert.equal(first.ok, true)
       if (!first.ok) return
       assert.equal(registry.install(first.value.token).ok, true)
 
       writeManifest('2.0.0')
       fs.writeFileSync(path.join(source, 'README.txt'), 'unsupported developer file')
-      assert.equal(registry.planInstallDirectory(source).ok, false)
+      assert.equal((await registry.planInstallDirectory(source)).ok, false)
       assert.equal(registry.list().find(entry => entry.id === 'sample-plugin')?.currentVersion, '1.0.0')
       assert.equal(fs.readFileSync(path.join(userData, 'plugins', 'sample-plugin', '1.0.0', 'dist', 'main.js'), 'utf8'), 'export default { activate() {} }')
     } finally {

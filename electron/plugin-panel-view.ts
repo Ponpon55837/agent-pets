@@ -43,7 +43,7 @@ export interface PluginPanelViewCancelableEvent {
 
 export interface PluginPanelViewSession {
   protocol: {
-    handle: (scheme: string, handler: (request: PluginProtocolRequestLike) => Response) => void | Promise<void>
+    handle: (scheme: string, handler: (request: PluginProtocolRequestLike) => Response | Promise<Response>) => void | Promise<void>
   }
   webRequest: {
     onBeforeRequest: (

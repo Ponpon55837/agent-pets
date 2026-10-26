@@ -10,7 +10,7 @@ type OpenDialogOptions = {
   filters?: Array<{ name: string; extensions: string[] }>
   properties: Array<'openFile'>
 }
-type FileSystemPort = Pick<typeof import('node:fs'), 'statSync' | 'lstatSync' | 'readFileSync' | 'writeFileSync' | 'existsSync' | 'rmSync'>
+type FileSystemPort = Pick<typeof import('node:fs/promises'), 'lstat' | 'readFile' | 'writeFile' | 'rm'>
 type PathPort = Pick<typeof import('node:path'), 'basename' | 'join'>
 
 export interface PetAssetIpcDependencies {
@@ -23,8 +23,8 @@ export interface PetAssetIpcDependencies {
   customPetsRoot(): string
   safeJoin(base: string, ...parts: string[]): string | null
   sanitizePetId(value: string): string | null
-  ensureDir(path: string): void
-  writeFileEnsured(path: string, contents: string): void
+  ensureDir(path: string): void | Promise<void>
+  writeFileEnsured(path: string, contents: string | Uint8Array): void | Promise<void>
   parsePetBehaviorManifest(value: unknown): SanitizedPetBehaviorManifest | undefined
   isSupportedRasterImage(data: Uint8Array): boolean
   guardArchive: typeof guardArchive
@@ -39,7 +39,7 @@ export interface PetAssetIpcDependencies {
 }
 
 export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
-  deps.ipcMain.handle(IPC_CHANNELS.addCustomPet, (event, petData: unknown) => {
+  deps.ipcMain.handle(IPC_CHANNELS.addCustomPet, async (event, petData: unknown) => {
     deps.assertTrustedIpcSender(event, deps.getPanelWindow())
     if (!petData || typeof petData !== 'object') return false
     const data = petData as Record<string, unknown>
@@ -48,7 +48,7 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
     const customDir = deps.safeJoin(deps.customPetsRoot(), 'custom', safeId)
     if (!customDir) return false
 
-    deps.ensureDir(customDir)
+    await deps.ensureDir(customDir)
     const petJson = {
       id: safeId,
       displayName: String(data.displayName || safeId).slice(0, 64),
@@ -57,11 +57,11 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
       spriteVersionNumber: 2,
       kind: 'person',
     }
-    deps.writeFileEnsured(deps.path.join(customDir, 'pet.json'), JSON.stringify(petJson, null, 2))
+    await deps.writeFileEnsured(deps.path.join(customDir, 'pet.json'), JSON.stringify(petJson, null, 2))
     return true
   })
 
-  deps.ipcMain.handle(IPC_CHANNELS.renameCustomPet, (event, petId: string, newName: string) => {
+  deps.ipcMain.handle(IPC_CHANNELS.renameCustomPet, async (event, petId: string, newName: string) => {
     deps.assertTrustedIpcSender(event, deps.getPanelWindow())
     const safeId = deps.sanitizePetId(petId)
     if (!safeId) return false
@@ -69,39 +69,45 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
     const customDir = deps.safeJoin(deps.customPetsRoot(), 'custom', safeId)
     if (!customDir) return false
     const petJsonPath = deps.safeJoin(customDir, 'pet.json')
-    if (!petJsonPath || !deps.fs.existsSync(petJsonPath)) return false
+    if (!petJsonPath) return false
     try {
-      const petData = JSON.parse(deps.fs.readFileSync(petJsonPath, 'utf-8'))
+      const stat = await deps.fs.lstat(petJsonPath)
+      if (!stat.isFile() || stat.isSymbolicLink()) return false
+      const petData = JSON.parse(await deps.fs.readFile(petJsonPath, 'utf-8'))
       petData.displayName = newName.trim().slice(0, 64)
-      deps.writeFileEnsured(petJsonPath, JSON.stringify(petData, null, 2))
+      await deps.writeFileEnsured(petJsonPath, JSON.stringify(petData, null, 2))
       return true
     } catch {
       return false
     }
   })
 
-  deps.ipcMain.handle(IPC_CHANNELS.removeCustomPet, (event, petId: string) => {
+  deps.ipcMain.handle(IPC_CHANNELS.removeCustomPet, async (event, petId: string) => {
     deps.assertTrustedIpcSender(event, deps.getPanelWindow())
     const safeId = deps.sanitizePetId(petId)
     if (!safeId) return false
     const customDir = deps.safeJoin(deps.customPetsRoot(), 'custom', safeId)
     if (!customDir) return false
-    if (deps.fs.existsSync(customDir)) {
-      deps.fs.rmSync(customDir, { recursive: true, force: true })
+    try {
+      const stat = await deps.fs.lstat(customDir)
+      if (!stat.isDirectory() || stat.isSymbolicLink()) return false
+      await deps.fs.rm(customDir, { recursive: true, force: true })
       return true
-    }
-    return false
+    } catch { return false }
   })
 
-  deps.ipcMain.handle(IPC_CHANNELS.getCustomPetSprite, (event, petId: string) => {
+  deps.ipcMain.handle(IPC_CHANNELS.getCustomPetSprite, async (event, petId: string) => {
     deps.assertTrustedIpcSender(event)
     const safeId = deps.sanitizePetId(petId)
     if (!safeId) return null
     const spritePath = deps.safeJoin(deps.customPetsRoot(), 'custom', safeId, 'spritesheet.webp')
     if (!spritePath) return null
-    if (deps.fs.existsSync(spritePath)) {
+    try {
+      const stat = await deps.fs.lstat(spritePath)
+      if (stat.isFile() && !stat.isSymbolicLink()) {
       return `agent-pets://custom/${encodeURIComponent(safeId)}/spritesheet.webp`
-    }
+      }
+    } catch {}
     return null
   })
 
@@ -124,11 +130,11 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
 
     try {
       const zipPath = result.filePaths[0]
-      const zipStat = deps.fs.statSync(zipPath)
-      if (!zipStat.isFile() || zipStat.size > deps.maxPetZipBytes) {
+      const zipStat = await deps.fs.lstat(zipPath)
+      if (!zipStat.isFile() || zipStat.isSymbolicLink() || zipStat.size > deps.maxPetZipBytes) {
         return { ok: false, error: 'Zip must be a regular file no larger than 10 MB' }
       }
-      const zipBuf = deps.fs.readFileSync(zipPath)
+      const zipBuf = await deps.fs.readFile(zipPath)
       if (zipBuf.length > deps.maxPetZipBytes) {
         return { ok: false, error: 'Zip must be no larger than 10 MB' }
       }
@@ -187,13 +193,13 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
 
       const customDir = deps.safeJoin(deps.customPetsRoot(), 'custom', safeId)
       if (!customDir) return { ok: false, error: 'Invalid destination path' }
-      deps.ensureDir(customDir)
+      await deps.ensureDir(customDir)
       const behaviorManifest = deps.parsePetBehaviorManifest(petData.behaviorManifest)
 
       // Renderer sniffs the actual image bytes rather than trusting the
       // extension (see importPetSprite below), so normalizing to
       // spritesheet.webp here is safe even for a source .png/.jpg.
-      deps.fs.writeFileSync(deps.path.join(customDir, 'spritesheet.webp'), Buffer.from(spriteData))
+      await deps.writeFileEnsured(deps.path.join(customDir, 'spritesheet.webp'), Buffer.from(spriteData))
 
       const petJson = {
         id: safeId,
@@ -204,7 +210,7 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
         kind: petData.kind === 'animal' ? 'animal' : 'person',
         ...(behaviorManifest ? { behaviorManifest } : {}),
       }
-      deps.writeFileEnsured(deps.path.join(customDir, 'pet.json'), JSON.stringify(petJson, null, 2))
+      await deps.writeFileEnsured(deps.path.join(customDir, 'pet.json'), JSON.stringify(petJson, null, 2))
 
       return { ok: true, id: safeId, displayName: petJson.displayName }
     } catch (err) {
@@ -226,15 +232,15 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
     deps.setDialogOpen(false)
     if (result.canceled || result.filePaths.length === 0) return null
     const src = result.filePaths[0]
-    const sourceStat = deps.fs.statSync(src)
-    if (!sourceStat.isFile() || sourceStat.size > deps.maxPetImageBytes) return null
-    const sourceData = deps.fs.readFileSync(src)
+    const sourceStat = await deps.fs.lstat(src)
+    if (!sourceStat.isFile() || sourceStat.isSymbolicLink() || sourceStat.size > deps.maxPetImageBytes) return null
+    const sourceData = await deps.fs.readFile(src)
     if (sourceData.length > deps.maxPetImageBytes || !deps.isSupportedRasterImage(sourceData)) return null
     const customDir = deps.safeJoin(deps.customPetsRoot(), 'custom', safeId)
     if (!customDir) return null
-    deps.ensureDir(customDir)
+    await deps.ensureDir(customDir)
     const dest = deps.path.join(customDir, 'spritesheet.webp')
-    deps.fs.writeFileSync(dest, sourceData)
+    await deps.writeFileEnsured(dest, sourceData)
     const petJson = {
       id: safeId,
       displayName: String(displayName || safeId).slice(0, 64),
@@ -243,7 +249,7 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
       spriteVersionNumber: 2,
       kind: 'person',
     }
-    deps.writeFileEnsured(deps.path.join(customDir, 'pet.json'), JSON.stringify(petJson, null, 2))
+    await deps.writeFileEnsured(deps.path.join(customDir, 'pet.json'), JSON.stringify(petJson, null, 2))
     return `agent-pets://custom/${encodeURIComponent(safeId)}/spritesheet.webp`
   })
 

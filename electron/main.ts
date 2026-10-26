@@ -70,9 +70,10 @@ import { locale, t } from '../src/i18n'
 import { createPluginSkinPetId } from '../src/utils/pet-id.ts'
 
 import { clampWindowBounds } from './pet-window-mode'
-import { hookScriptDeployPath, ensureDir, writeFileEnsured, installIntegration, uninstallIntegration, refreshInstalledIntegrationScripts, ensurePermissionToken, ensurePresentationToken, ensurePresentationMcpScript, presentationMcpScriptPath, resolveNodeBin } from './setup'
+import { hookScriptDeployPath, installIntegration, uninstallIntegration, refreshInstalledIntegrationScripts, ensurePermissionToken, ensurePresentationToken, ensurePresentationMcpScript, presentationMcpScriptPath, resolveNodeBin } from './setup'
 import { parsePetBehaviorManifest } from './pet-behavior-manifest'
 import { shouldDisableDevHardwareAcceleration } from './dev-runtime'
+import { ensureDirectoryWithin, writeFileWithin } from './ipc/pet-assets-fs.ts'
 
 import { registerHistoryIpc } from './ipc/history'
 import { registerProgressionIpc } from './ipc/progression'
@@ -221,7 +222,7 @@ if (!hasSingleInstanceLock) {
   })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return
 
   session.defaultSession.setPermissionCheckHandler(() => false)
@@ -235,7 +236,7 @@ app.whenReady().then(() => {
     join(app.getPath('userData'), 'project-mcp-registry.json'),
   )
   createProjectRoutingServices()
-  createPluginServices()
+  await createPluginServices()
   const permissionToken = ensurePermissionToken()
   const presentationToken = ensurePresentationToken()
   configureSecureProtocol()
@@ -249,7 +250,7 @@ app.whenReady().then(() => {
   powerMonitor.on('on-ac', broadcastPowerSaveState)
   broadcastPowerSaveState()
   createPresentationServices(presentationToken)
-  syncPluginHost()
+  await syncPluginHost()
   initializePluginCatalogAutoCheck()
   screen.on('display-added', rehomePetWindowForDisplayChange)
   screen.on('display-removed', rehomePetWindowForDisplayChange)
@@ -485,7 +486,7 @@ app.whenReady().then(() => {
   registerPetsIpc({
     ipcMain,
     assertTrustedIpcSender,
-    fs,
+    fs: fs.promises,
     path,
     builtinPetsPath: getPetsJsonPath,
     customPetsPath: hookScriptDeployPath,
@@ -513,12 +514,12 @@ app.whenReady().then(() => {
     customPetsRoot: hookScriptDeployPath,
     safeJoin,
     sanitizePetId,
-    ensureDir,
-    writeFileEnsured,
+    ensureDir: directory => ensureDirectoryWithin(hookScriptDeployPath(), directory),
+    writeFileEnsured: (filePath, contents) => writeFileWithin(hookScriptDeployPath(), filePath, contents),
     parsePetBehaviorManifest,
     isSupportedRasterImage,
     guardArchive,
-    fs,
+    fs: fs.promises,
     path,
     customPetDescription: () => t('customPet'),
     maxPetZipBytes: MAX_PET_ZIP_BYTES,

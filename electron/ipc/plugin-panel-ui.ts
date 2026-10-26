@@ -23,7 +23,7 @@ export interface PluginPanelUiIpcDependencies {
   assertPluginPanelSender(event: IpcMainInvokeEvent | IpcMainEvent): void
   isTrustedIpcSender(event: IpcMainInvokeEvent | IpcMainEvent, requiredWindow?: BrowserWindow | null): boolean
   isPluginPanelPluginId(value: unknown): value is string
-  getPluginPanelSnapshot(): PluginPanelResult<PluginPanelSnapshot>
+  getPluginPanelSnapshot(): PluginPanelResult<PluginPanelSnapshot> | Promise<PluginPanelResult<PluginPanelSnapshot>>
   invokePluginCommand(pluginId: unknown, commandId: unknown): unknown
   openSequence: { value: number }
   openPluginPanelView(pluginId: string, openToken: number, frame: unknown, content: unknown): Promise<unknown>

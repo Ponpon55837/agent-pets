@@ -14,7 +14,7 @@ export interface ProjectPetsIpcDependencies {
   getPanelWindow(): BrowserWindow | null
   getPetWindow(): BrowserWindow | null
   getStore(): ProjectRoutingStore | null
-  availablePetIds(): Set<string>
+  availablePetIds(): Set<string> | Promise<Set<string>>
   isDialogOpen(): boolean
   setDialogOpen(value: boolean): void
   showOpenDialog(window: BrowserWindow, options: DirectoryDialogOptions): Promise<DirectoryDialogResult>
@@ -24,9 +24,9 @@ export interface ProjectPetsIpcDependencies {
 }
 
 export function registerProjectPetsIpc(deps: ProjectPetsIpcDependencies): void {
-  handleTrusted(deps.ipcMain, IPC_CHANNELS.projectPetsList, deps.getPanelWindow, deps.assertTrustedIpcSender, (): ProjectPetView[] => {
+  handleTrusted(deps.ipcMain, IPC_CHANNELS.projectPetsList, deps.getPanelWindow, deps.assertTrustedIpcSender, async (): Promise<ProjectPetView[]> => {
     try {
-      return deps.getStore()?.listProjects(deps.availablePetIds()) ?? []
+      return deps.getStore()?.listProjects(await deps.availablePetIds()) ?? []
     } catch (error) {
       deps.logError('Project pet list failed', error)
       return []
@@ -71,7 +71,7 @@ export function registerProjectPetsIpc(deps: ProjectPetsIpcDependencies): void {
     if (result.canceled || result.filePaths.length === 0) return { ok: false, error: 'cancelled' }
 
     try {
-      const project = store.registerPath(result.filePaths[0]!, Date.now(), deps.availablePetIds())
+      const project = store.registerPath(result.filePaths[0]!, Date.now(), await deps.availablePetIds())
       return project ? { ok: true, project } : { ok: false, error: 'invalid_project' }
     } catch (error) {
       deps.logError('Project pet registration failed', error)
@@ -79,7 +79,7 @@ export function registerProjectPetsIpc(deps: ProjectPetsIpcDependencies): void {
     }
   })
 
-  handleTrusted(deps.ipcMain, IPC_CHANNELS.projectPetsBind, deps.getPanelWindow, deps.assertTrustedIpcSender, (_event, payload: unknown): ProjectPetCommandResult => {
+  handleTrusted(deps.ipcMain, IPC_CHANNELS.projectPetsBind, deps.getPanelWindow, deps.assertTrustedIpcSender, async (_event, payload: unknown): Promise<ProjectPetCommandResult> => {
     const store = deps.getStore()
     if (!store || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
       return { ok: false, error: 'unavailable' }
@@ -89,7 +89,7 @@ export function registerProjectPetsIpc(deps: ProjectPetsIpcDependencies): void {
     const petId = input.petId === null ? null : typeof input.petId === 'string' ? input.petId : undefined
     if (!/^[a-f0-9]{32}$/.test(projectId)) return { ok: false, error: 'invalid_project' }
     if (petId === undefined) return { ok: false, error: 'invalid_pet' }
-    const available = deps.availablePetIds()
+    const available = await deps.availablePetIds()
     if (petId !== null && (!isValidPetId(petId, 128) || !available.has(petId))) {
       return { ok: false, error: 'invalid_pet' }
     }

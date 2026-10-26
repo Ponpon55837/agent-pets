@@ -57,10 +57,10 @@ function fixture() {
   return { handlers, calls, pluginEnableOrder, sequence, setEnabledCount: (value: number) => { enabledCount = value }, setMaxEnabled: (value: number) => { maxEnabled = value } }
 }
 
-test('global plugin preferences notify catalog state, sync the host, and schedule opted-in checks', () => {
+test('global plugin preferences notify catalog state, sync the host, and schedule opted-in checks', async () => {
   const state = fixture()
   const handler = state.handlers.get('plugin-preferences-global-set')!
-  assert.deepEqual(handler('panel' as unknown as IpcMainInvokeEvent, { onlineCatalogEnabled: true, dailyUpdateCheck: true }), {
+  assert.deepEqual(await handler('panel' as unknown as IpcMainInvokeEvent, { onlineCatalogEnabled: true, dailyUpdateCheck: true }), {
     ok: true,
     value: {
       onlineCatalogEnabled: true,
@@ -71,18 +71,18 @@ test('global plugin preferences notify catalog state, sync the host, and schedul
   assert.deepEqual(state.calls, ['global:update', 'catalog:true', 'host:sync', 'catalog:check'])
 })
 
-test('plugin enable preferences enforce the limit and update registry order only after acceptance', () => {
+test('plugin enable preferences enforce the limit and update registry order only after acceptance', async () => {
   const state = fixture()
   const handler = state.handlers.get('plugin-preferences-instance-set')!
   state.setEnabledCount(1)
-  assert.deepEqual(handler('panel' as unknown as IpcMainInvokeEvent, 'sample-plugin', { enabled: true }), {
+  assert.deepEqual(await handler('panel' as unknown as IpcMainInvokeEvent, 'sample-plugin', { enabled: true }), {
     ok: false,
     error: 'too_many_enabled',
   })
   assert.deepEqual(state.calls, [])
 
   state.setEnabledCount(0)
-  assert.deepEqual(handler('panel' as unknown as IpcMainInvokeEvent, 'sample-plugin', { enabled: true }), {
+  assert.deepEqual(await handler('panel' as unknown as IpcMainInvokeEvent, 'sample-plugin', { enabled: true }), {
     ok: true,
     value: {
       onlineCatalogEnabled: false,

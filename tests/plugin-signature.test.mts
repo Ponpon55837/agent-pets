@@ -65,6 +65,11 @@ function withUserData(run: (directory: string) => void): void {
   try { run(directory) } finally { fs.rmSync(directory, { recursive: true, force: true }) }
 }
 
+async function withUserDataAsync(run: (directory: string) => Promise<void> | void): Promise<void> {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-signature-'))
+  try { await run(directory) } finally { fs.rmSync(directory, { recursive: true, force: true }) }
+}
+
 function successfulPlan(registry: PluginRegistry, archive: Uint8Array) {
   const result = registry.planInstall(archive)
   assert.equal(result.ok, true)
@@ -251,8 +256,8 @@ test('unsigned-to-signed updates notify once and record the new trust key', () =
   })
 })
 
-test('developer folder plans skip signatures and mark the installed package unverified', () => {
-  withUserData((userData) => {
+test('developer folder plans skip signatures and mark the installed package unverified', async () => {
+  await withUserDataAsync(async (userData) => {
     const source = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-dev-signature-'))
     try {
       fs.mkdirSync(path.join(source, 'dist'), { recursive: true })
@@ -263,7 +268,7 @@ test('developer folder plans skip signatures and mark the installed package unve
       fs.writeFileSync(path.join(source, 'dist', 'main.js'), 'export default { activate() {} }')
       fs.writeFileSync(path.join(source, 'signature.json'), '{invalid signature}')
       const registry = new PluginRegistry(userData)
-      const planned = registry.planInstallDirectory(source)
+      const planned = await registry.planInstallDirectory(source)
       assert.equal(planned.ok, true)
       if (!planned.ok) return
       assert.equal(planned.value.developerMode, true)

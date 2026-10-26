@@ -3,6 +3,7 @@ import type {
   PluginEventSourceStatusView,
   PluginLocalizedText,
 } from '../src/types/plugin.ts'
+import { SlidingWindowLimiter } from './sliding-window-limiter.ts'
 
 export const PLUGIN_EVENT_SOURCE_WINDOW_MS = 60_000
 export const PLUGIN_EVENT_SOURCE_RATE_PER_PLUGIN = 30
@@ -99,8 +100,8 @@ export class PluginEventSourceController {
   private readonly cancel: NonNullable<PluginEventSourceControllerOptions['cancel']>
   private readonly entries = new Map<string, PluginEventSourceEntry>()
   private readonly usedSessionIds = new Map<string, number>()
-  private readonly pluginRates = new Map<string, number[]>()
-  private globalRate: Array<{ pluginId: string; at: number }> = []
+  private readonly pluginRates = new Map<string, SlidingWindowLimiter>()
+  private readonly globalRate = new SlidingWindowLimiter(PLUGIN_EVENT_SOURCE_WINDOW_MS, PLUGIN_EVENT_SOURCE_RATE_GLOBAL)
   private sequence = 0
 
   constructor(options: PluginEventSourceControllerOptions) {
@@ -200,7 +201,7 @@ export class PluginEventSourceController {
       changed = true
     }
     this.pluginRates.delete(pluginId)
-    this.globalRate = this.globalRate.filter(entry => entry.pluginId !== pluginId)
+    this.globalRate.removeScope(pluginId)
     for (const key of this.usedSessionIds.keys()) if (key.startsWith(`${pluginId}\u0000`)) this.usedSessionIds.delete(key)
     if (changed) this.broadcast()
   }
@@ -210,7 +211,7 @@ export class PluginEventSourceController {
     this.entries.clear()
     this.usedSessionIds.clear()
     this.pluginRates.clear()
-    this.globalRate = []
+    this.globalRate.clear()
     this.broadcast()
   }
 
@@ -228,20 +229,24 @@ export class PluginEventSourceController {
   }
 
   private consumeRate(pluginId: string, now: number): boolean {
-    const pluginTimes = this.pluginRates.get(pluginId) ?? []
-    if (pluginTimes.length >= PLUGIN_EVENT_SOURCE_RATE_PER_PLUGIN || this.globalRate.length >= PLUGIN_EVENT_SOURCE_RATE_GLOBAL) return false
-    pluginTimes.push(now)
-    this.pluginRates.set(pluginId, pluginTimes)
-    this.globalRate.push({ pluginId, at: now })
+    const pluginTimes = this.pluginRates.get(pluginId)
+    if ((pluginTimes?.size ?? 0) >= PLUGIN_EVENT_SOURCE_RATE_PER_PLUGIN
+      || this.globalRate.size >= PLUGIN_EVENT_SOURCE_RATE_GLOBAL) return false
+    let limiter = pluginTimes
+    if (!limiter) {
+      limiter = new SlidingWindowLimiter(PLUGIN_EVENT_SOURCE_WINDOW_MS, PLUGIN_EVENT_SOURCE_RATE_PER_PLUGIN)
+      this.pluginRates.set(pluginId, limiter)
+    }
+    limiter.record(now)
+    this.globalRate.record(now, pluginId)
     return true
   }
 
   private prune(now: number): void {
-    const cutoff = now - PLUGIN_EVENT_SOURCE_WINDOW_MS
-    this.globalRate = this.globalRate.filter(entry => entry.at > cutoff)
-    for (const [pluginId, times] of this.pluginRates) {
-      const recent = times.filter(at => at > cutoff)
-      if (recent.length) this.pluginRates.set(pluginId, recent)
+    this.globalRate.prune(now)
+    for (const [pluginId, limiter] of this.pluginRates) {
+      limiter.prune(now)
+      if (limiter.size > 0) this.pluginRates.set(pluginId, limiter)
       else this.pluginRates.delete(pluginId)
     }
     for (const [key, expiry] of this.usedSessionIds) if (expiry <= now) this.usedSessionIds.delete(key)

@@ -19,12 +19,12 @@ export interface PluginPreferencesIpcDependencies {
   nextPluginEnableOrder: { value: number }
   onCatalogPreferencesChanged(previous: ReturnType<PluginPreferencesStore['get']>, next: ReturnType<PluginPreferencesStore['get']>): void
   checkCatalogIfDue(): void
-  syncPluginHost(): void
+  syncPluginHost(): void | Promise<void>
   pluginPanelError(error: unknown): string
 }
 
 export function registerPluginPreferencesIpc(deps: PluginPreferencesIpcDependencies): void {
-  handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.pluginPreferencesGlobalSet, deps.assertPluginPanelSender, (_event, patch: unknown) => {
+  handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.pluginPreferencesGlobalSet, deps.assertPluginPanelSender, async (_event, patch: unknown) => {
     const preferencesStore = deps.getPreferencesStore()
     if (!preferencesStore || !deps.isPluginPanelPreferencePatch(patch)) {
       return { ok: false, error: preferencesStore ? 'invalid_request' : 'plugin_service_unavailable' }
@@ -33,7 +33,7 @@ export function registerPluginPreferencesIpc(deps: PluginPreferencesIpcDependenc
       const previous = preferencesStore.get()
       const preferences = preferencesStore.updateGlobal(patch)
       deps.onCatalogPreferencesChanged(previous, preferences)
-      deps.syncPluginHost()
+      await deps.syncPluginHost()
       if (preferences.dailyUpdateCheck) deps.checkCatalogIfDue()
       return { ok: true, value: preferences }
     } catch (error) {
@@ -41,7 +41,7 @@ export function registerPluginPreferencesIpc(deps: PluginPreferencesIpcDependenc
     }
   })
 
-  handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.pluginPreferencesInstanceSet, deps.assertPluginPanelSender, (_event, pluginId: unknown, patch: unknown) => {
+  handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.pluginPreferencesInstanceSet, deps.assertPluginPanelSender, async (_event, pluginId: unknown, patch: unknown) => {
     const registry = deps.getRegistry()
     const preferencesStore = deps.getPreferencesStore()
     if (!registry || !preferencesStore) return { ok: false, error: 'plugin_service_unavailable' }
@@ -61,7 +61,7 @@ export function registerPluginPreferencesIpc(deps: PluginPreferencesIpcDependenc
         if (patch.enabled) deps.pluginEnableOrder.set(pluginId, deps.nextPluginEnableOrder.value++)
         else deps.pluginEnableOrder.delete(pluginId)
       }
-      deps.syncPluginHost()
+      await deps.syncPluginHost()
       return { ok: true, value: preferences }
     } catch (error) {
       return { ok: false, error: deps.pluginPanelError(error) }

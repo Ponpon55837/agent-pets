@@ -64,7 +64,7 @@ import type { ProgressionSnapshot } from '../../src/types/progression'
 import type { AchievementUnlock } from '../../src/types/achievement'
 import type { HistorySummary } from '../../src/types/history'
 import type { PresentationIntent } from '../../src/types/presentation'
-import type { PluginPanelPlugin, PluginPanelResult, PluginPanelSnapshot } from '../../src/types/plugin'
+import type { PluginEventSourceStatusView, PluginPanelPlugin, PluginPanelResult, PluginPanelSnapshot } from '../../src/types/plugin'
 
 import type { PetEdge, PetWindowMode, PetWindowModeState } from '../../src/types/pet-window'
 import { createPluginSkinPetId, isPluginSkinPetId, isValidPetId, isValidRegularPetId } from '../../src/utils/pet-id.ts'
@@ -82,6 +82,7 @@ import { createWindowsFullscreenDetector, nativeWindowHandleToPointer, type Wind
 
 
 import { registerPluginFeedIpc } from '../ipc/plugin-feed'
+import { createLatestValueCoalescer } from '../ipc/broadcast-coalescer.ts'
 
 import { type IntegrationTestSource } from '../ipc/integrations'
 
@@ -295,13 +296,13 @@ export function pluginPanelError(error: unknown): string {
   return pluginPanelErrorCode(error)
 }
 
-export function pluginPanelSnapshot(): PluginPanelResult<PluginPanelSnapshot> {
+export async function pluginPanelSnapshot(): Promise<PluginPanelResult<PluginPanelSnapshot>> {
   if (!mainState.pluginRegistry || !mainState.pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
   try {
     const preferences = mainState.pluginPreferences.get()
-    const plugins: PluginPanelPlugin[] = mainState.pluginRegistry.list().map(entry => {
+    const plugins: PluginPanelPlugin[] = await Promise.all(mainState.pluginRegistry.list().map(async entry => {
       const root = resolve(app.getPath('userData'), 'plugins', entry.id, entry.currentVersion)
-      const source = readRegularFileWithin(root, 'plugin.json', 256 * 1024)
+      const source = await readRegularFileWithin(root, 'plugin.json', 256 * 1024)
       let manifest: PluginPanelPlugin['manifest'] = null
       if (source) {
         try {
@@ -321,7 +322,7 @@ export function pluginPanelSnapshot(): PluginPanelResult<PluginPanelSnapshot> {
         development: mainState.developerSourceFolders.has(entry.id),
         preference: preferences.plugins[entry.id] ?? mainState.pluginPreferences!.getPlugin(entry.id),
       }
-    })
+    }))
     return { ok: true, value: { preferences, plugins } }
   } catch (error) {
     return { ok: false, error: pluginPanelError(error) }
@@ -382,40 +383,47 @@ export function rasterContentType(data: Uint8Array): string | null {
   return null
 }
 
-export function readRegularFileWithin(root: string, relativePath: string, maxBytes: number): Buffer | null {
+export async function readRegularFileWithin(root: string, relativePath: string, maxBytes: number): Promise<Buffer | null> {
   const candidate = safeJoin(root, relativePath)
   if (!candidate) return null
+  let handle: Awaited<ReturnType<typeof fs.promises.open>> | null = null
   try {
-    const rootReal = fs.realpathSync(root)
-    const candidateStat = fs.lstatSync(candidate)
+    const rootReal = await fs.promises.realpath(root)
+    const candidateStat = await fs.promises.lstat(candidate)
     if (!candidateStat.isFile() || candidateStat.isSymbolicLink() || candidateStat.size > maxBytes) return null
-    const candidateReal = fs.realpathSync(candidate)
+    const candidateReal = await fs.promises.realpath(candidate)
     const relative = path.relative(rootReal, candidateReal)
     if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null
-    const data = fs.readFileSync(candidateReal)
+    const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0
+    handle = await fs.promises.open(candidateReal, fs.constants.O_RDONLY | noFollow)
+    const opened = await handle.stat()
+    if (!opened.isFile() || opened.size > maxBytes) return null
+    const data = await handle.readFile()
     return data.length <= maxBytes ? data : null
   } catch {
     return null
+  } finally {
+    try { await handle?.close() } catch {}
   }
 }
 
 export function configureSecureProtocol(): void {
-  protocol.handle('agent-pets', (request) => {
+  protocol.handle('agent-pets', async (request) => {
     if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 })
     try {
       const url = new URL(request.url)
       const pathname = decodeURIComponent(url.pathname)
       if (url.hostname === 'plugin') {
-        return handlePluginProtocolRequest(request.url, {
+        return await handlePluginProtocolRequest(request.url, {
           pluginRootForId: enabledPluginRoot,
           hostAssets: pluginHostAssets,
-          pluginSkinAssetForId: (pluginId, relativePath) => {
+          pluginSkinAssetForId: async (pluginId, relativePath) => {
             const context = mainState.pluginRuntimeContexts.get(pluginId)
             const skin = context?.manifest.contributes.skins?.find(candidate => candidate.spritesheet === relativePath)
             if (!skin) return undefined
             const root = enabledPluginRoot(pluginId)
             if (!root) return null
-            const data = readRegularFileWithin(root, relativePath, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES)
+            const data = await readRegularFileWithin(root, relativePath, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES)
             const type = data ? rasterContentType(data) : null
             return data && type ? { data, contentType: type } : null
           },
@@ -423,7 +431,7 @@ export function configureSecureProtocol(): void {
       }
       if (url.hostname === 'app') {
         const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
-        const data = readRegularFileWithin(resolve(join(__dirname, '../dist')), relativePath, 25 * 1024 * 1024)
+        const data = await readRegularFileWithin(resolve(join(__dirname, '../dist')), relativePath, 25 * 1024 * 1024)
         if (!data) return new Response('Not found', { status: 404 })
         return new Response(Uint8Array.from(data), {
           status: 200,
@@ -438,7 +446,7 @@ export function configureSecureProtocol(): void {
         const safeId = match ? sanitizePetId(match[1]) : null
         if (!safeId) return new Response('Not found', { status: 404 })
         const customRoot = resolve(hookScriptDeployPath(), 'custom')
-        const data = readRegularFileWithin(customRoot, join(safeId, 'spritesheet.webp'), MAX_PET_IMAGE_BYTES)
+        const data = await readRegularFileWithin(customRoot, join(safeId, 'spritesheet.webp'), MAX_PET_IMAGE_BYTES)
         const contentType = data ? rasterContentType(data) : null
         if (!data || !contentType) return new Response('Not found', { status: 404 })
         return new Response(Uint8Array.from(data), {
@@ -459,7 +467,7 @@ export function enabledPluginRoot(pluginId: string): string | null {
   return resolve(app.getPath('userData'), 'plugins', entry.id, entry.currentVersion)
 }
 
-export function refreshPluginRuntimeContexts(): void {
+export async function refreshPluginRuntimeContexts(): Promise<void> {
   let preferences: ReturnType<PluginPreferencesStore['get']> | null = null
   try { preferences = mainState.pluginPreferences?.get() ?? null } catch {}
   mainState.pluginPreferencesSnapshot = preferences
@@ -469,7 +477,7 @@ export function refreshPluginRuntimeContexts(): void {
     const preference = preferences?.plugins[entry.id]
     if (!preference) continue
     const root = resolve(app.getPath('userData'), 'plugins', entry.id, entry.currentVersion)
-    const source = readRegularFileWithin(root, 'plugin.json', 256 * 1024)
+    const source = await readRegularFileWithin(root, 'plugin.json', 256 * 1024)
     if (!source) continue
     try {
       const parsed = parsePluginManifest(JSON.parse(source.toString('utf8')) as unknown)
@@ -538,7 +546,7 @@ export async function reloadDeveloperPlugin(pluginId: string, sourceFolder: stri
     || mainState.pluginPreferencesSnapshot?.developerMode !== true) return
   mainState.developerReloadsInFlight.add(pluginId)
   try {
-    const planned = mainState.pluginRegistry.planInstallDirectory(sourceFolder)
+    const planned = await mainState.pluginRegistry.planInstallDirectory(sourceFolder)
     if (!planned.ok) {
       mainState.pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
       return
@@ -559,7 +567,7 @@ export async function reloadDeveloperPlugin(pluginId: string, sourceFolder: stri
       mainState.pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
       return
     }
-    syncPluginHost()
+    await syncPluginHost()
   } catch {
     mainState.pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
   } finally {
@@ -607,9 +615,9 @@ export function broadcastPluginSkinsChanged(removedPetIds: string[]): void {
   }
 }
 
-export function syncPluginHost(): void {
+export async function syncPluginHost(): Promise<void> {
   const previousSkins = enabledPluginSkinRecords()
-  refreshPluginRuntimeContexts()
+  await refreshPluginRuntimeContexts()
   const currentSkins = enabledPluginSkinRecords()
   const removedPetIds: string[] = []
   for (const [petId, info] of previousSkins) {
@@ -634,6 +642,7 @@ export function syncPluginHost(): void {
     })
   if (catalogChanged) {
     mainState.availablePetIdsCache = null
+    availablePetIdsLoad = null
     broadcastPluginSkinsChanged(removedPetIds)
   }
   mainState.pluginBadgeController?.syncEnabledPlugins()
@@ -676,13 +685,23 @@ export function pluginTrayCommands(): PluginTrayCommandItem[] {
 }
 
 export function broadcastPluginFeedUnreadCount(count = mainState.pluginFeedController?.unreadCount() ?? 0): void {
+  queuePluginFeedUnreadCountBroadcast(count)
+}
+
+const queuePluginFeedUnreadCountBroadcast = createLatestValueCoalescer((count: number) => {
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
     if (window && !window.isDestroyed()) {
       window.webContents.send(IPC_CHANNELS.pluginFeedUnreadCount, count)
       window.webContents.send(IPC_CHANNELS.pluginNotificationsChanged)
     }
   }
-}
+})
+
+const queuePluginEventSourceBroadcast = createLatestValueCoalescer((statuses: PluginEventSourceStatusView[]) => {
+  if (mainState.panelWindow && !mainState.panelWindow.isDestroyed()) {
+    mainState.panelWindow.webContents.send(IPC_CHANNELS.pluginEventSourceUpdated, statuses)
+  }
+})
 
 export function broadcastPluginBadges(badges = mainState.pluginBadgeController?.list() ?? []): void {
   if (mainState.petWindow && !mainState.petWindow.isDestroyed()) mainState.petWindow.webContents.send(IPC_CHANNELS.pluginBadgesUpdated, badges)
@@ -880,7 +899,7 @@ export function initializePluginCatalogAutoCheck(): void {
   }, 60 * 60 * 1_000)
 }
 
-export function createPluginServices(): void {
+export async function createPluginServices(): Promise<void> {
   if (mainState.pluginRegistry || mainState.pluginPreferences || mainState.pluginHostWindow) return
   const userDataDirectory = app.getPath('userData')
   mainState.pluginRegistry = new PluginRegistry(userDataDirectory)
@@ -925,10 +944,10 @@ export function createPluginServices(): void {
       } : null
     },
     onChanged: statuses => {
-      if (mainState.panelWindow && !mainState.panelWindow.isDestroyed()) mainState.panelWindow.webContents.send(IPC_CHANNELS.pluginEventSourceUpdated, statuses)
+      queuePluginEventSourceBroadcast(statuses)
     },
   })
-  refreshPluginRuntimeContexts()
+  await refreshPluginRuntimeContexts()
   mainState.pluginFeedController = new PluginFeedController({
     emit: item => {
       if (mainState.petWindow && !mainState.petWindow.isDestroyed()) {
@@ -1015,7 +1034,7 @@ export function createPluginServices(): void {
         const grantedHosts = [...new Set([...storedHosts, decision.host])]
         mainState.pluginPreferences.updatePlugin(pluginId, { grantedHosts })
         mainState.pluginHostGrantController.finish(pluginId, decision.host, true)
-        syncPluginHost()
+        await syncPluginHost()
         return { granted: true, host: decision.host }
       } catch {
         mainState.pluginHostGrantController.finish(pluginId, decision.host, true)
@@ -1104,7 +1123,7 @@ export function createPluginServices(): void {
         try { mainState.pluginRegistry?.setStatus(pluginId, 'disabled_crashed') } catch {}
         try { mainState.pluginPreferences?.updatePlugin(pluginId, { enabled: false }) } catch {}
         mainState.pluginEnableOrder.delete(pluginId)
-        setTimeout(() => syncPluginHost(), 0)
+        setTimeout(() => { void syncPluginHost() }, 0)
       }
     },
     onPluginReset: pluginId => mainState.pluginEventSourceController?.clearPlugin(pluginId),
@@ -1292,7 +1311,7 @@ export function createPluginServices(): void {
     setDialogOpen: value => { mainState.dialogOpen = value },
     showOpenDialog: (window, options) => dialog.showOpenDialog(window, options),
     translate: key => t(key),
-    fs,
+    fs: fs.promises,
     maxArchiveBytes: PLUGIN_ARCHIVE_SKIN_MAX_BYTES,
     pendingPlanIds: mainState.pendingPluginPlanIds,
     pendingDeveloperFolders: mainState.pendingDeveloperFolders,
@@ -2366,13 +2385,9 @@ export function createAchievementServices(): void {
 }
 
 export function logAchievementDiagnostic(label: string, error: unknown, extra?: unknown): void {
-  try {
-    fs.appendFileSync(
-      join(app.getPath('userData'), 'achievements-init-error.log'),
-      `${new Date().toISOString()} [${label}] ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`
-        + `${extra !== undefined ? ` extra=${JSON.stringify(extra)}` : ''}\n`,
-    )
-  } catch {}
+  const line = `${new Date().toISOString()} [${label}] ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`
+    + `${extra !== undefined ? ` extra=${JSON.stringify(extra)}` : ''}\n`
+  void fs.promises.appendFile(join(app.getPath('userData'), 'achievements-init-error.log'), line).catch(() => {})
 }
 
 export function scheduleAchievementStoreRetry(): void {
@@ -2570,10 +2585,10 @@ export function getPetsJsonPath(): string {
   return join(__dirname, '..', 'dist', 'pets', 'pets.json')
 }
 
-export function availablePetIds(): Set<string> {
+export async function availablePetIds(): Promise<Set<string>> {
   const ids = new Set<string>()
   try {
-    const raw = JSON.parse(fs.readFileSync(getPetsJsonPath(), 'utf-8'))
+    const raw = JSON.parse(await fs.promises.readFile(getPetsJsonPath(), 'utf-8'))
     if (Array.isArray(raw)) {
       for (const pet of raw) {
         if (pet && isValidRegularPetId(pet.id, 128)) ids.add(pet.id)
@@ -2583,12 +2598,14 @@ export function availablePetIds(): Set<string> {
 
   const customBase = path.resolve(hookScriptDeployPath(), 'custom')
   try {
-    for (const entry of fs.readdirSync(customBase, { withFileTypes: true })) {
+    for (const entry of await fs.promises.readdir(customBase, { withFileTypes: true })) {
       if (!entry.isDirectory() || !isValidRegularPetId(entry.name, 128)) continue
       const petJsonPath = safeJoin(customBase, entry.name, 'pet.json')
-      if (!petJsonPath || !fs.existsSync(petJsonPath)) continue
+      if (!petJsonPath) continue
       try {
-        const pet = JSON.parse(fs.readFileSync(petJsonPath, 'utf-8'))
+        const petStat = await fs.promises.lstat(petJsonPath)
+        if (!petStat.isFile() || petStat.isSymbolicLink()) continue
+        const pet = JSON.parse(await fs.promises.readFile(petJsonPath, 'utf-8'))
         const id = typeof pet.id === 'string' ? pet.id : entry.name
         if (isValidRegularPetId(id, 128)) ids.add(id)
       } catch {}
@@ -2609,18 +2626,28 @@ export function availablePetIds(): Set<string> {
 
 
 export const AVAILABLE_PET_IDS_CACHE_MS = 5_000
+let availablePetIdsLoad: Promise<Set<string>> | null = null
 
 // Live event ingestion calls this on every tool-call/state event; re-reading
 // pets.json plus the whole custom-pets directory that often would add a
 // second batch of synchronous disk I/O to the same hot path project routing
 // already had to be freed of. User-initiated calls (pick/bind/list) skip
 // this and always read fresh.
-export function availablePetIdsCached(): Set<string> {
+export async function availablePetIdsCached(): Promise<Set<string>> {
   const now = Date.now()
   if (mainState.availablePetIdsCache && mainState.availablePetIdsCache.expiresAt > now) return mainState.availablePetIdsCache.ids
-  const ids = availablePetIds()
-  mainState.availablePetIdsCache = { ids, expiresAt: now + AVAILABLE_PET_IDS_CACHE_MS }
-  return ids
+  if (availablePetIdsLoad) return availablePetIdsLoad
+  const loading = availablePetIds()
+  availablePetIdsLoad = loading
+  try {
+    const ids = await loading
+    if (availablePetIdsLoad === loading) {
+      mainState.availablePetIdsCache = { ids, expiresAt: Date.now() + AVAILABLE_PET_IDS_CACHE_MS }
+    }
+    return ids
+  } finally {
+    if (availablePetIdsLoad === loading) availablePetIdsLoad = null
+  }
 }
 
 export function createProjectRoutingServices(): void {
@@ -2648,7 +2675,7 @@ export async function normalizeIngressEvent(input: unknown, receivedAt?: number)
   if (!normalized.ok || !mainState.projectRoutingStore) return normalized
 
   try {
-    const available = availablePetIdsCached()
+    const available = await availablePetIdsCached()
     const identity = mainState.projectRoutingStore.trackSeen(rawProjectPath(input), receivedAt)
     if (!identity) return normalized
     const route = mainState.projectRoutingStore.route(identity.projectId, available)

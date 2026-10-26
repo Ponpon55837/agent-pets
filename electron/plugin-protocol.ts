@@ -1,4 +1,5 @@
-import * as fs from 'node:fs'
+import { constants as fsConstants } from 'node:fs'
+import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 
 export const PLUGIN_CONTENT_SECURITY_POLICY = "default-src 'none'; script-src agent-pets://plugin; worker-src agent-pets://plugin; connect-src 'none'; img-src agent-pets://plugin; style-src agent-pets://plugin; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
@@ -16,6 +17,7 @@ export interface PluginProtocolOptions {
   pluginRootForId: (pluginId: string) => string | null
   hostAssets: PluginProtocolAssets
   pluginSkinAssetForId?: (pluginId: string, relativePath: string) => { data: Uint8Array; contentType: string } | null | undefined
+    | Promise<{ data: Uint8Array; contentType: string } | null | undefined>
 }
 
 export interface PluginHostProtocolOptions {
@@ -40,34 +42,32 @@ function isPathInside(root: string, candidate: string): boolean {
   return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
 }
 
-function readRegularFileWithin(root: string, relativePath: string): Buffer | null {
+async function readRegularFileWithin(root: string, relativePath: string): Promise<Buffer | null> {
   if (!path.isAbsolute(root) || typeof relativePath !== 'string' || relativePath.length === 0
     || relativePath.length > 512 || relativePath.includes('\\')) return null
   const segments = relativePath.split('/')
   if (segments.some(segment => !segment || segment === '.' || segment === '..')) return null
 
-  let descriptor: number | null = null
+  let handle: Awaited<ReturnType<typeof fs.open>> | null = null
   try {
-    const rootStat = fs.lstatSync(root)
+    const rootStat = await fs.lstat(root)
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return null
-    const rootReal = fs.realpathSync(root)
+    const rootReal = await fs.realpath(root)
     const candidate = path.resolve(root, ...segments)
     if (!isPathInside(root, candidate)) return null
-    const candidateStat = fs.lstatSync(candidate)
+    const candidateStat = await fs.lstat(candidate)
     if (!candidateStat.isFile() || candidateStat.isSymbolicLink() || candidateStat.size > PLUGIN_PROTOCOL_MAX_FILE_BYTES) return null
-    const candidateReal = fs.realpathSync(candidate)
+    const candidateReal = await fs.realpath(candidate)
     if (!isPathInside(rootReal, candidateReal)) return null
-    const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0
-    descriptor = fs.openSync(candidateReal, fs.constants.O_RDONLY | noFollow)
-    const openedStat = fs.fstatSync(descriptor)
+    const noFollow = typeof fsConstants.O_NOFOLLOW === 'number' ? fsConstants.O_NOFOLLOW : 0
+    handle = await fs.open(candidateReal, fsConstants.O_RDONLY | noFollow)
+    const openedStat = await handle.stat()
     if (!openedStat.isFile() || openedStat.size > PLUGIN_PROTOCOL_MAX_FILE_BYTES) return null
-    return fs.readFileSync(descriptor)
+    return await handle.readFile()
   } catch {
     return null
   } finally {
-    if (descriptor !== null) {
-      try { fs.closeSync(descriptor) } catch {}
-    }
+    try { await handle?.close() } catch {}
   }
 }
 
@@ -148,8 +148,8 @@ function decodePluginPanelPath(pathname: string): string[] | null {
 const PLUGIN_PANEL_ALLOWED_EXTENSIONS = new Set(['.html', '.js', '.css', '.json', '.png', '.webp'])
 
 /** Creates a panel-only handler scoped to a random plugin token plus one read-only shared stylesheet. */
-export function createPluginPanelProtocolHandler(options: PluginPanelProtocolOptions): (request: PluginProtocolRequestLike) => Response {
-  return request => {
+export function createPluginPanelProtocolHandler(options: PluginPanelProtocolOptions): (request: PluginProtocolRequestLike) => Promise<Response> {
+  return async request => {
     if (request.method && request.method !== 'GET') return new Response('Method not allowed', { status: 405 })
     try {
       const url = new URL(request.url)
@@ -170,7 +170,7 @@ export function createPluginPanelProtocolHandler(options: PluginPanelProtocolOpt
       }
       const root = options.pluginRootForToken(scope)
       if (!root) return new Response('Not found', { status: 404 })
-      const data = readRegularFileWithin(root, relativePath)
+      const data = await readRegularFileWithin(root, relativePath)
       if (!data) return new Response('Not found', { status: 404 })
       return pluginPanelResponse(relativePath, data)
     } catch {
@@ -179,7 +179,7 @@ export function createPluginPanelProtocolHandler(options: PluginPanelProtocolOpt
   }
 }
 
-function handlePluginHostProtocolRequest(requestUrl: string, options: PluginHostProtocolOptions): Response {
+async function handlePluginHostProtocolRequest(requestUrl: string, options: PluginHostProtocolOptions): Promise<Response> {
   try {
     const url = new URL(requestUrl)
     if (url.protocol !== 'agent-pets:' || url.hostname !== 'plugin' || url.username || url.password || url.port
@@ -202,7 +202,7 @@ function handlePluginHostProtocolRequest(requestUrl: string, options: PluginHost
     }
     const root = options.pluginRootForToken(tokenOrHost)
     if (!root) return new Response('Not found', { status: 404 })
-    const data = readRegularFileWithin(root, relativePath)
+    const data = await readRegularFileWithin(root, relativePath)
     if (!data) return new Response('Not found', { status: 404 })
     return pluginHostResponse(relativePath, data, true)
   } catch {
@@ -211,15 +211,15 @@ function handlePluginHostProtocolRequest(requestUrl: string, options: PluginHost
 }
 
 /** Creates the isolated partition handler; it can only serve plugin-host resources. */
-export function createPluginHostProtocolHandler(options: PluginHostProtocolOptions): (request: PluginProtocolRequestLike) => Response {
-  return request => {
+export function createPluginHostProtocolHandler(options: PluginHostProtocolOptions): (request: PluginProtocolRequestLike) => Promise<Response> {
+  return async request => {
     if (request.method && request.method !== 'GET') return new Response('Method not allowed', { status: 405 })
-    return handlePluginHostProtocolRequest(request.url, options)
+    return await handlePluginHostProtocolRequest(request.url, options)
   }
 }
 
 /** Serves only embedded host resources and explicitly supplied current-version plugin roots. */
-export function handlePluginProtocolRequest(requestUrl: string, options: PluginProtocolOptions): Response {
+export async function handlePluginProtocolRequest(requestUrl: string, options: PluginProtocolOptions): Promise<Response> {
   try {
     const url = new URL(requestUrl)
     if (url.protocol !== 'agent-pets:' || url.hostname !== 'plugin' || url.username || url.password || url.port
@@ -247,10 +247,10 @@ export function handlePluginProtocolRequest(requestUrl: string, options: PluginP
     if (!PLUGIN_ID.test(id)) return new Response('Not found', { status: 404 })
     const root = options.pluginRootForId(id)
     if (!root) return new Response('Not found', { status: 404 })
-    const skinAsset = options.pluginSkinAssetForId?.(id, relativePath)
+    const skinAsset = await options.pluginSkinAssetForId?.(id, relativePath)
     if (skinAsset === null) return new Response('Not found', { status: 404 })
     if (skinAsset) return pluginSkinResponse(skinAsset.data, skinAsset.contentType)
-    const data = readRegularFileWithin(root, relativePath)
+    const data = await readRegularFileWithin(root, relativePath)
     if (!data) return new Response('Not found', { status: 404 })
     return pluginResponse(relativePath, data)
   } catch {

@@ -41,7 +41,13 @@ import type {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   onAgentStatusEvent: (callback: (event: unknown) => void) => {
-    const handler = (_event: unknown, data: unknown) => callback(data)
+    const handler = (_event: unknown, data: unknown) => {
+      if (Array.isArray(data)) {
+        for (const item of data) callback(item)
+      } else {
+        callback(data)
+      }
+    }
     ipcRenderer.on(IPC_CHANNELS.agentStatusEvent, handler)
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.agentStatusEvent, handler)

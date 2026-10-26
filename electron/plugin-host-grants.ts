@@ -1,5 +1,6 @@
 import { isIP } from 'node:net'
 import { isValidPluginNetworkHost } from './plugin-manifest.ts'
+import { SlidingWindowLimiter } from './sliding-window-limiter.ts'
 
 export const PLUGIN_HOST_REQUEST_LIMIT = 3
 export const PLUGIN_HOST_REQUEST_WINDOW_MS = 10 * 60 * 1_000
@@ -29,7 +30,7 @@ export function normalizePluginHostRequest(value: unknown): string | null {
 
 export class PluginHostGrantController {
   private readonly now: () => number
-  private readonly attempts = new Map<string, number[]>()
+  private readonly attempts = new Map<string, SlidingWindowLimiter>()
   private readonly deniedUntil = new Map<string, number>()
   private readonly pending = new Set<string>()
 
@@ -50,10 +51,12 @@ export class PluginHostGrantController {
     if (denied !== undefined && denied > now) return { ok: false, error: 'denied' }
     this.deniedUntil.delete(key)
     if (this.pending.has(key)) return { ok: false, error: 'rate_limited' }
-    const attempts = (this.attempts.get(pluginId) ?? []).filter(at => now - at < PLUGIN_HOST_REQUEST_WINDOW_MS)
-    if (attempts.length >= PLUGIN_HOST_REQUEST_LIMIT) return { ok: false, error: 'rate_limited' }
-    attempts.push(now)
-    this.attempts.set(pluginId, attempts)
+    let attempts = this.attempts.get(pluginId)
+    if (!attempts) {
+      attempts = new SlidingWindowLimiter(PLUGIN_HOST_REQUEST_WINDOW_MS, PLUGIN_HOST_REQUEST_LIMIT)
+      this.attempts.set(pluginId, attempts)
+    }
+    if (!attempts.consume(now, PLUGIN_HOST_REQUEST_LIMIT).allowed) return { ok: false, error: 'rate_limited' }
     this.pending.add(key)
     return { ok: true, host, alreadyGranted: false }
   }
@@ -68,9 +71,7 @@ export class PluginHostGrantController {
   }
 
   clearPlugin(pluginId: string): void {
-    for (const key of this.attempts.keys()) {
-      if (key === pluginId) this.attempts.delete(key)
-    }
+    this.attempts.delete(pluginId)
     for (const key of this.deniedUntil.keys()) {
       if (key.startsWith(`${pluginId}\u0000`)) this.deniedUntil.delete(key)
     }

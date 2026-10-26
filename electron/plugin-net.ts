@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import type { PluginErrorCode } from '../src/types/plugin.ts'
 import { isValidPluginNetworkHost } from './plugin-manifest.ts'
+import { SlidingWindowLimiter } from './sliding-window-limiter.ts'
 
 export const PLUGIN_NET_MAX_REDIRECTS = 3
 export const PLUGIN_NET_MAX_REQUEST_BYTES = 256 * 1024
@@ -258,7 +259,7 @@ async function readResponse(response: Response, maxBytes: number): Promise<Plugi
 
 export class PluginNetworkClient {
   private readonly dependencies: PluginNetDependencies
-  private readonly requestTimes = new Map<string, number[]>()
+  private readonly requestTimes = new Map<string, SlidingWindowLimiter>()
 
   constructor(dependencies: Partial<PluginNetDependencies> = {}) {
     this.dependencies = {
@@ -286,10 +287,12 @@ export class PluginNetworkClient {
     }
     const now = this.safeNow()
     if (now === null) return { ok: false, error: 'disabled' }
-    const recent = (this.requestTimes.get(pluginId) ?? []).filter(at => now - at < 60_000)
-    if (recent.length >= limits.requestsPerMinute) return { ok: false, error: 'rate_limited' }
-    recent.push(now)
-    this.requestTimes.set(pluginId, recent)
+    let limiter = this.requestTimes.get(pluginId)
+    if (!limiter) {
+      limiter = new SlidingWindowLimiter(60_000, limits.requestsPerMinute)
+      this.requestTimes.set(pluginId, limiter)
+    }
+    if (!limiter.consume(now, limits.requestsPerMinute).allowed) return { ok: false, error: 'rate_limited' }
 
     let currentUrl = firstUrl
     let headers = new Headers(request.headers)

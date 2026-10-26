@@ -33,7 +33,7 @@ export type PetLoadItem = {
   }
 }
 
-type PetLoadFileSystem = Pick<typeof import('node:fs'), 'readFileSync' | 'existsSync' | 'readdirSync'>
+type PetLoadFileSystem = Pick<typeof import('node:fs/promises'), 'readFile' | 'lstat' | 'readdir'>
 type PetLoadPath = Pick<typeof import('node:path'), 'resolve'>
 
 export interface PetsIpcDependencies {
@@ -50,17 +50,17 @@ export interface PetsIpcDependencies {
   pluginContexts(): Iterable<[string, PluginPetContext]>
   enabledPluginRoot(pluginId: string): string | null
   createPluginSkinPetId(pluginId: string, skinId: string): string | null
-  readRegularFileWithin(root: string, relativePath: string, maxBytes: number): Uint8Array | null
+  readRegularFileWithin(root: string, relativePath: string, maxBytes: number): Uint8Array | null | Promise<Uint8Array | null>
   rasterContentType(data: Uint8Array): string | null
   pluginSkinImageMaxBytes: number
   locale(): string
   pluginVersion(pluginId: string): string
 }
 
-export function loadPets(deps: Omit<PetsIpcDependencies, 'ipcMain' | 'assertTrustedIpcSender'>): PetLoadItem[] {
+export async function loadPets(deps: Omit<PetsIpcDependencies, 'ipcMain' | 'assertTrustedIpcSender'>): Promise<PetLoadItem[]> {
   let builtin: PetLoadItem[] = []
   try {
-    const raw = deps.fs.readFileSync(deps.builtinPetsPath(), 'utf-8')
+    const raw = await deps.fs.readFile(deps.builtinPetsPath(), 'utf-8')
     builtin = JSON.parse(raw).map((pet: Record<string, unknown>) => {
       const behaviorManifest = deps.parseBehaviorManifest(pet.behaviorManifest)
       return {
@@ -75,16 +75,20 @@ export function loadPets(deps: Omit<PetsIpcDependencies, 'ipcMain' | 'assertTrus
 
   const customBase = deps.path.resolve(deps.customPetsPath(), 'custom')
   const custom: PetLoadItem[] = []
-  if (deps.fs.existsSync(customBase)) {
-    const entries = deps.fs.readdirSync(customBase, { withFileTypes: true })
+  try {
+    const baseStat = await deps.fs.lstat(customBase)
+    if (!baseStat.isDirectory() || baseStat.isSymbolicLink()) throw new Error('unsafe custom pet directory')
+    const entries = await deps.fs.readdir(customBase, { withFileTypes: true })
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
       const safe = deps.sanitizePetId(entry.name)
       if (!safe) continue
       const petJsonPath = deps.safeJoin(customBase, safe, 'pet.json')
-      if (!petJsonPath || !deps.fs.existsSync(petJsonPath)) continue
+      if (!petJsonPath) continue
       try {
-        const petData = JSON.parse(deps.fs.readFileSync(petJsonPath, 'utf-8')) as Record<string, unknown>
+        const stat = await deps.fs.lstat(petJsonPath)
+        if (!stat.isFile() || stat.isSymbolicLink()) continue
+        const petData = JSON.parse(await deps.fs.readFile(petJsonPath, 'utf-8')) as Record<string, unknown>
         const behaviorManifest = deps.parseBehaviorManifest(petData.behaviorManifest)
         custom.push({
           id: String(petData.id || safe),
@@ -95,7 +99,7 @@ export function loadPets(deps: Omit<PetsIpcDependencies, 'ipcMain' | 'assertTrus
         })
       } catch {}
     }
-  }
+  } catch {}
 
   const pluginSkins: PetLoadItem[] = []
   if (deps.pluginsEnabled()) {
@@ -107,7 +111,7 @@ export function loadPets(deps: Omit<PetsIpcDependencies, 'ipcMain' | 'assertTrus
       for (const skin of context.manifest.contributes.skins ?? []) {
         const id = deps.createPluginSkinPetId(pluginId, skin.id)
         if (!id) continue
-        const image = deps.readRegularFileWithin(root, skin.spritesheet, deps.pluginSkinImageMaxBytes)
+        const image = await deps.readRegularFileWithin(root, skin.spritesheet, deps.pluginSkinImageMaxBytes)
         if (!image || !deps.rasterContentType(image)) continue
         const encodedPath = skin.spritesheet.split('/').map(segment => encodeURIComponent(segment)).join('/')
         const behaviorManifest = deps.parseBehaviorManifest(skin.behaviorManifest)
@@ -133,7 +137,7 @@ export function loadPets(deps: Omit<PetsIpcDependencies, 'ipcMain' | 'assertTrus
 }
 
 export function registerPetsIpc(deps: PetsIpcDependencies): void {
-  handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.loadPets, deps.assertTrustedIpcSender, () => {
-    return loadPets(deps)
+  handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.loadPets, deps.assertTrustedIpcSender, async () => {
+    return await loadPets(deps)
   })
 }

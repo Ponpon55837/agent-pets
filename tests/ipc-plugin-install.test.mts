@@ -51,8 +51,8 @@ function fixture() {
     },
     translate: key => key,
     fs: {
-      lstatSync: () => ({ isFile: () => true, isSymbolicLink: () => false, size: 32 }),
-      readFileSync: () => new Uint8Array([1, 2, 3]),
+      lstat: async () => ({ isFile: () => true, isSymbolicLink: () => false, size: 32 }),
+      readFile: async () => new Uint8Array([1, 2, 3]),
     } as unknown as PluginInstallIpcDependencies['fs'],
     maxArchiveBytes: 100,
     pendingPlanIds,
@@ -91,11 +91,11 @@ test('plugin archive picker validates a regular bounded file and remembers the i
   assert.equal(state.calls.includes('dialog:openFile'), true)
 })
 
-test('plugin install confirmation clears the pending plan and syncs the installed snapshot', () => {
+test('plugin install confirmation clears the pending plan and syncs the installed snapshot', async () => {
   const state = fixture()
   state.pendingPlanIds.set('fixture-plan', 'sample-plugin')
   const confirm = state.handlers.get('plugin-install-confirm')!
-  assert.deepEqual(confirm('panel' as unknown as IpcMainInvokeEvent, 'fixture-plan', false, false), {
+  assert.deepEqual(await confirm('panel' as unknown as IpcMainInvokeEvent, 'fixture-plan', false, false), {
     ok: true,
     value: { id: 'sample-plugin', currentVersion: '1.0.0' },
   })
@@ -108,10 +108,10 @@ test('plugin install confirmation clears the pending plan and syncs the installe
   ])
 })
 
-test('plugin removal clears runtime grants and preserves or removes preferences by choice', () => {
+test('plugin removal clears runtime grants and preserves or removes preferences by choice', async () => {
   const state = fixture()
   const remove = state.handlers.get('plugin-remove')!
-  assert.deepEqual(remove('panel' as unknown as IpcMainInvokeEvent, 'sample-plugin', true), {
+  assert.deepEqual(await remove('panel' as unknown as IpcMainInvokeEvent, 'sample-plugin', true), {
     ok: true,
     value: { removed: true },
   })
@@ -125,7 +125,7 @@ test('plugin removal clears runtime grants and preserves or removes preferences 
   ])
 
   state.calls.length = 0
-  assert.deepEqual(remove('panel' as unknown as IpcMainInvokeEvent, 'sample-plugin', false), {
+  assert.deepEqual(await remove('panel' as unknown as IpcMainInvokeEvent, 'sample-plugin', false), {
     ok: true,
     value: { removed: true },
   })

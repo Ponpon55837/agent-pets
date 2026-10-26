@@ -412,14 +412,14 @@ export class PluginRegistry {
   }
 
   /** Package a developer-selected folder in memory, then run the exact archive validator. */
-  planInstallDirectory(directory: string): PluginRegistryResult<PluginInstallPlan> {
+  async planInstallDirectory(directory: string): Promise<PluginRegistryResult<PluginInstallPlan>> {
     if (typeof directory !== 'string' || !path.isAbsolute(directory)) return { ok: false, error: 'invalid_archive' }
     const root = path.resolve(directory)
     let rootReal: string
     try {
-      const stat = fs.lstatSync(root)
+      const stat = await fs.promises.lstat(root)
       if (!stat.isDirectory() || stat.isSymbolicLink()) return { ok: false, error: 'filesystem_unsafe' }
-      rootReal = fs.realpathSync(root)
+      rootReal = await fs.promises.realpath(root)
     } catch {
       return { ok: false, error: 'invalid_archive' }
     }
@@ -427,17 +427,17 @@ export class PluginRegistry {
     const files: Record<string, Uint8Array> = Object.create(null) as Record<string, Uint8Array>
     let totalBytes = 0
     let fileCount = 0
-    const collect = (current: string, relativeDirectory: string): boolean => {
+    const collect = async (current: string, relativeDirectory: string): Promise<boolean> => {
       let entries: fs.Dirent[]
-      try { entries = fs.readdirSync(current, { withFileTypes: true }) } catch { return false }
+      try { entries = await fs.promises.readdir(current, { withFileTypes: true }) } catch { return false }
       for (const entry of entries) {
         const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name
         const absolutePath = path.join(current, entry.name)
         let stat: fs.Stats
-        try { stat = fs.lstatSync(absolutePath) } catch { return false }
+        try { stat = await fs.promises.lstat(absolutePath) } catch { return false }
         if (stat.isSymbolicLink()) return false
         if (stat.isDirectory()) {
-          if (!collect(absolutePath, relativePath)) return false
+          if (!await collect(absolutePath, relativePath)) return false
           continue
         }
         if (!stat.isFile()) return false
@@ -445,27 +445,27 @@ export class PluginRegistry {
         if (fileCount > PLUGIN_ARCHIVE_MAX_FILES || stat.size > PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES) return false
         totalBytes += stat.size
         if (!Number.isSafeInteger(totalBytes) || totalBytes > PLUGIN_ARCHIVE_SKIN_MAX_BYTES) return false
-        let descriptor: number | null = null
+        let handle: Awaited<ReturnType<typeof fs.promises.open>> | null = null
         try {
           const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0
-          descriptor = fs.openSync(absolutePath, fs.constants.O_RDONLY | noFollow)
-          const opened = fs.fstatSync(descriptor)
-          const realPath = fs.realpathSync(absolutePath)
+          handle = await fs.promises.open(absolutePath, fs.constants.O_RDONLY | noFollow)
+          const opened = await handle.stat()
+          const realPath = await fs.promises.realpath(absolutePath)
           const relativeRealPath = path.relative(rootReal, realPath)
           if (!opened.isFile() || opened.isSymbolicLink() || opened.size !== stat.size
             || opened.dev !== stat.dev || opened.ino !== stat.ino
             || relativeRealPath === '..' || relativeRealPath.startsWith(`..${path.sep}`) || path.isAbsolute(relativeRealPath)) return false
-          files[relativePath] = fs.readFileSync(descriptor)
+          files[relativePath] = await handle.readFile()
         } catch {
           return false
         } finally {
-          if (descriptor !== null) fs.closeSync(descriptor)
+          try { await handle?.close() } catch {}
         }
       }
       return true
     }
 
-    if (!collect(rootReal, '') || fileCount === 0) return { ok: false, error: 'invalid_archive' }
+    if (!await collect(rootReal, '') || fileCount === 0) return { ok: false, error: 'invalid_archive' }
     try {
       const archive = zipSync(files, { level: 0 })
       return this.planInstallArchive(archive, true)

@@ -10,6 +10,7 @@ import type {
 } from '../src/types/presentation.ts'
 import { PRESENTATION_REACTIONS, type PresentationReaction } from '../src/types/presentation.ts'
 import { isValidPetId } from '../src/utils/pet-id.ts'
+import { SlidingWindowLimiter } from './sliding-window-limiter.ts'
 
 export const PRESENTATION_MIN_TTL_MS = 1_000
 export const PRESENTATION_MAX_TTL_MS = 15_000
@@ -186,7 +187,7 @@ export class PresentationController {
   private readonly now: () => number
   private readonly createId: () => string
   private readonly pending = new Map<string, PendingPresentation>()
-  private readonly recentByClient = new Map<string, number[]>()
+  private readonly recentByClient = new Map<string, SlidingWindowLimiter>()
   private cleanupTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(options: PresentationControllerOptions) {
@@ -217,12 +218,14 @@ export class PresentationController {
     if (!normalized.ok) return { accepted: false, error: normalized.error }
 
     const now = this.now()
-    const recent = (this.recentByClient.get(clientId) ?? [])
-      .filter(timestamp => now - timestamp < PRESENTATION_RATE_WINDOW_MS)
-    if (recent.length >= PRESENTATION_MAX_CLIENT_REQUESTS) {
-      const retryAfterMs = Math.max(1, PRESENTATION_RATE_WINDOW_MS - (now - recent[0]))
-      this.recentByClient.set(clientId, recent)
-      return { accepted: false, error: 'rate_limited', retryAfterMs }
+    let limiter = this.recentByClient.get(clientId)
+    if (!limiter) {
+      limiter = new SlidingWindowLimiter(PRESENTATION_RATE_WINDOW_MS, PRESENTATION_MAX_CLIENT_REQUESTS)
+    }
+    const rate = limiter.check(now, PRESENTATION_MAX_CLIENT_REQUESTS)
+    if (!rate.allowed) {
+      this.recentByClient.set(clientId, limiter)
+      return { accepted: false, error: 'rate_limited', retryAfterMs: rate.retryAfterMs }
     }
     if (this.pending.size >= PRESENTATION_MAX_QUEUE_DEPTH) {
       return { accepted: false, error: 'queue_full', queued: this.pending.size }
@@ -238,8 +241,8 @@ export class PresentationController {
       expiresAt: now + normalized.value.ttlMs,
     }
     this.pending.set(intent.id, { clientId, intent })
-    recent.push(now)
-    this.recentByClient.set(clientId, recent)
+    limiter.record(now)
+    this.recentByClient.set(clientId, limiter)
     try {
       this.emitIntent(intent)
     } catch {
@@ -317,9 +320,9 @@ export class PresentationController {
     for (const [id, pending] of this.pending) {
       if (pending.intent.expiresAt <= now) this.pending.delete(id)
     }
-    for (const [clientId, timestamps] of this.recentByClient) {
-      const recent = timestamps.filter(timestamp => now - timestamp < PRESENTATION_RATE_WINDOW_MS)
-      if (recent.length > 0) this.recentByClient.set(clientId, recent)
+    for (const [clientId, limiter] of this.recentByClient) {
+      limiter.prune(now)
+      if (limiter.size > 0) this.recentByClient.set(clientId, limiter)
       else this.recentByClient.delete(clientId)
     }
     this.scheduleCleanup()
@@ -330,8 +333,9 @@ export class PresentationController {
     this.cleanupTimer = null
     let nextAt = Number.POSITIVE_INFINITY
     for (const pending of this.pending.values()) nextAt = Math.min(nextAt, pending.intent.expiresAt)
-    for (const timestamps of this.recentByClient.values()) {
-      for (const timestamp of timestamps) nextAt = Math.min(nextAt, timestamp + PRESENTATION_RATE_WINDOW_MS)
+    for (const limiter of this.recentByClient.values()) {
+      const earliest = limiter.earliestTimestamp
+      if (earliest !== null) nextAt = Math.min(nextAt, earliest + PRESENTATION_RATE_WINDOW_MS)
     }
     if (!Number.isFinite(nextAt)) return
     this.cleanupTimer = setTimeout(() => {

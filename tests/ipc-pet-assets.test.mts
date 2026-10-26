@@ -11,12 +11,15 @@ test('pet asset IPC uses injected paths, archive helpers, and renderer sender ch
   const removedDirectories: string[] = []
   const panelWindow = { isDestroyed: () => false }
   const fakeFs = {
-    statSync: () => ({ isFile: () => true, size: 10 }),
-    lstatSync: () => ({ isFile: () => true, isSymbolicLink: () => false, size: 10 }),
-    readFileSync: () => '{"id":"safe-pet"}',
-    writeFileSync: () => undefined,
-    existsSync: () => true,
-    rmSync: (path: string) => { removedDirectories.push(path) },
+    lstat: async (path: string) => ({
+      isFile: () => !path.endsWith('/custom/safe-pet'),
+      isDirectory: () => path.endsWith('/custom/safe-pet'),
+      isSymbolicLink: () => false,
+      size: 10,
+    }),
+    readFile: async () => '{"id":"safe-pet"}',
+    writeFile: async () => undefined,
+    rm: async (path: string) => { removedDirectories.push(path) },
   }
   const deps: PetAssetIpcDependencies = {
     ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler) } },

@@ -19,7 +19,7 @@ type DialogOptions = {
   properties: Array<'openFile' | 'openDirectory'>
 }
 type FilePickerResult = { canceled: boolean; filePaths: string[] }
-type InstallFileSystem = Pick<typeof import('node:fs'), 'lstatSync' | 'readFileSync'>
+type InstallFileSystem = Pick<typeof import('node:fs/promises'), 'lstat' | 'readFile'>
 
 export interface PluginInstallIpcDependencies {
   ipcMain: Pick<IpcMain, 'handle'>
@@ -44,8 +44,8 @@ export interface PluginInstallIpcDependencies {
   isInstallConfirmation(token: unknown, acceptAdditionalPermissions: unknown, acceptSignatureChange: unknown): token is string
   isPluginPanelPluginId(value: unknown): value is string
   pluginPanelError(error: unknown): string
-  syncPluginHost(): void
-  pluginPanelSnapshot(): PluginPanelResult<PluginPanelSnapshot>
+  syncPluginHost(): void | Promise<void>
+  pluginPanelSnapshot(): PluginPanelResult<PluginPanelSnapshot> | Promise<PluginPanelResult<PluginPanelSnapshot>>
 }
 
 export function registerPluginInstallIpc(deps: PluginInstallIpcDependencies): void {
@@ -75,10 +75,12 @@ export function registerPluginInstallIpc(deps: PluginInstallIpcDependencies): vo
     try {
       const archivePath = selection.filePaths[0]
       if (!archivePath) return { ok: false, error: 'invalid_archive' }
-      const stat = deps.fs.lstatSync(archivePath)
+      const stat = await deps.fs.lstat(archivePath)
       if (!stat.isFile() || stat.isSymbolicLink()) return { ok: false, error: 'invalid_archive' }
       if (stat.size > deps.maxArchiveBytes) return { ok: false, error: 'archive_too_large' }
-      const planned = registry.planInstall(deps.fs.readFileSync(archivePath))
+      const archive = await deps.fs.readFile(archivePath)
+      if (archive.length > deps.maxArchiveBytes) return { ok: false, error: 'archive_too_large' }
+      const planned = registry.planInstall(archive)
       if (!planned.ok) return { ok: false, error: planned.error }
       if (planned.value.pluginId && planned.value.kind !== 'incompatible') {
         rememberPluginPlan(deps.pendingPlanIds, deps.pendingDeveloperFolders, planned.value.token, planned.value.pluginId)
@@ -116,7 +118,7 @@ export function registerPluginInstallIpc(deps: PluginInstallIpcDependencies): vo
     try {
       const sourceFolder = selection.filePaths[0]
       if (!sourceFolder) return { ok: false, error: 'invalid_archive' }
-      const planned = registry.planInstallDirectory(sourceFolder)
+      const planned = await registry.planInstallDirectory(sourceFolder)
       if (!planned.ok) return { ok: false, error: planned.error }
       if (planned.value.pluginId && planned.value.kind !== 'incompatible') {
         rememberPluginPlan(deps.pendingPlanIds, deps.pendingDeveloperFolders, planned.value.token, planned.value.pluginId)
@@ -128,7 +130,7 @@ export function registerPluginInstallIpc(deps: PluginInstallIpcDependencies): vo
     }
   })
 
-  handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.pluginInstallConfirm, deps.assertPluginPanelSender, (_event, token: unknown, acceptAdditionalPermissions: unknown, acceptSignatureChange: unknown) => {
+  handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.pluginInstallConfirm, deps.assertPluginPanelSender, async (_event, token: unknown, acceptAdditionalPermissions: unknown, acceptSignatureChange: unknown) => {
     const registry = deps.getRegistry()
     const preferences = deps.getPreferencesStore()
     if (!registry || !preferences) return { ok: false, error: 'plugin_service_unavailable' }
@@ -153,14 +155,14 @@ export function registerPluginInstallIpc(deps: PluginInstallIpcDependencies): vo
       deps.developerSourceFolders.delete(pluginId)
       deps.getDeveloperModeWatcher()?.unwatch(pluginId)
     }
-    deps.syncPluginHost()
-    const snapshot = deps.pluginPanelSnapshot()
+    await deps.syncPluginHost()
+    const snapshot = await deps.pluginPanelSnapshot()
     if (!snapshot.ok) return snapshot
     const plugin = snapshot.value.plugins.find(item => item.id === pluginId)
     return plugin ? { ok: true, value: plugin } : { ok: false, error: 'plugin_action_failed' }
   })
 
-  handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.pluginRemove, deps.assertPluginPanelSender, (_event, pluginId: unknown, keepData: unknown) => {
+  handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.pluginRemove, deps.assertPluginPanelSender, async (_event, pluginId: unknown, keepData: unknown) => {
     const registry = deps.getRegistry()
     const preferences = deps.getPreferencesStore()
     if (!registry || !preferences) return { ok: false, error: 'plugin_service_unavailable' }
@@ -186,7 +188,7 @@ export function registerPluginInstallIpc(deps: PluginInstallIpcDependencies): vo
       }
       deps.getPluginFeedController()?.clear(pluginId)
     }
-    deps.syncPluginHost()
+    await deps.syncPluginHost()
     return { ok: true, value: removed.value }
   })
 

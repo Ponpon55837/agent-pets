@@ -872,6 +872,20 @@ export class HistoryStore {
         VALUES (4, 'history-unique-terminal-sessions', ?, 'history-unique-terminal-sessions')
       `).run(this.now())
     })
+    const hasV5 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 5').get())
+    if (!hasV5) this.transaction(() => {
+      this.database.exec(`
+        CREATE INDEX IF NOT EXISTS idx_daily_stats_summary_cover
+          ON daily_stats(
+            pet_id, local_date, project_id, adapter_id,
+            sessions_completed, sessions_failed, active_ms, token_input, token_output, token_quality
+          );
+      `)
+      this.statement(`
+        INSERT INTO schema_migrations(version, name, applied_at, checksum)
+        VALUES (5, 'history-daily-summary-covering-index', ?, 'history-daily-summary-covering-index')
+      `).run(this.now())
+    })
   }
 
   private rebuildEventDailyStats(): void {

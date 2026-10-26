@@ -1,3 +1,5 @@
+import { SlidingWindowLimiter } from './sliding-window-limiter.ts'
+
 export const PLUGIN_UI_MESSAGE_MAX_BYTES = 256 * 1024
 export const PLUGIN_UI_MESSAGE_LIMIT_PER_SECOND = 20
 
@@ -31,7 +33,7 @@ function isJsonValue(value: unknown, depth = 0, seen = new Set<object>()): boole
 
 export class PluginUiMessageGuard {
   private readonly now: () => number
-  private readonly sentAt = new Map<string, number[]>()
+  private readonly sentAt = new Map<string, SlidingWindowLimiter>()
 
   constructor(now: () => number = Date.now) {
     this.now = now
@@ -45,14 +47,12 @@ export class PluginUiMessageGuard {
     const now = this.now()
     if (!Number.isSafeInteger(now) || now < 0) return 'invalid_request'
     const key = `${pluginId}:${direction}`
-    const recent = (this.sentAt.get(key) ?? []).filter(at => now - at < 1_000)
-    if (recent.length >= PLUGIN_UI_MESSAGE_LIMIT_PER_SECOND) {
-      this.sentAt.set(key, recent)
-      return 'rate_limited'
+    let limiter = this.sentAt.get(key)
+    if (!limiter) {
+      limiter = new SlidingWindowLimiter(1_000, PLUGIN_UI_MESSAGE_LIMIT_PER_SECOND)
+      this.sentAt.set(key, limiter)
     }
-    recent.push(now)
-    this.sentAt.set(key, recent)
-    return null
+    return limiter.consume(now, PLUGIN_UI_MESSAGE_LIMIT_PER_SECOND).allowed ? null : 'rate_limited'
   }
 }
 

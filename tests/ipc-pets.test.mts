@@ -27,13 +27,17 @@ function makeDeps(): { deps: PetsIpcDependencies; files: Map<string, string> } {
     ipcMain: { handle: () => undefined } as PetsIpcDependencies['ipcMain'],
     assertTrustedIpcSender: event => { assert.equal(event, 'trusted') },
     fs: {
-      readFileSync: (filePath: string) => {
+      readFile: async (filePath: string) => {
         const value = files.get(filePath)
         if (value === undefined) throw new Error('missing file')
         return value
       },
-      existsSync: filePath => filePath === '/deploy/custom' || files.has(filePath),
-      readdirSync: () => [{ name: 'custom-one', isDirectory: () => true }, { name: '../escape', isDirectory: () => true }],
+      lstat: async filePath => {
+        if (filePath === '/deploy/custom') return { isDirectory: () => true, isFile: () => false, isSymbolicLink: () => false }
+        if (files.has(filePath)) return { isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false }
+        throw new Error('missing file')
+      },
+      readdir: async () => [{ name: 'custom-one', isDirectory: () => true }, { name: '../escape', isDirectory: () => true }],
     } as unknown as PetsIpcDependencies['fs'],
     path: { resolve: (...parts: string[]) => parts.join('/') } as PetsIpcDependencies['path'],
     builtinPetsPath: () => '/pets.json',
@@ -54,9 +58,9 @@ function makeDeps(): { deps: PetsIpcDependencies; files: Map<string, string> } {
   return { deps, files }
 }
 
-test('loadPets combines built-in, safe custom, and enabled plugin skins', () => {
+test('loadPets combines built-in, safe custom, and enabled plugin skins', async () => {
   const { deps } = makeDeps()
-  const pets = loadPets(deps)
+  const pets = await loadPets(deps)
   assert.deepEqual(pets.map(pet => pet.id), [
     'built-in',
     'custom-one',
@@ -71,24 +75,24 @@ test('loadPets combines built-in, safe custom, and enabled plugin skins', () => 
   })
 })
 
-test('loadPets skips plugin skins without a readable supported image or enabled root', () => {
+test('loadPets skips plugin skins without a readable supported image or enabled root', async () => {
   const { deps } = makeDeps()
-  const pets = loadPets({
+  const pets = await loadPets({
     ...deps,
     readRegularFileWithin: () => null,
   })
   assert.deepEqual(pets.map(pet => pet.id), ['built-in', 'custom-one'])
 })
 
-test('pets IPC checks the trusted sender before reading pet data', () => {
+test('pets IPC checks the trusted sender before reading pet data', async () => {
   const { deps } = makeDeps()
   let senderChecked = false
-  let invoke = (_event: unknown): unknown => null
+  let invoke = async (_event: unknown): Promise<unknown> => null
   const ipcMain = {
-    handle: (_channel: string, callback: (event: unknown) => unknown) => { invoke = callback },
+    handle: (_channel: string, callback: (event: unknown) => unknown) => { invoke = async event => await callback(event) },
   } as unknown as PetsIpcDependencies['ipcMain']
   registerPetsIpc({ ...deps, ipcMain, assertTrustedIpcSender: event => { senderChecked = event === 'trusted' } })
-  const result = invoke('trusted') as PetLoadItem[]
+  const result = await invoke('trusted') as PetLoadItem[]
   assert.equal(senderChecked, true)
   assert.deepEqual(result.map(pet => pet.id), ['built-in', 'custom-one', 'plugin-skin:skin-plugin:blue-cat'])
 })
