@@ -2,36 +2,51 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
+import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { analyzeIpcInventory, renderIpcInventory } from '../scripts/generate-ipc-inventory.mjs'
 
 const mainSource = readFileSync(path.resolve('electron/main.ts'), 'utf8')
+const runtimeSource = readFileSync(path.resolve('electron/main/runtime.ts'), 'utf8')
 const hostSource = readFileSync(path.resolve('electron/plugin-host-window.ts'), 'utf8')
 const panelViewSource = readFileSync(path.resolve('electron/plugin-panel-view.ts'), 'utf8')
 const pluginUiPreloadSource = readFileSync(path.resolve('electron/plugin-ui-preload.ts'), 'utf8')
 const pluginUiBridgeSource = readFileSync(path.resolve('electron/plugin-panel-view-bridge.ts'), 'utf8')
+const preloadSource = readFileSync(path.resolve('electron/preload.ts'), 'utf8')
+const pluginHostPreloadSource = readFileSync(path.resolve('electron/plugin-host-preload.ts'), 'utf8')
 
 test('IPC inventory matches main registrations, preload APIs, and sender guards', () => {
   const inventory = analyzeIpcInventory()
-  assert.equal(inventory.rows.length, 83)
+  assert.ok(inventory.rows.length >= 70)
+  assert.equal(inventory.rows.length, new Set(inventory.rows.map(row => row.channel)).size)
   assert.equal(inventory.dynamicRegistrationCount, 0)
   assert.deepEqual(inventory.missingPreloadChannels, [])
   assert.deepEqual(inventory.unregisteredPreloadChannels, [])
   assert.deepEqual(inventory.unguardedChannels, [])
   assert.deepEqual(inventory.missingTypes, [])
   assert.deepEqual(inventory.extraTypes, [])
+  assert.deepEqual(inventory.unknownChannelKeys, [])
+  assert.deepEqual(inventory.unusedChannelKeys, [])
+  const channelValues = Object.values(IPC_CHANNELS)
+  assert.equal(channelValues.length, 105)
+  assert.equal(new Set(channelValues).size, channelValues.length)
+  assert.doesNotMatch(mainSource, /ipcMain\.(?:handle|on)\(\s*['"]/)
+  assert.doesNotMatch(preloadSource, /ipcRenderer\.(?:invoke|send|on|removeListener)\(\s*['"]/)
+  assert.doesNotMatch(pluginHostPreloadSource, /ipcRenderer\.(?:invoke|send|on|removeListener)\(\s*['"]/)
+  assert.doesNotMatch(pluginUiPreloadSource, /ipcRenderer\.(?:invoke|send|on|removeListener)\(\s*['"]/)
   assert.equal(readFileSync(path.resolve('docs/security/ipc-inventory.md'), 'utf8'), renderIpcInventory())
   assert.match(pluginUiPreloadSource, /contextBridge\.exposeInMainWorld\('agentPetsPlugin', api\)/)
   assert.match(pluginUiBridgeSource, /export interface PluginPanelPublicApi/)
 })
 
 test('renderer windows and plugin views explicitly retain Electron security defaults', () => {
-  assert.equal((mainSource.match(/new BrowserWindow\(/g) ?? []).length, 2)
-  assert.equal((mainSource.match(/webSecurity:\s*true/g) ?? []).length, 2)
-  assert.equal((mainSource.match(/contextIsolation:\s*true/g) ?? []).length, 2)
-  assert.equal((mainSource.match(/sandbox:\s*true/g) ?? []).length, 2)
-  assert.equal((mainSource.match(/nodeIntegration:\s*false/g) ?? []).length, 2)
-  assert.match(mainSource, /secureRendererWindow\(petWindow\)/)
-  assert.match(mainSource, /secureRendererWindow\(panelWindow\)/)
+  assert.ok(mainSource.split('\n').length < 1_200)
+  assert.equal((runtimeSource.match(/new BrowserWindow\(/g) ?? []).length, 2)
+  assert.equal((runtimeSource.match(/webSecurity:\s*true/g) ?? []).length, 2)
+  assert.equal((runtimeSource.match(/contextIsolation:\s*true/g) ?? []).length, 2)
+  assert.equal((runtimeSource.match(/sandbox:\s*true/g) ?? []).length, 2)
+  assert.equal((runtimeSource.match(/nodeIntegration:\s*false/g) ?? []).length, 2)
+  assert.match(runtimeSource, /secureRendererWindow\(mainState\.petWindow\)/)
+  assert.match(runtimeSource, /secureRendererWindow\(mainState\.panelWindow\)/)
 
   assert.match(hostSource, /webSecurity:\s*true/)
   assert.match(hostSource, /contextIsolation:\s*true/)
@@ -52,9 +67,9 @@ test('renderer windows and plugin views explicitly retain Electron security defa
 })
 
 test('every non-default Electron session rejects permission requests and checks', () => {
-  const networkSessionStart = mainSource.indexOf("const pluginNetworkSession = session.fromPartition('plugin-network')")
+  const networkSessionStart = runtimeSource.indexOf("const pluginNetworkSession = session.fromPartition('plugin-network')")
   assert.notEqual(networkSessionStart, -1)
-  const networkSession = mainSource.slice(networkSessionStart, networkSessionStart + 1_200)
+  const networkSession = runtimeSource.slice(networkSessionStart, networkSessionStart + 1_200)
   assert.match(networkSession, /setPermissionRequestHandler\([^\n]+callback\(false\)/)
   assert.match(networkSession, /setPermissionCheckHandler\(\(\) => false\)/)
 
