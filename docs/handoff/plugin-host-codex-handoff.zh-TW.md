@@ -468,13 +468,17 @@ Phase 最後一個 checkpoint 必須：
 ### P16.6 Phase 16 收尾與整體收尾
 
 - 測試插件：`ok-commands`（宣告 2 個指令與 tray、收到指令時送通知並更新徽章）、`ok-skin`（只有 skins、沒有 entry）、`evil-badge`（超長文字、每 10ms 設定一次）、`evil-skin`（spritesheet 是改副檔名的非圖片、超過大小）。
-- `pnpm dev` 實測：Tray 子選單出現與消失、指令觸發、徽章顯示與 `+N`、外觀出現在選擇清單並可套用、停用插件後外觀退回預設。
+- 以隔離啟動腳本（§0.4a）實測：Tray 子選單出現與消失、指令觸發、徽章顯示與 `+N`、外觀出現在選擇清單並可套用、停用插件後外觀退回預設。Tray 選單以主程序 inspector 讀取選單模板／呼叫 click callback 驗證，不要操作使用者真實選單列。
 - 寫 `docs/phase-reports/phase-16-plugin-contributions.md`。
 - **整體收尾**（Phase 12–16）：
   - 更新 `README.md` 與 `README.zh-TW.md`：插件功能說明、安裝方式、安全說明、指向 `docs/plugins/`。
   - 更新 `.agents/skills/pet-skill/references/project-map.md`：新增插件相關模組與安全控制。
   - 更新規劃文件狀態為「已實作（Phase 12–16）」，並列出實作與規劃的差異。
-  - 執行一次 `pnpm build:fast`（會打包；確認打包後插件功能可用，至少安裝 `ok-notify` 與 `ok-skin` 驗證），在報告記錄。
+  - 打包驗證（**不要** 執行 `pnpm build`／`pnpm build:fast`：它們的 prebuild 會關掉使用者正在用的 Agent Pets；**不要** 直接開啟打包出來的 `.app`：會使用真實 userData、鑰匙圈與 `~/.desktop-pet`）：
+    1. `pnpm exec vite build && pnpm check:bundle`
+    2. `pnpm exec electron-builder --dir --config.compression=store`（只產生未封裝的 app 資料夾，不做 dmg）
+    3. 把 `release/**/Agent Pets.app/Contents/Resources/app.asar` 以 `pnpm exec asar extract <app.asar> <暫存資料夾>` 解開到暫存資料夾
+    4. `node scripts/e2e-isolated-electron.mjs --app-root <暫存資料夾>`，等 `AGENT_PETS_E2E_READY`，安裝 `ok-notify`、`ok-skin`、`panel-demo` 驗證通知、外觀與面板 `tokens.css`（確認打包內容沒有漏檔），在報告記錄。
   - 另寫 `docs/phase-reports/plugin-host-summary.md`：Phase 12–16 總覽、所有 checkpoint commit、整體殘餘風險、建議版本 `1.3.0`。
   - 開發者文件收尾：
     - 完成 §7.1 中標示 **P16** 的頁面，並把 `commands`、`tray`、`badge`、`skins` 補進 API 參考、權限顯示文字、限制表、錯誤碼表。

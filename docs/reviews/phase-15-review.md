@@ -136,3 +136,45 @@
 ### P6（低）tokens 打包檢查沒有接到任何流程
 
 - `scripts/check-plugin-panel-tokens-bundle.mjs` 目前只能手動執行。請在 `package.json` 新增 `check:bundle` 指令，交接 §0.4 的檢查清單加上「build 後執行 `pnpm check:bundle`」，並在 `.github/workflows/release.yml` 的 build 之後執行一次。
+
+---
+
+# P15.R2 複檢（`c9c82e7..f28c4d9`）
+
+- 複檢日期：2026-10-26
+- 結論：**Phase 15 通過，可以進入 Phase 16。**
+
+## 複檢時實際執行
+
+| 檢查 | 結果 |
+|---|---|
+| `pnpm exec vue-tsc --noEmit` | 通過 |
+| `pnpm test:unit` | 303/303 |
+| `pnpm exec vite build`、`pnpm check:bundle` | 通過 |
+| `git diff --check c9c82e7..HEAD` | 通過 |
+| `pnpm audit --prod --audit-level moderate` | 無弱點 |
+
+### Electron 實機（隔離啟動腳本；safeStorage 呼叫次數全程 0）
+
+| 項目 | 結果 |
+|---|---|
+| 面板視窗隱藏時直接呼叫 `openPluginPanelView`（合理 bounds） | `panel_unavailable`，沒有 view、尺寸不變 ✅ |
+| 視窗可見、使用者在「工作階段」分頁，直接呼叫並帶合理 bounds | 回傳成功但 view 保持不可見；約 2 秒後關閉，視窗尺寸還原 460×560 ✅（P15.R ❌ 那一列已修正） |
+| 從寵物正常開啟 `panel-demo` | view 可見、位置在外框內容區；按鈕後計數更新 ✅ |
+| 同時送出開 ok-panel、evil-panel | 只剩 evil-panel 一個 view，外框標題一致 ✅ |
+| 面板開啟時隱藏視窗 | view 關閉 ✅ |
+| renderer crash | view 關閉、外框收起並顯示錯誤 ✅ |
+| 面板視窗重新載入 | view 關閉 ✅ |
+| P5：`example.com` 特例 | 已移除 ✅ |
+| P6：`check:bundle` | 已加進 `package.json`、交接 §0.4、release workflow ✅ |
+
+## 不阻擋的觀察
+
+- 開啟計時從 `loadURL` 之前開始。插件頁若載入超過 2 秒（例如很大的本機檔案），面板會被當成沒回報而關閉。目前本機載入只要幾毫秒，先記錄，不要求修改。
+- 面板開啟時隱藏視窗，下次打開會看到「插件面板外框尚未就緒，請重新開啟面板。」這句提示對使用者有點多餘，Phase 16 若有動到 `PluginPanel.vue` 可順手改成隱藏時不顯示錯誤。
+- `project-pets-get-enabled` 的 `Unauthorized IPC sender`：這是 `main` 分支既有的行為，與插件無關。寵物視窗與面板視窗共用 `agentStore`，寵物視窗載入時也會呼叫這個只允許面板視窗的 IPC，被拒絕後就當作「未啟用」。只影響寵物視窗自己的那份狀態，功能不受影響，但每次啟動都會在 log 留一筆錯誤，建議另外修。
+
+## 為 Phase 16 調整的交接內容
+
+- `scripts/e2e-isolated-electron.mjs` 新增 `--app-root <dir>`，可在隔離環境中執行解開後的打包內容。
+- 交接 P16.6：實測改用隔離啟動腳本，不再用 `pnpm dev`；打包驗證改成 `electron-builder --dir` → 解開 `app.asar` → `--app-root`。禁止 `pnpm build`／`build:fast`（會關掉使用者正在用的 App），也禁止直接開啟打包出來的 `.app`。

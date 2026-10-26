@@ -3,7 +3,8 @@
 // fake safeStorage installed BEFORE any app code runs, so automated runs never touch
 // the user's real data or macOS Keychain. Usage:
 //   pnpm exec vite build
-//   node scripts/e2e-isolated-electron.mjs [--inspect-port 9349] [--debug-port 9348]
+//   node scripts/e2e-isolated-electron.mjs [--inspect-port 9349] [--debug-port 9348] [--app-root <dir>]
+// --app-root runs another copy of the app (e.g. an extracted packaged app.asar) instead of this repo.
 // Prints one JSON line with the temp root, ports and pid, then keeps running.
 import { spawn } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs'
@@ -12,18 +13,22 @@ import { join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 
 const repoRoot = resolve(import.meta.dirname, '..')
-const mainBundle = join(repoRoot, 'dist-electron', 'main.js')
-if (!existsSync(mainBundle)) {
-  console.error('dist-electron/main.js not found; run `pnpm exec vite build` first')
-  process.exit(1)
-}
-
-const argValue = (name, fallback) => {
+const argString = name => {
   const index = process.argv.indexOf(name)
-  return index >= 0 && process.argv[index + 1] ? Number(process.argv[index + 1]) : fallback
+  return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : null
+}
+const argValue = (name, fallback) => {
+  const value = argString(name)
+  return value ? Number(value) : fallback
 }
 const inspectPort = argValue('--inspect-port', 9349)
 const debugPort = argValue('--debug-port', 9348)
+const appRoot = resolve(argString('--app-root') ?? repoRoot)
+const mainBundle = join(appRoot, 'dist-electron', 'main.js')
+if (!existsSync(mainBundle)) {
+  console.error(`${mainBundle} not found; run \`pnpm exec vite build\` first (or check --app-root)`)
+  process.exit(1)
+}
 
 const root = mkdtempSync(join(tmpdir(), 'agent-pets-e2e-'))
 mkdirSync(join(root, 'home'))
@@ -35,7 +40,7 @@ const { app, safeStorage } = require('electron')
 const root = ${JSON.stringify(root)}
 const userData = path.join(root, 'ud')
 app.setPath('userData', userData)
-if (typeof app.setAppPath === 'function') app.setAppPath(${JSON.stringify(repoRoot)})
+if (typeof app.setAppPath === 'function') app.setAppPath(${JSON.stringify(appRoot)})
 const calls = { isEncryptionAvailable: 0, encryptString: 0, decryptString: 0 }
 safeStorage.isEncryptionAvailable = () => { calls.isEncryptionAvailable += 1; return true }
 safeStorage.encryptString = (value) => { calls.encryptString += 1; return Buffer.from('agent-pets-e2e:' + value, 'utf8') }
@@ -73,6 +78,6 @@ const child = spawn(electronBinary, [
   env: { ...process.env, HOME: join(root, 'home') },
   stdio: ['ignore', 'inherit', 'inherit'],
 })
-console.log(JSON.stringify({ root, inspectPort, debugPort, pid: child.pid }))
+console.log(JSON.stringify({ root, appRoot, inspectPort, debugPort, pid: child.pid }))
 child.on('exit', code => process.exit(code ?? 0))
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal))
