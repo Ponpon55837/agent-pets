@@ -74,3 +74,45 @@
 ## 已知、不阻擋
 
 - 建立 `Ponpon55837/agent-pets-plugins` repo 是使用者的工作；在那之前，預設目錄網址會回 404，介面要顯示可理解的錯誤，而不是空白。
+
+---
+
+# Phase 17 最終複檢（`4307984..2b28180`）
+
+- 複檢日期：2026-10-26
+- 結論：**Phase 17 通過**，但有一項必修（F1）。F1 很小，併入 Phase 18 的第一個 checkpoint 處理，不另開修正輪。
+
+## 複檢時實際執行
+
+| 檢查 | 結果 |
+|---|---|
+| `pnpm exec vue-tsc --noEmit` | 通過 |
+| `pnpm test:unit` | 391/391 |
+| `pnpm exec vite build`、`pnpm check:bundle` | 通過 |
+| `git diff --check 4307984..HEAD` | 通過 |
+| `pnpm audit --prod --audit-level moderate` | 無弱點 |
+| 上傳內容檢查（email、本機路徑、私鑰、token） | 0 命中；commit 身分皆為 GitHub noreply |
+
+### Electron 實機（隔離啟動腳本；safeStorage 0 次）
+
+| 項目 | 結果 |
+|---|---|
+| R1 預設目錄網址、R2 固定回報網址 | 程式中為 `Ponpon55837/agent-pets-plugins` 的網址；正式 repo 已建立，`index.json` 可讀取 ✅ |
+| 安裝 `tests/fixtures/plugins/ok-event-source`、`evil-event-source` | **兩者都變成 `disabled_crashed`** ❌（見 F1） |
+| 改用正確格式的探測插件驗證 eventSource | 合法狀態顯示在面板，名稱與插件名稱正確；`permission` 欄位、`waiting-permission`、`success`、65 字元 session、終態後再送事件全部 `invalid_request`；第 31 次起 `rate_limited`；History 統計前後不變；停用插件後它的狀態立即清除 ✅ |
+
+## F1（必修）eventSource 測試插件格式錯誤
+
+- `ok-event-source`、`evil-event-source` 的 `dist/main.js` 直接在最上層呼叫 `api`，沒有 `export default { activate(api) { ... } }`。宿主載入時判定為無效 entry，插件連續崩潰後被停用。
+- 所以 Phase 17 報告中「eventSource 隔離 Electron 驗收」不可能真的執行過這兩個插件；單元測試只讀檔案文字，抓不到這個問題。
+- 修正：兩個 fixture 改成正確格式；新增測試，靜態檢查所有有 `entry` 的 fixture 與文件範例都是 `export default` 並有 `activate`；用隔離 Electron 實際安裝這兩個插件，在報告中記錄真正的結果。
+
+## 隔離啟動腳本的安全強化（複檢者修改，61eacc5）
+
+複檢時發現，App 的 Claude 額度功能會用 `/usr/bin/security find-generic-password -w` 讀取 **真實的 macOS 登入鑰匙圈**，也會執行 `claude` CLI。把 HOME 換成暫存資料夾擋不住這些呼叫，而且啟動腳本先前會把完整的環境變數（包含 Claude Code 的帳號與 session 變數）傳給 App。
+
+已修改 `scripts/e2e-isolated-electron.mjs`：
+
+- `security`、`claude`、`codex` 一律導向 `/usr/bin/false`，呼叫次數記在 `__agentPetsE2E.blockedExecs`。實測開啟面板時被擋下 3 次（claude 1 次、security 2 次）。
+- 環境變數改為白名單（PATH、語系、暫存資料夾等），不再傳入任何 `CLAUDE_*`、`ANTHROPIC_*`、`OPENAI_*`、`CODEX_*`、`OPENCODE_*` 變數；如果出現就直接中止，不載入 App。
+- 之後的驗收報告除了 `calls`，也要記錄 `blockedExecs`。
