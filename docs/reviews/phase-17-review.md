@@ -43,7 +43,7 @@
 ### R2（中）回報網址改成固定值
 
 - 現況：正式版從環境變數 `AGENT_PETS_PLUGIN_ISSUE_REPORT_URL` 讀取，沒設定時回 `report_unavailable`，所以正式版的回報按鈕實際上不能用。
-- 交接決策：網址由宿主固定組成。
+- 交接決策：網址由宿主固定組成。Codex 為避免把個人資訊寫進 commit 而改用環境變數，但 `Ponpon55837` 是本專案公開 repo 的帳號，README 的 Releases 連結本來就寫著，不屬於新增的個資。
 - 修正：移除環境變數，正式版固定使用 `https://github.com/Ponpon55837/agent-pets-plugins/issues/new`；隔離測試仍可用 `__agentPetsE2E.pluginIssueReportBaseUrl` 覆寫。文件 `reporting` 中英文同步。補測試。
 
 ### R3（低）停用的插件圖示破圖
