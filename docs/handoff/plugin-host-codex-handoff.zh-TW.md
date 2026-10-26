@@ -476,7 +476,7 @@ Phase 最後一個 checkpoint 必須：
   - 更新規劃文件狀態為「已實作（Phase 12–16）」，並列出實作與規劃的差異。
   - 打包驗證（**不要** 執行 `pnpm build`／`pnpm build:fast`：它們的 prebuild 會關掉使用者正在用的 Agent Pets；**不要** 直接開啟打包出來的 `.app`：會使用真實 userData、鑰匙圈與 `~/.desktop-pet`）：
     1. `pnpm exec vite build && pnpm check:bundle`
-    2. `pnpm exec electron-builder --dir --config.compression=store`（只產生未封裝的 app 資料夾，不做 dmg）
+    2. `CSC_IDENTITY_AUTO_DISCOVERY=false pnpm exec electron-builder --dir --config.compression=store`（關閉簽章身分探索，避免查詢鑰匙圈）（只產生未封裝的 app 資料夾，不做 dmg）
     3. 把 `release/**/Agent Pets.app/Contents/Resources/app.asar` 以 `pnpm exec asar extract <app.asar> <暫存資料夾>` 解開到暫存資料夾
     4. `node scripts/e2e-isolated-electron.mjs --app-root <暫存資料夾>`，等 `AGENT_PETS_E2E_READY`，安裝 `ok-notify`、`ok-skin`、`panel-demo` 驗證通知、外觀與面板 `tokens.css`（確認打包內容沒有漏檔），在報告記錄。
   - 另寫 `docs/phase-reports/plugin-host-summary.md`：Phase 12–16 總覽、所有 checkpoint commit、整體殘餘風險、建議版本 `1.3.0`。
