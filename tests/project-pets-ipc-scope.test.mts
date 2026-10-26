@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
+import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 
 // The Pinia store needs Vue, vue-i18n, the `@/` alias and a renderer
 // `window`, so it cannot be loaded under node --test. These source checks
@@ -27,12 +28,13 @@ function functionBody(source: string, signature: string): string {
 }
 
 test('project-pet IPC handlers only trust the panel window', () => {
-  const main = read('electron/main.ts')
+  const registrar = read('electron/ipc/project-pets.ts')
   for (const channel of ['project-pets-list', 'project-pets-get-enabled']) {
-    const start = main.indexOf(`ipcMain.handle('${channel}'`)
+    const key = Object.entries(IPC_CHANNELS).find(([, value]) => value === channel)?.[0]
+    assert.ok(key, `missing ${channel} channel constant`)
+    const start = registrar.indexOf(`IPC_CHANNELS.${key}`)
     assert.ok(start >= 0, `missing ${channel} handler`)
-    const head = main.slice(start, main.indexOf('\n', main.indexOf('\n', start) + 1))
-    assert.match(head, /assertTrustedIpcSender\(event, panelWindow\)/, channel)
+    assert.match(registrar, new RegExp(`handleTrusted\\(deps\\.ipcMain, IPC_CHANNELS\\.${key}, deps\\.getPanelWindow, deps\\.assertTrustedIpcSender`), channel)
   }
 })
 

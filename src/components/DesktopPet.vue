@@ -199,6 +199,7 @@ const displayLines = computed(() => {
 // toggle on — showing a single pet forces picking a "winner", so instead
 // show one small pet per family, side by side.
 const isMultiPet = computed(() => store.isMultiPet)
+const petAnimationFrozen = computed(() => shimejiReducedMotion.value || store.petWindowMode.mode === 'mini')
 
 const bubbleSelection = computed(() => {
   const permissionRequest = Boolean(store.permissionBubbleActive && store.permissionRequest)
@@ -607,7 +608,7 @@ watch(() => store.achievementUnlock, (unlock) => {
             :pet-id="store.activePetId"
             :since="store.highestPrioritySession?.lastSeenAt"
             autonomous-behavior="idle"
-            :freeze="shimejiReducedMotion"
+            :freeze="petAnimationFrozen"
           />
         </span>
         <span class="edge-peek-grip" aria-hidden="true" />
@@ -792,6 +793,7 @@ watch(() => store.achievementUnlock, (unlock) => {
               :since="line.since"
               :mood="store.moodVisualsEnabled ? store.mood : undefined"
               :autonomous-behavior="shimejiBehavior"
+              :freeze="petAnimationFrozen"
             />
             <div
               class="status-line multi-pet-status-line"
@@ -864,6 +866,7 @@ watch(() => store.achievementUnlock, (unlock) => {
           :since="store.highestPrioritySession?.lastSeenAt"
           :mood="store.moodVisualsEnabled ? store.mood : undefined"
           :autonomous-behavior="shimejiBehavior"
+          :freeze="petAnimationFrozen"
         />
         <TransitionGroup tag="div" name="status-line" class="status-lines">
           <div

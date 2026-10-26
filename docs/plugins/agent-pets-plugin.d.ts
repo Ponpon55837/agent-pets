@@ -51,11 +51,44 @@ export interface PluginSkinContribution {
   behaviorManifest?: Partial<Record<'walk' | 'sleep', { row: number; frames?: number; frameDurations?: number[] }>>
 }
 
+export type PluginEventSourceState = 'thinking' | 'tool-running' | 'idle' | 'done' | 'error'
+
+export interface PluginEventSourceContribution {
+  family: string
+  displayName: PluginLocalizedText
+}
+
+export interface PluginEventSourceEvent {
+  sessionId: string
+  state: PluginEventSourceState
+}
+
+export interface PluginSettingDefinition {
+  type: 'string' | 'number' | 'boolean'
+  title?: PluginLocalizedText | string
+  enum?: Array<string | number | boolean>
+  maxLength?: number
+  minimum?: number
+  maximum?: number
+  format?: 'secret'
+  default?: string | number | boolean
+}
+
+export interface PluginSettingsSchema {
+  type: 'object'
+  properties: Record<string, PluginSettingDefinition>
+}
+
 export interface PluginContributions {
+  feed?: boolean
+  reaction?: boolean
+  settings?: PluginSettingsSchema
+  panelView?: PluginPanelViewContribution
   commands?: PluginCommandContribution[]
   tray?: { commands: string[] }
   badge?: boolean
   skins?: PluginSkinContribution[]
+  eventSource?: PluginEventSourceContribution
 }
 
 export interface PetStatusChange {
@@ -88,6 +121,15 @@ export interface PluginSettings {
 export type PluginJsonValue = string | number | boolean | null | PluginJsonValue[] | { [key: string]: PluginJsonValue }
 
 export interface AgentPetsPluginApi {
+  agent: {
+    /**
+     * Publish an observe-only status in this plugin's separate status list. Requires contributes.eventSource.
+     * Only { sessionId, state } is accepted; session ids cannot be reused after terminal state. This never enters Agent events.
+     * Rejects: invalid_request, rate_limited, not_permitted, disabled.
+     * Example: `await api.agent.emit({ sessionId: 'build-1', state: 'thinking' })`
+     */
+    emit(event: PluginEventSourceEvent): Promise<{ accepted: true }>
+  }
   feed: {
     /**
      * Show a feed item. Requires contributes.feed. The success value identifies the item and delivery path.

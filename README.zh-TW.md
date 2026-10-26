@@ -242,7 +242,7 @@ Setup Wizard 會讀取 runtime Agent Adapter registry，並在你點擊按鈕時
 
 ## 插件
 
-插件可提供寵物通知、反應、面板與 Tray 指令、狀態徽章、可選的沙箱面板頁，以及可套用的寵物外觀。在 **Settings → Plugins** 安裝 `.agentpet-plugin` 套件；開發者可開啟 **開發者模式** 載入本機資料夾。安裝前請檢查插件要求的權限與貢獻。插件頁面與背景程式都視為不受信任：沒有 Node.js、檔案系統或 shell 存取，網路請求只能送到核准的 HTTPS 網域。插件網路請求不會送出或儲存 Cookie。密鑰由 App 的受保護儲存加密，設定快照不會回傳密鑰值。此版本沒有線上插件目錄或發布者簽章驗證。
+插件可提供寵物通知、反應、面板與 Tray 指令、狀態徽章、沙箱面板頁、寵物外觀，以及清楚標示來源的唯讀狀態列。在 **Settings → Plugins** 安裝 `.agentpet-plugin` 套件，或開啟選擇加入的線上目錄檢視已簽章插件並檢查更新；問題回報會開啟只包含插件 ID 與版本的預填連結。開發者可開啟 **開發者模式** 載入本機資料夾。安裝前請檢查插件要求的權限與貢獻。插件頁面與背景程式都視為不受信任：沒有 Node.js、檔案系統或 shell 存取，網路請求只能送到核准的 HTTPS 網域。插件網路請求不會送出或儲存 Cookie。密鑰由 App 的受保護儲存加密，設定快照不會回傳密鑰值。
 
 請參閱[插件開發索引](docs/plugins/README.zh-TW.md)、[10 分鐘入門](docs/plugins/getting-started.zh-TW.md)、[安全模型](docs/plugins/security.zh-TW.md)、[API 參考](docs/plugins/api-reference.zh-TW.md)與[範例](docs/plugins/examples.zh-TW.md)。
 

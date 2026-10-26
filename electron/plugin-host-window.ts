@@ -5,6 +5,7 @@ import { pluginHostAssets } from './plugin-host-assets.ts'
 import { PluginHostFailureTracker, pluginHostRetryDelay, shouldRetryPluginHost } from './plugin-host-recovery.ts'
 import { dispatchPluginUiMessage, PluginUiMessageGuard, type PluginUiMessageResult } from './plugin-ui-messages.ts'
 import { join } from 'node:path'
+import { isCurrentPluginRuntimeToken, runPluginRpcForCurrentToken } from './plugin-host-token.ts'
 
 export interface PluginHostDescriptor {
   id: string
@@ -17,8 +18,9 @@ export interface PluginHostDescriptor {
 }
 
 export interface PluginHostControllerOptions {
-  onRpc: (pluginId: string, request: unknown) => Promise<unknown> | unknown
+  onRpc: (pluginId: string, request: unknown, runtimeToken?: string) => Promise<unknown> | unknown
   onPluginCrash: (pluginId: string, consecutiveCrashes: number, reason: 'host' | 'worker') => void
+  onPluginReset?: (pluginId: string) => void
   getMemoryBudgetMb: (activePluginCount: number) => number
   createPluginToken: (pluginId: string) => string
   revokePluginToken: (pluginId: string, token: string) => void
@@ -51,6 +53,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export class PluginHostWindowController {
   private readonly onRpc: PluginHostControllerOptions['onRpc']
   private readonly onPluginCrash: PluginHostControllerOptions['onPluginCrash']
+  private readonly onPluginReset: NonNullable<PluginHostControllerOptions['onPluginReset']>
   private readonly getMemoryBudgetMb: PluginHostControllerOptions['getMemoryBudgetMb']
   private readonly createPluginToken: PluginHostControllerOptions['createPluginToken']
   private readonly revokePluginToken: PluginHostControllerOptions['revokePluginToken']
@@ -71,6 +74,7 @@ export class PluginHostWindowController {
   constructor(options: PluginHostControllerOptions) {
     this.onRpc = options.onRpc
     this.onPluginCrash = options.onPluginCrash
+    this.onPluginReset = options.onPluginReset ?? (() => {})
     this.getMemoryBudgetMb = options.getMemoryBudgetMb
     this.createPluginToken = options.createPluginToken
     this.revokePluginToken = options.revokePluginToken
@@ -166,6 +170,7 @@ export class PluginHostWindowController {
         contextIsolation: true,
         nodeIntegration: false,
         webviewTag: false,
+        webSecurity: true,
         partition: 'plugin-host',
         devTools: !app.isPackaged,
       },
@@ -177,6 +182,16 @@ export class PluginHostWindowController {
     window.webContents.on('will-redirect', event => event.preventDefault())
     window.webContents.on('will-attach-webview', event => event.preventDefault())
     window.webContents.once('did-finish-load', () => this.attachHostPort(window))
+    window.webContents.on('did-start-loading', () => {
+      if (this.hostWindow !== window) return
+      for (const [pluginId, runtime] of this.runtime) {
+        this.revokePluginToken(pluginId, runtime.token)
+        this.onPluginReset(pluginId)
+      }
+      this.runtime.clear()
+      this.closePort()
+      this.portReady = false
+    })
     window.webContents.on('render-process-gone', () => this.handleHostCrash(window))
     window.on('closed', () => {
       if (this.hostWindow !== window) return
@@ -214,6 +229,7 @@ export class PluginHostWindowController {
       if (!this.desired.has(pluginId)) {
         this.post({ type: 'stop', pluginId })
         this.revokePluginToken(pluginId, state.token)
+        this.onPluginReset(pluginId)
         this.runtime.delete(pluginId)
         this.failureTracker.clear(pluginId)
       } else {
@@ -224,6 +240,7 @@ export class PluginHostWindowController {
           && next.agentStatusEnabled === state.descriptor.agentStatusEnabled) continue
         this.post({ type: 'stop', pluginId })
         this.revokePluginToken(pluginId, state.token)
+        this.onPluginReset(pluginId)
         this.runtime.delete(pluginId)
       }
     }
@@ -263,20 +280,32 @@ export class PluginHostWindowController {
       return
     }
     if (value.type === 'rpc') {
+      const runtime = this.runtime.get(pluginId)
+      if (!runtime || !isCurrentPluginRuntimeToken(runtime.token, value.token)) return
+      const runtimeToken = runtime.token
       const requestId = isRecord(value.request) && typeof value.request.id === 'string' ? value.request.id : ''
       void Promise.resolve()
-        .then(() => this.onRpc(pluginId, value.request))
-        .then(result => {
+        .then(() => runPluginRpcForCurrentToken(
+          () => this.desired.has(pluginId) ? this.runtime.get(pluginId)?.token : null,
+          runtimeToken,
+          () => this.onRpc(pluginId, value.request, runtimeToken),
+        ))
+        .then(dispatch => {
+          if (!dispatch.current) return
+          const result = dispatch.value
           const normalizedResult = requestId && isRecord(result) && result.id === requestId
             ? result
             : { ...(requestId ? { id: requestId } : {}), ok: false, error: 'invalid_request' }
           this.post({ type: 'rpc-result', pluginId, result: normalizedResult })
         })
-        .catch(() => this.post({
-          type: 'rpc-result',
-          pluginId,
-          result: { ...(requestId ? { id: requestId } : {}), ok: false, error: 'invalid_request' },
-        }))
+        .catch(() => {
+          if (!isCurrentPluginRuntimeToken(this.runtime.get(pluginId)?.token, runtimeToken)) return
+          this.post({
+            type: 'rpc-result',
+            pluginId,
+            result: { ...(requestId ? { id: requestId } : {}), ok: false, error: 'invalid_request' },
+          })
+        })
     }
   }
 
@@ -331,6 +360,7 @@ export class PluginHostWindowController {
     const runtime = this.runtime.get(pluginId)
     if (reason === 'worker' && !runtime) return
     if (runtime) this.revokePluginToken(pluginId, runtime.token)
+    this.onPluginReset(pluginId)
     const count = this.failureTracker.record(pluginId)
     this.runtime.delete(pluginId)
     this.onPluginCrash(pluginId, count, reason)
@@ -380,7 +410,10 @@ export class PluginHostWindowController {
   }
 
   private closeHost(): void {
-    for (const [pluginId, runtime] of this.runtime) this.revokePluginToken(pluginId, runtime.token)
+    for (const [pluginId, runtime] of this.runtime) {
+      this.revokePluginToken(pluginId, runtime.token)
+      this.onPluginReset(pluginId)
+    }
     this.runtime.clear()
     this.failureTracker.clear()
     this.portReady = false

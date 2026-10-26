@@ -30,6 +30,7 @@ function createHarness(options: {
   onSecretGet?: (pluginId: string, key: string) => string | { ok: false; error: 'secret_unavailable' | 'secret_not_found' }
   onSettingsGet?: (pluginId: string) => Record<string, unknown> | { ok: false; error: 'settings_invalid' }
   onAgentStatusGet?: (pluginId: string) => unknown
+  onAgentEmit?: (pluginId: string, event: unknown) => unknown
   onBadgeSet?: (pluginId: string, badge: unknown) => unknown
 } = {}) {
   const userDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-broker-'))
@@ -65,6 +66,7 @@ function createHarness(options: {
     onSecretGet: options.onSecretGet,
     onSettingsGet: options.onSettingsGet,
     onAgentStatusGet: options.onAgentStatusGet,
+    onAgentEmit: options.onAgentEmit,
     onBadgeSet: options.onBadgeSet,
     now: () => now,
   })
@@ -289,4 +291,49 @@ test('PluginBroker keeps only the latest 200 bounded plain-text log messages', (
   } finally {
     harness.cleanup()
   }
+})
+
+test('agent.emit reaches only the observe-only event source callback', () => {
+  const calls = new Map<string, number>()
+  const hit = (name: string) => calls.set(name, (calls.get(name) ?? 0) + 1)
+  const hostCapabilityCalls = {
+    feedSubmit: 0,
+    reaction: 0,
+    agentStatus: 0,
+    secrets: 0,
+    settings: 0,
+    badge: 0,
+  }
+  const harness = createHarness({
+    pluginManifest: manifest({ contributes: {
+      eventSource: { family: 'build-watch', displayName: { 'zh-TW': '建置狀態', 'en-US': 'Build state' } },
+    } }),
+    onAgentEmit: (_pluginId, event) => {
+      hit('eventSource')
+      return event && typeof event === 'object' && 'state' in event ? { accepted: true } : { ok: false, error: 'invalid_request' }
+    },
+    onAgentStatusGet: () => { hostCapabilityCalls.agentStatus += 1; hit('agentStatus'); return null },
+    onSecretGet: () => { hostCapabilityCalls.secrets += 1; hit('secrets'); return 'secret' },
+    onSettingsGet: () => { hostCapabilityCalls.settings += 1; hit('settings'); return {} },
+    onBadgeSet: () => { hostCapabilityCalls.badge += 1; hit('badge'); return { set: true } },
+  })
+  const feedSubmit = harness.feed.submit.bind(harness.feed)
+  harness.feed.submit = (...args) => { hostCapabilityCalls.feedSubmit += 1; hit('feed'); return feedSubmit(...args) }
+  const reactionCallback = harness.reactions.push.bind(harness.reactions)
+  harness.reactions.push = (...args) => { hostCapabilityCalls.reaction += args.length; return reactionCallback(...args) }
+  try {
+    assert.deepEqual(harness.broker.handle('sample', request('event', 'agent.emit', [{ sessionId: 'build-1', state: 'thinking' }])), {
+      id: 'event', ok: true, value: { accepted: true },
+    })
+    assert.deepEqual([...calls.entries()], [['eventSource', 1]])
+    assert.equal(harness.reactions.length, 0)
+    assert.deepEqual(hostCapabilityCalls, {
+      feedSubmit: 0,
+      reaction: 0,
+      agentStatus: 0,
+      secrets: 0,
+      settings: 0,
+      badge: 0,
+    })
+  } finally { harness.cleanup() }
 })

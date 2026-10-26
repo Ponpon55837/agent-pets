@@ -81,6 +81,45 @@ test('P16 API and contribution docs describe command, Tray, badge, and skin beha
   }
 })
 
+test('P17 eventSource and publishing contracts are indexed in both locales', () => {
+  for (const suffix of ['', '.zh-TW']) {
+    const readme = fs.readFileSync(path.join(docsDirectory, `README${suffix}.md`), 'utf8')
+    const examples = fs.readFileSync(path.join(docsDirectory, `examples${suffix}.md`), 'utf8')
+    const api = fs.readFileSync(path.join(docsDirectory, `api-reference${suffix}.md`), 'utf8')
+    const limits = fs.readFileSync(path.join(docsDirectory, `limits${suffix}.md`), 'utf8')
+    const publishing = fs.readFileSync(path.join(docsDirectory, `publishing${suffix}.md`), 'utf8')
+    const signing = fs.readFileSync(path.join(docsDirectory, `signing${suffix}.md`), 'utf8')
+    assert.ok(suffix === ''
+      ? /publishing/i.test(readme) && /signing/i.test(readme)
+      : /發布至線上目錄/.test(readme) && /簽章與線上目錄/.test(readme))
+    assert.match(examples, /event-source-status/)
+    assert.match(api, /agent\.emit\(event\)/)
+    assert.match(api, /invalid_request.*rate_limited.*not_permitted.*disabled/)
+    assert.match(api, /History.*quota/)
+    for (const value of ['30', '120', '20', '100', '2 KiB', '64', '80', '2 minutes', '30 seconds', '30 minutes']) {
+      if (suffix === '') assert.ok(limits.includes(value), `English limits missing ${value}`)
+    }
+    if (suffix === '.zh-TW') {
+      for (const value of ['30', '120', '20', '100', '2 KiB', '64', '80', '2 分鐘', '30 秒', '30 分鐘']) {
+        assert.ok(limits.includes(value), `Traditional Chinese limits missing ${value}`)
+      }
+    }
+    assert.match(publishing, /schemaVersion: 1/)
+    assert.match(publishing, /SHA-256/)
+    assert.match(publishing, /pull request|pull request|PR/i)
+    assert.match(signing, /Ed25519/)
+    assert.match(signing, /private|私鑰/i)
+  }
+
+  const exampleDirectory = path.join(docsDirectory, 'examples/event-source-status')
+  const manifest = JSON.parse(fs.readFileSync(path.join(exampleDirectory, 'plugin.json'), 'utf8')) as Record<string, unknown>
+  const source = fs.readFileSync(path.join(exampleDirectory, 'dist/main.js'), 'utf8')
+  assert.equal(parsePluginManifest(manifest).ok, true)
+  assert.match(source, /export default\s*\{\s*activate\s*\(/)
+  assert.match(source, /api\.agent\.emit\(\{ sessionId, state: 'thinking' \}\)/)
+  assert.match(source, /state: 'done'/)
+})
+
 test('plugin documentation has bilingual page pairs and all local Markdown links resolve', () => {
   const markdownFiles: string[] = []
   function collectMarkdown(directory: string): void {
@@ -119,7 +158,7 @@ test('public manifest schema required keys and enums match the runtime validator
   assert.deepEqual(schema.required, ['id', 'name', 'version', 'apiVersion', 'author', 'permissions', 'contributes'])
   assert.equal(schema.properties.apiVersion?.const, '1')
   assert.deepEqual(Object.keys(schema.properties.permissions?.properties ?? {}).sort(), ['agentStatus', 'network', 'schedule', 'secrets', 'storage'])
-  assert.deepEqual(Object.keys(schema.properties.contributes?.properties ?? {}).sort(), ['badge', 'commands', 'feed', 'panelView', 'reaction', 'settings', 'skins', 'tray'])
+  assert.deepEqual(Object.keys(schema.properties.contributes?.properties ?? {}).sort(), ['badge', 'commands', 'eventSource', 'feed', 'panelView', 'reaction', 'settings', 'skins', 'tray'])
   const panelView = schema.properties.contributes?.properties?.panelView
   assert.match(panelView?.description ?? '', /sandboxed host view/)
   assert.equal(panelView?.properties?.preferredSize?.properties?.width?.type, 'integer')

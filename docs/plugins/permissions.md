@@ -15,6 +15,7 @@ Declare only the capabilities you need. The install confirmation lists requested
 | `contributes.tray` | `Add items to the Tray menu` |
 | `contributes.badge: true` | `Show a badge in the pet status line` |
 | `contributes.skins` | `Provide N pet skins` (the manifest count is substituted) |
+| `contributes.eventSource` | `Show plugin-reported work in a separate status list` |
 
 `network.hosts` is the pre-approved host list. With `userGranted: true`, the plugin may call `api.net.requestHost(host, reason)` with a bare DNS hostname (no wildcard) and a 1–120 character reason. The host is checked for public DNS before a native confirmation appears. A denial suppresses another prompt for that host for 24 hours; each plugin can request at most three hosts per 10 minutes. Granted dynamic hosts appear in settings and can be revoked. Consent never permits HTTP, IP literals, localhost, private/reserved IPs, or DNS resolving to a non-public address.
 

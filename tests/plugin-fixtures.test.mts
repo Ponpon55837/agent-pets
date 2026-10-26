@@ -14,7 +14,7 @@ import { pluginHostAssets } from '../electron/plugin-host-assets.ts'
 import type { PluginManifest } from '../src/types/plugin.ts'
 
 const fixtureRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'plugins')
-const FIXTURE_IDS = ['ok-notify', 'ok-panel', 'ok-skin', 'ok-commands', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel', 'evil-badge', 'evil-skin'] as const
+const FIXTURE_IDS = ['ok-notify', 'ok-panel', 'ok-skin', 'ok-commands', 'ok-event-source', 'evil-event-source', 'ok-signed', 'ok-signed-rotated', 'evil-signed-tampered', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel', 'evil-badge', 'evil-skin'] as const
 
 function readFixture(pluginId: string): { manifest: PluginManifest; files: Record<string, Uint8Array> } {
   const sourceDirectory = path.join(fixtureRoot, pluginId)
@@ -70,11 +70,36 @@ function createFeed(pluginId: string, manifest: PluginManifest, rateLimitPer10Mi
 test('plugin fixture sources have bounded manifests and include all declared runtime assets', () => {
   for (const pluginId of FIXTURE_IDS) {
     const { manifest, files } = readFixture(pluginId)
-    assert.equal(manifest.id, pluginId)
+    assert.equal(manifest.id, pluginId === 'ok-signed-rotated' ? 'ok-signed' : pluginId)
     if (manifest.entry) assert.ok(files[manifest.entry])
     if (manifest.icon) {
       assert.deepEqual([...files[manifest.icon]!.slice(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
     }
+  }
+})
+
+test('every fixture and public example entry exports an object with activate(api)', () => {
+  const roots = [fixtureRoot, path.resolve('docs/plugins/examples')]
+  const manifests: string[] = []
+  function collect(directory: string): void {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name)
+      if (entry.isDirectory()) collect(target)
+      else if (entry.isFile() && entry.name === 'plugin.json') manifests.push(target)
+    }
+  }
+  roots.forEach(collect)
+
+  for (const manifestPath of manifests) {
+    const manifestValue = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown
+    const parsed = parsePluginManifest(manifestValue)
+    assert.equal(parsed.ok, true, `${manifestPath} must pass manifest validation`)
+    if (!parsed.ok || !parsed.manifest.entry) continue
+
+    const entryPath = path.join(path.dirname(manifestPath), parsed.manifest.entry)
+    const source = fs.readFileSync(entryPath, 'utf8')
+    assert.match(source, /export\s+default\s*\{[\s\S]*?\bactivate\s*(?:async\s*)?\(/,
+      `${path.relative(process.cwd(), entryPath)} must export an object with activate(api)`)
   }
 })
 
@@ -98,6 +123,24 @@ test('ok-commands declares user-triggered commands, Tray entries, and a badge', 
   assert.match(source, /api\.commands\.onInvoke/)
   assert.match(source, /api\.badge\.set/)
   assert.match(source, /api\.feed\.notify/)
+})
+
+test('eventSource fixtures declare a valid observer and probe its rejected inputs', () => {
+  const accepted = readFixture('ok-event-source')
+  assert.deepEqual(accepted.manifest.contributes.eventSource, {
+    family: 'build-watch',
+    displayName: { 'zh-TW': '建置工作', 'en-US': 'Build job' },
+  })
+  const acceptedSource = Buffer.from(accepted.files['dist/main.js']!).toString('utf8')
+  assert.match(acceptedSource, /api\.agent\.emit\(\{ sessionId: 'fixture-build-1', state: 'thinking' \}\)/)
+
+  const evil = readFixture('evil-event-source')
+  assert.equal(evil.manifest.contributes.eventSource?.family, 'probe-status')
+  const evilSource = Buffer.from(evil.files['dist/main.js']!).toString('utf8')
+  assert.match(evilSource, /permission: \{ decision: 'allow' \}/)
+  assert.match(evilSource, /waiting-permission/)
+  assert.match(evilSource, /'x'\.repeat\(65\)/)
+  assert.match(evilSource, /index < 31/)
 })
 
 test('evil-badge probes overlong text and attempts updates every 10 milliseconds', () => {
@@ -130,7 +173,7 @@ test('evil-skin uses a forged WebP and an oversized sheet is rejected during pla
 })
 
 test('every evil fixture records a host log entry for its runtime probe', () => {
-  for (const pluginId of ['evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel', 'evil-badge']) {
+  for (const pluginId of ['evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel', 'evil-badge', 'evil-event-source']) {
     const source = Buffer.from(readFixture(pluginId).files['dist/main.js']!).toString('utf8')
     assert.match(source, /api\.log\.info/, `${pluginId} must leave inspectable evidence`)
   }
@@ -195,7 +238,7 @@ test('all source fixtures can be packed and installed by PluginRegistry', () => 
       if (!planned.ok) continue
       assert.equal(registry.install(planned.value.token).ok, true, `${pluginId} base fixture should install`)
     }
-    assert.equal(registry.list().length, FIXTURE_IDS.length - 1)
+    assert.equal(registry.list().length, new Set(FIXTURE_IDS.map(pluginId => readFixture(pluginId).manifest.id)).size - 1)
   } finally {
     fs.rmSync(userData, { recursive: true, force: true })
   }

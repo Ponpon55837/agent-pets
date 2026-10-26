@@ -1,3 +1,4 @@
+import { IPC_CHANNELS } from './ipc/channels'
 import { contextBridge, ipcRenderer } from 'electron'
 import { createPluginPanelPublicApi } from './plugin-panel-view-bridge.ts'
 
@@ -9,11 +10,11 @@ for (const eventName of ['dragstart', 'dragenter', 'dragover', 'drop']) {
 }
 
 const api = createPluginPanelPublicApi({
-  invoke: (method, args) => ipcRenderer.invoke('plugin-panel-api', method, args),
+  invoke: (method, args) => ipcRenderer.invoke(IPC_CHANNELS.pluginPanelApi, method, args),
   onMessage: listener => {
     const handler = (_event: unknown, data: unknown) => listener(data)
-    ipcRenderer.on('plugin-panel-ui-message', handler)
-    return () => ipcRenderer.removeListener('plugin-panel-ui-message', handler)
+    ipcRenderer.on(IPC_CHANNELS.pluginPanelUiMessage, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.pluginPanelUiMessage, handler)
   },
 })
 

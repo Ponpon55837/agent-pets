@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { PluginFeedQueue } from './plugin-feed-queue.ts'
+import { SlidingWindowLimiter } from './sliding-window-limiter.ts'
 import type { PluginErrorCode, PluginFeedItem, PluginLocalizedText } from '../src/types/plugin.ts'
 import { isValidPetId } from '../src/utils/pet-id.ts'
 import { isValidPluginNetworkHost } from './plugin-manifest.ts'
@@ -247,10 +249,10 @@ export class PluginFeedController {
   private readonly resolveIconUrl?: PluginFeedControllerOptions['resolveIconUrl']
   private readonly now: () => number
   private readonly createId: () => string
-  private readonly recentGlobal: number[] = []
-  private readonly recentByPlugin = new Map<string, number[]>()
+  private readonly recentGlobal = new SlidingWindowLimiter(PLUGIN_FEED_RATE_WINDOW_MS, PLUGIN_FEED_DEFAULT_GLOBAL_RATE)
+  private readonly recentByPlugin = new Map<string, SlidingWindowLimiter>()
   private readonly recentDedupe = new Map<string, number>()
-  private readonly queue: PluginFeedItem[] = []
+  private readonly queue = new PluginFeedQueue()
   private readonly queueTtlMs = new Map<string, number>()
   private readonly center: CenterRecord[] = []
   private activeId: string | null = null
@@ -307,10 +309,7 @@ export class PluginFeedController {
       return { accepted: false, error: 'rate_limited', itemId: item.id, queued: this.queue.length, retryAfterMs }
     }
 
-    this.recentGlobal.push(now)
-    const pluginRecent = this.recentByPlugin.get(pluginId) ?? []
-    pluginRecent.push(now)
-    this.recentByPlugin.set(pluginId, pluginRecent)
+    this.recordRate(pluginId, now)
     if (dedupeIdentity) this.rememberDedupe(dedupeIdentity, now)
     this.addToCenter(item, false)
 
@@ -385,7 +384,7 @@ export class PluginFeedController {
     this.discardExpiredQueue(now)
     if (previousActiveId && !this.activeId) this.emitNext(now)
     if (!this.activeId || itemId !== this.activeId) return false
-    const current = this.queue[0]
+    const current = this.queue.peek()
     if (!current || current.id !== itemId) return false
     this.queue.shift()
     this.queueTtlMs.delete(itemId)
@@ -539,36 +538,30 @@ export class PluginFeedController {
   }
 
   private pruneRates(now: number): void {
-    const cutoff = now - PLUGIN_FEED_RATE_WINDOW_MS
-    for (let index = this.recentGlobal.length - 1; index >= 0; index -= 1) {
-      const timestamp = this.recentGlobal[index]
-      if (timestamp !== undefined && timestamp <= cutoff) this.recentGlobal.splice(index, 1)
-    }
-    for (const [pluginId, timestamps] of this.recentByPlugin) {
-      const recent = timestamps.filter(timestamp => timestamp > cutoff)
-      if (recent.length > 0) this.recentByPlugin.set(pluginId, recent)
+    this.recentGlobal.prune(now)
+    for (const [pluginId, limiter] of this.recentByPlugin) {
+      limiter.prune(now)
+      if (limiter.size > 0) this.recentByPlugin.set(pluginId, limiter)
       else this.recentByPlugin.delete(pluginId)
     }
   }
 
   private rateLimitRetryAfter(pluginId: string, pluginLimit: number, globalLimit: number, now: number): number | null {
     this.pruneRates(now)
-    const pluginRecent = this.recentByPlugin.get(pluginId) ?? []
-    const limitedTimestamps = pluginRecent.length >= pluginLimit
-      ? pluginRecent
-      : this.recentGlobal.length >= globalLimit
-        ? this.recentGlobal
-        : null
-    if (!limitedTimestamps) return null
-    const oldest = limitedTimestamps[0] ?? now
-    return Math.max(1, Math.min(PLUGIN_FEED_RATE_WINDOW_MS, PLUGIN_FEED_RATE_WINDOW_MS - (now - oldest)))
+    const pluginRate = this.recentByPlugin.get(pluginId)?.check(now, pluginLimit)
+    if (pluginRate && !pluginRate.allowed) return Math.min(PLUGIN_FEED_RATE_WINDOW_MS, pluginRate.retryAfterMs)
+    const globalRate = this.recentGlobal.check(now, globalLimit)
+    return globalRate.allowed ? null : Math.min(PLUGIN_FEED_RATE_WINDOW_MS, globalRate.retryAfterMs)
   }
 
   private recordRate(pluginId: string, now: number): void {
-    this.recentGlobal.push(now)
-    const pluginRecent = this.recentByPlugin.get(pluginId) ?? []
-    pluginRecent.push(now)
-    this.recentByPlugin.set(pluginId, pluginRecent)
+    this.recentGlobal.record(now, pluginId)
+    let pluginRecent = this.recentByPlugin.get(pluginId)
+    if (!pluginRecent) {
+      pluginRecent = new SlidingWindowLimiter(PLUGIN_FEED_RATE_WINDOW_MS, PLUGIN_FEED_DEFAULT_PLUGIN_RATE)
+      this.recentByPlugin.set(pluginId, pluginRecent)
+    }
+    pluginRecent.record(now)
   }
 
   private addToCenter(item: PluginFeedItem, read: boolean): void {
@@ -598,12 +591,11 @@ export class PluginFeedController {
   }
 
   private discardExpiredQueue(now: number): void {
-    for (let index = this.queue.length - 1; index >= 0; index -= 1) {
-      const item = this.queue[index]
+    for (const item of this.queue.values()) {
       if (item && item.expiresAt <= now) {
         if (item.id === this.activeId) this.activeId = null
         this.queueTtlMs.delete(item.id)
-        this.queue.splice(index, 1)
+        this.queue.remove(item.id)
       }
     }
   }
@@ -623,7 +615,7 @@ export class PluginFeedController {
     if (this.lastVisibility === visible) return
 
     if (this.lastVisibility && !visible) {
-      const latestPending = this.queue[this.queue.length - 1] ?? null
+      const latestPending = this.queue.last() ?? null
       const ttlMs = latestPending ? this.queueTtlMs.get(latestPending.id) : undefined
       this.hiddenLatest = latestPending && ttlMs !== undefined
         ? { item: cloneFeedItem(latestPending), ttlMs }
@@ -635,7 +627,7 @@ export class PluginFeedController {
           this.notifyNotificationsChanged()
         }
       }
-      this.queue.length = 0
+      this.queue.clear()
       this.queueTtlMs.clear()
       this.activeId = null
     } else if (!this.lastVisibility && visible) {
@@ -656,7 +648,7 @@ export class PluginFeedController {
     if (this.activeId || !this.readVisibility()) return
     this.discardExpiredQueue(now)
     while (this.queue.length > 0) {
-      const item = this.queue[0]
+      const item = this.queue.peek()
       if (!item) return
       if (!this.canDisplay(item.pluginId)) {
         this.queue.shift()

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, shallowRef, computed, watch } from 'vue'
+import { ref, shallowRef, computed, watch, reactive } from 'vue'
 import { t, translateBackendError, setLocale as applyLocale } from '@/i18n'
 import type {
   AgentSession,
@@ -28,6 +28,7 @@ import type {
 } from '@/types/presentation'
 import { PRESENTATION_REACTIONS } from '@/types/presentation'
 import { formatProject } from '@/utils/format'
+import { AgentSessionIndex } from '@/utils/agent-session-index'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
 import {
@@ -189,7 +190,18 @@ interface MoodTaskProgress {
 
 export const useAgentStore = defineStore('agent', () => {
   // --- 核心狀態 ----------------------------------------------------------
-  const sessions = ref<Record<string, AgentSession>>({})
+  const sessionsByKey = reactive(new Map<string, AgentSession>())
+  const sessionIndex = new AgentSessionIndex(sessionsByKey)
+  const sessionList = computed(() => [...sessionsByKey.values()].sort((a, b) => {
+    const priorityDelta = (STATE_PRIORITY[b.state] ?? 0) - (STATE_PRIORITY[a.state] ?? 0)
+    if (priorityDelta !== 0) return priorityDelta
+    const recencyDelta = b.lastSeenAt - a.lastSeenAt
+    if (recencyDelta !== 0) return recencyDelta
+    return SOURCE_LABELS[a.source].localeCompare(SOURCE_LABELS[b.source])
+  }))
+  // Preserve the store's existing object-shaped view for any internal caller
+  // that still needs keyed access; the Map remains the source of truth.
+  const sessions = computed(() => Object.fromEntries(sessionsByKey))
   const isDragging = ref(false)
   const petWindowMode = ref<PetWindowModeState>({ mode: 'normal' })
   const panelView = ref<'sessions' | 'settings'>('sessions')
@@ -1052,7 +1064,7 @@ export const useAgentStore = defineStore('agent', () => {
   // must only come from one of them or it plays twice.
   function handleEvent(event: AgentStatusEvent): 'success' | 'error' | 'waiting-permission' | null {
     const key = getSessionKey(event.source, event.sessionId)
-    const existing = sessions.value[key]
+    const existing = sessionIndex.get(key)
     const prevState = existing?.state
 
     if (event.originalEvent === 'AgentPetsIntegrationTest' && event.state === 'offline') {
@@ -1068,21 +1080,9 @@ export const useAgentStore = defineStore('agent', () => {
       existing.routedPetId = event.routedPetId
       existing.toolName = event.toolName
       existing.permissionNotice = event.permissionNotice
+      sessionIndex.updatePriority(key, event.state, event.timestamp)
     } else {
-      const allSessions = Object.values(sessions.value)
-      if (allSessions.length >= MAX_SESSION_COUNT) {
-        // 只需要最小值：單次線性掃描 O(n) 取代整體排序 O(n log n)。
-        // 優先淘汰 offline，其次是最久未更新的 session。
-        let evictionCandidate = allSessions[0]
-        for (const candidate of allSessions) {
-          const offlineDelta = Number(candidate.state !== 'offline') - Number(evictionCandidate.state !== 'offline')
-          if (offlineDelta < 0 || (offlineDelta === 0 && candidate.lastSeenAt < evictionCandidate.lastSeenAt)) {
-            evictionCandidate = candidate
-          }
-        }
-        if (evictionCandidate) removeSession(evictionCandidate.key)
-      }
-      sessions.value[key] = {
+      const evicted = sessionIndex.upsert({
         key,
         source: event.source,
         sessionId: event.sessionId,
@@ -1093,7 +1093,8 @@ export const useAgentStore = defineStore('agent', () => {
         lastSeenAt: event.timestamp,
         toolName: event.toolName,
         permissionNotice: event.permissionNotice,
-      }
+      }, MAX_SESSION_COUNT)
+      if (evicted) moodTaskProgress.delete(evicted.key)
     }
 
     if ((STATE_PRIORITY[event.state] ?? 0) >= PRESENTATION_HIGH_PRIORITY) {
@@ -1118,51 +1119,47 @@ export const useAgentStore = defineStore('agent', () => {
 
   function cleanupStale() {
     const now = Date.now()
-    for (const key of Object.keys(sessions.value)) {
-      const session = sessions.value[key]
+    for (const session of sessionIndex.values()) {
       if (now - session.lastSeenAt > SESSION_STALE_MS && session.state !== 'offline') {
         // No update in a long time means the process died without sending a
         // terminal event (Stop/SessionEnd) — treat it as gone rather than
         // letting a stuck thinking/tool-running state mask real sessions.
         session.state = 'offline'
-        moodTaskProgress.delete(key)
+        sessionIndex.updatePriority(session.key, session.state, session.lastSeenAt)
+        moodTaskProgress.delete(session.key)
       }
     }
   }
 
   function handleSuccessTimeout() {
     const now = Date.now()
-    for (const key of Object.keys(sessions.value)) {
-      const session = sessions.value[key]
+    for (const session of sessionIndex.values()) {
       if (session.state === 'success') {
         if (now - session.lastSeenAt > SUCCESS_DISPLAY_MS) {
           session.state = 'idle'
+          sessionIndex.updatePriority(session.key, session.state, session.lastSeenAt)
         }
       }
     }
   }
 
   function removeSession(key: string) {
-    delete sessions.value[key]
+    sessionIndex.delete(key)
     moodTaskProgress.delete(key)
   }
 
   function clearOfflineSessions() {
-    for (const key of Object.keys(sessions.value)) {
-      if (sessions.value[key].state === 'offline') {
-        delete sessions.value[key]
-        moodTaskProgress.delete(key)
+    for (const session of [...sessionIndex.values()]) {
+      if (session.state === 'offline') {
+        sessionIndex.delete(session.key)
+        moodTaskProgress.delete(session.key)
       }
     }
   }
 
   // --- Quota 與工作階段衍生狀態（computed） -----------------------------------
 
-  const activeSessions = computed(() => {
-    return Object.values(sessions.value).filter(
-      (s) => s.state !== 'offline'
-    )
-  })
+  const activeSessions = computed(() => sessionList.value.filter(session => session.state !== 'offline'))
 
   const hasQuotaCapableSessions = computed(
     () => activeSessions.value.some((session) => isQuotaCapableSource(session.source)),
@@ -1381,7 +1378,7 @@ export const useAgentStore = defineStore('agent', () => {
   // and the session it blocks share the exact same getSessionKey().
   function settleWaitingPermission(agentId: string, sessionId: string): void {
     const key = getSessionKey(agentId as AgentSource, sessionId)
-    const session = sessions.value[key]
+    const session = sessionIndex.get(key)
     if (!session || session.state !== 'waiting-permission') return
     // The user (or the broker's own TTL) has resolved this request, but a
     // Codex/Claude session may never send a follow-up hook event — without
@@ -1390,6 +1387,7 @@ export const useAgentStore = defineStore('agent', () => {
     // a local, visual-only fallback: any real event still overwrites it.
     session.state = 'idle'
     session.permissionNotice = undefined
+    sessionIndex.updatePriority(key, session.state, session.lastSeenAt)
   }
 
   function setPermissionRequests(value: unknown): void {
@@ -1655,6 +1653,7 @@ export const useAgentStore = defineStore('agent', () => {
 
   return {
     sessions,
+    sessionList,
     isDragging,
     petWindowMode,
     panelView,

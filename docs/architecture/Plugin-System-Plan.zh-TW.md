@@ -1,6 +1,6 @@
 # Agent Pets 插件系統規劃（Plugin System v1）
 
-> 狀態：已實作（Phase 12–16；交接：`docs/handoff/plugin-host-codex-handoff.zh-TW.md`）。發布版本 `1.3.0`。
+> 狀態：已實作（Phase 12–17；交接：`docs/handoff/plugin-host-codex-handoff.zh-TW.md`、`docs/handoff/plugin-distribution-codex-handoff.zh-TW.md`）。Phase 12–16 發布於 `1.3.0`；Phase 17 與 Phase 18 重構發布於 `1.3.1`。
 > 範圍：把寵物做成 **插件宿主（Plugin Host）**，讓第三方以「安裝插件」的方式，把資訊與行為插入寵物的各個介面（狀態泡泡、反應、狀態列、設定頁、Tray…），同時不破壞既有的 Permission／XP／History 安全邊界。
 >
 > **本專案只做宿主端，不開發任何插件。** 我們負責：插入點、Host API、安裝／權限／沙箱、泡泡仲裁，以及公開給第三方的對接規格。插件本身（例如下面的推文提醒）由其他人開發。
@@ -365,17 +365,20 @@ tibo-watch-1.0.0.agentpet-plugin   (zip)
 ### Phase 16 — 更多插入點（納入本次範圍）
 - `badge`、`tray`、`commands`、`skins`。`skins` 與既有寵物匯入共用驗證邏輯，既有匯入功能保留；只有 `skins` 的插件可以沒有 `entry`。
 
-### Phase 12–16 實作差異
+### Phase 12–17 實作差異
 
-- 本機安裝、更新、降版與開發者資料夾載入已實作；線上目錄、作者簽章與自動更新仍留在 Phase 17。
-- `eventSource` 尚未開放；插件仍只能透過受控 Host API 使用已核准的網路 host。
+- 本機安裝、更新、降版、開發者資料夾載入、線上目錄、作者簽章、手動更新檢查與問題回報連結已實作。
+- `eventSource` 已以獨立 IPC、記憶體 store 和狀態清單實作 observe-only 顯示；它不進入 Generic HTTP、內建 Agent event pipeline 或 Permission／XP／成就／History／quota／通知路徑。
 - 插件 Worker 記憶體以啟用插件總預算監控，沒有精確的單一 Worker 記憶體隔離。
 - 插件外觀與既有寵物選擇共用外觀顯示與驗證，但舊有 zip／單張圖匯入功能保留。
 - 公開範例只供開發者參考，不會隨 App 打包；本次沒有開發或隨附第三方插件。
 
-### Phase 17 — 散佈（之後再評估）
-- 插件目錄（registry JSON）、作者簽章（ed25519）、自動更新檢查、評分／回報機制。
-- `eventSource`（observe-only）另行做 threat model 後再開。
+### Phase 17 — 散佈、簽章、更新與 eventSource（已實作）
+- 插件目錄由使用者維護的 GitHub repo JSON 提供，預設關閉；載入與下載均走 Main 的 host allowlist、redirect 與內容大小防護。
+- 插件套件使用 Node `node:crypto` 驗證 Ed25519 簽章，首次安裝採 TOFU；金鑰變更及簽章狀態轉換需明確確認。更新只檢查並提示，由使用者逐項安裝；不做背景自動安裝。
+- 插件詳情提供固定 GitHub issue 回報連結，不收集評分或附帶使用者資料。
+- `eventSource` 僅在獨立插件狀態清單呈現受限狀態，固定標示插件來源，具有限流、容量和 TTL；停用、移除、崩潰、重新載入時清除。其狀態不代表宿主驗證過外部 Agent 的真實狀態。
+- 發布者簽章與目錄發布方式見 `docs/plugins/signing.zh-TW.md`、`docs/plugins/publishing.zh-TW.md`；實作細節與驗收結果見 `docs/phase-reports/phase-17-plugin-distribution.md`。
 
 ---
 

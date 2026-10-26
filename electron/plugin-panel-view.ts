@@ -1,6 +1,7 @@
 import { createPluginPanelProtocolHandler, type PluginProtocolRequestLike } from './plugin-protocol.ts'
 import type { PluginPanelApiMethod } from './plugin-panel-view-bridge.ts'
 import type { PluginPanelViewClosedEvent, PluginPanelViewCloseReason } from '../src/types/plugin.ts'
+import { isIpcErrorCode, PLUGIN_PANEL_IPC_ERROR_CODES } from '../src/types/ipc.ts'
 import { dispatchPluginUiMessage, PLUGIN_UI_MESSAGE_MAX_BYTES, PluginUiMessageGuard } from './plugin-ui-messages.ts'
 
 export const PLUGIN_PANEL_PARTITION_PREFIX = 'plugin-ui-'
@@ -12,12 +13,7 @@ const PANEL_ENTRY_METHODS = new Set<PluginPanelApiMethod>([
   'feed.notify', 'pet.status', 'storage.get', 'storage.set', 'storage.remove',
   'settings.get', 'log.info', 'log.warn', 'log.error', 'net.fetch', 'ui.postMessage',
 ])
-const PANEL_ERROR_CODES = new Set([
-  'not_permitted', 'rate_limited', 'invalid_request', 'too_large', 'timeout', 'host_not_allowed',
-  'disabled', 'queue_full', 'duplicate', 'not_found', 'too_many_enabled', 'host_unavailable',
-  'too_many_redirects', 'secret_unavailable', 'secret_not_found', 'settings_invalid',
-  'schedule_invalid', 'agent_status_unavailable', 'denied', 'panel_load_failed', 'panel_unavailable',
-])
+const PANEL_ERROR_CODES: ReadonlySet<string> = new Set(PLUGIN_PANEL_IPC_ERROR_CODES)
 
 export interface PluginPanelViewDescriptor {
   pluginId: string
@@ -32,6 +28,7 @@ export interface PluginPanelViewWebPreferences {
   contextIsolation: true
   nodeIntegration: false
   webviewTag: false
+  webSecurity: true
   partition: string
   devTools: false
 }
@@ -42,7 +39,7 @@ export interface PluginPanelViewCancelableEvent {
 
 export interface PluginPanelViewSession {
   protocol: {
-    handle: (scheme: string, handler: (request: PluginProtocolRequestLike) => Response) => void | Promise<void>
+    handle: (scheme: string, handler: (request: PluginProtocolRequestLike) => Response | Promise<Response>) => void | Promise<void>
   }
   webRequest: {
     onBeforeRequest: (
@@ -150,7 +147,7 @@ function isJsonValue(value: unknown, depth = 0, seen = new Set<object>()): boole
 }
 
 function errorResult(error: string): { ok: false; error: string } {
-  return { ok: false, error: PANEL_ERROR_CODES.has(error) ? error : 'invalid_request' }
+  return { ok: false, error: isIpcErrorCode(error) && PANEL_ERROR_CODES.has(error) ? error : 'invalid_request' }
 }
 
 export function isPluginPanelResourceAllowed(url: string, token: string | null, method = 'GET'): boolean {
@@ -201,6 +198,7 @@ export class PluginPanelViewController {
           contextIsolation: true,
           nodeIntegration: false,
           webviewTag: false,
+          webSecurity: true,
           partition,
           devTools: false,
         },

@@ -12,6 +12,7 @@ import {
   PluginPreferencesFileError,
   PluginPreferencesStore,
 } from '../electron/plugin-preferences.ts'
+import { DEFAULT_PLUGIN_CATALOG_URL } from '../src/types/plugin-catalog.ts'
 
 function withUserData(run: (userData: string) => void): void {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-preferences-'))
@@ -240,5 +241,52 @@ test('removePlugin deletes only that plugin settings and writes the remaining pr
     assert.equal(remaining.plugins.sample, undefined)
     assert.equal(remaining.plugins.another?.muted, true)
     assert.equal(new PluginPreferencesStore(userData).getPlugin('sample').enabled, false)
+  })
+})
+
+test('online catalog stays off by default and persists only allowed HTTPS GitHub URLs', () => {
+  withUserData((userData) => {
+    const store = new PluginPreferencesStore(userData)
+    assert.equal(store.get().onlineCatalogEnabled, false)
+    assert.equal(store.get().dailyUpdateCheck, false)
+    assert.equal(store.get().catalogUrl, DEFAULT_PLUGIN_CATALOG_URL)
+    assert.throws(() => store.updateGlobal({ catalogUrl: 'http://raw.githubusercontent.com/example/index.json' }), /catalog URL/)
+    assert.throws(() => store.updateGlobal({ catalogUrl: 'https://example.com/index.json' }), /catalog URL/)
+    assert.throws(() => store.updateGlobal({ catalogUrl: 'https://user:pass@github.com/example/index.json' }), /catalog URL/)
+    assert.throws(() => store.updateGlobal({ onlineCatalogEnabled: 'yes' as unknown as boolean }), /must be boolean/)
+
+    const updated = store.updateGlobal({
+      onlineCatalogEnabled: true,
+      catalogUrl: 'https://raw.githubusercontent.com/example/plugins/main/index.json',
+    })
+    assert.equal(updated.onlineCatalogEnabled, true)
+    assert.equal(new PluginPreferencesStore(userData).get().catalogUrl,
+      'https://raw.githubusercontent.com/example/plugins/main/index.json')
+    const scheduled = store.updateGlobal({ dailyUpdateCheck: true })
+    assert.equal(scheduled.dailyUpdateCheck, true)
+    assert.throws(() => store.updateGlobal({ dailyUpdateCheck: 'yes' as unknown as boolean }), /must be boolean/)
+    assert.equal(store.updateGlobal({ onlineCatalogEnabled: false }).dailyUpdateCheck, false)
+    assert.throws(() => store.updateGlobal({ dailyUpdateCheck: true }), /require the online catalog/)
+  })
+})
+
+test('legacy preferences without catalogUrl adopt the default while explicit empty stays editable', () => {
+  withUserData((userData) => {
+    const file = path.join(userData, PLUGIN_PREFERENCES_FILENAME)
+    fs.writeFileSync(file, JSON.stringify({ pluginsEnabled: false, plugins: {} }))
+    const store = new PluginPreferencesStore(userData)
+    assert.equal(store.get().catalogUrl, DEFAULT_PLUGIN_CATALOG_URL)
+    assert.equal(store.updateGlobal({ catalogUrl: '' }).catalogUrl, '')
+  })
+})
+
+test('daily catalog check date persists privately and rejects malformed dates', () => {
+  withUserData((userData) => {
+    const store = new PluginPreferencesStore(userData)
+    assert.equal(store.getLastCatalogAutoCheckDay(), null)
+    assert.throws(() => store.setLastCatalogAutoCheckDay('2026-99-99'), /day is invalid/)
+    store.setLastCatalogAutoCheckDay('2026-10-26')
+    assert.equal(new PluginPreferencesStore(userData).getLastCatalogAutoCheckDay(), '2026-10-26')
+    assert.equal(Object.hasOwn(new PluginPreferencesStore(userData).get(), 'lastCatalogAutoCheckDay'), false)
   })
 })

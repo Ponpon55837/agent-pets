@@ -156,6 +156,7 @@ test('plugin panel uses an ephemeral plugin-specific WebContentsView and a token
     contextIsolation: true,
     nodeIntegration: false,
     webviewTag: false,
+    webSecurity: true,
     partition: 'plugin-ui-sample-plugin',
     devTools: false,
   })

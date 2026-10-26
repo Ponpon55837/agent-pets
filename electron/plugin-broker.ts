@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { PluginErrorCode, PluginManifest } from '../src/types/plugin.ts'
+import { isPluginErrorCode, type PluginErrorCode, type PluginManifest } from '../src/types/plugin.ts'
 import { isValidPetId } from '../src/utils/pet-id.ts'
 import { PRESENTATION_REACTIONS, type PresentationReaction } from '../src/types/presentation.ts'
 import { writeJsonAtomic } from './desktop-preferences.ts'
@@ -53,6 +53,7 @@ export interface PluginBrokerOptions {
   onSecretGet?: (pluginId: string, key: string) => string | { ok: false; error: PluginErrorCode }
   onSettingsGet?: (pluginId: string) => Record<string, unknown> | { ok: false; error: PluginErrorCode }
   onAgentStatusGet?: (pluginId: string) => unknown | { ok: false; error: PluginErrorCode }
+  onAgentEmit?: (pluginId: string, event: unknown) => unknown | { ok: false; error: PluginErrorCode }
   onBadgeSet?: (pluginId: string, badge: unknown) => unknown | { ok: false; error: PluginErrorCode }
 }
 
@@ -68,7 +69,7 @@ interface PluginStorageState {
 const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 const STORAGE_KEY_FORBIDDEN = new Set(['__proto__', 'prototype', 'constructor'])
 const KNOWN_METHODS = new Set([
-  'feed.notify', 'pet.react', 'pet.status', 'badge.set', 'storage.get', 'storage.set', 'storage.remove',
+  'feed.notify', 'pet.react', 'pet.status', 'agent.emit', 'badge.set', 'storage.get', 'storage.set', 'storage.remove',
   'log.info', 'log.warn', 'log.error', 'net.fetch', 'net.requestHost', 'secrets.get', 'settings.get',
 ])
 
@@ -142,6 +143,7 @@ export class PluginBroker {
   private readonly onSecretGet: PluginBrokerOptions['onSecretGet']
   private readonly onSettingsGet: PluginBrokerOptions['onSettingsGet']
   private readonly onAgentStatusGet: PluginBrokerOptions['onAgentStatusGet']
+  private readonly onAgentEmit: PluginBrokerOptions['onAgentEmit']
   private readonly onBadgeSet: PluginBrokerOptions['onBadgeSet']
   private readonly now: () => number
   private readonly storage = new Map<string, PluginStorageState>()
@@ -160,6 +162,7 @@ export class PluginBroker {
     this.onSecretGet = options.onSecretGet
     this.onSettingsGet = options.onSettingsGet
     this.onAgentStatusGet = options.onAgentStatusGet
+    this.onAgentEmit = options.onAgentEmit
     this.onBadgeSet = options.onBadgeSet
     this.now = options.now ?? Date.now
   }
@@ -190,28 +193,29 @@ export class PluginBroker {
     }
     let context: PluginBrokerContext | null = null
     try { context = this.getContext(pluginId) } catch {}
+    const method = rawRequest.method
     if (!context || !context.pluginsEnabled || !context.enabled || context.manifest.id !== pluginId) {
-      return this.reject(pluginId, id, 'disabled', rawRequest.method)
+      return this.reject(pluginId, id, 'disabled', method)
     }
     try {
-      const value = this.dispatch(pluginId, context, rawRequest.method, rawRequest.args)
+      const value = this.dispatch(pluginId, context, method, rawRequest.args)
       const finish = (resolved: unknown): RpcResponse => {
         if (resolved && typeof resolved === 'object' && 'ok' in resolved && resolved.ok === false && 'error' in resolved) {
-          const error = resolved.error as PluginErrorCode
-          this.recordDiagnostic(pluginId, error, rawRequest.method as string)
+          const error = isPluginErrorCode(resolved.error) ? resolved.error : 'invalid_request'
+          this.recordDiagnostic(pluginId, error, method)
           return { id, ok: false, error }
         }
         return { id, ok: true, value: resolved }
       }
       if (value && typeof value === 'object' && 'then' in value && typeof value.then === 'function') {
         return Promise.resolve(value).then(finish).catch(() => {
-          this.recordDiagnostic(pluginId, 'invalid_request', rawRequest.method as string)
+          this.recordDiagnostic(pluginId, 'invalid_request', method)
           return { id, ok: false, error: 'invalid_request' }
         })
       }
       return finish(value)
     } catch {
-      this.recordDiagnostic(pluginId, 'invalid_request', rawRequest.method)
+      this.recordDiagnostic(pluginId, 'invalid_request', method)
       return { id, ok: false, error: 'invalid_request' }
     }
   }
@@ -301,6 +305,11 @@ export class PluginBroker {
       if (!context.manifest.permissions.agentStatus) return { ok: false, error: 'not_permitted' }
       if (args.length !== 0) return { ok: false, error: 'invalid_request' }
       return this.onAgentStatusGet?.(pluginId) ?? { ok: false, error: 'agent_status_unavailable' }
+    }
+    if (method === 'agent.emit') {
+      if (!context.manifest.contributes.eventSource) return { ok: false, error: 'not_permitted' }
+      if (args.length !== 1) return { ok: false, error: 'invalid_request' }
+      return this.onAgentEmit?.(pluginId, args[0]) ?? { ok: false, error: 'disabled' }
     }
     if (method === 'badge.set') {
       if (!context.manifest.contributes.badge) return { ok: false, error: 'not_permitted' }

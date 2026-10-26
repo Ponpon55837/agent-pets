@@ -3,6 +3,8 @@ import * as path from 'node:path'
 import type { PluginInstancePreferences, PluginPreferences, PluginResourceLimits } from '../src/types/plugin.ts'
 import { isValidPetId } from '../src/utils/pet-id.ts'
 import { isValidPluginNetworkHost } from './plugin-manifest.ts'
+import { isPluginCatalogUrl } from './plugin-catalog.ts'
+import { DEFAULT_PLUGIN_CATALOG_URL } from '../src/types/plugin-catalog.ts'
 import { writeJsonAtomic } from './desktop-preferences.ts'
 
 export const PLUGIN_PREFERENCES_FILENAME = 'plugin-preferences.json'
@@ -42,6 +44,9 @@ export const DEFAULT_PLUGIN_RESOURCES = Object.freeze({
 export const DEFAULT_PLUGIN_PREFERENCES = Object.freeze({
   pluginsEnabled: false,
   developerMode: false,
+  onlineCatalogEnabled: false,
+  dailyUpdateCheck: false,
+  catalogUrl: DEFAULT_PLUGIN_CATALOG_URL,
   resources: DEFAULT_PLUGIN_RESOURCES,
   plugins: Object.freeze({}),
 }) as PluginPreferences
@@ -66,6 +71,9 @@ function clonePluginPreferences(value: PluginPreferences): PluginPreferences {
   return {
     pluginsEnabled: value.pluginsEnabled,
     developerMode: value.developerMode,
+    onlineCatalogEnabled: value.onlineCatalogEnabled,
+    dailyUpdateCheck: value.dailyUpdateCheck,
+    catalogUrl: value.catalogUrl,
     resources: { ...value.resources },
     plugins,
   }
@@ -138,6 +146,12 @@ function parseStoredPreferences(value: unknown): PluginPreferences | null {
   if (!isRecord(value)) return null
   const pluginsEnabled = typeof value.pluginsEnabled === 'boolean' ? value.pluginsEnabled : false
   const developerMode = typeof value.developerMode === 'boolean' ? value.developerMode : false
+  const onlineCatalogEnabled = value.onlineCatalogEnabled === true
+  const dailyUpdateCheck = onlineCatalogEnabled && value.dailyUpdateCheck === true
+  const catalogUrl = value.catalogUrl === undefined
+    ? DEFAULT_PLUGIN_CATALOG_URL
+    : typeof value.catalogUrl === 'string' && value.catalogUrl.length <= 2_048
+      && (value.catalogUrl === '' || isPluginCatalogUrl(value.catalogUrl)) ? value.catalogUrl : DEFAULT_PLUGIN_CATALOG_URL
   const resources = parseStoredResourceValues(value.resources)
 
   const plugins: Record<string, PluginInstancePreferences> = {}
@@ -149,7 +163,7 @@ function parseStoredPreferences(value: unknown): PluginPreferences | null {
     }
   }
 
-  return { pluginsEnabled, developerMode, resources, plugins }
+  return { pluginsEnabled, developerMode, onlineCatalogEnabled, dailyUpdateCheck, catalogUrl, resources, plugins }
 }
 
 interface StoredPreferencesRead {
@@ -160,6 +174,11 @@ interface StoredPreferencesRead {
 
 function isErrorCode(error: unknown, code: string): boolean {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === code)
+}
+
+function isIsoCalendarDay(value: string): boolean {
+  const timestamp = Date.parse(`${value}T00:00:00.000Z`)
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value
 }
 
 function readStoredPreferences(filePath: string): StoredPreferencesRead {
@@ -207,23 +226,36 @@ function readStoredPreferences(filePath: string): StoredPreferencesRead {
 function parseGlobalPatch(value: unknown): {
   pluginsEnabled?: boolean
   developerMode?: boolean
+  onlineCatalogEnabled?: boolean
+  dailyUpdateCheck?: boolean
+  catalogUrl?: string
   resources?: Partial<PluginResourceLimits>
 } {
   if (!isRecord(value)) throw new TypeError('Plugin preferences patch must be an object')
-  const allowed = new Set(['pluginsEnabled', 'developerMode', 'resources'])
+  const allowed = new Set(['pluginsEnabled', 'developerMode', 'onlineCatalogEnabled', 'dailyUpdateCheck', 'catalogUrl', 'resources'])
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) throw new TypeError(`Unsupported plugin preference: ${key}`)
   }
   const patch: {
     pluginsEnabled?: boolean
     developerMode?: boolean
+    onlineCatalogEnabled?: boolean
+    dailyUpdateCheck?: boolean
+    catalogUrl?: string
     resources?: Partial<PluginResourceLimits>
   } = {}
-  for (const key of ['pluginsEnabled', 'developerMode'] as const) {
+  for (const key of ['pluginsEnabled', 'developerMode', 'onlineCatalogEnabled', 'dailyUpdateCheck'] as const) {
     if (value[key] !== undefined) {
       if (typeof value[key] !== 'boolean') throw new TypeError(`Plugin preference ${key} must be boolean`)
       patch[key] = value[key]
     }
+  }
+  if (value.catalogUrl !== undefined) {
+    if (typeof value.catalogUrl !== 'string' || value.catalogUrl.length > 2_048
+      || (value.catalogUrl !== '' && !isPluginCatalogUrl(value.catalogUrl))) {
+      throw new TypeError('Plugin catalog URL is invalid')
+    }
+    patch.catalogUrl = value.catalogUrl
   }
   if (value.resources !== undefined) {
     const resources = parseResourceValues(value.resources, DEFAULT_PLUGIN_RESOURCES)
@@ -285,6 +317,7 @@ export class PluginPreferencesStore {
   private stored: PluginPreferences | null = null
   private corruptBackupRequired = false
   private unsafeFile = false
+  private lastCatalogAutoCheckDay: string | null = null
 
   constructor(userDataDirectory: string) {
     if (!path.isAbsolute(userDataDirectory)) throw new TypeError('Plugin preferences require an absolute userData directory')
@@ -293,6 +326,26 @@ export class PluginPreferencesStore {
 
   get(): PluginPreferences {
     return clonePluginPreferences(this.load())
+  }
+
+  getLastCatalogAutoCheckDay(): string | null {
+    this.load()
+    return this.lastCatalogAutoCheckDay
+  }
+
+  setLastCatalogAutoCheckDay(day: string): void {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !isIsoCalendarDay(day)) {
+      throw new TypeError('Catalog auto-check day is invalid')
+    }
+    const current = this.load()
+    const previous = this.lastCatalogAutoCheckDay
+    this.lastCatalogAutoCheckDay = day
+    try {
+      this.persist(current)
+    } catch (error) {
+      this.lastCatalogAutoCheckDay = previous
+      throw error
+    }
   }
 
   getPlugin(pluginId: string): PluginInstancePreferences {
@@ -307,8 +360,13 @@ export class PluginPreferencesStore {
     const next: PluginPreferences = {
       ...current,
       ...patch,
+      dailyUpdateCheck: patch.dailyUpdateCheck
+        ?? (patch.onlineCatalogEnabled === false ? false : current.dailyUpdateCheck),
       resources: patch.resources ? { ...current.resources, ...patch.resources } : { ...current.resources },
       plugins: current.plugins,
+    }
+    if (next.dailyUpdateCheck && !next.onlineCatalogEnabled) {
+      throw new TypeError('Daily plugin update checks require the online catalog')
     }
     this.persist(next)
     return clonePluginPreferences(next)
@@ -350,6 +408,11 @@ export class PluginPreferencesStore {
       const read = readStoredPreferences(this.filePath)
       this.corruptBackupRequired = read.backupRequired
       this.unsafeFile = read.unsafe
+      const storedDay = isRecord(read.value) ? read.value.lastCatalogAutoCheckDay : undefined
+      this.lastCatalogAutoCheckDay = typeof storedDay === 'string'
+        && /^\d{4}-\d{2}-\d{2}$/.test(storedDay)
+        && isIsoCalendarDay(storedDay)
+        ? storedDay : null
       const parsed = parseStoredPreferences(read.value)
       this.corruptBackupRequired ||= read.value !== undefined && parsed === null
       this.stored = parsed ?? clonePluginPreferences(DEFAULT_PLUGIN_PREFERENCES)
@@ -390,7 +453,10 @@ export class PluginPreferencesStore {
       if (!isErrorCode(error, 'ENOENT')) throw error
     }
     this.backupCorruptFile()
-    writeJsonAtomic(this.filePath, value)
+    writeJsonAtomic(this.filePath, {
+      ...value,
+      ...(this.lastCatalogAutoCheckDay ? { lastCatalogAutoCheckDay: this.lastCatalogAutoCheckDay } : {}),
+    })
     this.stored = clonePluginPreferences(value)
   }
 }

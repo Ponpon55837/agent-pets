@@ -29,11 +29,13 @@ test('plugin panel preference patches must be bounded plain objects', () => {
   assert.equal(isPluginPanelPreferencePatch(cyclic), false)
 })
 
-test('plugin panel install confirmation requires a bounded plan token and boolean consent', () => {
-  assert.equal(isPluginPanelInstallConfirmation('opaque-plan-token', true), true)
-  assert.equal(isPluginPanelInstallConfirmation('', true), false)
-  assert.equal(isPluginPanelInstallConfirmation('token', 'yes'), false)
-  assert.equal(isPluginPanelInstallConfirmation('x'.repeat(129), false), false)
+test('plugin panel install confirmation validates both permission and signature consent flags', () => {
+  assert.equal(isPluginPanelInstallConfirmation('opaque-plan-token', true, false), true)
+  assert.equal(isPluginPanelInstallConfirmation('', true, false), false)
+  assert.equal(isPluginPanelInstallConfirmation('token', 'yes', false), false)
+  assert.equal(isPluginPanelInstallConfirmation('token', true, 'yes'), false)
+  assert.equal(isPluginPanelInstallConfirmation('token', true, undefined), false)
+  assert.equal(isPluginPanelInstallConfirmation('x'.repeat(129), false, false), false)
 })
 
 test('unsafe plugin preference files map to a recoverable localized panel error', () => {

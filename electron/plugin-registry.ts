@@ -4,7 +4,9 @@ import * as path from 'node:path'
 import { zipSync } from 'fflate'
 import { guardArchive } from './archive-guard.ts'
 import { parsePluginManifest } from './plugin-manifest.ts'
+import { verifyPluginSignature } from './plugin-signature.ts'
 import type { PluginManifest, PluginRuntimeState } from '../src/types/plugin.ts'
+import type { PluginRegistryError } from '../src/types/ipc.ts'
 
 export const PLUGIN_ARCHIVE_MAX_BYTES = 5 * 1024 * 1024
 export const PLUGIN_ARCHIVE_SKIN_MAX_BYTES = 25 * 1024 * 1024
@@ -20,6 +22,9 @@ export interface PluginRegistryEntry {
   status: PluginRuntimeState
   installedAt: number
   grantedPermissions: unknown
+  signatureStatus?: 'unsigned' | 'valid' | 'unverified'
+  signatureFingerprint?: string
+  trustedKeyFingerprint?: string
 }
 
 export interface PluginInstallPlan {
@@ -34,24 +39,15 @@ export interface PluginInstallPlan {
   contributes?: PluginManifest['contributes']
   addedPermissions: string[]
   requiresReconsent: boolean
+  signatureStatus?: 'unsigned' | 'valid'
+  signatureFingerprint?: string
+  previousTrustedFingerprint?: string
+  signatureChange?: 'first-trust' | 'unsigned-to-signed' | 'key-changed' | 'signed-to-unsigned' | 'unchanged' | 'developer-unverified'
+  requiresSignatureConfirmation?: boolean
+  developerMode?: boolean
 }
 
-export type PluginRegistryError =
-  | 'archive_too_large'
-  | 'invalid_archive'
-  | 'invalid_manifest'
-  | 'incompatible'
-  | 'missing_entry'
-  | 'missing_icon'
-  | 'missing_panel_entry'
-  | 'invalid_html_location'
-  | 'invalid_icon'
-  | 'registry_unavailable'
-  | 'plan_not_found'
-  | 'permission_reconsent_required'
-  | 'filesystem_unsafe'
-  | 'install_failed'
-  | 'plugin_not_found'
+export type { PluginRegistryError } from '../src/types/ipc.ts'
 
 export type PluginRegistryResult<T> = { ok: true; value: T } | { ok: false; error: PluginRegistryError }
 
@@ -108,6 +104,7 @@ function permissionUnits(manifest: PluginManifest): string[] {
   if (manifest.contributes.tray?.commands.length) result.add('contributes:tray')
   if (manifest.contributes.badge) result.add('contributes:badge')
   if (manifest.contributes.skins?.length) result.add(`contributes:skins:${manifest.contributes.skins.length}`)
+  if (manifest.contributes.eventSource) result.add('contributes:eventSource')
   return [...result].sort()
 }
 
@@ -187,12 +184,24 @@ function readRegistry(filePath: string): Record<string, PluginRegistryEntry> {
       || (raw.status !== 'installed' && raw.status !== 'enabled' && raw.status !== 'disabled_crashed' && raw.status !== 'incompatible')) {
       continue
     }
+    const signatureStatus = raw.signatureStatus === 'valid' || raw.signatureStatus === 'unverified'
+      ? raw.signatureStatus
+      : 'unsigned'
+    const signatureFingerprint = typeof raw.signatureFingerprint === 'string' && /^[a-f0-9]{16}$/.test(raw.signatureFingerprint)
+      ? raw.signatureFingerprint
+      : undefined
+    const trustedKeyFingerprint = typeof raw.trustedKeyFingerprint === 'string' && /^[a-f0-9]{16}$/.test(raw.trustedKeyFingerprint)
+      ? raw.trustedKeyFingerprint
+      : undefined
     entries[id] = {
       id,
       currentVersion: raw.currentVersion,
       status: raw.status,
       installedAt: raw.installedAt as number,
       grantedPermissions: raw.grantedPermissions ?? {},
+      signatureStatus,
+      ...(signatureFingerprint ? { signatureFingerprint } : {}),
+      ...(trustedKeyFingerprint ? { trustedKeyFingerprint } : {}),
     }
   }
   return entries
@@ -257,6 +266,10 @@ export class PluginRegistry {
   }
 
   planInstall(archive: Uint8Array): PluginRegistryResult<PluginInstallPlan> {
+    return this.planInstallArchive(archive, false)
+  }
+
+  private planInstallArchive(archive: Uint8Array, developerMode: boolean): PluginRegistryResult<PluginInstallPlan> {
     if (!(archive instanceof Uint8Array) || archive.byteLength > PLUGIN_ARCHIVE_SKIN_MAX_BYTES) {
       return { ok: false, error: 'archive_too_large' }
     }
@@ -268,6 +281,8 @@ export class PluginRegistry {
       mode: 'strict',
     })
     if (!guarded.ok) return { ok: false, error: 'invalid_archive' }
+    const signature = developerMode ? { status: 'unsigned' as const } : verifyPluginSignature(guarded.files)
+    if (signature.status === 'invalid') return { ok: false, error: 'signature_invalid' }
     const manifestBytes = guarded.files.get('plugin.json')
     if (!manifestBytes || manifestBytes.byteLength > 256 * 1024) return { ok: false, error: 'invalid_manifest' }
     let rawManifest: unknown
@@ -288,6 +303,11 @@ export class PluginRegistry {
           ...(unsupported.author ? { author: unsupported.author } : {}),
           addedPermissions: [],
           requiresReconsent: false,
+          signatureStatus: signature.status,
+          ...(signature.status === 'valid' ? { signatureFingerprint: signature.fingerprint } : {}),
+          signatureChange: developerMode ? 'developer-unverified' : 'unchanged',
+          requiresSignatureConfirmation: false,
+          developerMode,
         }, guarded.files, null)
       }
       return { ok: false, error: 'invalid_manifest' }
@@ -345,6 +365,16 @@ export class PluginRegistry {
       ? existing.grantedPermissions.units.filter((value): value is string => typeof value === 'string')
       : []
     const addedPermissions = requestedPermissions.filter(value => !grantedPermissions.includes(value))
+    const trustedFingerprint = existing?.trustedKeyFingerprint
+      ?? (existing?.signatureStatus === 'valid' ? existing.signatureFingerprint : undefined)
+    const signatureChange = developerMode
+      ? 'developer-unverified'
+      : signature.status === 'valid'
+        ? !existing ? 'first-trust'
+          : !trustedFingerprint ? existing.signatureStatus === 'valid' ? 'key-changed' : 'unsigned-to-signed'
+            : trustedFingerprint === signature.fingerprint ? 'unchanged' : 'key-changed'
+        : existing?.signatureStatus === 'valid' || trustedFingerprint ? 'signed-to-unsigned' : 'unchanged'
+    const requiresSignatureConfirmation = signatureChange === 'key-changed' || signatureChange === 'signed-to-unsigned'
     return this.keepPlan({
       kind,
       pluginId: manifest.id,
@@ -356,18 +386,24 @@ export class PluginRegistry {
       contributes: manifest.contributes,
       addedPermissions,
       requiresReconsent: Boolean(existing && addedPermissions.length > 0),
+      signatureStatus: signature.status,
+      ...(signature.status === 'valid' ? { signatureFingerprint: signature.fingerprint } : {}),
+      ...(trustedFingerprint ? { previousTrustedFingerprint: trustedFingerprint } : {}),
+      signatureChange,
+      requiresSignatureConfirmation,
+      developerMode,
     }, guarded.files, manifest)
   }
 
   /** Package a developer-selected folder in memory, then run the exact archive validator. */
-  planInstallDirectory(directory: string): PluginRegistryResult<PluginInstallPlan> {
+  async planInstallDirectory(directory: string): Promise<PluginRegistryResult<PluginInstallPlan>> {
     if (typeof directory !== 'string' || !path.isAbsolute(directory)) return { ok: false, error: 'invalid_archive' }
     const root = path.resolve(directory)
     let rootReal: string
     try {
-      const stat = fs.lstatSync(root)
+      const stat = await fs.promises.lstat(root)
       if (!stat.isDirectory() || stat.isSymbolicLink()) return { ok: false, error: 'filesystem_unsafe' }
-      rootReal = fs.realpathSync(root)
+      rootReal = await fs.promises.realpath(root)
     } catch {
       return { ok: false, error: 'invalid_archive' }
     }
@@ -375,17 +411,17 @@ export class PluginRegistry {
     const files: Record<string, Uint8Array> = Object.create(null) as Record<string, Uint8Array>
     let totalBytes = 0
     let fileCount = 0
-    const collect = (current: string, relativeDirectory: string): boolean => {
+    const collect = async (current: string, relativeDirectory: string): Promise<boolean> => {
       let entries: fs.Dirent[]
-      try { entries = fs.readdirSync(current, { withFileTypes: true }) } catch { return false }
+      try { entries = await fs.promises.readdir(current, { withFileTypes: true }) } catch { return false }
       for (const entry of entries) {
         const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name
         const absolutePath = path.join(current, entry.name)
         let stat: fs.Stats
-        try { stat = fs.lstatSync(absolutePath) } catch { return false }
+        try { stat = await fs.promises.lstat(absolutePath) } catch { return false }
         if (stat.isSymbolicLink()) return false
         if (stat.isDirectory()) {
-          if (!collect(absolutePath, relativePath)) return false
+          if (!await collect(absolutePath, relativePath)) return false
           continue
         }
         if (!stat.isFile()) return false
@@ -393,36 +429,36 @@ export class PluginRegistry {
         if (fileCount > PLUGIN_ARCHIVE_MAX_FILES || stat.size > PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES) return false
         totalBytes += stat.size
         if (!Number.isSafeInteger(totalBytes) || totalBytes > PLUGIN_ARCHIVE_SKIN_MAX_BYTES) return false
-        let descriptor: number | null = null
+        let handle: Awaited<ReturnType<typeof fs.promises.open>> | null = null
         try {
           const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0
-          descriptor = fs.openSync(absolutePath, fs.constants.O_RDONLY | noFollow)
-          const opened = fs.fstatSync(descriptor)
-          const realPath = fs.realpathSync(absolutePath)
+          handle = await fs.promises.open(absolutePath, fs.constants.O_RDONLY | noFollow)
+          const opened = await handle.stat()
+          const realPath = await fs.promises.realpath(absolutePath)
           const relativeRealPath = path.relative(rootReal, realPath)
           if (!opened.isFile() || opened.isSymbolicLink() || opened.size !== stat.size
             || opened.dev !== stat.dev || opened.ino !== stat.ino
             || relativeRealPath === '..' || relativeRealPath.startsWith(`..${path.sep}`) || path.isAbsolute(relativeRealPath)) return false
-          files[relativePath] = fs.readFileSync(descriptor)
+          files[relativePath] = await handle.readFile()
         } catch {
           return false
         } finally {
-          if (descriptor !== null) fs.closeSync(descriptor)
+          try { await handle?.close() } catch {}
         }
       }
       return true
     }
 
-    if (!collect(rootReal, '') || fileCount === 0) return { ok: false, error: 'invalid_archive' }
+    if (!await collect(rootReal, '') || fileCount === 0) return { ok: false, error: 'invalid_archive' }
     try {
       const archive = zipSync(files, { level: 0 })
-      return this.planInstall(archive)
+      return this.planInstallArchive(archive, true)
     } catch {
       return { ok: false, error: 'invalid_archive' }
     }
   }
 
-  install(planToken: string, acceptAdditionalPermissions = false): PluginRegistryResult<PluginRegistryEntry> {
+  install(planToken: string, acceptAdditionalPermissions = false, acceptSignatureChange = false): PluginRegistryResult<PluginRegistryEntry> {
     const prepared = this.getPlan(planToken)
     if (!prepared) return { ok: false, error: 'plan_not_found' }
     if (prepared.publicPlan.kind === 'incompatible' || !prepared.manifest || !prepared.publicPlan.pluginId) {
@@ -430,6 +466,9 @@ export class PluginRegistry {
     }
     if (prepared.publicPlan.requiresReconsent && !acceptAdditionalPermissions) {
       return { ok: false, error: 'permission_reconsent_required' }
+    }
+    if (prepared.publicPlan.requiresSignatureConfirmation && !acceptSignatureChange) {
+      return { ok: false, error: 'signature_confirmation_required' }
     }
     const manifest = prepared.manifest
     const pluginId = manifest.id
@@ -469,12 +508,21 @@ export class PluginRegistry {
       }
       fs.renameSync(stagingDirectory, versionDirectory)
       stagedInstalled = true
+      const previousEntry = entries[pluginId]
+      const signatureFingerprint = prepared.publicPlan.developerMode
+        ? undefined
+        : prepared.publicPlan.signatureStatus === 'valid' ? prepared.publicPlan.signatureFingerprint : undefined
+      const trustedKeyFingerprint = signatureFingerprint ?? previousEntry?.trustedKeyFingerprint
+        ?? (previousEntry?.signatureStatus === 'valid' ? previousEntry.signatureFingerprint : undefined)
       const entry: PluginRegistryEntry = {
         id: pluginId,
         currentVersion: manifest.version,
         status: 'installed',
         installedAt: now,
         grantedPermissions: { units: permissionUnits(manifest) },
+        signatureStatus: prepared.publicPlan.developerMode ? 'unverified' : prepared.publicPlan.signatureStatus ?? 'unsigned',
+        ...(signatureFingerprint ? { signatureFingerprint } : {}),
+        ...(trustedKeyFingerprint ? { trustedKeyFingerprint } : {}),
       }
       entries[pluginId] = entry
       atomicWriteJson(this.registryPath, { plugins: entries })

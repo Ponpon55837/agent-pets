@@ -23,7 +23,7 @@ test('plugin protocol serves only current plugin files with the required CSP and
     const root = path.join(userData, 'sample-plugin', '1.0.0')
     fs.mkdirSync(path.join(root, 'dist'), { recursive: true })
     fs.writeFileSync(path.join(root, 'dist', 'main.js'), 'export default 1')
-    const response = handlePluginProtocolRequest('agent-pets://plugin/sample-plugin/dist/main.js', {
+    const response = await handlePluginProtocolRequest('agent-pets://plugin/sample-plugin/dist/main.js', {
       pluginRootForId: id => id === 'sample-plugin' ? root : null,
       hostAssets: pluginHostAssets,
     })
@@ -36,7 +36,7 @@ test('plugin protocol serves only current plugin files with the required CSP and
 })
 
 test('plugin protocol serves embedded host resources and denies uninstalled or disabled ids', async () => {
-  const response = handlePluginProtocolRequest('agent-pets://plugin/_host/worker-bootstrap.js', {
+  const response = await handlePluginProtocolRequest('agent-pets://plugin/_host/worker-bootstrap.js', {
     pluginRootForId: () => null,
     hostAssets: pluginHostAssets,
   })
@@ -50,7 +50,7 @@ test('plugin protocol serves embedded host resources and denies uninstalled or d
     'agent-pets://plugin/_host/unknown.js',
     'agent-pets://plugin/sample-plugin/main.js?query=1',
   ]) {
-    assert.equal(handlePluginProtocolRequest(url, { pluginRootForId: () => null, hostAssets: pluginHostAssets }).status, 404)
+    assert.equal((await handlePluginProtocolRequest(url, { pluginRootForId: () => null, hostAssets: pluginHostAssets })).status, 404)
   }
 })
 
@@ -71,32 +71,32 @@ test('plugin skin assets use byte-detected MIME and remain unavailable while the
       hostAssets: pluginHostAssets,
     }
     const url = 'agent-pets://plugin/skin-pack/skins/winter%20fox.webp'
-    const response = handlePluginProtocolRequest(url, options)
+    const response = await handlePluginProtocolRequest(url, options)
     assert.equal(response.status, 200)
     assert.equal(response.headers.get('content-type'), 'image/png')
     assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
     assert.deepEqual(await response.arrayBuffer().then(value => Buffer.from(value)), png)
     enabled = false
-    assert.equal(handlePluginProtocolRequest(url, options).status, 404)
+    assert.equal((await handlePluginProtocolRequest(url, options)).status, 404)
   })
 })
 
 test('plugin protocol refuses symlink files and non-regular file paths', async () => {
   if (process.platform === 'win32') return
-  await withPluginRoot((userData) => {
+  await withPluginRoot(async userData => {
     const root = path.join(userData, 'sample-plugin', '1.0.0')
     fs.mkdirSync(root, { recursive: true })
     const outside = path.join(userData, 'outside.js')
     fs.writeFileSync(outside, 'secret')
     fs.symlinkSync(outside, path.join(root, 'main.js'))
     const options = { pluginRootForId: () => root, hostAssets: pluginHostAssets }
-    assert.equal(handlePluginProtocolRequest('agent-pets://plugin/sample-plugin/main.js', options).status, 404)
-    assert.equal(handlePluginProtocolRequest('agent-pets://plugin/sample-plugin/missing.js', options).status, 404)
+    assert.equal((await handlePluginProtocolRequest('agent-pets://plugin/sample-plugin/main.js', options)).status, 404)
+    assert.equal((await handlePluginProtocolRequest('agent-pets://plugin/sample-plugin/missing.js', options)).status, 404)
   })
 })
 
 test('plugin-host partition handler serves only token-scoped plugin files and embedded host assets', async () => {
-  await withPluginRoot(userData => {
+  await withPluginRoot(async userData => {
     const root = path.join(userData, 'sample-plugin', '1.0.0')
     fs.mkdirSync(path.join(root, 'dist'), { recursive: true })
     fs.writeFileSync(path.join(root, 'dist', 'main.js'), 'export default 1')
@@ -106,21 +106,21 @@ test('plugin-host partition handler serves only token-scoped plugin files and em
       pluginRootForToken: value => value === token ? currentRoot : null,
       hostAssets: pluginHostAssets,
     })
-    const pluginResponse = handler({ url: `agent-pets://plugin/${token}/dist/main.js`, method: 'GET' })
+    const pluginResponse = await handler({ url: `agent-pets://plugin/${token}/dist/main.js`, method: 'GET' })
     assert.equal(pluginResponse.status, 200)
     assert.equal(pluginResponse.headers.get('content-security-policy'), PLUGIN_WORKER_CONTENT_SECURITY_POLICY)
     assert.equal(pluginResponse.status, 200)
-    assert.equal(handler({ url: `agent-pets://plugin/${token}/dist/main.js` }).status, 200)
-    assert.equal(handler({ url: 'agent-pets://plugin/sample-plugin/dist/main.js', method: 'GET' }).status, 404)
-    assert.equal(handler({ url: `agent-pets://plugin/${token}/dist/main.js`, method: 'POST' }).status, 405)
-    assert.equal(handler({ url: 'agent-pets://app/index.html', method: 'GET' }).status, 404)
-    assert.equal(handler({ url: 'agent-pets://custom/pet/spritesheet.webp', method: 'GET' }).status, 404)
-    assert.equal(handler({ url: 'agent-pets://plugin/unknown-token/dist/main.js', method: 'GET' }).status, 404)
-    assert.equal(handler({ url: `agent-pets://plugin/${token}/dist/main.js?x=1`, method: 'GET' }).status, 404)
+    assert.equal((await handler({ url: `agent-pets://plugin/${token}/dist/main.js` })).status, 200)
+    assert.equal((await handler({ url: 'agent-pets://plugin/sample-plugin/dist/main.js', method: 'GET' })).status, 404)
+    assert.equal((await handler({ url: `agent-pets://plugin/${token}/dist/main.js`, method: 'POST' })).status, 405)
+    assert.equal((await handler({ url: 'agent-pets://app/index.html', method: 'GET' })).status, 404)
+    assert.equal((await handler({ url: 'agent-pets://custom/pet/spritesheet.webp', method: 'GET' })).status, 404)
+    assert.equal((await handler({ url: 'agent-pets://plugin/unknown-token/dist/main.js', method: 'GET' })).status, 404)
+    assert.equal((await handler({ url: `agent-pets://plugin/${token}/dist/main.js?x=1`, method: 'GET' })).status, 404)
     currentRoot = null
-    assert.equal(handler({ url: `agent-pets://plugin/${token}/dist/main.js`, method: 'GET' }).status, 404)
+    assert.equal((await handler({ url: `agent-pets://plugin/${token}/dist/main.js`, method: 'GET' })).status, 404)
 
-    const workerBootstrap = handler({ url: 'agent-pets://plugin/_host/worker-bootstrap.js', method: 'GET' })
+    const workerBootstrap = await handler({ url: 'agent-pets://plugin/_host/worker-bootstrap.js', method: 'GET' })
     assert.equal(workerBootstrap.status, 200)
     assert.equal(workerBootstrap.headers.get('content-security-policy'), PLUGIN_WORKER_CONTENT_SECURITY_POLICY)
     assert.match(PLUGIN_CONTENT_SECURITY_POLICY, /worker-src agent-pets:\/\/plugin/)
@@ -142,17 +142,17 @@ test('plugin panel protocol serves only token-scoped plugin files and read-only 
       tokensCss: ':root { --pet-ui-test: 1; }',
     })
 
-    const entry = handler({ url: `agent-pets://plugin/${token}/ui/index.html`, method: 'GET' })
+    const entry = await handler({ url: `agent-pets://plugin/${token}/ui/index.html`, method: 'GET' })
     assert.equal(entry.status, 200)
     assert.equal(entry.headers.get('content-security-policy'), PLUGIN_PANEL_CONTENT_SECURITY_POLICY)
     assert.equal(entry.headers.get('cache-control'), 'no-store')
     assert.equal(await entry.text(), '<main>ok</main>')
 
-    const script = handler({ url: `agent-pets://plugin/${token}/ui/app.js`, method: 'GET' })
+    const script = await handler({ url: `agent-pets://plugin/${token}/ui/app.js`, method: 'GET' })
     assert.equal(script.status, 200)
     assert.equal(await script.text(), 'globalThis.started = true')
 
-    const shared = handler({ url: 'agent-pets://plugin/_shared/tokens.css', method: 'GET' })
+    const shared = await handler({ url: 'agent-pets://plugin/_shared/tokens.css', method: 'GET' })
     assert.equal(shared.status, 200)
     assert.equal(shared.headers.get('content-type'), 'text/css; charset=utf-8')
     assert.equal(await shared.text(), ':root { --pet-ui-test: 1; }')
@@ -165,16 +165,16 @@ test('plugin panel protocol serves only token-scoped plugin files and read-only 
       { url: 'agent-pets://plugin/sample-plugin/ui/index.html', method: 'GET' },
       { url: `agent-pets://plugin/${token}/ui/index.html`, method: 'POST' },
       { url: 'https://example.com/', method: 'GET' },
-    ]) assert.notEqual(handler(request).status, 200)
+    ]) assert.notEqual((await handler(request)).status, 200)
 
     currentRoot = null
-    assert.equal(handler({ url: `agent-pets://plugin/${token}/ui/index.html`, method: 'GET' }).status, 404)
+    assert.equal((await handler({ url: `agent-pets://plugin/${token}/ui/index.html`, method: 'GET' })).status, 404)
   })
 })
 
 test('plugin panel protocol refuses symlinks and encoded traversal', async () => {
   if (process.platform === 'win32') return
-  await withPluginRoot(userData => {
+  await withPluginRoot(async userData => {
     const root = path.join(userData, 'sample-plugin', '1.0.0')
     fs.mkdirSync(path.join(root, 'ui'), { recursive: true })
     const outside = path.join(userData, 'outside.html')
@@ -185,8 +185,8 @@ test('plugin panel protocol refuses symlinks and encoded traversal', async () =>
       pluginRootForToken: value => value === token ? root : null,
       tokensCss: '',
     })
-    assert.equal(handler({ url: `agent-pets://plugin/${token}/ui/link.html`, method: 'GET' }).status, 404)
-    assert.equal(handler({ url: `agent-pets://plugin/${token}/%2e%2e/outside.html`, method: 'GET' }).status, 404)
-    assert.equal(handler({ url: `agent-pets://plugin/${token}/ui/link.html`, method: 'GET' }).status, 404)
+    assert.equal((await handler({ url: `agent-pets://plugin/${token}/ui/link.html`, method: 'GET' })).status, 404)
+    assert.equal((await handler({ url: `agent-pets://plugin/${token}/%2e%2e/outside.html`, method: 'GET' })).status, 404)
+    assert.equal((await handler({ url: `agent-pets://plugin/${token}/ui/link.html`, method: 'GET' })).status, 404)
   })
 })

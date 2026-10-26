@@ -1,5 +1,7 @@
 import { isIP } from 'node:net'
 import { parsePetBehaviorManifest } from './pet-behavior-manifest.ts'
+import { normalizePluginEventSourceFamily } from './plugin-event-source.ts'
+import { PLUGIN_CONTRIBUTION_REGISTRY } from '../src/types/plugin.ts'
 import type {
   PluginLocalizedText,
   PluginManifest,
@@ -73,6 +75,12 @@ function parseLocalizedText(value: unknown, maxLength: number): PluginLocalizedT
   const enUS = normalizePlainText(value['en-US'], maxLength)
   if (!zhTW || !enUS) return null
   return { 'zh-TW': zhTW, 'en-US': enUS }
+}
+
+function parseEventSourceDisplayName(value: unknown): PluginLocalizedText | null {
+  const localized = parseLocalizedText(value, 160)
+  if (!localized || Object.values(localized).some(text => Array.from(text).length > 80)) return null
+  return localized
 }
 
 function parseSchemaTitle(value: unknown): string | PluginLocalizedText | null {
@@ -267,7 +275,7 @@ function parseManifest(value: unknown): PluginManifest {
   }
   const secretSet = new Set(permissions.secrets ?? [])
 
-  if (!isRecord(value.contributes) || !hasOnlyKeys(value.contributes, ['feed', 'reaction', 'settings', 'panelView', 'commands', 'tray', 'badge', 'skins'])) {
+  if (!isRecord(value.contributes) || !hasOnlyKeys(value.contributes, Object.keys(PLUGIN_CONTRIBUTION_REGISTRY))) {
     reject('invalid_contributions')
   }
   const contributes: PluginManifest['contributes'] = {}
@@ -368,8 +376,20 @@ function parseManifest(value: unknown): PluginManifest {
     }
     contributes.skins = parsedSkins
   }
+  if (value.contributes.eventSource !== undefined) {
+    const eventSource = value.contributes.eventSource
+    if (!isRecord(eventSource) || !hasOnlyKeys(eventSource, ['family', 'displayName'])) reject('invalid_contributions')
+    const family = normalizePluginEventSourceFamily(eventSource.family)
+    const displayName = parseEventSourceDisplayName(eventSource.displayName)
+    if (!family || !displayName) reject('invalid_contributions')
+    contributes.eventSource = { family, displayName }
+  }
   if (!entry) {
-    const onlySkinContribution = Object.keys(value.contributes).every(key => key === 'skins')
+    const workerlessContributionIds = Object.entries(PLUGIN_CONTRIBUTION_REGISTRY)
+      .filter(([, definition]) => 'allowsWorkerlessPlugin' in definition && definition.allowsWorkerlessPlugin === true)
+      .map(([id]) => id)
+    const onlySkinContribution = Object.keys(value.contributes).length === 1
+      && Object.keys(value.contributes).every(key => workerlessContributionIds.includes(key))
       && (contributes.skins?.length ?? 0) > 0
     if (!onlySkinContribution || Object.keys(value.permissions).length > 0) reject('invalid_contributions')
   }
