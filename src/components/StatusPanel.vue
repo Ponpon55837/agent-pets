@@ -516,6 +516,7 @@ async function importPet() {
   const fileUrl = await window.electronAPI?.importPetSprite(id, t('customPet'))
   if (fileUrl) {
     await store.loadPets()
+    void store.refreshProjectPets()
     store.setPet(id)
   }
   importing.value = false
@@ -530,6 +531,7 @@ async function importPetZip() {
   const result = await window.electronAPI?.importPetZip()
   if (result?.ok && result.id) {
     await store.loadPets()
+    void store.refreshProjectPets()
     store.setPet(result.id)
   } else if (result && !result.ok && result.error !== 'cancelled') {
     importZipError.value = translateBackendError(result.error || t('failed'))
