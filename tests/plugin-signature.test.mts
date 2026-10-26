@@ -4,6 +4,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import { strToU8, unzipSync, zipSync } from 'fflate'
 import {
   createPluginSignaturePayload,
@@ -112,6 +113,41 @@ test('changing any signed file, including plugin.json, invalidates the signature
   changedManifest.set('plugin.json', Buffer.from('{"id":"other-plugin"}'))
   assert.equal(verifyPluginSignature(changedAsset).status, 'invalid')
   assert.equal(verifyPluginSignature(changedManifest).status, 'invalid')
+})
+
+test('distribution fixtures cover a valid signature, a post-signature tamper, and a rotated signing key', () => {
+  const fixtureRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'plugins')
+  const readFiles = (fixtureId: string) => {
+    const root = path.join(fixtureRoot, fixtureId)
+    const files = new Map<string, Uint8Array>()
+    const walk = (directory: string, prefix = '') => {
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        const relativePath = path.posix.join(prefix, entry.name)
+        const fullPath = path.join(directory, entry.name)
+        if (entry.isDirectory()) walk(fullPath, relativePath)
+        else if (entry.isFile()) files.set(relativePath, new Uint8Array(fs.readFileSync(fullPath)))
+      }
+    }
+    walk(root)
+    return files
+  }
+  const firstKey = createTestKeyPair()
+  const rotatedKey = createTestKeyPair()
+  const signed = readFiles('ok-signed')
+  assert.match(Buffer.from(signed.get('dist/main.js')!).toString('utf8'), /export default\s*\{\s*activate\s*\(/)
+  signed.set('signature.json', signatureBytes(signed, firstKey))
+  assert.equal(verifyPluginSignature(signed).status, 'valid')
+
+  const tampered = readFiles('evil-signed-tampered')
+  tampered.set('signature.json', signatureBytes(tampered, firstKey))
+  tampered.set('dist/main.js', Buffer.from('api.log.info("altered after signing")'))
+  assert.equal(verifyPluginSignature(tampered).status, 'invalid')
+
+  const rotated = readFiles('ok-signed-rotated')
+  assert.match(Buffer.from(rotated.get('dist/main.js')!).toString('utf8'), /export default\s*\{\s*activate\s*\(/)
+  rotated.set('signature.json', signatureBytes(rotated, rotatedKey))
+  assert.equal(verifyPluginSignature(rotated).status, 'valid')
+  assert.notEqual(pluginPublicKeyFingerprint(firstKey.publicKey), pluginPublicKeyFingerprint(rotatedKey.publicKey))
 })
 
 test('signature parser rejects bad lengths, non-canonical base64, unknown algorithms, and extra fields', () => {

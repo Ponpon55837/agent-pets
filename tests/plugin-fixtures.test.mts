@@ -14,7 +14,7 @@ import { pluginHostAssets } from '../electron/plugin-host-assets.ts'
 import type { PluginManifest } from '../src/types/plugin.ts'
 
 const fixtureRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'plugins')
-const FIXTURE_IDS = ['ok-notify', 'ok-panel', 'ok-skin', 'ok-commands', 'ok-event-source', 'evil-event-source', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel', 'evil-badge', 'evil-skin'] as const
+const FIXTURE_IDS = ['ok-notify', 'ok-panel', 'ok-skin', 'ok-commands', 'ok-event-source', 'evil-event-source', 'ok-signed', 'ok-signed-rotated', 'evil-signed-tampered', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel', 'evil-badge', 'evil-skin'] as const
 
 function readFixture(pluginId: string): { manifest: PluginManifest; files: Record<string, Uint8Array> } {
   const sourceDirectory = path.join(fixtureRoot, pluginId)
@@ -70,7 +70,7 @@ function createFeed(pluginId: string, manifest: PluginManifest, rateLimitPer10Mi
 test('plugin fixture sources have bounded manifests and include all declared runtime assets', () => {
   for (const pluginId of FIXTURE_IDS) {
     const { manifest, files } = readFixture(pluginId)
-    assert.equal(manifest.id, pluginId)
+    assert.equal(manifest.id, pluginId === 'ok-signed-rotated' ? 'ok-signed' : pluginId)
     if (manifest.entry) assert.ok(files[manifest.entry])
     if (manifest.icon) {
       assert.deepEqual([...files[manifest.icon]!.slice(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
@@ -213,7 +213,7 @@ test('all source fixtures can be packed and installed by PluginRegistry', () => 
       if (!planned.ok) continue
       assert.equal(registry.install(planned.value.token).ok, true, `${pluginId} base fixture should install`)
     }
-    assert.equal(registry.list().length, FIXTURE_IDS.length - 1)
+    assert.equal(registry.list().length, new Set(FIXTURE_IDS.map(pluginId => readFixture(pluginId).manifest.id)).size - 1)
   } finally {
     fs.rmSync(userData, { recursive: true, force: true })
   }

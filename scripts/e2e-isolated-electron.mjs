@@ -7,10 +7,12 @@
 // --app-root runs another copy of the app (e.g. an extracted packaged app.asar) instead of this repo.
 // Prints one JSON line with the temp root, ports and pid, then keeps running.
 import { spawn } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import { zipSync } from 'fflate'
 
 const repoRoot = resolve(import.meta.dirname, '..')
 const argString = name => {
@@ -30,9 +32,103 @@ if (!existsSync(mainBundle)) {
   process.exit(1)
 }
 
+function readPluginFixture(pluginId) {
+  const fixtureRoot = join(repoRoot, 'tests', 'fixtures', 'plugins', pluginId)
+  const files = new Map()
+  const walk = (directory, relativeDirectory = '') => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name
+      const absolutePath = join(directory, entry.name)
+      if (entry.isDirectory()) walk(absolutePath, relativePath)
+      else if (entry.isFile()) files.set(relativePath, new Uint8Array(readFileSync(absolutePath)))
+    }
+  }
+  walk(fixtureRoot)
+  return files
+}
+
+function signaturePayload(files) {
+  return Buffer.from([...files.entries()]
+    .filter(([path]) => path !== 'signature.json')
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+    .map(([path, bytes]) => `${path}\t${createHash('sha256').update(bytes).digest('hex')}\n`)
+    .join(''), 'utf8')
+}
+
+function signFixture(pluginId, version, keyPair, tamperAfterSigning = false) {
+  const files = readPluginFixture(pluginId)
+  const manifest = JSON.parse(Buffer.from(files.get('plugin.json')).toString('utf8'))
+  manifest.version = version
+  files.set('plugin.json', Buffer.from(JSON.stringify(manifest), 'utf8'))
+  const publicKey = new Uint8Array(keyPair.publicKey.export({ type: 'spki', format: 'der' }).subarray(-32))
+  const signature = cryptoSign(null, signaturePayload(files), keyPair.privateKey)
+  files.set('signature.json', Buffer.from(JSON.stringify({
+    alg: 'ed25519',
+    publicKey: Buffer.from(publicKey).toString('base64'),
+    signature: signature.toString('base64'),
+  }), 'utf8'))
+  if (tamperAfterSigning) files.set('dist/main.js', Buffer.from('api.log.info("tampered after signing")', 'utf8'))
+  return {
+    archive: zipSync(Object.fromEntries(files), { level: 6 }),
+    fingerprint: createHash('sha256').update(publicKey).digest('hex').slice(0, 16),
+  }
+}
+
+function createCatalogFixture(root) {
+  const firstKey = generateKeyPairSync('ed25519')
+  const rotatedKey = generateKeyPairSync('ed25519')
+  const first = signFixture('ok-signed', '1.0.0', firstKey)
+  const update = signFixture('ok-signed', '1.0.1', firstKey)
+  const rotated = signFixture('ok-signed-rotated', '1.0.2', rotatedKey)
+  const tampered = signFixture('evil-signed-tampered', '1.0.0', firstKey, true)
+  const packageBase = 'https://raw.githubusercontent.com/Ponpon55837/agent-pets-plugins/main/packages'
+  const packages = [
+    { version: '1.0.0', result: first },
+    { version: '1.0.1', result: update },
+    { version: '1.0.2', result: rotated },
+  ].map(({ version, result }) => ({
+    version,
+    url: `${packageBase}/ok-signed-${version}.agentpet-plugin`,
+    result,
+  }))
+  const catalogVersion = ({ version, url, result }) => ({
+    version,
+    apiVersion: '1',
+    url,
+    sha256: createHash('sha256').update(result.archive).digest('hex'),
+    size: result.archive.byteLength,
+    publishedAt: `2026-10-26T00:00:00.000Z`,
+  })
+  const plugin = (fingerprint, versions) => ({
+    id: 'ok-signed',
+    name: { 'zh-TW': '簽章驗證插件', 'en-US': 'Signed Fixture' },
+    description: { 'zh-TW': '只供隔離驗收使用', 'en-US': 'Isolated acceptance fixture only' },
+    author: 'Agent Pets Test Fixture',
+    publicKeyFingerprint: fingerprint,
+    versions: versions.map(catalogVersion),
+  })
+  const registry = versions => JSON.stringify({
+    schemaVersion: 1,
+    plugins: [plugin(versions.at(-1).result.fingerprint, versions)],
+  })
+  const catalogFixture = {
+    registry: registry([packages[0]]),
+    registryProfiles: {
+      initial: registry([packages[0]]),
+      sameKeyUpdate: registry(packages.slice(0, 2)),
+      rotatedKey: registry([packages[2]]),
+    },
+    downloads: Object.fromEntries(packages.map(({ url, result }) => [url, Buffer.from(result.archive).toString('base64')])),
+  }
+  const tamperedArchivePath = join(root, 'evil-signed-tampered.agentpet-plugin')
+  writeFileSync(tamperedArchivePath, tampered.archive, { mode: 0o600 })
+  return { catalogFixture, tamperedArchivePath }
+}
+
 const root = mkdtempSync(join(tmpdir(), 'agent-pets-e2e-'))
 mkdirSync(join(root, 'home'))
 mkdirSync(join(root, 'ud'))
+const { catalogFixture, tamperedArchivePath } = createCatalogFixture(root)
 const bootstrap = join(root, 'bootstrap.cjs')
 writeFileSync(bootstrap, `
 const path = require('node:path')
@@ -64,7 +160,8 @@ globalThis.__agentPetsE2E = {
   root,
   userData,
   calls,
-  catalogFixture: null,
+  catalogFixture: ${JSON.stringify(catalogFixture)},
+  tamperedArchivePath: ${JSON.stringify(tamperedArchivePath)},
   pluginIssueReportBaseUrl: 'https://github.com/example/agent-pets-plugins/issues/new',
   shellOpenExternalCalls,
   panelViewBlockedRequests: 0,
