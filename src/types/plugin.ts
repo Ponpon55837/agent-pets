@@ -197,6 +197,8 @@ export type PluginErrorCode =
 export type PluginRuntimeState = 'installed' | 'enabled' | 'disabled_crashed' | 'incompatible'
 
 export type PluginInstallKind = 'new' | 'update' | 'downgrade' | 'reinstall' | 'incompatible'
+export type PluginSignatureStatus = 'unsigned' | 'valid' | 'unverified'
+export type PluginSignatureChange = 'first-trust' | 'unsigned-to-signed' | 'key-changed' | 'signed-to-unsigned' | 'unchanged' | 'developer-unverified'
 
 export interface PluginInstallPlan {
   token: string
@@ -210,6 +212,12 @@ export interface PluginInstallPlan {
   contributes?: PluginManifest['contributes']
   addedPermissions: string[]
   requiresReconsent: boolean
+  signatureStatus?: 'unsigned' | 'valid'
+  signatureFingerprint?: string
+  previousTrustedFingerprint?: string
+  signatureChange?: PluginSignatureChange
+  requiresSignatureConfirmation?: boolean
+  developerMode?: boolean
 }
 
 export interface PluginPanelPlugin {
@@ -220,6 +228,8 @@ export interface PluginPanelPlugin {
   grantedPermissions: unknown
   manifest: PluginManifest | null
   development: boolean
+  signatureStatus?: PluginSignatureStatus
+  signatureFingerprint?: string
   preference: PluginInstancePreferences
 }
 

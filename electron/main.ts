@@ -500,7 +500,13 @@ function pluginPanelSnapshot(): PluginPanelResult<PluginPanelSnapshot> {
         } catch {}
       }
       return {
-        ...entry,
+        id: entry.id,
+        currentVersion: entry.currentVersion,
+        status: entry.status,
+        installedAt: entry.installedAt,
+        grantedPermissions: entry.grantedPermissions,
+        signatureStatus: entry.signatureStatus,
+        ...(entry.signatureFingerprint ? { signatureFingerprint: entry.signatureFingerprint } : {}),
         manifest,
         development: developerSourceFolders.has(entry.id),
         preference: preferences.plugins[entry.id] ?? pluginPreferences!.getPlugin(entry.id),
@@ -1548,11 +1554,13 @@ function createPluginServices(): void {
       return { ok: false, error: 'invalid_archive' }
     }
   })
-  ipcMain.handle('plugin-install-confirm', (event, token: unknown, acceptAdditionalPermissions: unknown) => {
+  ipcMain.handle('plugin-install-confirm', (event, token: unknown, acceptAdditionalPermissions: unknown, acceptSignatureChange: unknown) => {
     assertPluginPanelSender(event)
     if (!pluginRegistry || !pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
-    if (!isPluginPanelInstallConfirmation(token, acceptAdditionalPermissions)
-      || typeof acceptAdditionalPermissions !== 'boolean') return { ok: false, error: 'invalid_request' }
+    if (!isPluginPanelInstallConfirmation(token, acceptAdditionalPermissions, acceptSignatureChange)
+      || typeof acceptAdditionalPermissions !== 'boolean' || typeof acceptSignatureChange !== 'boolean') {
+      return { ok: false, error: 'invalid_request' }
+    }
     const pluginId = pendingPluginPlanIds.get(token)
     const developerFolder = pendingDeveloperFolders.get(token)
     if (!pluginId) return { ok: false, error: 'plan_not_found' }
@@ -1563,7 +1571,7 @@ function createPluginServices(): void {
     } catch (error) {
       return { ok: false, error: pluginPanelError(error) }
     }
-    const installed = pluginRegistry.install(token, acceptAdditionalPermissions)
+    const installed = pluginRegistry.install(token, acceptAdditionalPermissions, acceptSignatureChange)
     if (!installed.ok) return { ok: false, error: installed.error }
     pendingPluginPlanIds.delete(token)
     pendingDeveloperFolders.delete(token)

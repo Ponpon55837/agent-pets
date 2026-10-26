@@ -73,7 +73,7 @@ declare global {
       setPluginInstancePreferences: (pluginId: string, patch: unknown) => Promise<PluginPanelResult<PluginPreferences>>
       selectPluginArchive: () => Promise<PluginPanelResult<PluginInstallPlan>>
       selectPluginFolder: () => Promise<PluginPanelResult<PluginInstallPlan>>
-      installPluginPlan: (token: string, acceptAdditionalPermissions: boolean) => Promise<PluginPanelResult<PluginPanelPlugin>>
+      installPluginPlan: (token: string, acceptAdditionalPermissions: boolean, acceptSignatureChange: boolean) => Promise<PluginPanelResult<PluginPanelPlugin>>
       removeInstalledPlugin: (pluginId: string, keepData: boolean) => Promise<PluginPanelResult<{ removed: true; keptData: boolean }>>
       getPluginDiagnostics: (pluginId: string) => Promise<PluginPanelResult<{ logs: PluginBrokerLogEntry[]; diagnostics: PluginBrokerDiagnostic[] }>>
       listPluginNotifications: () => Promise<PluginPanelResult<PluginNotificationRecord[]>>

@@ -19,9 +19,14 @@ export function isPluginPanelPreferencePatch(value: unknown): value is Record<st
   }
 }
 
-export function isPluginPanelInstallConfirmation(token: unknown, acceptAdditionalPermissions: unknown): token is string {
+export function isPluginPanelInstallConfirmation(
+  token: unknown,
+  acceptAdditionalPermissions: unknown,
+  acceptSignatureChange: unknown,
+): token is string {
   return typeof token === 'string' && token.length > 0 && token.length <= 128
     && typeof acceptAdditionalPermissions === 'boolean'
+    && typeof acceptSignatureChange === 'boolean'
 }
 
 export function pluginPanelErrorCode(error: unknown): string {

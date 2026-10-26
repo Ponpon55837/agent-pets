@@ -86,6 +86,12 @@ function pluginIconUrl(plugin: PluginPanelPlugin): string | null {
   return `agent-pets://plugin/${plugin.id}/${icon.split('/').map(encodeURIComponent).join('/')}`
 }
 
+function displayFingerprint(value: string | undefined): string {
+  return typeof value === 'string' && /^[a-f0-9]{16}$/.test(value)
+    ? value.match(/.{4}/g)?.join(' ') ?? ''
+    : ''
+}
+
 function readPluginPanelViewBounds(): { frame: DOMRect; content: DOMRect } | null {
   const frame = panelViewFrame.value?.getBoundingClientRect()
   const content = panelViewContent.value?.getBoundingClientRect()
@@ -196,6 +202,8 @@ function localizedError(code: string): string {
     preferences_unsafe: 'pluginPreferencesUnsafe',
     plugin_service_unavailable: 'pluginServiceUnavailable',
     archive_too_large: 'pluginArchiveTooLarge',
+    signature_invalid: 'pluginSignatureInvalid',
+    signature_confirmation_required: 'pluginSignatureConfirmationRequired',
     invalid_archive: 'pluginInvalidArchive',
     invalid_manifest: 'pluginInvalidArchive',
     incompatible: 'pluginIncompatible',
@@ -619,7 +627,11 @@ async function confirmInstall(): Promise<void> {
   errorMessage.value = ''
   statusMessage.value = ''
   try {
-    const result = await window.electronAPI?.installPluginPlan(plan.token, plan.requiresReconsent)
+    const result = await window.electronAPI?.installPluginPlan(
+      plan.token,
+      plan.requiresReconsent,
+      plan.requiresSignatureConfirmation === true,
+    )
     if (!result?.ok) {
       if (result && !result.ok) setError(result.error)
       return
@@ -861,7 +873,13 @@ onUnmounted(() => {
             <div class="plugin-copy">
               <strong :title="pluginName(plugin)">{{ pluginName(plugin) }}</strong>
               <span>{{ plugin.id }} · {{ t('pluginVersion', { version: plugin.currentVersion }) }}</span>
-              <span v-if="plugin.development" class="plugin-development-badge">{{ t('pluginDevelopmentBadge') }}</span>
+              <span v-if="plugin.development || plugin.signatureStatus === 'unverified'" class="plugin-development-badge">{{ t('pluginSignatureDeveloperUnverified') }}</span>
+              <span v-else class="plugin-signature-status">
+                {{ t(plugin.signatureStatus === 'valid' ? 'pluginSignatureVerified' : 'pluginSignatureUnsigned') }}
+              </span>
+              <span v-if="!plugin.development && plugin.signatureFingerprint" class="plugin-signature-fingerprint">
+                {{ t('pluginSignatureFingerprint', { fingerprint: displayFingerprint(plugin.signatureFingerprint) }) }}
+              </span>
             </div>
             <span class="plugin-status" :class="`tone-${pluginStatusTone(plugin)}`">{{ pluginStatusLabel(plugin) }}</span>
           </div>
@@ -1077,6 +1095,7 @@ onUnmounted(() => {
       :open="hasCompatiblePlan"
       :title="t('pluginInstallConfirmTitle')"
       :message="t('pluginThirdPartyWarning')"
+      :focus-cancel="pendingPlan?.requiresSignatureConfirmation === true"
       :confirm-label="t('pluginInstallConfirm')"
       :cancel-label="t('cancel')"
       @confirm="confirmInstall"
@@ -1089,6 +1108,26 @@ onUnmounted(() => {
           author: pendingPlan.author ?? '',
           kind: planKindLabel(pendingPlan),
         }) }}</p>
+        <p v-if="pendingPlan.developerMode" class="plugin-plan-warning">{{ t('pluginSignatureDeveloperUnverified') }}</p>
+        <template v-else>
+          <p class="plugin-signature-status">
+            {{ t(pendingPlan.signatureStatus === 'valid' ? 'pluginSignatureVerified' : 'pluginSignatureUnsigned') }}
+          </p>
+          <p v-if="pendingPlan.signatureFingerprint" class="plugin-signature-fingerprint">
+            {{ t('pluginSignatureFingerprint', { fingerprint: displayFingerprint(pendingPlan.signatureFingerprint) }) }}
+          </p>
+          <p v-if="pendingPlan.signatureChange === 'first-trust'" class="plugin-plan-warning">{{ t('pluginSignatureFirstTrust') }}</p>
+          <p v-if="pendingPlan.signatureChange === 'unsigned-to-signed'" class="plugin-plan-warning">{{ t('pluginSignatureUnsignedToSigned') }}</p>
+          <p v-if="pendingPlan.signatureChange === 'key-changed'" class="plugin-plan-warning">
+            {{ t('pluginSignatureKeyChanged', {
+              previous: displayFingerprint(pendingPlan.previousTrustedFingerprint) || t('pluginSignatureUnknownFingerprint'),
+              next: displayFingerprint(pendingPlan.signatureFingerprint),
+            }) }}
+          </p>
+          <p v-if="pendingPlan.signatureChange === 'signed-to-unsigned'" class="plugin-plan-warning">
+            {{ t('pluginSignatureSignedToUnsigned', { previous: displayFingerprint(pendingPlan.previousTrustedFingerprint) || t('pluginSignatureUnknownFingerprint') }) }}
+          </p>
+        </template>
         <p v-if="pendingPlan.kind === 'downgrade'" class="plugin-plan-warning">{{ t('pluginDowngradeWarning') }}</p>
         <p v-if="pendingPlan.requiresReconsent" class="plugin-plan-warning">{{ t('pluginNewPermissionWarning') }}</p>
         <template v-if="pendingPlan.requiresReconsent && pendingAddedPermissions.length">

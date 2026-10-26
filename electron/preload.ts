@@ -100,7 +100,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setPluginInstancePreferences: (pluginId: string, patch: unknown): Promise<PluginPanelResult<PluginPreferences>> => ipcRenderer.invoke('plugin-preferences-instance-set', pluginId, patch),
   selectPluginArchive: (): Promise<PluginPanelResult<PluginInstallPlan>> => ipcRenderer.invoke('plugin-install-select'),
   selectPluginFolder: (): Promise<PluginPanelResult<PluginInstallPlan>> => ipcRenderer.invoke('plugin-install-select-folder'),
-  installPluginPlan: (token: string, acceptAdditionalPermissions: boolean): Promise<PluginPanelResult<PluginPanelPlugin>> => ipcRenderer.invoke('plugin-install-confirm', token, acceptAdditionalPermissions),
+  installPluginPlan: (token: string, acceptAdditionalPermissions: boolean, acceptSignatureChange: boolean): Promise<PluginPanelResult<PluginPanelPlugin>> => ipcRenderer.invoke('plugin-install-confirm', token, acceptAdditionalPermissions, acceptSignatureChange),
   removeInstalledPlugin: (pluginId: string, keepData: boolean): Promise<PluginPanelResult<{ removed: true; keptData: boolean }>> => ipcRenderer.invoke('plugin-remove', pluginId, keepData),
   getPluginDiagnostics: (pluginId: string): Promise<PluginPanelResult<{ logs: PluginBrokerLogEntry[]; diagnostics: PluginBrokerDiagnostic[] }>> => ipcRenderer.invoke('plugin-diagnostics', pluginId),
   listPluginNotifications: (): Promise<PluginPanelResult<PluginNotificationRecord[]>> => ipcRenderer.invoke('plugin-notifications-list'),
