@@ -18,6 +18,8 @@
 | `storage.set(key,value)` | `permissions.storage`；`{stored:true}` | 同上。`await api.storage.set('etag','abc')` |
 | `storage.remove(key)` | `permissions.storage`；`{removed:boolean}` | `invalid_request`, `disabled`, `not_permitted`。`await api.storage.remove('etag')` |
 | `log.info/warn/error(...values)` | 插件面板診斷記錄；`{logged:true}` | `invalid_request`, `too_large`, `disabled`。`await api.log.warn('Retrying', code)` |
+| `commands.onInvoke(fn)` | `contributes.commands`；解除訂閱函式 | callback 不是函式時立即同步拋 `invalid_request`。插件不能自行觸發指令。`const off = api.commands.onInvoke(id => api.log.info('Command', id))` |
+| `badge.set(badge|null)` | `contributes.badge`；`{set:boolean}` | `invalid_request`, `rate_limited`, `disabled`, `not_permitted`。`await api.badge.set({text:'OK',tone:'info'})`；`await api.badge.set(null)` 清除。 |
 | `ui.postMessage(data)` | `contributes.panelView`；`{delivered:boolean}` | `invalid_request`, `too_large`, `rate_limited`, `disabled`。`const result = await api.ui.postMessage({type:'refresh'})` |
 | `ui.onMessage(fn)` | `contributes.panelView`；解除訂閱函式 | 立即同步拋 `invalid_request`。`const off = api.ui.onMessage(message => api.log.info(message.type))` |
 
@@ -26,3 +28,7 @@
 `PetStatusChange` 僅含 `petId`、`name`、`agentFamily`、`previousState`、`visibleState`、`dnd`、`at`。`net.fetch` 僅允許 HTTPS 公開 DNS 網域；最多 3 次 redirect，每一跳都重新驗證網域與 DNS。插件網路請求不會送出或儲存 Cookie；需要登入時，請使用 `authorization` header 與已宣告的密鑰。Host API 成功直接回傳，不包 `{ok,value}`。
 
 `ui.postMessage` 與 `ui.onMessage` 在插件 Worker 和已開啟的面板頁之間交換 JSON 資料。每則訊息最多 256 KB；每個插件、每個方向每秒最多 20 則。面板關閉時 Worker 訊息會以 `{delivered:false}` 成功回傳且不排隊。面板頁 API 子集與瀏覽器限制見[自訂面板頁](panel-view.zh-TW.md)。
+
+指令需先在 manifest 宣告，只能由使用者在該插件的面板頁或 Tray 觸發。`commands.onInvoke` 會收到已宣告的指令 id。使用者觸發後可能得到 `invalid_request`（指令格式錯誤）、`disabled`（插件或總開關關閉）、`not_permitted`（指令未宣告）、`rate_limited`（同一指令一秒內重複觸發）或 `host_unavailable`（插件 Worker 尚未就緒）；面板會對不可用、未授權或速率限制顯示本地化狀態，其他錯誤顯示一般操作失敗。Tray 項目與寵物外觀是 manifest 貢獻，沒有額外 Host API。
+
+插件停用、移除或崩潰時會清除徽章。格式錯誤的徽章（包括文字超過 6 個 Unicode 字元）會以 `invalid_request` 失敗且不消耗速率；有效更新每秒超過一次則以 `rate_limited` 失敗。寵物可見時，狀態列最多顯示 2 個插件徽章，其餘合併為 `+N`。

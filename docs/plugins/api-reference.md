@@ -18,6 +18,8 @@ Successful calls return the values listed below directly. A failure rejects an `
 | `storage.set(key,value)` | `permissions.storage`; `{stored:true}` | Same as `storage.get`. `await api.storage.set('etag','abc')` |
 | `storage.remove(key)` | `permissions.storage`; `{removed:boolean}` | `invalid_request`, `disabled`, `not_permitted`. `await api.storage.remove('etag')` |
 | `log.info/warn/error(...values)` | Plugin-panel diagnostic; `{logged:true}` | `invalid_request`, `too_large`, `disabled`. `await api.log.warn('Retrying', code)` |
+| `commands.onInvoke(fn)` | `contributes.commands`; unsubscribe function | Throws `invalid_request` immediately for a non-function callback. Plugins cannot trigger commands. `const off = api.commands.onInvoke(id => api.log.info('Command', id))` |
+| `badge.set(badge|null)` | `contributes.badge`; `{set:boolean}` | `invalid_request`, `rate_limited`, `disabled`, `not_permitted`. `await api.badge.set({text:'OK',tone:'info'})`; `await api.badge.set(null)` clears it. |
 | `ui.postMessage(data)` | `contributes.panelView`; `{delivered:boolean}` | `invalid_request`, `too_large`, `rate_limited`, `disabled`. `const result = await api.ui.postMessage({type:'refresh'})` |
 | `ui.onMessage(fn)` | `contributes.panelView`; unsubscribe function | Throws `invalid_request` immediately. `const off = api.ui.onMessage(message => api.log.info(message.type))` |
 
@@ -26,3 +28,7 @@ Successful calls return the values listed below directly. A failure rejects an `
 `PetStatusChange` contains only `petId`, `name`, `agentFamily`, `previousState`, `visibleState`, `dnd`, and `at`. `net.fetch` requires HTTPS and public DNS; each of up to three redirects rechecks the hostname and DNS. Plugin network requests do not send or store cookies. Use an `authorization` header with a declared secret when an API requires authentication. Host API successes are direct values, not `{ok,value}` wrappers.
 
 `ui.postMessage` and `ui.onMessage` exchange JSON values between a plugin Worker and its open panel page. Each message is limited to 256 KB and 20 per second per plugin and direction. A Worker message sent while the panel is closed resolves to `{delivered:false}` without being queued. The panel page API subset and browser restrictions are listed in [Panel views](panel-view.md).
+
+Commands are declared in the manifest and can only be triggered by a user from that plugin's panel or the Tray. `commands.onInvoke` receives the declared command id. A user-triggered command request can fail with `invalid_request` (malformed command), `disabled` (plugin or global switch is off), `not_permitted` (the command is not declared), `rate_limited` (the same command was triggered within one second), or `host_unavailable` (the plugin Worker is not ready). The panel shows a localized status for unavailable, unpermitted, or rate-limited commands; other failures show a generic action error. Tray entries and pet skins are manifest contributions and have no extra Host API.
+
+Badges are cleared when a plugin is disabled, removed, or crashes. A malformed badge (including text over six Unicode code points) fails with `invalid_request` without consuming the rate limit; a valid update more frequent than once per second fails with `rate_limited`. The app shows up to two plugin badges beside a visible pet's status line and combines the remaining count as `+N`.

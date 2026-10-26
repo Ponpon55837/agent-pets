@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
 import * as path from 'node:path'
 import test from 'node:test'
+import { zipSync } from 'fflate'
 import { parsePluginManifest } from '../electron/plugin-manifest.ts'
+import { PluginRegistry } from '../electron/plugin-registry.ts'
 
 const docsDirectory = path.resolve('docs/plugins')
 
@@ -15,6 +18,95 @@ test('every public plugin example manifest passes the runtime validator', () => 
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown
     const parsed = parsePluginManifest(manifest)
     assert.equal(parsed.ok, true, `${example.name}: ${parsed.ok ? '' : parsed.error}`)
+  }
+})
+
+test('P16 public examples cover the documented timer APIs and skin-only package', () => {
+  const examples = path.join(docsDirectory, 'examples')
+  const pomodoro = fs.readFileSync(path.join(examples, 'pomodoro/dist/main.js'), 'utf8')
+  const pomodoroManifest = JSON.parse(fs.readFileSync(path.join(examples, 'pomodoro/plugin.json'), 'utf8')) as Record<string, unknown>
+  const skinManifest = JSON.parse(fs.readFileSync(path.join(examples, 'skin-pack/plugin.json'), 'utf8')) as Record<string, unknown>
+  assert.equal(parsePluginManifest(pomodoroManifest).ok, true)
+  assert.equal(parsePluginManifest(skinManifest).ok, true)
+  assert.match(pomodoro, /api\.pet\.status/)
+  assert.match(pomodoro, /api\.pet\.onStatusChange/)
+  assert.match(pomodoro, /api\.schedule\.every/)
+  assert.match(pomodoro, /api\.feed\.notify/)
+  assert.match(pomodoro, /api\.badge\.set/)
+  assert.doesNotMatch(pomodoro, /api\.(?:net|secrets|storage|settings|commands|ui)\./)
+  assert.equal('entry' in skinManifest, false)
+  const spritesheet = fs.readFileSync(path.join(examples, 'skin-pack/skins/snow-fox.webp'))
+  assert.equal(spritesheet.subarray(0, 4).toString('ascii'), 'RIFF')
+  assert.equal(spritesheet.subarray(8, 12).toString('ascii'), 'WEBP')
+})
+
+test('skin-pack example is accepted and installed by PluginRegistry', () => {
+  const exampleDirectory = path.join(docsDirectory, 'examples/skin-pack')
+  const files: Record<string, Uint8Array> = {}
+  function collect(directory: string, relativeDirectory = ''): void {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const relativePath = path.posix.join(relativeDirectory, entry.name)
+      const absolutePath = path.join(directory, entry.name)
+      if (entry.isDirectory()) collect(absolutePath, relativePath)
+      else if (entry.isFile()) files[relativePath] = new Uint8Array(fs.readFileSync(absolutePath))
+    }
+  }
+  collect(exampleDirectory)
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-doc-skin-pack-'))
+  try {
+    const registry = new PluginRegistry(userData)
+    const planned = registry.planInstall(zipSync(files, { level: 6 }))
+    assert.equal(planned.ok, true, planned.ok ? '' : planned.error)
+    if (!planned.ok) return
+    assert.equal(planned.value.pluginId, 'skin-pack')
+    assert.equal(registry.install(planned.value.token).ok, true)
+  } finally {
+    fs.rmSync(userData, { recursive: true, force: true })
+  }
+})
+
+test('P16 API and contribution docs describe command, Tray, badge, and skin behavior in both locales', () => {
+  for (const suffix of ['', '.zh-TW']) {
+    const api = fs.readFileSync(path.join(docsDirectory, `api-reference${suffix}.md`), 'utf8')
+    const contribution = fs.readFileSync(path.join(docsDirectory, `contribution-points${suffix}.md`), 'utf8')
+    const limits = fs.readFileSync(path.join(docsDirectory, `limits${suffix}.md`), 'utf8')
+    const examples = fs.readFileSync(path.join(docsDirectory, `examples${suffix}.md`), 'utf8')
+    assert.match(api, /commands\.onInvoke/)
+    assert.match(api, /badge\.set/)
+    assert.match(api, /invalid_request.*rate_limited.*disabled.*not_permitted|invalid_request.*not_permitted.*rate_limited.*disabled/)
+    for (const term of ['`commands`', '`tray`', '`badge`', '`skins`']) assert.ok(contribution.includes(term), `${suffix} missing ${term}`)
+    for (const term of ['10', '30', '6', '25 MB', '20 MB']) assert.ok(limits.includes(term), `${suffix} missing ${term}`)
+    assert.match(examples, /pomodoro/)
+    assert.match(examples, /skin-pack/)
+  }
+})
+
+test('plugin documentation has bilingual page pairs and all local Markdown links resolve', () => {
+  const markdownFiles: string[] = []
+  function collectMarkdown(directory: string): void {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name)
+      if (entry.isDirectory()) collectMarkdown(target)
+      else if (entry.isFile() && entry.name.endsWith('.md')) markdownFiles.push(target)
+    }
+  }
+  collectMarkdown(docsDirectory)
+
+  for (const file of markdownFiles.filter(file => !file.endsWith('.zh-TW.md'))) {
+    const localized = file.replace(/\.md$/, '.zh-TW.md')
+    assert.equal(fs.existsSync(localized), true, `${path.relative(docsDirectory, file)} needs a Traditional Chinese page`)
+  }
+
+  const readmeFiles = [path.resolve('README.md'), path.resolve('README.zh-TW.md')]
+  for (const file of [...markdownFiles, ...readmeFiles]) {
+    const source = fs.readFileSync(file, 'utf8').replace(/```[\s\S]*?```/g, '')
+    for (const match of source.matchAll(/!?\[[^\]]+\]\(([^)]+)\)/g)) {
+      const rawTarget = match[1]?.trim().replace(/^<|>$/g, '').split(/\s+/, 1)[0]
+      if (!rawTarget || /^(?:https?:|mailto:|tel:|data:)/i.test(rawTarget) || rawTarget.startsWith('#')) continue
+      const relativeTarget = decodeURIComponent(rawTarget.split('#', 1)[0] ?? '')
+      const target = path.resolve(path.dirname(file), relativeTarget)
+      assert.equal(fs.existsSync(target), true, `${path.relative(process.cwd(), file)} links to missing ${rawTarget}`)
+    }
   }
 })
 

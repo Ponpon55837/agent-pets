@@ -21,5 +21,8 @@ Additional fixed limits:
 - Network: request body at most 256 KB; response bytes and timeout use the panel limits; at most three redirects, each revalidated before a new request. Plugin requests do not send or store cookies. Requests per plugin per minute follow the panel limit.
 - Runtime: heartbeat every 10 seconds, failure after 30 seconds without a pong, and disable plus notification after three consecutive crashes. Plugin Host process memory is monitored against the combined enabled-plugin budgets; **exact per-Worker memory isolation is not available**.
 - Runtime host requests: at most three per plugin per 10 minutes; denial cools down that host for 24 hours.
+- Commands: at most 10 per plugin; each id is 1–32 characters and each localized title is at most 32 characters. A given command may be invoked at most once per second. Tray contributes at most five command ids per plugin, with at most 30 plugin command items across the Tray; labels are truncated to 32 characters.
+- Badges: text is at most six Unicode code points; each plugin may update once per second. At most two plugin badges appear per pet; additional badges are represented by `+N`.
+- Skins: at most five per plugin. A package containing skins is at most 25 MB total and each spritesheet is at most 20 MB; the existing 5 MB package limit applies when there are no skins.
 
 Full queues return `queue_full`, network rate overages return `rate_limited`, and response-size overages return `too_large`. See the [API reference](api-reference.md) for error codes.

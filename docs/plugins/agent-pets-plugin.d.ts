@@ -97,7 +97,12 @@ export interface AgentPetsPluginApi {
     notify(item: PluginFeedInput): Promise<PluginFeedResult>
   }
   badge: {
-    /** Set or clear the status badge shown beside this plugin's target pet. Requires contributes.badge. */
+    /**
+     * Set or clear the status badge beside this plugin's target pet. Requires contributes.badge.
+     * Text is limited to six Unicode code points; updates are limited to once per second.
+     * Rejects: invalid_request, rate_limited, disabled, not_permitted.
+     * Example: `await api.badge.set({ text: 'OK', tone: 'info' }); await api.badge.set(null)`
+     */
     set(badge: { text: string; tone?: 'neutral' | 'info' | 'warning' } | null): Promise<{ set: boolean }>
   }
   pet: {
@@ -200,7 +205,11 @@ export interface AgentPetsPluginApi {
     error(...values: unknown[]): Promise<{ logged: true }>
   }
   commands: {
-    /** Subscribe to commands triggered by the user from this plugin panel or Tray. Plugins cannot invoke commands themselves. */
+    /**
+     * Subscribe to declared commands triggered by the user from this plugin panel or Tray.
+     * Throws invalid_request for an invalid callback. Plugins cannot invoke commands themselves.
+     * Example: `const off = api.commands.onInvoke(id => api.log.info('Command', id))`
+     */
     onInvoke(callback: (commandId: string) => void): () => void
   }
   ui: {

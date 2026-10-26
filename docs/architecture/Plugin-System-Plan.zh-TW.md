@@ -1,6 +1,6 @@
 # Agent Pets 插件系統規劃（Plugin System v1）
 
-> 狀態：規劃定案，實作範圍為 Phase 12–16（交接：`docs/handoff/plugin-host-codex-handoff.zh-TW.md`）。基準版本 `1.2.4`。
+> 狀態：已實作（Phase 12–16；交接：`docs/handoff/plugin-host-codex-handoff.zh-TW.md`）。目前版本 `1.2.4`，未修改。
 > 範圍：把寵物做成 **插件宿主（Plugin Host）**，讓第三方以「安裝插件」的方式，把資訊與行為插入寵物的各個介面（狀態泡泡、反應、狀態列、設定頁、Tray…），同時不破壞既有的 Permission／XP／History 安全邊界。
 >
 > **本專案只做宿主端，不開發任何插件。** 我們負責：插入點、Host API、安裝／權限／沙箱、泡泡仲裁，以及公開給第三方的對接規格。插件本身（例如下面的推文提醒）由其他人開發。
@@ -364,6 +364,14 @@ tibo-watch-1.0.0.agentpet-plugin   (zip)
 
 ### Phase 16 — 更多插入點（納入本次範圍）
 - `badge`、`tray`、`commands`、`skins`。`skins` 與既有寵物匯入共用驗證邏輯，既有匯入功能保留；只有 `skins` 的插件可以沒有 `entry`。
+
+### Phase 12–16 實作差異
+
+- 本機安裝、更新、降版與開發者資料夾載入已實作；線上目錄、作者簽章與自動更新仍留在 Phase 17。
+- `eventSource` 尚未開放；插件仍只能透過受控 Host API 使用已核准的網路 host。
+- 插件 Worker 記憶體以啟用插件總預算監控，沒有精確的單一 Worker 記憶體隔離。
+- 插件外觀與既有寵物選擇共用外觀顯示與驗證，但舊有 zip／單張圖匯入功能保留。
+- 公開範例只供開發者參考，不會隨 App 打包；本次沒有開發或隨附第三方插件。
 
 ### Phase 17 — 散佈（之後再評估）
 - 插件目錄（registry JSON）、作者簽章（ed25519）、自動更新檢查、評分／回報機制。

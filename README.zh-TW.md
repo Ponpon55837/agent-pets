@@ -242,7 +242,9 @@ Setup Wizard 會讀取 runtime Agent Adapter registry，並在你點擊按鈕時
 
 ## 插件
 
-插件網路請求不會送出或儲存 Cookie。需要登入 API 時，請在插件 manifest 宣告密鑰，並透過 `authorization` header 傳送。密鑰會使用系統鑰匙圈加密；第一次儲存前 Agent Pets 會顯示一次性說明，macOS 可能會詢問是否允許 Agent Pets 存取鑰匙圈。
+插件可提供寵物通知、反應、面板與 Tray 指令、狀態徽章、可選的沙箱面板頁，以及可套用的寵物外觀。在 **Settings → Advanced → Plugins** 安裝 `.agentpet-plugin` 套件；開發者可開啟 Developer mode 載入本機資料夾。安裝前請檢查插件要求的權限與貢獻。插件頁面與背景程式都視為不受信任：沒有 Node.js、檔案系統或 shell 存取，網路請求只能送到核准的 HTTPS 網域。插件網路請求不會送出或儲存 Cookie。密鑰由 App 的受保護儲存加密，設定快照不會回傳密鑰值。此版本沒有線上插件目錄或發布者簽章驗證。
+
+請參閱[插件開發索引](docs/plugins/README.zh-TW.md)、[10 分鐘入門](docs/plugins/getting-started.zh-TW.md)、[安全模型](docs/plugins/security.zh-TW.md)、[API 參考](docs/plugins/api-reference.zh-TW.md)與[範例](docs/plugins/examples.zh-TW.md)。
 
 ---
 

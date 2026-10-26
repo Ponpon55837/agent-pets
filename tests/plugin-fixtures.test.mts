@@ -7,14 +7,14 @@ import { fileURLToPath } from 'node:url'
 import { strToU8, zipSync } from 'fflate'
 import { PluginBroker } from '../electron/plugin-broker.ts'
 import { PluginFeedController, type PluginFeedPluginState } from '../electron/plugin-feed.ts'
-import { PLUGIN_ARCHIVE_MAX_FILES, PluginRegistry } from '../electron/plugin-registry.ts'
+import { PLUGIN_ARCHIVE_MAX_FILES, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES, PluginRegistry } from '../electron/plugin-registry.ts'
 import { PLUGIN_CONTENT_SECURITY_POLICY } from '../electron/plugin-protocol.ts'
 import { parsePluginManifest } from '../electron/plugin-manifest.ts'
 import { pluginHostAssets } from '../electron/plugin-host-assets.ts'
 import type { PluginManifest } from '../src/types/plugin.ts'
 
 const fixtureRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'plugins')
-const FIXTURE_IDS = ['ok-notify', 'ok-panel', 'ok-skin', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel'] as const
+const FIXTURE_IDS = ['ok-notify', 'ok-panel', 'ok-skin', 'ok-commands', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel', 'evil-badge', 'evil-skin'] as const
 
 function readFixture(pluginId: string): { manifest: PluginManifest; files: Record<string, Uint8Array> } {
   const sourceDirectory = path.join(fixtureRoot, pluginId)
@@ -89,8 +89,48 @@ test('ok-skin is a skin-only fixture with a valid WebP spritesheet and no worker
   assert.equal(files['dist/main.js'], undefined)
 })
 
+test('ok-commands declares user-triggered commands, Tray entries, and a badge', () => {
+  const { manifest, files } = readFixture('ok-commands')
+  assert.deepEqual(manifest.contributes.commands?.map(command => command.id), ['start', 'stop'])
+  assert.deepEqual(manifest.contributes.tray?.commands, ['start', 'stop'])
+  assert.equal(manifest.contributes.badge, true)
+  const source = Buffer.from(files['dist/main.js']!).toString('utf8')
+  assert.match(source, /api\.commands\.onInvoke/)
+  assert.match(source, /api\.badge\.set/)
+  assert.match(source, /api\.feed\.notify/)
+})
+
+test('evil-badge probes overlong text and attempts updates every 10 milliseconds', () => {
+  const { manifest, files } = readFixture('evil-badge')
+  assert.equal(manifest.contributes.badge, true)
+  const source = Buffer.from(files['dist/main.js']!).toString('utf8')
+  assert.match(source, /text:\s*'TOO-LONG'/)
+  assert.match(source, /setInterval\(probe,\s*10\)/)
+  assert.match(source, /api\.log\.info/)
+})
+
+test('evil-skin uses a forged WebP and an oversized sheet is rejected during planning', () => {
+  const { manifest, files } = readFixture('evil-skin')
+  assert.equal(manifest.entry, undefined)
+  assert.equal(manifest.contributes.skins?.[0]?.spritesheet, 'skins/not-an-image.webp')
+  assert.notEqual(Buffer.from(files['skins/not-an-image.webp']!.subarray(8, 12)).toString('ascii'), 'WEBP')
+
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-evil-skin-'))
+  try {
+    const registry = new PluginRegistry(userData)
+    assert.deepEqual(registry.planInstall(packFixture('evil-skin')), { ok: false, error: 'invalid_manifest' })
+    const oversized = new Uint8Array(PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES + 1)
+    assert.deepEqual(registry.planInstall(packFixture('evil-skin', { 'skins/not-an-image.webp': oversized })), {
+      ok: false,
+      error: 'invalid_archive',
+    })
+  } finally {
+    fs.rmSync(userData, { recursive: true, force: true })
+  }
+})
+
 test('every evil fixture records a host log entry for its runtime probe', () => {
-  for (const pluginId of ['evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel']) {
+  for (const pluginId of ['evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel', 'evil-badge']) {
     const source = Buffer.from(readFixture(pluginId).files['dist/main.js']!).toString('utf8')
     assert.match(source, /api\.log\.info/, `${pluginId} must leave inspectable evidence`)
   }
@@ -147,11 +187,15 @@ test('all source fixtures can be packed and installed by PluginRegistry', () => 
     const registry = new PluginRegistry(userData)
     for (const pluginId of FIXTURE_IDS) {
       const planned = registry.planInstall(packFixture(pluginId))
+      if (pluginId === 'evil-skin') {
+        assert.deepEqual(planned, { ok: false, error: 'invalid_manifest' }, 'forged skin must not install')
+        continue
+      }
       assert.equal(planned.ok, true, `${pluginId} should produce a valid base install plan`)
       if (!planned.ok) continue
       assert.equal(registry.install(planned.value.token).ok, true, `${pluginId} base fixture should install`)
     }
-    assert.equal(registry.list().length, FIXTURE_IDS.length)
+    assert.equal(registry.list().length, FIXTURE_IDS.length - 1)
   } finally {
     fs.rmSync(userData, { recursive: true, force: true })
   }

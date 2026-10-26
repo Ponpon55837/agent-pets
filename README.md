@@ -241,7 +241,9 @@ For a configured adapter, click **Test** to send a short-lived event through the
 
 ## Plugins
 
-Plugin network requests do not send or store cookies. For authenticated APIs, declare the required secret in the plugin manifest and send it with an `authorization` header. Secret values are encrypted with the system keychain. Before the first secret is saved, Agent Pets shows a one-time notice; macOS may ask whether Agent Pets can access the keychain.
+Plugins can add pet feed notifications, reactions, panel and Tray commands, status badges, optional sandboxed panel pages, and selectable pet skins. Install a `.agentpet-plugin` package from **Settings → Advanced → Plugins**; developers can enable Developer mode to load a local folder. Review the requested permissions and contributions before installing. Plugin pages and background code are treated as untrusted: they have no Node.js, filesystem, or shell access, and network requests are limited to approved HTTPS hosts. Plugin network requests do not send or store cookies. Secrets are encrypted by the app's protected storage and never returned in settings snapshots. This version has no online plugin directory or publisher signature verification.
+
+See the [plugin development index](docs/plugins/README.md) for the [10-minute guide](docs/plugins/getting-started.md), [security model](docs/plugins/security.md), [API reference](docs/plugins/api-reference.md), and [examples](docs/plugins/examples.md).
 
 ---
 
