@@ -12,6 +12,7 @@
       { "id": "start", "title": { "zh-TW": "開始測試", "en-US": "Start test" } },
       { "id": "stop", "title": { "zh-TW": "停止測試", "en-US": "Stop test" } }
     ],
+    "badge": true,
     "tray": { "commands": ["start", "stop"] }
   }
 }

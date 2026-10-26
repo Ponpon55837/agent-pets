@@ -30,6 +30,7 @@ function createHarness(options: {
   onSecretGet?: (pluginId: string, key: string) => string | { ok: false; error: 'secret_unavailable' | 'secret_not_found' }
   onSettingsGet?: (pluginId: string) => Record<string, unknown> | { ok: false; error: 'settings_invalid' }
   onAgentStatusGet?: (pluginId: string) => unknown
+  onBadgeSet?: (pluginId: string, badge: unknown) => unknown
 } = {}) {
   const userDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-broker-'))
   fs.mkdirSync(path.join(userDataDirectory, 'plugins', 'sample'), { recursive: true })
@@ -64,6 +65,7 @@ function createHarness(options: {
     onSecretGet: options.onSecretGet,
     onSettingsGet: options.onSettingsGet,
     onAgentStatusGet: options.onAgentStatusGet,
+    onBadgeSet: options.onBadgeSet,
     now: () => now,
   })
   return {
@@ -114,6 +116,25 @@ test('PluginBroker rejects self-asserted plugin identity and ungranted APIs', ()
     assert.deepEqual(harness.broker.handle('sample', request('store', 'storage.set', ['key', 'value'])), {
       id: 'store', ok: false, error: 'not_permitted',
     })
+    assert.deepEqual(harness.broker.handle('sample', request('badge', 'badge.set', [{ text: 'READY' }])), {
+      id: 'badge', ok: false, error: 'not_permitted',
+    })
+  } finally {
+    harness.cleanup()
+  }
+})
+
+test('PluginBroker requires contributes.badge and unwraps badge.set success values', () => {
+  const calls: unknown[] = []
+  const harness = createHarness({
+    pluginManifest: manifest({ contributes: { badge: true } }),
+    onBadgeSet: (pluginId, badge) => { calls.push({ pluginId, badge }); return { set: true } },
+  })
+  try {
+    assert.deepEqual(harness.broker.handle('sample', request('badge-1', 'badge.set', [{ text: 'BUILD', tone: 'info' }])), {
+      id: 'badge-1', ok: true, value: { set: true },
+    })
+    assert.deepEqual(calls, [{ pluginId: 'sample', badge: { text: 'BUILD', tone: 'info' } }])
   } finally {
     harness.cleanup()
   }

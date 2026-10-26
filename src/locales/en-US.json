@@ -378,6 +378,8 @@
   "pluginDiagnosticsHelp": "Recent plain-text logs, rejected calls, and host errors.",
   "pluginTray": "Plugins",
   "pluginTrayOverflowDiagnostic": "The plugin Tray menu exceeded its 30-item limit; some commands are hidden.",
+  "pluginBadgeTooltip": "{plugin}: {text}",
+  "pluginBadgeOverflow": "{count} more plugin badges",
   "pluginRecentLogs": "Recent logs",
   "pluginNoLogs": "No logs yet.",
   "pluginRejectedCalls": "Rejected calls",

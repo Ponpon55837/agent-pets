@@ -52,6 +52,7 @@ export interface PluginBrokerOptions {
   onSecretGet?: (pluginId: string, key: string) => string | { ok: false; error: PluginErrorCode }
   onSettingsGet?: (pluginId: string) => Record<string, unknown> | { ok: false; error: PluginErrorCode }
   onAgentStatusGet?: (pluginId: string) => unknown | { ok: false; error: PluginErrorCode }
+  onBadgeSet?: (pluginId: string, badge: unknown) => unknown | { ok: false; error: PluginErrorCode }
 }
 
 type RpcResponse = { id: string; ok: true; value: unknown } | { id: string; ok: false; error: PluginErrorCode }
@@ -66,7 +67,7 @@ interface PluginStorageState {
 const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 const STORAGE_KEY_FORBIDDEN = new Set(['__proto__', 'prototype', 'constructor'])
 const KNOWN_METHODS = new Set([
-  'feed.notify', 'pet.react', 'pet.status', 'storage.get', 'storage.set', 'storage.remove',
+  'feed.notify', 'pet.react', 'pet.status', 'badge.set', 'storage.get', 'storage.set', 'storage.remove',
   'log.info', 'log.warn', 'log.error', 'net.fetch', 'net.requestHost', 'secrets.get', 'settings.get',
 ])
 
@@ -140,6 +141,7 @@ export class PluginBroker {
   private readonly onSecretGet: PluginBrokerOptions['onSecretGet']
   private readonly onSettingsGet: PluginBrokerOptions['onSettingsGet']
   private readonly onAgentStatusGet: PluginBrokerOptions['onAgentStatusGet']
+  private readonly onBadgeSet: PluginBrokerOptions['onBadgeSet']
   private readonly now: () => number
   private readonly storage = new Map<string, PluginStorageState>()
   private readonly storageTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -157,6 +159,7 @@ export class PluginBroker {
     this.onSecretGet = options.onSecretGet
     this.onSettingsGet = options.onSettingsGet
     this.onAgentStatusGet = options.onAgentStatusGet
+    this.onBadgeSet = options.onBadgeSet
     this.now = options.now ?? Date.now
   }
 
@@ -297,6 +300,11 @@ export class PluginBroker {
       if (!context.manifest.permissions.agentStatus) return { ok: false, error: 'not_permitted' }
       if (args.length !== 0) return { ok: false, error: 'invalid_request' }
       return this.onAgentStatusGet?.(pluginId) ?? { ok: false, error: 'agent_status_unavailable' }
+    }
+    if (method === 'badge.set') {
+      if (!context.manifest.contributes.badge) return { ok: false, error: 'not_permitted' }
+      if (args.length !== 1) return { ok: false, error: 'invalid_request' }
+      return this.onBadgeSet?.(pluginId, args[0]) ?? { ok: false, error: 'disabled' }
     }
     if (method === 'net.fetch') {
       if (!context.manifest.permissions.network) return { ok: false, error: 'not_permitted' }

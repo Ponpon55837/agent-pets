@@ -15,6 +15,7 @@ import type {
 } from '@/types/agent-adapter'
 import type { PresentationIntent, PresentationStatusUpdate } from '@/types/presentation'
 import type {
+  PluginBadgeView,
   PluginBrokerDiagnostic,
   PluginBrokerLogEntry,
   PluginFeedItem,
@@ -50,6 +51,8 @@ declare global {
       onPluginFeedItem: (callback: (item: PluginFeedItem) => void) => () => void
       onPluginFeedUnreadCount: (callback: (count: number) => void) => () => void
       getPluginFeedUnreadCount: () => Promise<number>
+      getPluginBadges: () => Promise<PluginBadgeView[]>
+      onPluginBadgesChanged: (callback: (badges: PluginBadgeView[]) => void) => () => void
       completePluginFeed: (itemId: string) => Promise<boolean>
       openPluginFeedLink: (itemId: string) => Promise<boolean>
       getPluginPanelSnapshot: () => Promise<PluginPanelResult<PluginPanelSnapshot>>

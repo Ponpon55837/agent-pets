@@ -4,6 +4,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { STATE_LABELS_SHORT, STATE_COLORS } from '@/types/agent'
 import { locale, t, type TranslationKey } from '@/i18n'
 import type { AchievementUnlock } from '@/types/achievement'
+import type { PluginBadgeView } from '@/types/plugin'
 import {
   canRunAutonomousBehavior,
   ShimejiScheduler,
@@ -13,6 +14,7 @@ import {
 } from '@/types/pet'
 import { quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
 import { selectBubble } from '@/utils/feed-arbiter'
+import { summarizePluginBadgesForPet } from '@/utils/plugin-badges'
 import PetAnimation from '@/components/PetAnimation.vue'
 
 const store = useAgentStore()
@@ -22,6 +24,10 @@ let mouseDownTime = 0
 const petAnimRef = ref<InstanceType<typeof PetAnimation> | null>(null)
 const multiPetRefs = ref<InstanceType<typeof PetAnimation>[]>([])
 const multiPetItemElements = ref<HTMLElement[]>([])
+const pluginBadges = ref<PluginBadgeView[]>([])
+const petDocumentVisible = ref(true)
+let cleanupPluginBadgeListener: (() => void) | null = null
+let pluginBadgeRevision = 0
 
 // --- Shimeji 行為排程 -------------------------------------------------------
 
@@ -233,6 +239,21 @@ const pluginFeedTargetPetId = computed(() => {
   return isMultiPet.value ? store.familyLines[0]?.petId ?? store.activePetId : store.activePetId
 })
 
+const pluginBadgesVisible = computed(() => petDocumentVisible.value && store.petWindowMode.mode === 'normal')
+
+function pluginBadgeSummary(petId: string) {
+  if (!pluginBadgesVisible.value) return { badges: [], hiddenCount: 0 }
+  return summarizePluginBadgesForPet(pluginBadges.value, petId, pluginFeedTargetPetId.value)
+}
+
+function pluginBadgeTooltip(badge: PluginBadgeView): string {
+  return t('pluginBadgeTooltip', { plugin: badge.pluginName[locale.value], text: badge.text })
+}
+
+function onPetDocumentVisibilityChange(): void {
+  petDocumentVisible.value = document.visibilityState === 'visible'
+}
+
 const pluginFeedTargetStyle = computed<Record<string, string>>(() => {
   if (!isMultiPet.value || !store.pluginFeedItem) return {} as Record<string, string>
   const clickArea = clickAreaRef.value
@@ -378,6 +399,19 @@ let contentObserver: ResizeObserver | null = null
 onMounted(() => {
   store.loadPets()
   void initializeShimejiEnvironment()
+  petDocumentVisible.value = document.visibilityState === 'visible'
+  document.addEventListener('visibilitychange', onPetDocumentVisibilityChange)
+  cleanupPluginBadgeListener = window.electronAPI?.onPluginBadgesChanged?.((badges) => {
+    pluginBadgeRevision += 1
+    pluginBadges.value = badges
+  }) ?? null
+  const getPluginBadges = window.electronAPI?.getPluginBadges
+  if (getPluginBadges) {
+    const revision = pluginBadgeRevision
+    void getPluginBadges().then((badges) => {
+      if (pluginBadgeRevision === revision) pluginBadges.value = badges
+    }).catch(() => {})
+  }
 
   if (!clickAreaRef.value || !window.electronAPI?.reportContentHeight) return
   contentObserver = new ResizeObserver(([entry]) => {
@@ -389,6 +423,9 @@ onMounted(() => {
 onBeforeUnmount(() => {
   contentObserver?.disconnect()
   contentObserver = null
+  cleanupPluginBadgeListener?.()
+  cleanupPluginBadgeListener = null
+  document.removeEventListener('visibilitychange', onPetDocumentVisibilityChange)
   disposeShimejiEnvironment()
 })
 
@@ -774,6 +811,19 @@ watch(() => store.achievementUnlock, (unlock) => {
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
                 <span class="line-sep">·</span>{{ STATE_LABELS_SHORT[line.state] }}
               </span>
+              <span v-if="pluginBadgesVisible" class="plugin-status-badges">
+                <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
+                  <span class="plugin-badge-anchor" tabindex="0" :aria-label="pluginBadgeTooltip(badge)">
+                    <span class="plugin-badge-pill" :class="`tone-${badge.tone}`">{{ badge.text }}</span>
+                    <span class="plugin-badge-tooltip" role="tooltip">{{ pluginBadgeTooltip(badge) }}</span>
+                  </span>
+                </template>
+                <span
+                  v-if="pluginBadgeSummary(line.petId).hiddenCount > 0"
+                  class="plugin-badge-pill plugin-badge-overflow"
+                  :aria-label="t('pluginBadgeOverflow', { count: pluginBadgeSummary(line.petId).hiddenCount })"
+                >+{{ pluginBadgeSummary(line.petId).hiddenCount }}</span>
+              </span>
               <span v-if="store.quotaByFamily[line.key]" class="quota-readout">
                 {{ quotaPercent(line.key) }}%
               </span>
@@ -837,6 +887,19 @@ watch(() => store.achievementUnlock, (unlock) => {
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
                 <span class="line-sep">·</span>
               </template>{{ STATE_LABELS_SHORT[line.state] }}
+            </span>
+            <span v-if="pluginBadgesVisible" class="plugin-status-badges">
+              <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
+                <span class="plugin-badge-anchor" tabindex="0" :aria-label="pluginBadgeTooltip(badge)">
+                  <span class="plugin-badge-pill" :class="`tone-${badge.tone}`">{{ badge.text }}</span>
+                  <span class="plugin-badge-tooltip" role="tooltip">{{ pluginBadgeTooltip(badge) }}</span>
+                </span>
+              </template>
+              <span
+                v-if="pluginBadgeSummary(line.petId).hiddenCount > 0"
+                class="plugin-badge-pill plugin-badge-overflow"
+                :aria-label="t('pluginBadgeOverflow', { count: pluginBadgeSummary(line.petId).hiddenCount })"
+              >+{{ pluginBadgeSummary(line.petId).hiddenCount }}</span>
             </span>
             <span v-if="store.quotaByFamily[line.key]" class="quota-readout">
               {{ quotaPercent(line.key) }}%

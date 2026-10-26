@@ -8,6 +8,7 @@ import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 import type { PetBehaviorManifest } from '../src/types/pet'
 import type { PresentationIntent, PresentationStatusUpdate } from '../src/types/presentation'
 import type {
+  PluginBadgeView,
   PluginBrokerDiagnostic,
   PluginBrokerLogEntry,
   PluginFeedItem,
@@ -65,6 +66,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
   getPluginFeedUnreadCount: (): Promise<number> => ipcRenderer.invoke('plugin-feed-unread-count'),
+  getPluginBadges: (): Promise<PluginBadgeView[]> => ipcRenderer.invoke('plugin-badges-get'),
+  onPluginBadgesChanged: (callback: (badges: PluginBadgeView[]) => void) => {
+    const handler = (_event: unknown, badges: PluginBadgeView[]) => callback(badges)
+    ipcRenderer.on('plugin-badges-updated', handler)
+    return () => ipcRenderer.removeListener('plugin-badges-updated', handler)
+  },
   completePluginFeed: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-complete', itemId),
   openPluginFeedLink: (itemId: string): Promise<boolean> => ipcRenderer.invoke('plugin-feed-open-link', itemId),
   getPluginPanelSnapshot: (): Promise<PluginPanelResult<PluginPanelSnapshot>> => ipcRenderer.invoke('plugin-panel-snapshot'),

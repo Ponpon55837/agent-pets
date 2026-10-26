@@ -147,6 +147,7 @@ function clearSchedules() {
 }
 const api = Object.freeze({
   feed: Object.freeze({ notify: (item) => rpc('feed.notify', [item]) }),
+  badge: Object.freeze({ set: (badge) => rpc('badge.set', [badge]) }),
   pet: Object.freeze({
     react: (reaction, options) => rpc('pet.react', options === undefined ? [reaction] : [reaction, options]),
     status: () => rpc('pet.status', []),

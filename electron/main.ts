@@ -52,6 +52,7 @@ import { PluginHostWindowController, type PluginHostDescriptor } from './plugin-
 import { canEnablePluginWithinLimit, selectEnabledPluginDescriptors } from './plugin-host-selection'
 import { PluginBroker, type PluginBrokerContext, type PluginReactionRequest } from './plugin-broker.ts'
 import { PluginCommandController } from './plugin-commands.ts'
+import { PluginBadgeController } from './plugin-badges.ts'
 import { PluginFeedController } from './plugin-feed.ts'
 import { filterPluginRequestHeaders, PluginNetworkClient, stripPluginSetCookieHeaders } from './plugin-net.ts'
 import { isPublicPluginNetworkHost } from './plugin-net.ts'
@@ -177,6 +178,7 @@ let programmaticPluginPanelSize: { width: number; height: number } | null = null
 let pluginPanelResizeResetTimer: ReturnType<typeof setTimeout> | null = null
 let pluginBroker: PluginBroker | null = null
 let pluginCommandController: PluginCommandController | null = null
+let pluginBadgeController: PluginBadgeController | null = null
 const diagnosedPluginTrayOverflowIds = new Set<string>()
 let pluginNetworkClient: PluginNetworkClient | null = null
 let pluginHostGrantController: PluginHostGrantController | null = null
@@ -743,6 +745,7 @@ function syncDeveloperWatchers(): void {
 
 function syncPluginHost(): void {
   refreshPluginRuntimeContexts()
+  pluginBadgeController?.syncEnabledPlugins()
   syncDeveloperWatchers()
   pluginPanelViewController?.closeIfNotAllowed(pluginId => {
     const context = pluginRuntimeContexts.get(pluginId)
@@ -788,6 +791,10 @@ function broadcastPluginFeedUnreadCount(count = pluginFeedController?.unreadCoun
       window.webContents.send('plugin-notifications-changed')
     }
   }
+}
+
+function broadcastPluginBadges(badges = pluginBadgeController?.list() ?? []): void {
+  if (petWindow && !petWindow.isDestroyed()) petWindow.webContents.send('plugin-badges-updated', badges)
 }
 
 function isPluginFeedVisible(): boolean {
@@ -889,6 +896,19 @@ function createPluginServices(): void {
   pluginSecretConsentStore = new PluginSecretConsentStore(userDataDirectory)
   pluginSettingsStore = new PluginSettingsStore(userDataDirectory)
   pluginHostGrantController = new PluginHostGrantController()
+  pluginBadgeController = new PluginBadgeController({
+    getContext: pluginId => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      return context ? {
+        enabled: context.enabled,
+        pluginsEnabled: context.pluginsEnabled,
+        contributesBadge: context.manifest.contributes.badge === true,
+        pluginName: context.manifest.name,
+        targetPetId: context.targetPetId,
+      } : null
+    },
+    onChanged: badges => broadcastPluginBadges(badges),
+  })
   pluginAgentStatusController = new PluginAgentStatusController({
     emit: change => {
       for (const [pluginId, context] of pluginRuntimeContexts) {
@@ -1013,6 +1033,10 @@ function createPluginServices(): void {
       if (!context?.manifest.permissions.agentStatus) return { ok: false, error: 'not_permitted' }
       return pluginAgentStatusController?.getStatus() ?? { ok: false, error: 'agent_status_unavailable' }
     },
+    onBadgeSet: (pluginId, badge) => {
+      const result = pluginBadgeController?.set(pluginId, badge)
+      return result?.ok ? result.value : { ok: false, error: result?.error ?? 'disabled' }
+    },
     onReaction: (pluginId, request: PluginReactionRequest) => {
       const result = presentationController?.submitPluginReaction(pluginId, request)
       if (result?.accepted) return { ok: true }
@@ -1051,6 +1075,7 @@ function createPluginServices(): void {
     pluginRootForToken: token => pluginRootsByToken.get(token) ?? null,
     messageGuard: pluginUiMessageGuard,
     onPluginCrash: (pluginId, consecutiveCrashes, reason) => {
+      pluginBadgeController?.clearPlugin(pluginId)
       if (consecutiveCrashes >= 3) {
         const name = pluginRuntimeContexts.get(pluginId)?.manifest.name ?? { 'zh-TW': pluginId, 'en-US': pluginId }
         if (reason === 'host') pluginBroker?.recordHostUnavailable(pluginId)
@@ -1135,6 +1160,10 @@ function createPluginServices(): void {
   ipcMain.handle('plugin-feed-unread-count', event => {
     assertTrustedIpcSender(event)
     return pluginFeedController?.unreadCount() ?? 0
+  })
+  ipcMain.handle('plugin-badges-get', event => {
+    assertTrustedIpcSender(event, petWindow)
+    return pluginBadgeController?.list() ?? []
   })
   ipcMain.handle('plugin-feed-complete', (event, itemId: unknown) => {
     assertTrustedIpcSender(event, petWindow)

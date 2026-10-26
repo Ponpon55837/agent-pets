@@ -96,6 +96,10 @@ export interface AgentPetsPluginApi {
      */
     notify(item: PluginFeedInput): Promise<PluginFeedResult>
   }
+  badge: {
+    /** Set or clear the status badge shown beside this plugin's target pet. Requires contributes.badge. */
+    set(badge: { text: string; tone?: 'neutral' | 'info' | 'warning' } | null): Promise<{ set: boolean }>
+  }
   pet: {
     /**
      * Ask a pet for a short reaction. Requires contributes.reaction; unavailable during DND.

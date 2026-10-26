@@ -42,6 +42,22 @@ export interface PluginCommandContribution {
   title: PluginLocalizedText
 }
 
+export type PluginBadgeTone = 'neutral' | 'info' | 'warning'
+
+export interface PluginBadgeInput {
+  text: string
+  tone?: PluginBadgeTone
+}
+
+export interface PluginBadgeView {
+  pluginId: string
+  pluginName: PluginLocalizedText
+  targetPetId: string | null
+  text: string
+  tone: PluginBadgeTone
+  updatedAt: number
+}
+
 export interface PluginSkinContribution {
   id: string
   displayName: PluginLocalizedText

@@ -292,6 +292,96 @@
     inset 0 -3px 7px color-mix(in srgb, var(--quota-color) 9%, transparent);
 }
 
+.plugin-status-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 132px;
+}
+
+.plugin-badge-anchor {
+  position: relative;
+  display: inline-flex;
+  flex: 0 1 42px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
+  border-radius: 999px;
+}
+
+.plugin-badge-anchor:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 1px;
+}
+
+.plugin-badge-pill {
+  display: inline-block;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 1px 5px;
+  border: 1px solid var(--organic-status-border);
+  border-radius: 999px;
+  background: var(--organic-status-surface-fallback);
+  color: var(--organic-status-text);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-badge-pill.tone-info {
+  color: var(--state-info);
+}
+
+.plugin-badge-pill.tone-warning {
+  border-color: color-mix(in srgb, var(--organic-quota-warning) 45%, var(--organic-status-border));
+  color: var(--organic-quota-warning);
+}
+
+.plugin-badge-overflow {
+  flex: 0 0 auto;
+  max-width: 36px;
+  color: var(--organic-status-tooltip-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.plugin-badge-tooltip {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  z-index: 40;
+  width: max-content;
+  max-width: 200px;
+  padding: 5px 7px;
+  border: 1px solid var(--organic-status-tooltip-border);
+  border-radius: var(--organic-status-tooltip-radius);
+  background: var(--organic-status-surface-fallback);
+  box-shadow: var(--organic-status-tooltip-shadow);
+  color: var(--organic-status-tooltip-text);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(-50%, 3px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+}
+
+.plugin-badge-anchor:hover .plugin-badge-tooltip,
+.plugin-badge-anchor:focus-visible .plugin-badge-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+
 .quota-readout {
   flex-shrink: 0;
   min-width: 25px;
