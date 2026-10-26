@@ -64,7 +64,7 @@ Download `AgentPets-<version>-arm64.dmg` (Apple Silicon) or `AgentPets-<version>
 | **Drag** the pet | Move it to a new position (remembered across restarts) |
 | **Right-click** | Hide the pet when enabled in Settings (permission controls remain interactive) |
 
-The system Tray menu can show or hide the pets, open the panel or Settings, toggle Mini / Edge Peek mode, Do Not Disturb, sound and notifications, configure launch at startup in packaged builds, mark pending attention on the Tray icon, and quit the app. Closing or hiding the pet window keeps hooks and background status running until **Quit** is selected.
+The system Tray menu can show or hide the pets, open the panel or Settings, toggle Mini / Edge Peek mode, Do Not Disturb, sound and notifications, configure launch at startup in packaged builds, run commands from enabled plugins under **Plugins**, mark pending attention on the Tray icon, and quit the app. Closing or hiding the pet window keeps hooks and background status running until **Quit** is selected.
 
 Below the pet, a floating status bar shows up to **3 lines**, one per active tool family (Codex / Claude / OpenCode). CLI and Desktop variants of the same tool are grouped onto a single line (e.g. `Claude (CLI+Desktop) · Thinking`). When nothing is active, a single line shows the pet's overall idle/offline state.
 
@@ -241,7 +241,7 @@ For a configured adapter, click **Test** to send a short-lived event through the
 
 ## Plugins
 
-Plugins can add pet feed notifications, reactions, panel and Tray commands, status badges, optional sandboxed panel pages, and selectable pet skins. Install a `.agentpet-plugin` package from **Settings → Advanced → Plugins**; developers can enable Developer mode to load a local folder. Review the requested permissions and contributions before installing. Plugin pages and background code are treated as untrusted: they have no Node.js, filesystem, or shell access, and network requests are limited to approved HTTPS hosts. Plugin network requests do not send or store cookies. Secrets are encrypted by the app's protected storage and never returned in settings snapshots. This version has no online plugin directory or publisher signature verification.
+Plugins can add pet feed notifications, reactions, panel and Tray commands, status badges, optional sandboxed panel pages, and selectable pet skins. Install a `.agentpet-plugin` package from **Settings → Plugins**; developers can enable Developer mode to load a local folder. Review the requested permissions and contributions before installing. Plugin pages and background code are treated as untrusted: they have no Node.js, filesystem, or shell access, and network requests are limited to approved HTTPS hosts. Plugin network requests do not send or store cookies. Secrets are encrypted by the app's protected storage and never returned in settings snapshots. This version has no online plugin directory or publisher signature verification.
 
 See the [plugin development index](docs/plugins/README.md) for the [10-minute guide](docs/plugins/getting-started.md), [security model](docs/plugins/security.md), [API reference](docs/plugins/api-reference.md), and [examples](docs/plugins/examples.md).
 
