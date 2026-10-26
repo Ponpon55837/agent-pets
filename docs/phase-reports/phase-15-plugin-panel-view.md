@@ -1,8 +1,8 @@
 # Phase 15 驗證報告：自訂面板頁（panelView）
 
-- 日期：2026-10-23
+- 日期：2026-10-23；複檢修正更新至 2026-10-26
 - 目前版本：`1.2.4`（未修改）
-- 階段狀態：P15.0–P15.4 原始 checkpoint 已完成；P15.R 程式與隔離 Electron 實測通過。推送因本機僅有鑰匙圈認證而依安全限制暫未完成。
+- 階段狀態：P15.0–P15.4、P15.R 與 P15.R2 均已完成；P15.R2 檢查、隔離 Electron 指定複驗及推送通過。真實系統鑰匙圈與硬體權限行為仍未驗證。
 - 建議版本：`1.3.0`（Phase 12–16 整體建議 minor；本階段未改版）
 
 ## 範圍與結果
@@ -23,6 +23,7 @@
 | P15.2 | 外框、尺寸控制與泡泡入口 | `ef80789166e8df0589df2fc352982fb83e30205a` | source tests 通過 |
 | P15.3 | 面板與 Worker 雙向訊息 | `faeaee5c6161f8ba4f4cceaf6dae9591718914b0` | source tests 通過，unit 288/288 |
 | P15.4 | panel-view 文件、範例與安全探針 | `7085e5da66e9bec50d757f4d97264eba90c678eb` | source gates 通過；Electron 實機項目未驗證 |
+| P15.R2 | bounds 握手、逾時關閉、bundle gate 與複檢 | 程式修正 `08ca468`；bounds 測試補強 `48921ab`；報告與 checkpoint 由本文件更新 commit 收尾 | 四項檢查及指定隔離 Electron 案例通過，已推送 |
 
 ## Acceptance criteria
 
@@ -125,4 +126,51 @@
 
 - 本次沒有驗證 Windows/Linux，沒有呼叫真實硬體或系統權限 API（依規則刻意避免）；此前錯誤隔離啟動的歷史結果仍無法回溯證明當時是否使用原始 safeStorage，維持未驗證。
 - 本次確認 preferredSize 尺寸與關閉後還原；未重新測試使用者手動拖曳調整 native 面板尺寸的優先順序。開發者不能執行中任意變更 bounds；若需要真正全螢幕顯示，需另訂宿主控制且保留外框的設計。
-- 推送尚未完成：為遵守不得觸碰本機鑰匙圈，push 時停用全域 `osxkeychain` helper，Git 回報無可用密碼；沒有使用鑰匙圈。`feat/plugin-host` 有本地 commit 未推送，需要可用的非鑰匙圈認證路徑後才能同步。
+- 當時的 P15.R push 曾因認證設定失敗；之後複檢者將 P15.R 程式與報告提交推送。P15.R2 則使用 Git 原有憑證設定成功推送，未停用 credential helper。
+
+## 複檢修正（P15.R2）
+
+- 日期：2026-10-26。
+- 程式修正 commit：`08ca468`（`fix(plugin): [P15.R2] 等待可信 bounds 握手後顯示面板`）；測試補強 commit：`48921ab`（`fix(plugin): [P15.R2] 驗證 bounds 確認須合法`）。本節隨 P15.R2 最終 checkpoint 的報告 commit 一併推送。
+
+### P15.R2 修正與測試
+
+| 項目 | 修正內容 | Commit | 新增測試 |
+|---|---|---|---|
+| P3-R | WebContentsView 建立後先隱藏；只有收到相符 `openToken` 且 bounds 合法的 renderer 回報才顯示。計時器自 view 附掛時開始，2 秒未確認以 `renderer_unavailable` 關閉；宿主視窗 hide 或 renderer reload 也關閉。宿主不可見時直接回 `panel_unavailable`，不調整尺寸。 | `08ca468`、`48921ab` | `tests/plugin-panel-view.test.mts` 新增 7 個單元測試，涵蓋合法回報前保持隱藏、非法 bounds 不顯示、未回報逾時、load 尚未完成仍按時逾時、宿主 hide、renderer reload、token 不符、宿主不可見拒絕建立。 |
+| P5 | 移除 `example.com` 專用 blocked-request 計數，只保留通用計數。 | `08ca468` | 確認隔離啟動器不再建立 example.com 專用欄位；既有通用網路阻擋測試照常通過。 |
+| P6 | `package.json` 新增 `check:bundle`；交接 §0.4 加入 build 後檢查；release workflow 的 Vite build 後執行一次。 | `08ca468` | 執行 `pnpm check:bundle`，確認 main bundle 內含 panel shared tokens，通過。 |
+
+### §0.4 與 §0.4b 檢查
+
+| 指令／檢查 | 實際結果 |
+|---|---|
+| `pnpm exec vue-tsc --noEmit` | 通過。 |
+| `pnpm test:unit` | 通過，303/303；本次新增 7 項 panel-view 單元測試。 |
+| `pnpm exec vite build` | 通過；renderer、main、preload、plugin-host-preload 與 plugin-ui-preload 均產出。 |
+| `pnpm check:bundle` | 通過；確認 plugin panel shared tokens 已嵌入 `dist-electron/main.js`。 |
+| `git diff --check` | 通過。 |
+| `pnpm audit --prod --audit-level moderate` | `No known vulnerabilities found`。 |
+| Secret／個資 pattern scan | 掃描 Phase 12 起 56 個已提交 commit 與本次差異；未命中私鑰、GitHub／OpenAI／Slack token、AWS key、Google API key 或 macOS home path。歷史 commit 有 2 筆 email pattern 誤報，均為 `example.com` 無效 URL 測試輸入中的合成 user-info，沒有真實個資或憑證；本次差異無命中。 |
+| `pnpm build` | 未執行，依要求。 |
+
+### 隔離 Electron 實機複驗
+
+- 只用 `node scripts/e2e-isolated-electron.mjs` 啟動；等待 `AGENT_PETS_E2E_READY` 且確認 `fakeSafeStorage: true` 後操作。safeStorage 計數開始與結束皆為 `{ isEncryptionAvailable: 0, encryptString: 0, decryptString: 0 }`。未呼叫 secrets、真實鑰匙圈或相機／麥克風／定位 API。
+- 在「工作階段」分頁直接以合理 bounds 呼叫 `openPluginPanelView('evil-panel', ...)`，回傳 `{ ok: true, openToken: 2 }`。建立後主程序觀察到面板 view 存在但 `visible: false`；500 ms 時仍隱藏。約 2.44 秒後 view 已移除，面板尺寸由插件建議的 520×440 還原為原始 460×560。
+- 另在宿主面板不可見時直接呼叫，回傳 `panel_unavailable`；視窗維持原 460×720，沒有 child view。未顯示且未調整尺寸。
+- 隔離程序以啟動腳本 terminal 的 Ctrl+C 關閉，程序正常結束。
+
+### P15.R2 手動驗收步驟
+
+1. 執行 `pnpm exec vite build`，再執行 `node scripts/e2e-isolated-electron.mjs`；只有看到 `AGENT_PETS_E2E_READY` 且 `fakeSafeStorage: true` 才繼續。從主程序 inspector 記錄 `globalThis.__agentPetsE2E.calls` 起始值，預期三個計數皆為 0。
+2. 在隔離 App 開啟插件設定，啟用全域插件與開發者模式，載入 `tests/fixtures/plugins/evil-panel/` 資料夾並啟用 evil-panel；切回「工作階段」分頁，確認該 tab 為 selected。
+3. 從面板 renderer DevTools 直接呼叫 `window.electronAPI.openPluginPanelView('evil-panel', { x: 12, y: 80, width: 436, height: 460 }, { x: 12, y: 128, width: 436, height: 400 })`，不要經由 PluginPanel 的按鈕或自動 bounds 回報。
+4. 在主程序 inspector 讀取面板 `contentView.children`：預期 child 存在但 `getVisible()` 為 false。等 2 秒多後再次檢查：預期 child 已移除、視窗尺寸還原到呼叫前的值，關閉原因為 `renderer_unavailable`。
+5. 隱藏宿主面板後再從該 renderer 直接呼叫 `openPluginPanelView`：預期回 `panel_unavailable`、沒有 child view、視窗尺寸不變。
+6. 記錄結束時 `globalThis.__agentPetsE2E.calls`，預期三個計數仍皆為 0；只在隔離啟動腳本 terminal 以 Ctrl+C 結束程序。不要呼叫 secrets 或真實硬體／系統權限 API。
+
+### 仍未驗證或待決
+
+- 真實 macOS 鑰匙圈、相機／麥克風／定位及其他系統權限視窗未驗證；本次以 fake safeStorage 且零呼叫計數確保自動化沒有觸發它們。
+- Windows、Linux 與實體滑鼠操作未驗證；本次指定的工作階段 direct-call 路徑以隔離 Electron／CDP 實測完成。
