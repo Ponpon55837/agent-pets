@@ -70,6 +70,43 @@ test('manifest rejects unknown top-level, permission, contribution, and settings
   ]) assert.equal(result.ok, false)
 })
 
+test('manifest validates eventSource family normalization, reserved families, and localized labels', () => {
+  const valid = withManifest(manifest => {
+    (manifest.contributes as Record<string, unknown>).eventSource = {
+      family: 'Build_Watch',
+      displayName: { 'zh-TW': '建置狀態', 'en-US': 'Build state' },
+    }
+  })
+  assert.equal(valid.ok, true)
+  if (valid.ok) assert.deepEqual(valid.manifest.contributes.eventSource, {
+    family: 'build-watch',
+    displayName: { 'zh-TW': '建置狀態', 'en-US': 'Build state' },
+  })
+  assert.equal(withManifest(manifest => {
+    (manifest.contributes as Record<string, unknown>).eventSource = {
+      family: 'emoji-state',
+      displayName: { 'zh-TW': '😀'.repeat(80), 'en-US': '😀'.repeat(80) },
+    }
+  }).ok, true)
+  assert.equal(withManifest(manifest => {
+    (manifest.contributes as Record<string, unknown>).eventSource = {
+      family: 'emoji-state',
+      displayName: { 'zh-TW': '😀'.repeat(81), 'en-US': '😀'.repeat(81) },
+    }
+  }).ok, false)
+
+  for (const family of ['codex', 'Claude Code', 'CLAUDE_CODE', 'claude.code', 'generic-http', 'agent_pets', 'plugin', 'system']) {
+    assert.equal(withManifest(manifest => {
+      (manifest.contributes as Record<string, unknown>).eventSource = { family, displayName: { 'zh-TW': '狀態', 'en-US': 'Status' } }
+    }).ok, false, family)
+  }
+  for (const eventSource of [
+    { family: 'build-watch', displayName: { 'zh-TW': '狀態', 'en-US': 'Status' }, extra: true },
+    { family: 'build-watch', displayName: { 'zh-TW': 'x'.repeat(81), 'en-US': 'Status' } },
+    { family: 'build-watch', displayName: { 'zh-TW': '狀態', 'en-US': 'Status' }, permission: true },
+  ]) assert.equal(withManifest(manifest => { (manifest.contributes as Record<string, unknown>).eventSource = eventSource }).ok, false)
+})
+
 test('plugin ids follow the bounded lowercase form and reject reserved ids', () => {
   for (const id of ['ab', 'A_plugin', 'a'.repeat(49), '_host', '_shared']) {
     assert.equal(withManifest(manifest => { manifest.id = id }).ok, false, id)

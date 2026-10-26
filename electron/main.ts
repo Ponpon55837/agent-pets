@@ -66,6 +66,7 @@ import { PluginSecretsStore } from './plugin-secrets.ts'
 import { PluginSecretConsentStore } from './plugin-secret-consent.ts'
 import { PluginSettingsStore, publishPluginSettingsChanged } from './plugin-settings.ts'
 import { PluginAgentStatusController } from './plugin-agent-status.ts'
+import { PluginEventSourceController } from './plugin-event-source.ts'
 import { buildPluginIssueReportUrl, DEFAULT_PLUGIN_ISSUE_REPORT_URL } from './plugin-report.ts'
 import { effectivePluginScheduleMinimum } from './plugin-schedule.ts'
 import { PluginUiMessageGuard } from './plugin-ui-messages.ts'
@@ -207,6 +208,7 @@ let pluginCatalogAutoCheckSchedule: PluginCatalogAutoCheckSchedule | null = null
 let pluginHostGrantController: PluginHostGrantController | null = null
 let pluginFeedController: PluginFeedController | null = null
 let pluginAgentStatusController: PluginAgentStatusController | null = null
+let pluginEventSourceController: PluginEventSourceController | null = null
 const pendingPluginPlanIds = new Map<string, string>()
 const pendingDeveloperFolders = new Map<string, string>()
 const developerSourceFolders = new Map<string, string>()
@@ -1121,6 +1123,22 @@ function createPluginServices(): void {
       }
     },
   })
+  pluginEventSourceController = new PluginEventSourceController({
+    getContext: pluginId => {
+      const context = pluginRuntimeContexts.get(pluginId)
+      const contribution = context?.manifest.contributes.eventSource
+      return context && contribution ? {
+        enabled: context.enabled,
+        pluginsEnabled: context.pluginsEnabled,
+        pluginName: context.manifest.name,
+        family: contribution.family,
+        displayName: contribution.displayName,
+      } : null
+    },
+    onChanged: statuses => {
+      if (panelWindow && !panelWindow.isDestroyed()) panelWindow.webContents.send('plugin-event-source-updated', statuses)
+    },
+  })
   refreshPluginRuntimeContexts()
   pluginFeedController = new PluginFeedController({
     emit: item => {
@@ -1236,6 +1254,7 @@ function createPluginServices(): void {
       if (!context?.manifest.permissions.agentStatus) return { ok: false, error: 'not_permitted' }
       return pluginAgentStatusController?.getStatus() ?? { ok: false, error: 'agent_status_unavailable' }
     },
+    onAgentEmit: (pluginId, event) => pluginEventSourceController?.emit(pluginId, event) ?? { ok: false, error: 'disabled' },
     onBadgeSet: (pluginId, badge) => {
       const result = pluginBadgeController?.set(pluginId, badge)
       return result?.ok ? result.value : { ok: false, error: result?.error ?? 'disabled' }
@@ -1279,6 +1298,7 @@ function createPluginServices(): void {
     messageGuard: pluginUiMessageGuard,
     onPluginCrash: (pluginId, consecutiveCrashes, reason) => {
       pluginBadgeController?.clearPlugin(pluginId)
+      pluginEventSourceController?.clearPlugin(pluginId)
       if (consecutiveCrashes >= 3) {
         const name = pluginRuntimeContexts.get(pluginId)?.manifest.name ?? { 'zh-TW': pluginId, 'en-US': pluginId }
         if (reason === 'host') pluginBroker?.recordHostUnavailable(pluginId)
@@ -1296,6 +1316,7 @@ function createPluginServices(): void {
         setTimeout(() => syncPluginHost(), 0)
       }
     },
+    onPluginReset: pluginId => pluginEventSourceController?.clearPlugin(pluginId),
     getMemoryBudgetMb: activePluginCount => {
       const perPlugin = pluginPreferencesSnapshot?.resources.memoryMbPerPlugin ?? 0
       return perPlugin * activePluginCount
@@ -1367,6 +1388,10 @@ function createPluginServices(): void {
   ipcMain.handle('plugin-badges-get', event => {
     assertTrustedIpcSender(event, petWindow)
     return pluginBadgeController?.list() ?? []
+  })
+  ipcMain.handle('plugin-event-source-list', event => {
+    assertTrustedIpcSender(event, panelWindow)
+    return pluginEventSourceController?.list() ?? []
   })
   ipcMain.handle('plugin-skin-fallback-notify', (event, petIds: unknown) => {
     assertTrustedIpcSender(event)
@@ -4280,6 +4305,8 @@ app.on('before-quit', () => {
   pluginPreferencesSnapshot = null
   pluginHostWindow?.close()
   pluginHostWindow = null
+  pluginEventSourceController?.destroy()
+  pluginEventSourceController = null
   windowsFullscreenDetector?.stop()
   windowsFullscreenDetector = null
   if (panelBlurHideHandle) clearTimeout(panelBlurHideHandle)

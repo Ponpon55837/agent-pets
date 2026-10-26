@@ -14,7 +14,7 @@ import { pluginHostAssets } from '../electron/plugin-host-assets.ts'
 import type { PluginManifest } from '../src/types/plugin.ts'
 
 const fixtureRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'plugins')
-const FIXTURE_IDS = ['ok-notify', 'ok-panel', 'ok-skin', 'ok-commands', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel', 'evil-badge', 'evil-skin'] as const
+const FIXTURE_IDS = ['ok-notify', 'ok-panel', 'ok-skin', 'ok-commands', 'ok-event-source', 'evil-event-source', 'evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel', 'evil-badge', 'evil-skin'] as const
 
 function readFixture(pluginId: string): { manifest: PluginManifest; files: Record<string, Uint8Array> } {
   const sourceDirectory = path.join(fixtureRoot, pluginId)
@@ -100,6 +100,24 @@ test('ok-commands declares user-triggered commands, Tray entries, and a badge', 
   assert.match(source, /api\.feed\.notify/)
 })
 
+test('eventSource fixtures declare a valid observer and probe its rejected inputs', () => {
+  const accepted = readFixture('ok-event-source')
+  assert.deepEqual(accepted.manifest.contributes.eventSource, {
+    family: 'build-watch',
+    displayName: { 'zh-TW': '建置工作', 'en-US': 'Build job' },
+  })
+  const acceptedSource = Buffer.from(accepted.files['dist/main.js']!).toString('utf8')
+  assert.match(acceptedSource, /api\.agent\.emit\(\{ sessionId: 'fixture-build-1', state: 'thinking' \}\)/)
+
+  const evil = readFixture('evil-event-source')
+  assert.equal(evil.manifest.contributes.eventSource?.family, 'probe-status')
+  const evilSource = Buffer.from(evil.files['dist/main.js']!).toString('utf8')
+  assert.match(evilSource, /permission: \{ decision: 'allow' \}/)
+  assert.match(evilSource, /waiting-permission/)
+  assert.match(evilSource, /'x'\.repeat\(65\)/)
+  assert.match(evilSource, /index < 31/)
+})
+
 test('evil-badge probes overlong text and attempts updates every 10 milliseconds', () => {
   const { manifest, files } = readFixture('evil-badge')
   assert.equal(manifest.contributes.badge, true)
@@ -130,7 +148,7 @@ test('evil-skin uses a forged WebP and an oversized sheet is rejected during pla
 })
 
 test('every evil fixture records a host log entry for its runtime probe', () => {
-  for (const pluginId of ['evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel', 'evil-badge']) {
+  for (const pluginId of ['evil-fetch', 'evil-loop', 'evil-spam', 'evil-xss', 'evil-spoof', 'evil-zip', 'evil-escape', 'evil-network', 'evil-panel', 'evil-badge', 'evil-event-source']) {
     const source = Buffer.from(readFixture(pluginId).files['dist/main.js']!).toString('utf8')
     assert.match(source, /api\.log\.info/, `${pluginId} must leave inspectable evidence`)
   }

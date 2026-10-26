@@ -20,12 +20,15 @@
 | `log.info/warn/error(...values)` | 插件面板診斷記錄；`{logged:true}` | `invalid_request`, `too_large`, `disabled`。`await api.log.warn('Retrying', code)` |
 | `commands.onInvoke(fn)` | `contributes.commands`；解除訂閱函式 | callback 不是函式時立即同步拋 `invalid_request`。插件不能自行觸發指令。`const off = api.commands.onInvoke(id => api.log.info('Command', id))` |
 | `badge.set(badge|null)` | `contributes.badge`；`{set:boolean}` | `invalid_request`, `rate_limited`, `disabled`, `not_permitted`。`await api.badge.set({text:'OK',tone:'info'})`；`await api.badge.set(null)` 清除。 |
+| `agent.emit(event)` | `contributes.eventSource`；`{accepted:true}` | `invalid_request`, `rate_limited`, `not_permitted`, `disabled`。`await api.agent.emit({sessionId:'build-1',state:'thinking'})` |
 | `ui.postMessage(data)` | `contributes.panelView`；`{delivered:boolean}` | `invalid_request`, `too_large`, `rate_limited`, `disabled`。`const result = await api.ui.postMessage({type:'refresh'})` |
 | `ui.onMessage(fn)` | `contributes.panelView`；解除訂閱函式 | 立即同步拋 `invalid_request`。`const off = api.ui.onMessage(message => api.log.info(message.type))` |
 
 `net.fetch` 的 method 為 `GET`、`POST`、`PUT`、`DELETE`、`PATCH`；可送出的 header 僅 `accept`、`authorization`、`content-type`、`if-modified-since`、`if-none-match`、`x-api-key`。Request body 最多 256 KB。回應只保留 `content-type`、`etag`、`last-modified`、`retry-after`；二進位 body 以 base64 字串回傳並設 `isBase64Encoded: true`。`requestHost` 的 reason 為 1–120 字。
 
 `PetStatusChange` 僅含 `petId`、`name`、`agentFamily`、`previousState`、`visibleState`、`dnd`、`at`。`net.fetch` 僅允許 HTTPS 公開 DNS 網域；最多 3 次 redirect，每一跳都重新驗證網域與 DNS。插件網路請求不會送出或儲存 Cookie；需要登入時，請使用 `authorization` header 與已宣告的密鑰。Host API 成功直接回傳，不包 `{ok,value}`。
+
+`agent.emit` 僅接受 `{sessionId, state}`。狀態為 `thinking`、`tool-running`、`idle`、`done`、`error`；`done` 與 `error` 是終態，要開始新工作階段必須用新 id。接收時間由宿主指定，並在獨立清單固定標示「來自插件：<插件名稱>」。這些狀態是未驗證的插件聲明，不會成為內建 Agent 事件，也不會觸發 Permission、XP、成就、History、quota 或通知。
 
 `ui.postMessage` 與 `ui.onMessage` 在插件 Worker 和已開啟的面板頁之間交換 JSON 資料。每則訊息最多 256 KB；每個插件、每個方向每秒最多 20 則。面板關閉時 Worker 訊息會以 `{delivered:false}` 成功回傳且不排隊。面板頁 API 子集與瀏覽器限制見[自訂面板頁](panel-view.zh-TW.md)。
 

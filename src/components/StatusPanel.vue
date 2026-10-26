@@ -6,6 +6,7 @@ import { formatProject, quotaWindowLabel, roundQuotaPercent } from '@/utils/form
 import { locale, t, translateBackendError, type TranslationKey } from '@/i18n'
 import type { HistoryAgentStat, HistoryDailyStat, HistorySummary } from '@/types/history'
 import type { AchievementTokenQuality, AchievementTranslationKey } from '@/types/achievement'
+import type { PluginEventSourceStatusView, PluginEventSourceState } from '@/types/plugin'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -95,6 +96,8 @@ const historyError = ref('')
 const historyAction = ref('')
 const historyProjectFilter = ref('')
 let cleanupHistoryUpdated: (() => void) | null = null
+let cleanupPluginEventSourceChanged: (() => void) | null = null
+const pluginEventSourceStatuses = ref<PluginEventSourceStatusView[]>([])
 const quotaUsage = computed(() => store.quotaUsage)
 const quotaLoading = computed(() => store.quotaLoading)
 const quotaError = computed(() => store.quotaError)
@@ -434,10 +437,19 @@ onMounted(() => {
       if (dashboardTab.value === 'history') void refreshHistory()
     })
   }
+  if (window.electronAPI?.onPluginEventSourceChanged) {
+    cleanupPluginEventSourceChanged = window.electronAPI.onPluginEventSourceChanged(statuses => {
+      pluginEventSourceStatuses.value = statuses
+    })
+  }
+  void window.electronAPI?.getPluginEventSourceStatuses().then(statuses => {
+    pluginEventSourceStatuses.value = statuses
+  }).catch(() => {})
 })
 
 onUnmounted(() => {
   cleanupHistoryUpdated?.()
+  cleanupPluginEventSourceChanged?.()
 })
 
 // --- 寵物重新命名 --------------------------------------------------------------
@@ -490,6 +502,17 @@ function sessionDetail(session: (typeof sessions.value)[number]): string {
   if (session.toolName) return `${STATE_LABELS[session.state]} · ${session.toolName}`
   if (session.state === 'success') return `${STATE_LABELS[session.state]} · ${formatTime(session.lastSeenAt)}`
   return STATE_LABELS[session.state]
+}
+
+function pluginEventSourceStateLabel(state: PluginEventSourceState): string {
+  const labels: Record<PluginEventSourceState, TranslationKey> = {
+    thinking: 'pluginEventSourceThinking',
+    'tool-running': 'pluginEventSourceToolRunning',
+    idle: 'pluginEventSourceIdle',
+    done: 'pluginEventSourceDone',
+    error: 'pluginEventSourceError',
+  }
+  return t(labels[state])
 }
 
 function permissionSourceLabel(agentId: string): string {
@@ -667,7 +690,7 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
       <template v-if="dashboardTab === 'sessions'">
         <div id="panel-sessions" role="tabpanel" aria-labelledby="tab-sessions" class="tab-panel">
           <div class="session-scroll">
-            <div v-if="activeSessionList.length === 0 && offlineSessionList.length === 0" class="panel-empty">
+            <div v-if="activeSessionList.length === 0 && offlineSessionList.length === 0 && pluginEventSourceStatuses.length === 0" class="panel-empty">
               {{ t('noActiveSessions') }}
             </div>
 
@@ -726,6 +749,30 @@ function confirmRemoveProjectPet(project: { projectId: string; displayName: stri
                   <span class="session-title-line">{{ SOURCE_LABELS[session.source] }}<template v-if="session.project"> · {{ formatProject(session.project) }}</template></span>
                   <span class="session-time">{{ formatTime(session.lastSeenAt) }}</span>
                 </div>
+              </section>
+
+              <section v-if="pluginEventSourceStatuses.length > 0" class="session-group plugin-event-source-group">
+                <div class="session-group-heading">
+                  <span>{{ t('pluginEventSourceHeading') }}</span>
+                </div>
+                <Card class="session-card">
+                  <div
+                    v-for="(status, index) in pluginEventSourceStatuses"
+                    :key="status.key"
+                    class="session-item"
+                    :class="{ 'is-last': index === pluginEventSourceStatuses.length - 1 }"
+                  >
+                    <span class="session-status-dot" :class="{ live: status.state === 'thinking' || status.state === 'tool-running' }" aria-hidden="true" />
+                    <div class="session-info">
+                      <span class="session-title-line">{{ t('pluginEventSourceFromPlugin', { name: status.pluginName[locale] }) }}</span>
+                      <span class="session-detail">{{ status.displayName[locale] }}</span>
+                    </div>
+                    <div class="session-state-column">
+                      <span class="state-chip">{{ pluginEventSourceStateLabel(status.state) }}</span>
+                      <span class="session-time">{{ formatTime(status.updatedAt) }}</span>
+                    </div>
+                  </div>
+                </Card>
               </section>
             </template>
           </div>

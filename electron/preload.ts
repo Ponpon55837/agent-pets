@@ -12,6 +12,7 @@ import type {
   PluginBrokerDiagnostic,
   PluginBrokerLogEntry,
   PluginFeedItem,
+  PluginEventSourceStatusView,
   PluginGlobalPreferencesPatch,
   PluginInstallPlan,
   PluginNotificationRecord,
@@ -72,6 +73,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: unknown, badges: PluginBadgeView[]) => callback(badges)
     ipcRenderer.on('plugin-badges-updated', handler)
     return () => ipcRenderer.removeListener('plugin-badges-updated', handler)
+  },
+  getPluginEventSourceStatuses: (): Promise<PluginEventSourceStatusView[]> => ipcRenderer.invoke('plugin-event-source-list'),
+  onPluginEventSourceChanged: (callback: (statuses: PluginEventSourceStatusView[]) => void) => {
+    const handler = (_event: unknown, statuses: PluginEventSourceStatusView[]) => callback(statuses)
+    ipcRenderer.on('plugin-event-source-updated', handler)
+    return () => ipcRenderer.removeListener('plugin-event-source-updated', handler)
   },
   onPluginSkinsChanged: (callback: (removedPetIds: string[]) => void) => {
     const handler = (_event: unknown, petIds: string[]) => callback(petIds)

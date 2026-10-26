@@ -23,7 +23,7 @@ window.addEventListener('message', (event) => {
           workers.set(pluginId, worker)
           worker.onmessage = ({ data: message }) => {
             if (!message || typeof message !== 'object') return
-            if (message.type === 'rpc') port.postMessage({ type: 'rpc', pluginId, request: message.request })
+            if (message.type === 'rpc') port.postMessage({ type: 'rpc', pluginId, token, request: message.request })
             else if (message.type === 'pong') port.postMessage({ type: 'pong', pluginId, at: message.at })
             else if (message.type === 'ready') port.postMessage({ type: 'worker-ready', pluginId })
             else if (message.type === 'activation-error') {
@@ -158,6 +158,7 @@ const api = Object.freeze({
       return () => statusListeners.delete(callback)
     },
   }),
+  agent: Object.freeze({ emit: (event) => rpc('agent.emit', [event]) }),
   net: Object.freeze({
     fetch: (url, options) => rpc('net.fetch', options === undefined ? [url] : [url, options]),
     requestHost: (host, reason) => rpc('net.requestHost', [host, reason]),

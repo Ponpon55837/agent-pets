@@ -19,6 +19,7 @@ import type {
   PluginBrokerDiagnostic,
   PluginBrokerLogEntry,
   PluginFeedItem,
+  PluginEventSourceStatusView,
   PluginGlobalPreferencesPatch,
   PluginInstallPlan,
   PluginNotificationRecord,
@@ -54,6 +55,8 @@ declare global {
       getPluginFeedUnreadCount: () => Promise<number>
       getPluginBadges: () => Promise<PluginBadgeView[]>
       onPluginBadgesChanged: (callback: (badges: PluginBadgeView[]) => void) => () => void
+      getPluginEventSourceStatuses: () => Promise<PluginEventSourceStatusView[]>
+      onPluginEventSourceChanged: (callback: (statuses: PluginEventSourceStatusView[]) => void) => () => void
       onPluginSkinsChanged: (callback: (removedPetIds: string[]) => void) => () => void
       notifyPluginSkinFallback: (petIds: string[]) => Promise<number>
       completePluginFeed: (itemId: string) => Promise<boolean>

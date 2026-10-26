@@ -120,6 +120,7 @@ function permissionUnits(manifest: PluginManifest): string[] {
   if (manifest.contributes.tray?.commands.length) result.add('contributes:tray')
   if (manifest.contributes.badge) result.add('contributes:badge')
   if (manifest.contributes.skins?.length) result.add(`contributes:skins:${manifest.contributes.skins.length}`)
+  if (manifest.contributes.eventSource) result.add('contributes:eventSource')
   return [...result].sort()
 }
 

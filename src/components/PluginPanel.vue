@@ -717,6 +717,7 @@ function permissionLabel(unit: string): string {
   if (detail === 'commands') return t('pluginPermissionCommands')
   if (detail === 'tray') return t('pluginPermissionTray')
   if (detail === 'badge') return t('pluginPermissionBadge')
+  if (detail === 'eventSource') return t('pluginPermissionEventSource')
   if (detail.startsWith('skins:')) return t('pluginPermissionSkins', { count: detail.slice(6) })
   return unit
 }
@@ -737,6 +738,7 @@ const pendingPermissions = computed(() => {
   if (plan.contributes?.tray?.commands.length) permissionUnits.push('contributes:tray')
   if (plan.contributes?.badge) permissionUnits.push('contributes:badge')
   if (plan.contributes?.skins?.length) permissionUnits.push(`contributes:skins:${plan.contributes.skins.length}`)
+  if (plan.contributes?.eventSource) permissionUnits.push('contributes:eventSource')
   return permissionUnits.map(permissionLabel)
 })
 

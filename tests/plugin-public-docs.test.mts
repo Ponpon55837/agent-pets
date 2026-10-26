@@ -119,7 +119,7 @@ test('public manifest schema required keys and enums match the runtime validator
   assert.deepEqual(schema.required, ['id', 'name', 'version', 'apiVersion', 'author', 'permissions', 'contributes'])
   assert.equal(schema.properties.apiVersion?.const, '1')
   assert.deepEqual(Object.keys(schema.properties.permissions?.properties ?? {}).sort(), ['agentStatus', 'network', 'schedule', 'secrets', 'storage'])
-  assert.deepEqual(Object.keys(schema.properties.contributes?.properties ?? {}).sort(), ['badge', 'commands', 'feed', 'panelView', 'reaction', 'settings', 'skins', 'tray'])
+  assert.deepEqual(Object.keys(schema.properties.contributes?.properties ?? {}).sort(), ['badge', 'commands', 'eventSource', 'feed', 'panelView', 'reaction', 'settings', 'skins', 'tray'])
   const panelView = schema.properties.contributes?.properties?.panelView
   assert.match(panelView?.description ?? '', /sandboxed host view/)
   assert.equal(panelView?.properties?.preferredSize?.properties?.width?.type, 'integer')

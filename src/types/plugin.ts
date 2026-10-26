@@ -66,6 +66,21 @@ export interface PluginSkinContribution {
   behaviorManifest?: Record<string, { row: number; frames?: number; frameDurations?: number[] }>
 }
 
+export type PluginEventSourceState = 'thinking' | 'tool-running' | 'idle' | 'done' | 'error'
+
+export interface PluginEventSourceContribution {
+  family: string
+  displayName: PluginLocalizedText
+}
+
+export interface PluginEventSourceStatusView {
+  key: number
+  pluginName: PluginLocalizedText
+  displayName: PluginLocalizedText
+  state: PluginEventSourceState
+  updatedAt: number
+}
+
 export interface PluginManifest {
   id: string
   name: PluginLocalizedText
@@ -102,6 +117,7 @@ export interface PluginManifest {
     tray?: { commands: string[] }
     badge?: boolean
     skins?: PluginSkinContribution[]
+    eventSource?: PluginEventSourceContribution
   }
 }
 

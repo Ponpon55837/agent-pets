@@ -15,6 +15,7 @@
 | `contributes.tray` | `在 Tray 選單新增項目` |
 | `contributes.badge: true` | `在寵物狀態列顯示徽章` |
 | `contributes.skins` | `提供 N 個寵物外觀`（依 manifest 數量代入） |
+| `contributes.eventSource` | `在獨立狀態列顯示插件回報的工作狀態` |
 
 `network.hosts` 是預先同意清單。若也設 `userGranted: true`，插件可呼叫 `api.net.requestHost(host, reason)`；host 是不含萬用字元的 DNS 名稱，reason 為 1–120 字。每次申請都會先檢查公開 DNS，再顯示原生確認框。使用者拒絕同一網域後 24 小時內不會再提示；每插件最多每 10 分鐘申請 3 次。通過的動態網域會出現在設定面板，可撤銷。即使已同意，HTTP、IP literal、localhost、私有／保留 IP 或 DNS 解析到非公開位址的請求仍會被拒絕。
 

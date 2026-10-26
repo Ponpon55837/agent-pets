@@ -24,5 +24,6 @@ Additional fixed limits:
 - Commands: at most 10 per plugin; each id is 1–32 characters and each localized title is at most 32 characters. A given command may be invoked at most once per second. Tray contributes at most five command ids per plugin, with at most 30 plugin command items across the Tray; labels are truncated to 32 characters.
 - Badges: text is at most six Unicode code points; each plugin may update once per second. At most two plugin badges appear per pet; additional badges are represented by `+N`.
 - Skins: at most five per plugin. A package containing skins is at most 25 MB total and each spritesheet is at most 20 MB; the existing 5 MB package limit applies when there are no skins.
+- `eventSource`: 30 events per plugin and 120 total in a rolling 60 seconds; 20 active sessions per plugin and 100 total; 2 KiB per event; session id at most 64 ASCII bytes; display name at most 80 characters per locale. Active state expires after 2 minutes without updates, `done`/`error` after 30 seconds, and every session after 30 minutes maximum.
 
 Full queues return `queue_full`, network rate overages return `rate_limited`, and response-size overages return `too_large`. See the [API reference](api-reference.md) for error codes.
