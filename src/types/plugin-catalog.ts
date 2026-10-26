@@ -29,4 +29,7 @@ export interface PluginCatalogPanelItem {
   latestVersion: PluginCatalogVersion
   installedVersion: string | null
   updateAvailable: boolean
+  catalogOlder: boolean
+  permissionsIncreased: boolean | null
+  signingKeyChange: 'changed' | 'unchanged' | 'unknown'
 }

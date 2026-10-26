@@ -72,12 +72,15 @@ import { PluginDeveloperModeWatcher } from './plugin-developer-mode.ts'
 import {
   catalogFingerprintMatches,
   createPluginCatalogGateway,
-  isCatalogVersionNewer,
   isPluginCatalogUrl,
   PLUGIN_CATALOG_ALLOWED_HOSTS,
   PLUGIN_CATALOG_MAX_PACKAGE_BYTES,
   selectLatestCompatiblePluginVersion,
 } from './plugin-catalog.ts'
+import {
+  buildPluginCatalogPanelItems,
+  PluginCatalogAutoCheckSchedule,
+} from './plugin-catalog-updates.ts'
 import {
   PluginPanelViewController,
   type PluginPanelNativeView,
@@ -199,6 +202,7 @@ let pluginBadgeController: PluginBadgeController | null = null
 const diagnosedPluginTrayOverflowIds = new Set<string>()
 let pluginNetworkClient: PluginNetworkClient | null = null
 let pluginCatalogCache: { url: string; document: PluginCatalogDocument } | null = null
+let pluginCatalogAutoCheckSchedule: PluginCatalogAutoCheckSchedule | null = null
 let pluginHostGrantController: PluginHostGrantController | null = null
 let pluginFeedController: PluginFeedController | null = null
 let pluginAgentStatusController: PluginAgentStatusController | null = null
@@ -1037,6 +1041,52 @@ function createMainPluginCatalogGateway() {
   })
 }
 
+function checkPluginCatalogUpdates(): Promise<number> {
+  return (async () => {
+    if (!pluginRegistry || !pluginPreferences) throw new Error('Plugin catalog services unavailable')
+    const preferences = pluginPreferences.get()
+    if (!preferences.onlineCatalogEnabled || !preferences.dailyUpdateCheck
+      || !isPluginCatalogUrl(preferences.catalogUrl)) throw new Error('Plugin catalog auto-check disabled')
+    const result = await createMainPluginCatalogGateway().load(preferences.catalogUrl)
+    if (!result.ok) throw new Error('Plugin catalog check failed')
+    const items = buildPluginCatalogPanelItems(result.value, pluginRegistry.list())
+    return items.filter(item => item.updateAvailable).length
+  })()
+}
+
+function initializePluginCatalogAutoCheck(): void {
+  if (!pluginPreferences || !pluginRegistry || pluginCatalogAutoCheckSchedule) return
+  pluginCatalogAutoCheckSchedule = new PluginCatalogAutoCheckSchedule({
+    isEnabled: () => {
+      try {
+        const preferences = pluginPreferences?.get()
+        return preferences?.onlineCatalogEnabled === true && preferences.dailyUpdateCheck
+          && isPluginCatalogUrl(preferences.catalogUrl)
+      } catch { return false }
+    },
+    getLastCheckedDay: () => pluginPreferences?.getLastCatalogAutoCheckDay() ?? null,
+    setLastCheckedDay: day => {
+      if (!pluginPreferences) throw new Error('Plugin preferences unavailable')
+      pluginPreferences.setLastCatalogAutoCheckDay(day)
+    },
+    check: checkPluginCatalogUpdates,
+    notify: updateCount => {
+      pluginFeedController?.addSystemNotification(
+        'agent-pets-catalog',
+        { 'zh-TW': 'Agent Pets', 'en-US': 'Agent Pets' },
+        t('pluginCatalogAutoCheckTitle'),
+        updateCount > 0
+          ? t('pluginCatalogAutoCheckFound', { count: String(updateCount) })
+          : t('pluginCatalogAutoCheckNone'),
+      )
+    },
+  })
+  void pluginCatalogAutoCheckSchedule.checkIfDue()
+  setInterval(() => {
+    void pluginCatalogAutoCheckSchedule?.checkIfDue()
+  }, 60 * 60 * 1_000)
+}
+
 function createPluginServices(): void {
   if (pluginRegistry || pluginPreferences || pluginHostWindow) return
   const userDataDirectory = app.getPath('userData')
@@ -1507,6 +1557,9 @@ function createPluginServices(): void {
       const preferences = pluginPreferences.updateGlobal(patch)
       if (!preferences.onlineCatalogEnabled || preferences.catalogUrl !== previous.catalogUrl) pluginCatalogCache = null
       syncPluginHost()
+      if (preferences.dailyUpdateCheck && pluginCatalogAutoCheckSchedule) {
+        void pluginCatalogAutoCheckSchedule.checkIfDue()
+      }
       return { ok: true, value: preferences }
     } catch (error) {
       return { ok: false, error: pluginPanelError(error) }
@@ -1522,19 +1575,7 @@ function createPluginServices(): void {
     const catalog = await createMainPluginCatalogGateway().load(preferences.catalogUrl)
     if (!catalog.ok) return { ok: false, error: catalog.error }
     pluginCatalogCache = { url: preferences.catalogUrl, document: catalog.value }
-    const installed = new Map(pluginRegistry.list().map(plugin => [plugin.id, plugin.currentVersion] as const))
-    const items: PluginCatalogPanelItem[] = []
-    for (const plugin of catalog.value.plugins) {
-      const latestVersion = selectLatestCompatiblePluginVersion(plugin, '1')
-      if (!latestVersion) continue
-      const installedVersion = installed.get(plugin.id) ?? null
-      items.push({
-        plugin,
-        latestVersion,
-        installedVersion,
-        updateAvailable: installedVersion !== null && isCatalogVersionNewer(installedVersion, latestVersion.version),
-      })
-    }
+    const items: PluginCatalogPanelItem[] = buildPluginCatalogPanelItems(catalog.value, pluginRegistry.list())
     return { ok: true, value: items }
   })
   ipcMain.handle('plugin-catalog-install', async (event, pluginId: unknown, version: unknown) => {
@@ -3161,6 +3202,7 @@ app.whenReady().then(() => {
   broadcastPowerSaveState()
   createPresentationServices(presentationToken)
   syncPluginHost()
+  initializePluginCatalogAutoCheck()
   screen.on('display-added', rehomePetWindowForDisplayChange)
   screen.on('display-removed', rehomePetWindowForDisplayChange)
   screen.on('display-metrics-changed', rehomePetWindowForDisplayChange)

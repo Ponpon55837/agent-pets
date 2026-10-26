@@ -164,6 +164,7 @@ export interface PluginPreferences {
   pluginsEnabled: boolean
   developerMode: boolean
   onlineCatalogEnabled: boolean
+  dailyUpdateCheck: boolean
   catalogUrl: string
   resources: PluginResourceLimits
   plugins: Record<string, PluginInstancePreferences>
@@ -173,6 +174,7 @@ export interface PluginGlobalPreferencesPatch {
   pluginsEnabled?: boolean
   developerMode?: boolean
   onlineCatalogEnabled?: boolean
+  dailyUpdateCheck?: boolean
   catalogUrl?: string
   resources?: Partial<PluginResourceLimits>
 }

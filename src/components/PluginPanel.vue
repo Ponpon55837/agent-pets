@@ -49,6 +49,7 @@ const pendingPlan = ref<PluginInstallPlan | null>(null)
 const pendingRemove = ref<PluginPanelPlugin | null>(null)
 const pendingSecretConsentKey = ref('')
 const catalogItems = ref<PluginCatalogPanelItem[]>([])
+const catalogCheckComplete = ref(false)
 const catalogSearch = ref('')
 const catalogUrlDraft = ref('')
 const keepData = ref(false)
@@ -62,6 +63,7 @@ const selectedPlugin = computed(() => plugins.value.find(plugin => plugin.id ===
 const panelViewPlugin = computed(() => plugins.value.find(plugin => plugin.id === panelViewPluginId.value) ?? null)
 const enabledGlobally = computed(() => snapshot.value?.preferences.pluginsEnabled ?? false)
 const onlineCatalogEnabled = computed(() => snapshot.value?.preferences.onlineCatalogEnabled ?? false)
+const dailyUpdateCheck = computed(() => snapshot.value?.preferences.dailyUpdateCheck ?? false)
 const filteredCatalogItems = computed(() => {
   const query = catalogSearch.value.trim().toLocaleLowerCase()
   if (!query) return catalogItems.value
@@ -460,6 +462,7 @@ async function confirmSecretConsent(): Promise<void> {
 
 async function updateGlobalPreferences(patch: PluginGlobalPreferencesPatch): Promise<void> {
   if (busy.value) return
+  const previousCatalogUrl = snapshot.value?.preferences.catalogUrl
   busy.value = true
   errorMessage.value = ''
   statusMessage.value = ''
@@ -471,8 +474,9 @@ async function updateGlobalPreferences(patch: PluginGlobalPreferencesPatch): Pro
     }
     if (snapshot.value) snapshot.value.preferences = result.value
     if (patch.onlineCatalogEnabled === false
-      || (patch.catalogUrl !== undefined && patch.catalogUrl !== snapshot.value?.preferences.catalogUrl)) {
+      || (patch.catalogUrl !== undefined && patch.catalogUrl !== previousCatalogUrl)) {
       catalogItems.value = []
+      catalogCheckComplete.value = false
     }
     await refreshPanel()
   } catch {
@@ -485,7 +489,10 @@ async function updateGlobalPreferences(patch: PluginGlobalPreferencesPatch): Pro
 async function saveCatalogUrl(): Promise<void> {
   const previousUrl = snapshot.value?.preferences.catalogUrl ?? ''
   await updateGlobalPreferences({ catalogUrl: catalogUrlDraft.value })
-  if (previousUrl !== snapshot.value?.preferences.catalogUrl) catalogItems.value = []
+  if (previousUrl !== snapshot.value?.preferences.catalogUrl) {
+    catalogItems.value = []
+    catalogCheckComplete.value = false
+  }
 }
 
 async function loadPluginCatalog(): Promise<void> {
@@ -500,7 +507,11 @@ async function loadPluginCatalog(): Promise<void> {
       return
     }
     catalogItems.value = result.value
-    statusMessage.value = t('pluginCatalogLoaded', { count: String(result.value.length) })
+    catalogCheckComplete.value = true
+    statusMessage.value = t('pluginCatalogChecked', {
+      entries: String(result.value.length),
+      updates: String(result.value.filter(item => item.updateAvailable).length),
+    })
   } catch {
     setError('catalog_unavailable')
   } finally {
@@ -949,6 +960,13 @@ onUnmounted(() => {
             </Button>
           </div>
         </div>
+        <ToggleRow
+          :model-value="dailyUpdateCheck"
+          :label="t('pluginCatalogDailyCheck')"
+          :help="t('pluginCatalogDailyCheckHelp')"
+          :disabled="busy || loading || !snapshot?.preferences.catalogUrl"
+          @update:model-value="updateGlobalPreferences({ dailyUpdateCheck: $event })"
+        />
         <label v-if="catalogItems.length" class="plugin-preference-field">
           <span>{{ t('pluginCatalogSearchLabel') }}</span>
           <input v-model="catalogSearch" type="search" :placeholder="t('pluginCatalogSearchPlaceholder')" />
@@ -970,9 +988,26 @@ onUnmounted(() => {
                 <span v-if="item.installedVersion">
                   {{ t('pluginCatalogInstalledVersion', { version: item.installedVersion }) }}
                 </span>
+                <span v-if="item.updateAvailable && item.permissionsIncreased === null">
+                  {{ t('pluginCatalogPermissionsCheckOnUpdate') }}
+                </span>
+                <span v-if="item.updateAvailable && item.signingKeyChange === 'changed'" class="plugin-development-badge">
+                  {{ t('pluginCatalogSigningKeyChanged') }}
+                </span>
+                <span v-else-if="item.updateAvailable && item.signingKeyChange === 'unchanged'">
+                  {{ t('pluginCatalogSigningKeyUnchanged') }}
+                </span>
+                <span v-else-if="item.updateAvailable">
+                  {{ t('pluginCatalogSigningKeyCheckOnUpdate') }}
+                </span>
+                <span v-if="item.catalogOlder" class="plugin-development-badge">
+                  {{ t('pluginCatalogOlderThanInstalled') }}
+                </span>
               </div>
-              <Button variant="secondary" size="sm" :disabled="busy" @click="installCatalogPlugin(item)">
-                {{ t(item.installedVersion ? 'pluginCatalogInstallUpdate' : 'pluginCatalogInstall') }}
+              <Button variant="secondary" size="sm"
+                :disabled="busy || (item.installedVersion !== null && !item.updateAvailable)"
+                @click="installCatalogPlugin(item)">
+                {{ t(!item.installedVersion ? 'pluginCatalogInstall' : item.updateAvailable ? 'pluginCatalogUpdate' : 'pluginCatalogUpToDate') }}
               </Button>
             </div>
           </Card>
@@ -1001,6 +1036,9 @@ onUnmounted(() => {
             <div class="plugin-copy">
               <strong :title="pluginName(plugin)">{{ pluginName(plugin) }}</strong>
               <span>{{ plugin.id }} · {{ t('pluginVersion', { version: plugin.currentVersion }) }}</span>
+              <span v-if="catalogCheckComplete && !catalogItems.some(item => item.plugin.id === plugin.id)" class="plugin-development-badge">
+                {{ t('pluginCatalogNotOnline') }}
+              </span>
               <span v-if="plugin.development || plugin.signatureStatus === 'unverified'" class="plugin-development-badge">{{ t('pluginSignatureDeveloperUnverified') }}</span>
               <span v-else class="plugin-signature-status">
                 {{ t(plugin.signatureStatus === 'valid' ? 'pluginSignatureVerified' : 'pluginSignatureUnsigned') }}

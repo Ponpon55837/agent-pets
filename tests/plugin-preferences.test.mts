@@ -247,6 +247,7 @@ test('online catalog stays off by default and persists only allowed HTTPS GitHub
   withUserData((userData) => {
     const store = new PluginPreferencesStore(userData)
     assert.equal(store.get().onlineCatalogEnabled, false)
+    assert.equal(store.get().dailyUpdateCheck, false)
     assert.equal(store.get().catalogUrl, '')
     assert.throws(() => store.updateGlobal({ catalogUrl: 'http://raw.githubusercontent.com/example/index.json' }), /catalog URL/)
     assert.throws(() => store.updateGlobal({ catalogUrl: 'https://example.com/index.json' }), /catalog URL/)
@@ -260,5 +261,21 @@ test('online catalog stays off by default and persists only allowed HTTPS GitHub
     assert.equal(updated.onlineCatalogEnabled, true)
     assert.equal(new PluginPreferencesStore(userData).get().catalogUrl,
       'https://raw.githubusercontent.com/example/plugins/main/index.json')
+    const scheduled = store.updateGlobal({ dailyUpdateCheck: true })
+    assert.equal(scheduled.dailyUpdateCheck, true)
+    assert.throws(() => store.updateGlobal({ dailyUpdateCheck: 'yes' as unknown as boolean }), /must be boolean/)
+    assert.equal(store.updateGlobal({ onlineCatalogEnabled: false }).dailyUpdateCheck, false)
+    assert.throws(() => store.updateGlobal({ dailyUpdateCheck: true }), /require the online catalog/)
+  })
+})
+
+test('daily catalog check date persists privately and rejects malformed dates', () => {
+  withUserData((userData) => {
+    const store = new PluginPreferencesStore(userData)
+    assert.equal(store.getLastCatalogAutoCheckDay(), null)
+    assert.throws(() => store.setLastCatalogAutoCheckDay('2026-99-99'), /day is invalid/)
+    store.setLastCatalogAutoCheckDay('2026-10-26')
+    assert.equal(new PluginPreferencesStore(userData).getLastCatalogAutoCheckDay(), '2026-10-26')
+    assert.equal(Object.hasOwn(new PluginPreferencesStore(userData).get(), 'lastCatalogAutoCheckDay'), false)
   })
 })
