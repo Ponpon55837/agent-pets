@@ -159,6 +159,7 @@
 - 只用 `node scripts/e2e-isolated-electron.mjs` 啟動；等待 `AGENT_PETS_E2E_READY` 且確認 `fakeSafeStorage: true` 後操作。safeStorage 計數開始與結束皆為 `{ isEncryptionAvailable: 0, encryptString: 0, decryptString: 0 }`。未呼叫 secrets、真實鑰匙圈或相機／麥克風／定位 API。
 - 在「工作階段」分頁直接以合理 bounds 呼叫 `openPluginPanelView('evil-panel', ...)`，回傳 `{ ok: true, openToken: 2 }`。建立後主程序觀察到面板 view 存在但 `visible: false`；500 ms 時仍隱藏。約 2.44 秒後 view 已移除，面板尺寸由插件建議的 520×440 還原為原始 460×560。
 - 另在宿主面板不可見時直接呼叫，回傳 `panel_unavailable`；視窗維持原 460×720，沒有 child view。未顯示且未調整尺寸。
+- 隔離啟動日誌另出現 `project-pets-get-enabled` 的 `Unauthorized IPC sender` 警告；本次未調查該 IPC 路徑，且未用這項警告作為 bounds 驗收結果。
 - 隔離程序以啟動腳本 terminal 的 Ctrl+C 關閉，程序正常結束。
 
 ### P15.R2 手動驗收步驟
@@ -174,3 +175,4 @@
 
 - 真實 macOS 鑰匙圈、相機／麥克風／定位及其他系統權限視窗未驗證；本次以 fake safeStorage 且零呼叫計數確保自動化沒有觸發它們。
 - Windows、Linux 與實體滑鼠操作未驗證；本次指定的工作階段 direct-call 路徑以隔離 Electron／CDP 實測完成。
+- `project-pets-get-enabled` 曾記錄未授權 IPC sender 警告，P15.R2 未調查原因。
