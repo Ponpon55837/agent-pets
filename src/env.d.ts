@@ -30,6 +30,7 @@ import type {
   PluginPreferences,
   PluginSettingScalar,
 } from '@/types/plugin'
+import type { PluginCatalogPanelItem } from '@/types/plugin-catalog'
 import type {
   ProjectMcpRegistrySnapshot,
   ProjectMcpRemovalSummary,
@@ -70,6 +71,8 @@ declare global {
       acceptPluginSecretConsent: () => Promise<PluginPanelResult<boolean>>
       setPluginSecret: (pluginId: string, key: string, value: string) => Promise<PluginPanelResult<{ configured: boolean }>>
       setPluginGlobalPreferences: (patch: PluginGlobalPreferencesPatch) => Promise<PluginPanelResult<PluginPreferences>>
+      listPluginCatalog: () => Promise<PluginPanelResult<PluginCatalogPanelItem[]>>
+      installPluginFromCatalog: (pluginId: string, version: string) => Promise<PluginPanelResult<PluginInstallPlan>>
       setPluginInstancePreferences: (pluginId: string, patch: unknown) => Promise<PluginPanelResult<PluginPreferences>>
       selectPluginArchive: () => Promise<PluginPanelResult<PluginInstallPlan>>
       selectPluginFolder: () => Promise<PluginPanelResult<PluginInstallPlan>>

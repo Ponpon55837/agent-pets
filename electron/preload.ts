@@ -23,6 +23,7 @@ import type {
   PluginPreferences,
   PluginSettingScalar,
 } from '../src/types/plugin.ts'
+import type { PluginCatalogPanelItem } from '../src/types/plugin-catalog.ts'
 import type {
   ProjectMcpRegistrySnapshot,
   ProjectMcpRemovalSummary,
@@ -97,6 +98,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   acceptPluginSecretConsent: (): Promise<PluginPanelResult<boolean>> => ipcRenderer.invoke('plugin-secret-consent-accept'),
   setPluginSecret: (pluginId: string, key: string, value: string): Promise<PluginPanelResult<{ configured: boolean }>> => ipcRenderer.invoke('plugin-secret-set', pluginId, key, value),
   setPluginGlobalPreferences: (patch: PluginGlobalPreferencesPatch): Promise<PluginPanelResult<PluginPreferences>> => ipcRenderer.invoke('plugin-preferences-global-set', patch),
+  listPluginCatalog: (): Promise<PluginPanelResult<PluginCatalogPanelItem[]>> => ipcRenderer.invoke('plugin-catalog-list'),
+  installPluginFromCatalog: (pluginId: string, version: string): Promise<PluginPanelResult<PluginInstallPlan>> => ipcRenderer.invoke('plugin-catalog-install', pluginId, version),
   setPluginInstancePreferences: (pluginId: string, patch: unknown): Promise<PluginPanelResult<PluginPreferences>> => ipcRenderer.invoke('plugin-preferences-instance-set', pluginId, patch),
   selectPluginArchive: (): Promise<PluginPanelResult<PluginInstallPlan>> => ipcRenderer.invoke('plugin-install-select'),
   selectPluginFolder: (): Promise<PluginPanelResult<PluginInstallPlan>> => ipcRenderer.invoke('plugin-install-select-folder'),

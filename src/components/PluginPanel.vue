@@ -17,6 +17,7 @@ import type {
   PluginPreferences,
   PluginSettingScalar,
 } from '@/types/plugin'
+import type { PluginCatalogPanelItem } from '@/types/plugin-catalog'
 import { isValidPetId } from '@/utils/pet-id'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
@@ -47,6 +48,9 @@ const statusMessage = ref('')
 const pendingPlan = ref<PluginInstallPlan | null>(null)
 const pendingRemove = ref<PluginPanelPlugin | null>(null)
 const pendingSecretConsentKey = ref('')
+const catalogItems = ref<PluginCatalogPanelItem[]>([])
+const catalogSearch = ref('')
+const catalogUrlDraft = ref('')
 const keepData = ref(false)
 let removeNotificationsListener: (() => void) | null = null
 let removePanelClosedListener: (() => void) | null = null
@@ -57,6 +61,17 @@ const plugins = computed(() => snapshot.value?.plugins ?? [])
 const selectedPlugin = computed(() => plugins.value.find(plugin => plugin.id === selectedPluginId.value) ?? null)
 const panelViewPlugin = computed(() => plugins.value.find(plugin => plugin.id === panelViewPluginId.value) ?? null)
 const enabledGlobally = computed(() => snapshot.value?.preferences.pluginsEnabled ?? false)
+const onlineCatalogEnabled = computed(() => snapshot.value?.preferences.onlineCatalogEnabled ?? false)
+const filteredCatalogItems = computed(() => {
+  const query = catalogSearch.value.trim().toLocaleLowerCase()
+  if (!query) return catalogItems.value
+  return catalogItems.value.filter(item => [
+    item.plugin.id,
+    item.plugin.name[locale.value],
+    item.plugin.description[locale.value],
+    item.plugin.author,
+  ].some(value => value.toLocaleLowerCase().includes(query)))
+})
 const hasCompatiblePlan = computed(() => Boolean(pendingPlan.value && pendingPlan.value.kind !== 'incompatible'))
 const pendingPluginName = computed(() => pendingPlan.value?.name?.[locale.value] ?? pendingPlan.value?.pluginId ?? '')
 const resourceFields: Array<{
@@ -219,6 +234,14 @@ function localizedError(code: string): string {
     dialog_unavailable: 'pluginActionFailed',
     install_failed: 'pluginActionFailed',
     registry_unavailable: 'pluginActionFailed',
+    catalog_disabled: 'pluginCatalogDisabledError',
+    catalog_url_invalid: 'pluginCatalogUrlInvalid',
+    catalog_unavailable: 'pluginCatalogUnavailable',
+    catalog_invalid: 'pluginCatalogInvalid',
+    download_mismatch: 'pluginCatalogDownloadMismatch',
+    signature_mismatch: 'pluginCatalogSignatureMismatch',
+    plugin_not_in_catalog: 'pluginCatalogUnavailable',
+    host_not_allowed: 'pluginCatalogHostNotAllowed',
   }
   return t(keys[code] ?? 'pluginActionFailed')
 }
@@ -250,6 +273,7 @@ async function refreshPanel(): Promise<void> {
       return
     }
     snapshot.value = result.value
+    catalogUrlDraft.value = result.value.preferences.catalogUrl
     const requestedPluginId = props.requestedPluginId
     if (requestedPluginId && result.value.plugins.some(plugin => plugin.id === requestedPluginId)) {
       selectedPluginId.value = requestedPluginId
@@ -446,7 +470,56 @@ async function updateGlobalPreferences(patch: PluginGlobalPreferencesPatch): Pro
       return
     }
     if (snapshot.value) snapshot.value.preferences = result.value
+    if (patch.onlineCatalogEnabled === false
+      || (patch.catalogUrl !== undefined && patch.catalogUrl !== snapshot.value?.preferences.catalogUrl)) {
+      catalogItems.value = []
+    }
     await refreshPanel()
+  } catch {
+    setError('plugin_action_failed')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function saveCatalogUrl(): Promise<void> {
+  const previousUrl = snapshot.value?.preferences.catalogUrl ?? ''
+  await updateGlobalPreferences({ catalogUrl: catalogUrlDraft.value })
+  if (previousUrl !== snapshot.value?.preferences.catalogUrl) catalogItems.value = []
+}
+
+async function loadPluginCatalog(): Promise<void> {
+  if (busy.value || !onlineCatalogEnabled.value) return
+  busy.value = true
+  errorMessage.value = ''
+  statusMessage.value = ''
+  try {
+    const result = await window.electronAPI?.listPluginCatalog()
+    if (!result?.ok) {
+      if (result && !result.ok) setError(result.error)
+      return
+    }
+    catalogItems.value = result.value
+    statusMessage.value = t('pluginCatalogLoaded', { count: String(result.value.length) })
+  } catch {
+    setError('catalog_unavailable')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function installCatalogPlugin(item: PluginCatalogPanelItem): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  errorMessage.value = ''
+  statusMessage.value = ''
+  try {
+    const result = await window.electronAPI?.installPluginFromCatalog(item.plugin.id, item.latestVersion.version)
+    if (!result?.ok) {
+      if (result && !result.ok) setError(result.error)
+      return
+    }
+    pendingPlan.value = result.value
   } catch {
     setError('plugin_action_failed')
   } finally {
@@ -852,6 +925,61 @@ onUnmounted(() => {
       </div>
     </Card>
 
+    <Card :title="t('pluginCatalogHeading')" class="plugin-section">
+      <ToggleRow
+        :model-value="onlineCatalogEnabled"
+        :label="t('pluginCatalogEnabled')"
+        :help="t('pluginCatalogEnabledHelp')"
+        :disabled="busy || loading"
+        @update:model-value="updateGlobalPreferences({ onlineCatalogEnabled: $event })"
+      />
+      <template v-if="onlineCatalogEnabled">
+        <div class="plugin-catalog-controls">
+          <label class="plugin-preference-field">
+            <span>{{ t('pluginCatalogUrlLabel') }}</span>
+            <input v-model="catalogUrlDraft" type="url" maxlength="2048" autocomplete="url" :disabled="busy || loading" />
+            <small>{{ t('pluginCatalogUrlHelp') }}</small>
+          </label>
+          <div class="plugin-toolbar-actions">
+            <Button variant="secondary" size="sm" :disabled="busy || loading" @click="saveCatalogUrl">
+              {{ t('pluginCatalogSaveUrl') }}
+            </Button>
+            <Button variant="primary" size="sm" :disabled="busy || loading || !snapshot?.preferences.catalogUrl" @click="loadPluginCatalog">
+              {{ t('pluginCatalogLoad') }}
+            </Button>
+          </div>
+        </div>
+        <label v-if="catalogItems.length" class="plugin-preference-field">
+          <span>{{ t('pluginCatalogSearchLabel') }}</span>
+          <input v-model="catalogSearch" type="search" :placeholder="t('pluginCatalogSearchPlaceholder')" />
+        </label>
+        <div v-if="catalogItems.length === 0" class="plugin-empty">{{ t('pluginCatalogEmpty') }}</div>
+        <div v-else-if="filteredCatalogItems.length === 0" class="plugin-empty">{{ t('pluginCatalogNoMatches') }}</div>
+        <div v-else class="plugin-list" role="list" :aria-label="t('pluginCatalogHeading')">
+          <Card v-for="item in filteredCatalogItems" :key="item.plugin.id" class="plugin-card" role="listitem">
+            <div class="plugin-row">
+              <div class="plugin-copy">
+                <strong :title="item.plugin.name[locale]">{{ item.plugin.name[locale] }}</strong>
+                <span>{{ item.plugin.id }} · {{ t('pluginCatalogAuthor', { author: item.plugin.author }) }}</span>
+                <span>{{ item.plugin.description[locale] }}</span>
+                <span>{{ t('pluginVersion', { version: item.latestVersion.version }) }}</span>
+                <span v-if="item.plugin.publicKeyFingerprint" class="plugin-signature-fingerprint">
+                  {{ t('pluginCatalogSignaturePinned', { fingerprint: displayFingerprint(item.plugin.publicKeyFingerprint) }) }}
+                </span>
+                <span v-else>{{ t('pluginCatalogSignatureUnpinned') }}</span>
+                <span v-if="item.installedVersion">
+                  {{ t('pluginCatalogInstalledVersion', { version: item.installedVersion }) }}
+                </span>
+              </div>
+              <Button variant="secondary" size="sm" :disabled="busy" @click="installCatalogPlugin(item)">
+                {{ t(item.installedVersion ? 'pluginCatalogInstallUpdate' : 'pluginCatalogInstall') }}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      </template>
+    </Card>
+
     <div v-if="errorMessage" class="error-msg plugin-message" role="alert">{{ errorMessage }}</div>
     <div v-if="statusMessage" class="plugin-message plugin-success" role="status" aria-live="polite">{{ statusMessage }}</div>
 
@@ -1102,6 +1230,7 @@ onUnmounted(() => {
       @cancel="pendingPlan = null"
     >
       <div v-if="pendingPlan" class="plugin-plan-content">
+        <p v-if="pendingPlan.source === 'catalog'" class="plugin-catalog-source">{{ t('pluginCatalogInstallSource') }}</p>
         <p>{{ t('pluginPlanSummary', {
           name: pendingPluginName,
           version: pendingPlan.version ?? '',
@@ -1221,6 +1350,9 @@ onUnmounted(() => {
 .plugin-section-heading p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--font-xs); }
 .plugin-count { flex: 0 0 auto; color: var(--text-muted); font-size: var(--font-xs); }
 .plugin-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.plugin-catalog-controls { display: flex; align-items: end; flex-wrap: wrap; gap: var(--space-3); }
+.plugin-catalog-controls > .plugin-preference-field { min-width: min(100%, 280px); flex: 1 1 320px; }
+.plugin-catalog-source { color: var(--text-secondary); font-weight: var(--weight-medium); }
 .plugin-setting-field { display: flex; flex-direction: column; gap: var(--space-2); color: var(--text-secondary); font-size: var(--font-sm); }
 .plugin-setting-label { color: var(--text-primary); font-size: var(--font-sm); }
 .plugin-setting-field > input:not([type="checkbox"]), .plugin-setting-field > select, .plugin-secret-control > input { width: 100%; min-height: 36px; padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-raised); color: var(--text-primary); }

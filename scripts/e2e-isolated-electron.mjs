@@ -62,6 +62,7 @@ globalThis.__agentPetsE2E = {
   root,
   userData,
   calls,
+  catalogFixture: null,
   panelViewBlockedRequests: 0,
 }
 console.log('AGENT_PETS_E2E_READY ' + JSON.stringify({ root, userData: app.getPath('userData'), home: require('node:os').homedir(), fakeSafeStorage: fake }))

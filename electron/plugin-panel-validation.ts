@@ -37,6 +37,7 @@ export function pluginPanelErrorCode(error: unknown): string {
     && ['secret_unavailable', 'secret_not_found', 'settings_invalid', 'too_large', 'not_permitted'].includes(String(error.code))) {
     return String(error.code)
   }
+  if (error instanceof TypeError && error.message === 'Plugin catalog URL is invalid') return 'catalog_url_invalid'
   if (error instanceof TypeError) return 'invalid_request'
   return 'plugin_action_failed'
 }

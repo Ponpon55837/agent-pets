@@ -3,6 +3,7 @@ import * as path from 'node:path'
 import type { PluginInstancePreferences, PluginPreferences, PluginResourceLimits } from '../src/types/plugin.ts'
 import { isValidPetId } from '../src/utils/pet-id.ts'
 import { isValidPluginNetworkHost } from './plugin-manifest.ts'
+import { isPluginCatalogUrl } from './plugin-catalog.ts'
 import { writeJsonAtomic } from './desktop-preferences.ts'
 
 export const PLUGIN_PREFERENCES_FILENAME = 'plugin-preferences.json'
@@ -42,6 +43,8 @@ export const DEFAULT_PLUGIN_RESOURCES = Object.freeze({
 export const DEFAULT_PLUGIN_PREFERENCES = Object.freeze({
   pluginsEnabled: false,
   developerMode: false,
+  onlineCatalogEnabled: false,
+  catalogUrl: '',
   resources: DEFAULT_PLUGIN_RESOURCES,
   plugins: Object.freeze({}),
 }) as PluginPreferences
@@ -66,6 +69,8 @@ function clonePluginPreferences(value: PluginPreferences): PluginPreferences {
   return {
     pluginsEnabled: value.pluginsEnabled,
     developerMode: value.developerMode,
+    onlineCatalogEnabled: value.onlineCatalogEnabled,
+    catalogUrl: value.catalogUrl,
     resources: { ...value.resources },
     plugins,
   }
@@ -138,6 +143,9 @@ function parseStoredPreferences(value: unknown): PluginPreferences | null {
   if (!isRecord(value)) return null
   const pluginsEnabled = typeof value.pluginsEnabled === 'boolean' ? value.pluginsEnabled : false
   const developerMode = typeof value.developerMode === 'boolean' ? value.developerMode : false
+  const onlineCatalogEnabled = value.onlineCatalogEnabled === true
+  const catalogUrl = typeof value.catalogUrl === 'string' && value.catalogUrl.length <= 2_048
+    && (value.catalogUrl === '' || isPluginCatalogUrl(value.catalogUrl)) ? value.catalogUrl : ''
   const resources = parseStoredResourceValues(value.resources)
 
   const plugins: Record<string, PluginInstancePreferences> = {}
@@ -149,7 +157,7 @@ function parseStoredPreferences(value: unknown): PluginPreferences | null {
     }
   }
 
-  return { pluginsEnabled, developerMode, resources, plugins }
+  return { pluginsEnabled, developerMode, onlineCatalogEnabled, catalogUrl, resources, plugins }
 }
 
 interface StoredPreferencesRead {
@@ -207,23 +215,34 @@ function readStoredPreferences(filePath: string): StoredPreferencesRead {
 function parseGlobalPatch(value: unknown): {
   pluginsEnabled?: boolean
   developerMode?: boolean
+  onlineCatalogEnabled?: boolean
+  catalogUrl?: string
   resources?: Partial<PluginResourceLimits>
 } {
   if (!isRecord(value)) throw new TypeError('Plugin preferences patch must be an object')
-  const allowed = new Set(['pluginsEnabled', 'developerMode', 'resources'])
+  const allowed = new Set(['pluginsEnabled', 'developerMode', 'onlineCatalogEnabled', 'catalogUrl', 'resources'])
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) throw new TypeError(`Unsupported plugin preference: ${key}`)
   }
   const patch: {
     pluginsEnabled?: boolean
     developerMode?: boolean
+    onlineCatalogEnabled?: boolean
+    catalogUrl?: string
     resources?: Partial<PluginResourceLimits>
   } = {}
-  for (const key of ['pluginsEnabled', 'developerMode'] as const) {
+  for (const key of ['pluginsEnabled', 'developerMode', 'onlineCatalogEnabled'] as const) {
     if (value[key] !== undefined) {
       if (typeof value[key] !== 'boolean') throw new TypeError(`Plugin preference ${key} must be boolean`)
       patch[key] = value[key]
     }
+  }
+  if (value.catalogUrl !== undefined) {
+    if (typeof value.catalogUrl !== 'string' || value.catalogUrl.length > 2_048
+      || (value.catalogUrl !== '' && !isPluginCatalogUrl(value.catalogUrl))) {
+      throw new TypeError('Plugin catalog URL is invalid')
+    }
+    patch.catalogUrl = value.catalogUrl
   }
   if (value.resources !== undefined) {
     const resources = parseResourceValues(value.resources, DEFAULT_PLUGIN_RESOURCES)

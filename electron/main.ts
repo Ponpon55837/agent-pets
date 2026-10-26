@@ -70,6 +70,15 @@ import { effectivePluginScheduleMinimum } from './plugin-schedule.ts'
 import { PluginUiMessageGuard } from './plugin-ui-messages.ts'
 import { PluginDeveloperModeWatcher } from './plugin-developer-mode.ts'
 import {
+  catalogFingerprintMatches,
+  createPluginCatalogGateway,
+  isCatalogVersionNewer,
+  isPluginCatalogUrl,
+  PLUGIN_CATALOG_ALLOWED_HOSTS,
+  PLUGIN_CATALOG_MAX_PACKAGE_BYTES,
+  selectLatestCompatiblePluginVersion,
+} from './plugin-catalog.ts'
+import {
   PluginPanelViewController,
   type PluginPanelNativeView,
   type PluginPanelViewSession,
@@ -102,6 +111,7 @@ import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achiev
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
 import type { PresentationIntent, PresentationStatusSnapshot } from '../src/types/presentation'
 import type { PluginPanelPlugin, PluginPanelResult, PluginPanelSettingsSnapshot, PluginPanelSnapshot } from '../src/types/plugin'
+import type { PluginCatalogDocument, PluginCatalogPanelItem } from '../src/types/plugin-catalog.ts'
 import type { ProjectMcpRegistrySnapshot, ProjectMcpRemovalSummary } from '../src/types/project-mcp'
 import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from '../src/types/project-pet'
 import type { PetEdge, PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
@@ -188,6 +198,7 @@ let pluginCommandController: PluginCommandController | null = null
 let pluginBadgeController: PluginBadgeController | null = null
 const diagnosedPluginTrayOverflowIds = new Set<string>()
 let pluginNetworkClient: PluginNetworkClient | null = null
+let pluginCatalogCache: { url: string; document: PluginCatalogDocument } | null = null
 let pluginHostGrantController: PluginHostGrantController | null = null
 let pluginFeedController: PluginFeedController | null = null
 let pluginAgentStatusController: PluginAgentStatusController | null = null
@@ -970,6 +981,62 @@ function requestPluginNetwork(
   })
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function decodeCatalogBase64(value: unknown): Uint8Array {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 36_000_000
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+    throw new Error('Invalid catalog base64')
+  }
+  const bytes = Buffer.from(value, 'base64')
+  if (bytes.toString('base64') !== value) throw new Error('Invalid catalog base64')
+  return bytes
+}
+
+function createMainPluginCatalogGateway() {
+  return createPluginCatalogGateway({
+    fetchRegistry: async (url, maxBytes) => {
+      const e2eMode = Object.prototype.hasOwnProperty.call(globalThis, '__agentPetsE2E')
+      const e2e = (globalThis as typeof globalThis & { __agentPetsE2E?: unknown }).__agentPetsE2E
+      if (e2eMode) {
+        if (!isRecord(e2e)) throw new Error('Catalog fixture unavailable')
+        const fixture = e2e.catalogFixture
+        if (!isRecord(fixture) || fixture.registry === undefined) throw new Error('Catalog fixture unavailable')
+        return fixture.registry
+      }
+      if (!pluginNetworkClient) throw new Error('Plugin network unavailable')
+      const result = await pluginNetworkClient.fetch('agent-pets-catalog', url, undefined,
+        PLUGIN_CATALOG_ALLOWED_HOSTS, { maxResponseBytes: maxBytes, timeoutMs: 15_000, requestsPerMinute: 10 })
+      if (!result.ok) throw Object.assign(new Error('Catalog unavailable'), { code: result.error })
+      if (result.value.status < 200 || result.value.status >= 300) throw new Error('Catalog unavailable')
+      return result.value.isBase64Encoded
+        ? Buffer.from(decodeCatalogBase64(result.value.body)).toString('utf8')
+        : result.value.body
+    },
+    downloadArchive: async (url, maxBytes) => {
+      const e2eMode = Object.prototype.hasOwnProperty.call(globalThis, '__agentPetsE2E')
+      const e2e = (globalThis as typeof globalThis & { __agentPetsE2E?: unknown }).__agentPetsE2E
+      if (e2eMode) {
+        if (!isRecord(e2e)) throw new Error('Catalog fixture unavailable')
+        const fixture = e2e.catalogFixture
+        const downloads = isRecord(fixture) && isRecord(fixture.downloads) ? fixture.downloads : null
+        if (!downloads || !Object.prototype.hasOwnProperty.call(downloads, url)) throw new Error('Catalog fixture download unavailable')
+        return decodeCatalogBase64(downloads[url])
+      }
+      if (!pluginNetworkClient) throw new Error('Plugin network unavailable')
+      const result = await pluginNetworkClient.fetch('agent-pets-catalog', url, undefined,
+        PLUGIN_CATALOG_ALLOWED_HOSTS, { maxResponseBytes: Math.min(maxBytes, PLUGIN_CATALOG_MAX_PACKAGE_BYTES), timeoutMs: 15_000, requestsPerMinute: 10 })
+      if (!result.ok) throw Object.assign(new Error('Package unavailable'), { code: result.error })
+      if (result.value.status < 200 || result.value.status >= 300) throw new Error('Package unavailable')
+      return result.value.isBase64Encoded
+        ? decodeCatalogBase64(result.value.body)
+        : Buffer.from(result.value.body, 'utf8')
+    },
+  })
+}
+
 function createPluginServices(): void {
   if (pluginRegistry || pluginPreferences || pluginHostWindow) return
   const userDataDirectory = app.getPath('userData')
@@ -1436,12 +1503,73 @@ function createPluginServices(): void {
       return { ok: false, error: pluginPreferences ? 'invalid_request' : 'plugin_service_unavailable' }
     }
     try {
+      const previous = pluginPreferences.get()
       const preferences = pluginPreferences.updateGlobal(patch)
+      if (!preferences.onlineCatalogEnabled || preferences.catalogUrl !== previous.catalogUrl) pluginCatalogCache = null
       syncPluginHost()
       return { ok: true, value: preferences }
     } catch (error) {
       return { ok: false, error: pluginPanelError(error) }
     }
+  })
+  ipcMain.handle('plugin-catalog-list', async (event) => {
+    assertPluginPanelSender(event)
+    if (!pluginRegistry || !pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
+    let preferences: ReturnType<PluginPreferencesStore['get']>
+    try { preferences = pluginPreferences.get() } catch { return { ok: false, error: 'preferences_unsafe' } }
+    if (!preferences.onlineCatalogEnabled) return { ok: false, error: 'catalog_disabled' }
+    if (!isPluginCatalogUrl(preferences.catalogUrl)) return { ok: false, error: 'catalog_url_invalid' }
+    const catalog = await createMainPluginCatalogGateway().load(preferences.catalogUrl)
+    if (!catalog.ok) return { ok: false, error: catalog.error }
+    pluginCatalogCache = { url: preferences.catalogUrl, document: catalog.value }
+    const installed = new Map(pluginRegistry.list().map(plugin => [plugin.id, plugin.currentVersion] as const))
+    const items: PluginCatalogPanelItem[] = []
+    for (const plugin of catalog.value.plugins) {
+      const latestVersion = selectLatestCompatiblePluginVersion(plugin, '1')
+      if (!latestVersion) continue
+      const installedVersion = installed.get(plugin.id) ?? null
+      items.push({
+        plugin,
+        latestVersion,
+        installedVersion,
+        updateAvailable: installedVersion !== null && isCatalogVersionNewer(installedVersion, latestVersion.version),
+      })
+    }
+    return { ok: true, value: items }
+  })
+  ipcMain.handle('plugin-catalog-install', async (event, pluginId: unknown, version: unknown) => {
+    assertPluginPanelSender(event)
+    if (!pluginRegistry || !pluginPreferences) return { ok: false, error: 'plugin_service_unavailable' }
+    if (!isPluginPanelPluginId(pluginId) || typeof version !== 'string' || version.length > 100) {
+      return { ok: false, error: 'invalid_request' }
+    }
+    let preferences: ReturnType<PluginPreferencesStore['get']>
+    try { preferences = pluginPreferences.get() } catch { return { ok: false, error: 'preferences_unsafe' } }
+    if (!preferences.onlineCatalogEnabled) return { ok: false, error: 'catalog_disabled' }
+    if (!isPluginCatalogUrl(preferences.catalogUrl)) return { ok: false, error: 'catalog_url_invalid' }
+    const cachedCatalog = pluginCatalogCache
+    if (!cachedCatalog || cachedCatalog.url !== preferences.catalogUrl) return { ok: false, error: 'catalog_unavailable' }
+    const plugin = cachedCatalog.document.plugins.find(item => item.id === pluginId)
+    const latestVersion = plugin && selectLatestCompatiblePluginVersion(plugin, '1')
+    if (!plugin || !latestVersion || latestVersion.version !== version) return { ok: false, error: 'plugin_not_in_catalog' }
+    const downloaded = await createMainPluginCatalogGateway().download(latestVersion)
+    if (!downloaded.ok) return { ok: false, error: downloaded.error }
+    const planned = pluginRegistry.planInstall(downloaded.value)
+    if (!planned.ok) return { ok: false, error: planned.error }
+    if (planned.value.kind === 'incompatible' || planned.value.pluginId !== plugin.id
+      || planned.value.version !== latestVersion.version) return { ok: false, error: 'catalog_invalid' }
+    if (!catalogFingerprintMatches(plugin.publicKeyFingerprint, planned.value.signatureFingerprint)
+      || (plugin.publicKeyFingerprint !== undefined && planned.value.signatureStatus !== 'valid')) {
+      return { ok: false, error: 'signature_mismatch' }
+    }
+    while (pendingPluginPlanIds.size >= 20) {
+      const oldest = pendingPluginPlanIds.keys().next().value as string | undefined
+      if (oldest === undefined) break
+      pendingPluginPlanIds.delete(oldest)
+      pendingDeveloperFolders.delete(oldest)
+    }
+    pendingPluginPlanIds.set(planned.value.token, plugin.id)
+    return { ok: true, value: { ...planned.value, source: 'catalog' as const } }
   })
   ipcMain.handle('plugin-preferences-instance-set', (event, pluginId: unknown, patch: unknown) => {
     assertPluginPanelSender(event)

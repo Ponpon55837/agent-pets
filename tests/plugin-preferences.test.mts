@@ -242,3 +242,23 @@ test('removePlugin deletes only that plugin settings and writes the remaining pr
     assert.equal(new PluginPreferencesStore(userData).getPlugin('sample').enabled, false)
   })
 })
+
+test('online catalog stays off by default and persists only allowed HTTPS GitHub URLs', () => {
+  withUserData((userData) => {
+    const store = new PluginPreferencesStore(userData)
+    assert.equal(store.get().onlineCatalogEnabled, false)
+    assert.equal(store.get().catalogUrl, '')
+    assert.throws(() => store.updateGlobal({ catalogUrl: 'http://raw.githubusercontent.com/example/index.json' }), /catalog URL/)
+    assert.throws(() => store.updateGlobal({ catalogUrl: 'https://example.com/index.json' }), /catalog URL/)
+    assert.throws(() => store.updateGlobal({ catalogUrl: 'https://user:pass@github.com/example/index.json' }), /catalog URL/)
+    assert.throws(() => store.updateGlobal({ onlineCatalogEnabled: 'yes' as unknown as boolean }), /must be boolean/)
+
+    const updated = store.updateGlobal({
+      onlineCatalogEnabled: true,
+      catalogUrl: 'https://raw.githubusercontent.com/example/plugins/main/index.json',
+    })
+    assert.equal(updated.onlineCatalogEnabled, true)
+    assert.equal(new PluginPreferencesStore(userData).get().catalogUrl,
+      'https://raw.githubusercontent.com/example/plugins/main/index.json')
+  })
+})

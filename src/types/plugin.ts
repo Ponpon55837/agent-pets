@@ -163,6 +163,8 @@ export interface PluginInstancePreferences {
 export interface PluginPreferences {
   pluginsEnabled: boolean
   developerMode: boolean
+  onlineCatalogEnabled: boolean
+  catalogUrl: string
   resources: PluginResourceLimits
   plugins: Record<string, PluginInstancePreferences>
 }
@@ -170,6 +172,8 @@ export interface PluginPreferences {
 export interface PluginGlobalPreferencesPatch {
   pluginsEnabled?: boolean
   developerMode?: boolean
+  onlineCatalogEnabled?: boolean
+  catalogUrl?: string
   resources?: Partial<PluginResourceLimits>
 }
 
@@ -203,6 +207,7 @@ export type PluginSignatureChange = 'first-trust' | 'unsigned-to-signed' | 'key-
 export interface PluginInstallPlan {
   token: string
   kind: PluginInstallKind
+  source?: 'local' | 'catalog'
   pluginId?: string
   name?: PluginLocalizedText
   version?: string
