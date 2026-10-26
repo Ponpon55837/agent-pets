@@ -18,7 +18,10 @@ const initialBounds = { x: 8, y: 64, width: 480, height: 360 }
 function fakeController(options: {
   loadURL?: (url: string, viewIndex: number) => Promise<void>
   onBlockedRequest?: (url: string) => void
+  ackTimeoutMs?: number
+  parentVisible?: boolean
 } = {}) {
+  let parentVisible = options.parentVisible ?? true
   let sessionPartition = ''
   let viewOptions: { webPreferences: Record<string, unknown> } | null = null
   let tokenSequence = 0
@@ -54,6 +57,7 @@ function fakeController(options: {
 
   const parent = {
     isDestroyed: () => false,
+    isVisible: () => parentVisible,
     addChildView: (view: PluginPanelNativeView) => { addedViews.push(view) },
     removeChildView: (_view: PluginPanelNativeView) => { removeCount += 1 },
   }
@@ -108,6 +112,7 @@ function fakeController(options: {
       return { ok: true, value: { method: request.method } }
     },
     onClosed: event => closedEvents.push(event),
+    ackTimeoutMs: options.ackTimeoutMs,
     onBlockedRequest: url => {
       blockedRequestUrls.push(url)
       options.onBlockedRequest?.(url)
@@ -117,6 +122,7 @@ function fakeController(options: {
   return {
     controller,
     parent,
+    setParentVisible: (visible: boolean) => { parentVisible = visible },
     get sessionPartition() { return sessionPartition },
     get viewOptions() { return viewOptions },
     get loadedUrl() { return views[0]?.loadedUrl ?? '' },
@@ -232,6 +238,97 @@ test('stale close after a rapid close-open cannot close the newer panel', async 
   fake.controller.close('closed', 1)
   assert.equal(fake.controller.activePluginId(), 'another-plugin')
   assert.deepEqual(fake.closedEvents, [{ pluginId: 'sample-plugin', openToken: 1, reason: 'closed' }])
+  fake.controller.close('closed', 2)
+})
+
+test('plugin panel remains hidden until the renderer acknowledges legal bounds', async () => {
+  const fake = fakeController()
+  const result = await fake.controller.open({
+    pluginId: 'sample-plugin', entry: 'ui/index.html', openToken: 1, bounds: initialBounds,
+  })
+  assert.deepEqual(result, { ok: true, value: { opened: true, openToken: 1 } })
+  assert.deepEqual(fake.views[0]?.visibility, [false])
+
+  assert.equal(fake.controller.setBounds(1, initialBounds), true)
+  assert.deepEqual(fake.views[0]?.visibility, [false, true])
+  fake.controller.close()
+})
+
+test('plugin panel closes after the renderer bounds acknowledgement times out', async () => {
+  const fake = fakeController({ ackTimeoutMs: 5 })
+  await fake.controller.open({
+    pluginId: 'sample-plugin', entry: 'ui/index.html', openToken: 1, bounds: initialBounds,
+  })
+  await new Promise(resolve => setTimeout(resolve, 25))
+
+  assert.equal(fake.controller.activePluginId(), null)
+  assert.equal(fake.views[0]?.visibility.includes(true), false)
+  assert.equal(fake.views[0]?.destroyed, true)
+  assert.deepEqual(fake.closedEvents, [{ pluginId: 'sample-plugin', openToken: 1, reason: 'renderer_unavailable' }])
+})
+
+test('plugin panel acknowledgement timeout starts before the renderer finishes loading', async () => {
+  let finishLoading: (() => void) | undefined
+  const fake = fakeController({
+    ackTimeoutMs: 5,
+    loadURL: () => new Promise(resolve => { finishLoading = resolve }),
+  })
+  const opening = fake.controller.open({
+    pluginId: 'sample-plugin', entry: 'ui/index.html', openToken: 1, bounds: initialBounds,
+  })
+  await new Promise(resolve => setTimeout(resolve, 25))
+
+  assert.equal(fake.controller.activePluginId(), null)
+  assert.equal(fake.views[0]?.visibility.includes(true), false)
+  assert.equal(fake.views[0]?.destroyed, true)
+  assert.deepEqual(fake.closedEvents, [{ pluginId: 'sample-plugin', openToken: 1, reason: 'renderer_unavailable' }])
+
+  finishLoading?.()
+  assert.deepEqual(await opening, { ok: false, error: 'disabled' })
+})
+
+test('plugin panel closes when the host window is hidden', async () => {
+  const fake = fakeController()
+  await fake.controller.open({
+    pluginId: 'sample-plugin', entry: 'ui/index.html', openToken: 1, bounds: initialBounds,
+  })
+  fake.setParentVisible(false)
+  fake.controller.onPanelWindowHidden()
+
+  assert.equal(fake.controller.activePluginId(), null)
+  assert.deepEqual(fake.closedEvents, [{ pluginId: 'sample-plugin', openToken: 1, reason: 'renderer_unavailable' }])
+})
+
+test('plugin panel closes when its host renderer reloads', async () => {
+  const fake = fakeController()
+  await fake.controller.open({
+    pluginId: 'sample-plugin', entry: 'ui/index.html', openToken: 1, bounds: initialBounds,
+  })
+  fake.controller.onPanelRendererReload()
+
+  assert.equal(fake.controller.activePluginId(), null)
+  assert.deepEqual(fake.closedEvents, [{ pluginId: 'sample-plugin', openToken: 1, reason: 'renderer_unavailable' }])
+})
+
+test('plugin panel ignores bounds acknowledgements with a mismatched open token', async () => {
+  const fake = fakeController()
+  await fake.controller.open({
+    pluginId: 'sample-plugin', entry: 'ui/index.html', openToken: 1, bounds: initialBounds,
+  })
+  assert.equal(fake.controller.setBounds(2, initialBounds), false)
+  assert.deepEqual(fake.views[0]?.visibility, [false])
+  assert.equal(fake.controller.activePluginId(), 'sample-plugin')
+  fake.controller.close()
+})
+
+test('plugin panel refuses to open while the host window is hidden', async () => {
+  const fake = fakeController({ parentVisible: false })
+  const result = await fake.controller.open({
+    pluginId: 'sample-plugin', entry: 'ui/index.html', openToken: 1, bounds: initialBounds,
+  })
+  assert.deepEqual(result, { ok: false, error: 'panel_unavailable' })
+  assert.equal(fake.views.length, 0)
+  assert.equal(fake.addedViews.length, 0)
 })
 
 test('plugin panel reports load failures and renderer crashes to the host', async () => {

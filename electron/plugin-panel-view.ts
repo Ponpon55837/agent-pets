@@ -16,7 +16,7 @@ const PANEL_ERROR_CODES = new Set([
   'not_permitted', 'rate_limited', 'invalid_request', 'too_large', 'timeout', 'host_not_allowed',
   'disabled', 'queue_full', 'duplicate', 'not_found', 'too_many_enabled', 'host_unavailable',
   'too_many_redirects', 'secret_unavailable', 'secret_not_found', 'settings_invalid',
-  'schedule_invalid', 'agent_status_unavailable', 'denied', 'panel_load_failed',
+  'schedule_invalid', 'agent_status_unavailable', 'denied', 'panel_load_failed', 'panel_unavailable',
 ])
 
 export interface PluginPanelViewDescriptor {
@@ -72,6 +72,7 @@ export interface PluginPanelNativeView {
 
 export interface PluginPanelViewParent {
   isDestroyed: () => boolean
+  isVisible: () => boolean
   addChildView: (view: PluginPanelNativeView) => void
   removeChildView: (view: PluginPanelNativeView) => void
 }
@@ -89,6 +90,7 @@ export interface PluginPanelViewControllerOptions {
   onApiRequest: (pluginId: string, request: { id: string; method: string; args: unknown[] }) => unknown | Promise<unknown>
   onClosed?: (event: PluginPanelViewClosedEvent) => void
   onBlockedRequest?: (url: string) => void
+  ackTimeoutMs?: number
 }
 
 interface ActivePanelView {
@@ -98,6 +100,8 @@ interface ActivePanelView {
   view: PluginPanelNativeView
   openToken: number
   attached: boolean
+  acknowledged: boolean
+  ackTimeout: ReturnType<typeof setTimeout> | null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -171,6 +175,7 @@ export class PluginPanelViewController {
       || (descriptor.openToken as number) <= this.lastOpenToken || !isValidBounds(descriptor.bounds)) return errorResult('invalid_request')
     const parent = this.options.getParentWindow()
     if (!parent || parent.isDestroyed()) return errorResult('disabled')
+    if (!parent.isVisible()) return errorResult('panel_unavailable')
     const openToken = descriptor.openToken as number
     this.lastOpenToken = openToken
     this.close('replaced')
@@ -200,17 +205,21 @@ export class PluginPanelViewController {
           devTools: false,
         },
       })
-      const active: ActivePanelView = { pluginId, token, parent, view, openToken, attached: false }
+      const active: ActivePanelView = {
+        pluginId, token, parent, view, openToken, attached: false, acknowledged: false, ackTimeout: null,
+      }
       this.active = active
       view.setBounds(descriptor.bounds)
       view.setVisible(false)
       parent.addChildView(view)
       active.attached = true
       this.configureWebContents(active)
+      active.ackTimeout = setTimeout(() => {
+        if (this.active === active && !active.acknowledged) this.close('renderer_unavailable', openToken)
+      }, this.options.ackTimeoutMs ?? 2_000)
       const entry = descriptor.entry.split('/').map(segment => encodeURIComponent(segment)).join('/')
       await view.webContents.loadURL(`agent-pets://plugin/${token}/${entry}`)
       if (this.active !== active) return errorResult('disabled')
-      view.setVisible(true)
       return { ok: true, value: { opened: true, openToken } }
     } catch {
       const active = this.active
@@ -230,6 +239,8 @@ export class PluginPanelViewController {
     const active = this.active
     if (!active || (openToken !== undefined && active.openToken !== openToken)) return
     this.active = null
+    if (active.ackTimeout) clearTimeout(active.ackTimeout)
+    active.ackTimeout = null
     this.activeTokens.delete(active.pluginId)
     try { this.options.revokeToken(active.pluginId, active.token) } catch {}
     try { active.view.setVisible(false) } catch {}
@@ -246,14 +257,31 @@ export class PluginPanelViewController {
   setBounds(openToken: number, bounds: { x: number; y: number; width: number; height: number }): boolean {
     const active = this.active
     if (!active || active.openToken !== openToken || !isValidBounds(bounds)) return false
+    if (active.parent.isDestroyed() || !active.parent.isVisible()) {
+      this.close('renderer_unavailable', openToken)
+      return false
+    }
     active.view.setBounds({
       x: Math.round(bounds.x),
       y: Math.round(bounds.y),
       width: Math.round(bounds.width),
       height: Math.round(bounds.height),
     })
+    if (!active.acknowledged) {
+      active.acknowledged = true
+      if (active.ackTimeout) clearTimeout(active.ackTimeout)
+      active.ackTimeout = null
+    }
     active.view.setVisible(true)
     return true
+  }
+
+  onPanelWindowHidden(): void {
+    this.close('renderer_unavailable')
+  }
+
+  onPanelRendererReload(): void {
+    this.close('renderer_unavailable')
   }
 
   closeIfNotAllowed(isAllowed: (pluginId: string) => boolean): void {

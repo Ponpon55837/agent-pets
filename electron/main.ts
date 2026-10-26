@@ -1046,6 +1046,7 @@ function createPluginServices(): void {
       if (!parent || parent.isDestroyed()) return null
       return {
         isDestroyed: () => parent.isDestroyed(),
+        isVisible: () => parent.isVisible(),
         addChildView: view => parent.contentView.addChildView(view as unknown as WebContentsView),
         removeChildView: view => parent.contentView.removeChildView(view as unknown as WebContentsView),
       }
@@ -1077,18 +1078,11 @@ function createPluginServices(): void {
         panelWindow.webContents.send('plugin-panel-view-closed', event)
       }
     },
-    onBlockedRequest: url => {
+    onBlockedRequest: () => {
       const e2e = (globalThis as typeof globalThis & {
-        __agentPetsE2E?: { panelViewBlockedRequests?: number; panelViewExampleComBlockedRequests?: number }
+        __agentPetsE2E?: { panelViewBlockedRequests?: number }
       }).__agentPetsE2E
-      if (e2e) {
-        e2e.panelViewBlockedRequests = (e2e.panelViewBlockedRequests ?? 0) + 1
-        try {
-          if (new URL(url).hostname === 'example.com') {
-            e2e.panelViewExampleComBlockedRequests = (e2e.panelViewExampleComBlockedRequests ?? 0) + 1
-          }
-        } catch {}
-      }
+      if (e2e) e2e.panelViewBlockedRequests = (e2e.panelViewBlockedRequests ?? 0) + 1
     },
   })
 
@@ -1145,6 +1139,10 @@ function createPluginServices(): void {
       : {}
     const openToken = finiteNumber(data.openToken)
     if (openToken === null || !Number.isSafeInteger(openToken)) return
+    if (!panelWindow.isVisible()) {
+      pluginPanelViewController.onPanelWindowHidden()
+      return
+    }
     const contentBounds = panelWindow.getContentBounds()
     const bounds = validatePluginPanelViewBounds(
       readPluginPanelRect(data.frame) ?? { x: -1, y: -1, width: 0, height: 0 },
@@ -1870,7 +1868,8 @@ function createPanelWindow() {
     },
   })
 
-  panelWindow.on('hide', () => pluginPanelViewController?.close())
+  panelWindow.on('hide', () => pluginPanelViewController?.onPanelWindowHidden())
+  panelWindow.webContents.on('did-start-loading', () => pluginPanelViewController?.onPanelRendererReload())
   panelWindow.on('resize', () => {
     if (!panelWindow || panelWindow.isDestroyed()) return
     const pluginId = pluginPanelWindowSizer.activePluginId()
@@ -1998,6 +1997,7 @@ async function openPluginPanelViewForPlugin(
     || !enabledPluginRoot(pluginId) || !panelWindow || panelWindow.isDestroyed() || !pluginPanelViewController) {
     return { ok: false as const, error: panelView ? 'disabled' : 'not_permitted' }
   }
+  if (!panelWindow.isVisible()) return { ok: false as const, error: 'panel_unavailable' }
   if (!pluginPanelViewController.canOpenToken(openToken)) return { ok: false as const, error: 'invalid_request' }
   const contentBounds = panelWindow.getContentBounds()
   const bounds = validatePluginPanelViewBounds(

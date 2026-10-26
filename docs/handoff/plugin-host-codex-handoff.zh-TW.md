@@ -35,6 +35,7 @@
 pnpm exec vue-tsc --noEmit
 pnpm test:unit
 pnpm exec vite build
+pnpm check:bundle
 git diff --check
 ```
 
