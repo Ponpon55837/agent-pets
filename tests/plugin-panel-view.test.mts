@@ -249,6 +249,9 @@ test('plugin panel remains hidden until the renderer acknowledges legal bounds',
   assert.deepEqual(result, { ok: true, value: { opened: true, openToken: 1 } })
   assert.deepEqual(fake.views[0]?.visibility, [false])
 
+  assert.equal(fake.controller.setBounds(1, { ...initialBounds, width: 0 }), false)
+  assert.deepEqual(fake.views[0]?.visibility, [false])
+
   assert.equal(fake.controller.setBounds(1, initialBounds), true)
   assert.deepEqual(fake.views[0]?.visibility, [false, true])
   fake.controller.close()
