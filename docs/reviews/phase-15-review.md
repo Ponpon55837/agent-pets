@@ -81,3 +81,58 @@
 - 視覺：深色、淺色、高對比（`prefers-contrast: more` 以 CDP `Emulation.setEmulatedMedia` 模擬）、reduced motion 下截圖檢查外框。
 - **不要** 觸發真實的相機、麥克風、定位請求（會跳 macOS 權限視窗）；權限拒絕以 `permissions.query`、`Notification.requestPermission` 等不會跳系統視窗的 API 驗證即可。
 - 修改 `tests/fixtures/plugins/evil-panel/ui/panel.js`：移除 `getUserMedia` 與 `geolocation.getCurrentPosition` 探測，改用 `navigator.permissions.query({ name: 'camera' })`、`navigator.permissions.query({ name: 'geolocation' })` 與 `Notification.requestPermission()`，避免任何人執行探測時跳出 macOS 權限視窗；同步更新 phase report 的手動驗收步驟。
+
+---
+
+# P15.R 複檢（`15298cc..833ad94`）
+
+- 複檢日期：2026-10-26
+- 結論：**P1、P2、P4 通過；P3 只修了一半，需再做一輪小修（P15.R2）後才進 Phase 16。**
+- Codex 未觸碰鑰匙圈：`git config` 沒有被修改（全域 `credential.helper=osxkeychain` 原樣保留），只是 push 時臨時停用；分支未推送的 2 個 commit 由複檢者推送。
+
+## 複檢時實際執行
+
+| 檢查 | 結果 |
+|---|---|
+| `pnpm exec vue-tsc --noEmit` | 通過 |
+| `pnpm test:unit` | 296/296 |
+| `pnpm exec vite build` | 通過 |
+| `node scripts/check-plugin-panel-tokens-bundle.mjs` | 通過 |
+| `git diff --check 15298cc..HEAD` | 通過 |
+| `pnpm audit --prod --audit-level moderate` | 無弱點 |
+
+### Electron 實機（`scripts/e2e-isolated-electron.mjs`；userData／HOME 皆在暫存資料夾，safeStorage 呼叫次數全程 0）
+
+| 項目 | 結果 |
+|---|---|
+| P1：`panel-demo` 載入 `_shared/tokens.css` | 2 條規則，`--surface-panel` 有值 ✅（內容已編進 `dist-electron/main.js`，不再讀 `src/`） |
+| P2：從寵物連續開 ok-panel → evil-panel → ok-panel（同時送出） | 最後只剩 1 個 view，外框標題與 view 內容一致 ✅ |
+| P2：按 × 後立刻開 evil-panel | 外框顯示「惡意面板測試」，view 內容為 `EvilPanelFixture` ✅ |
+| P2：`forcefullyCrashRenderer()` | view 移除、外框收起、顯示「插件面板發生錯誤，已關閉。」✅ |
+| P3：直接呼叫 `openPluginPanelView` 不帶 bounds 或帶 0 寬 | `panel_unavailable`，沒有 view、沒有改尺寸 ✅ |
+| P3：直接呼叫、帶「看起來合法」的 bounds，但使用者在「工作階段」分頁、畫面上沒有外框 | **建立了 view、視窗被改成 520×440；顯示面板視窗後插件內容直接出現在工作階段分頁上，沒有任何外框** ❌（見 P3-R） |
+| P4：evil-panel 探測 | secrets／requestHost 未暴露；fetch、XHR、WebSocket、跨插件檔案、`window.open`、導覽皆被擋；camera／geolocation／notification 皆 `denied`；暫存 HOME 內沒有下載檔 ✅ |
+| 外框與 view 位置 | 外框 (18,193,485×229)，view (19,246,483×175)，在標題列下方 ✅ |
+
+## 修正清單 P15.R2（給 Codex）
+
+修完後依交接 §0.4、§0.4a（`scripts/e2e-isolated-electron.mjs`）、§0.4b 驗證。commit 訊息 `fix(plugin): [P15.R2] ...`，最後一個加 `Checkpoint: P15.R2`，push，更新 Phase 15 同一筆工作記錄（每個檔案都要有 changedFileChanges 狀態與 provenance）與 phase report。完成後停止，不要開始 Phase 16。
+
+### P3-R（中）主程序仍完全相信 renderer 給的 bounds
+
+- 現象：主程序只檢查 bounds 數值是否落在視窗內，不知道外框是否真的掛在畫面上。renderer 在其他分頁、甚至視窗隱藏時傳入合理數值，就會建立並顯示 view；而且 renderer 拿不到這次的 `openToken`，事後也無法關掉它，只能等停用插件或開別的面板。
+- 修正（建議做法）：
+  1. `open()` 建立 view 後一律保持 `setVisible(false)`，回傳 `openToken`；
+  2. renderer 拿到 token 後送出第一筆 `plugin-panel-view-bounds`（token 相符、bounds 合法），主程序才 `setVisible(true)`；
+  3. 開啟後 2 秒內沒有收到相符的 bounds，主程序以 `renderer_unavailable` 關閉；
+  4. 面板視窗 `hide` 或 renderer 重新載入時，主程序關閉目前的 view；
+  5. 若面板視窗不可見，`plugin-panel-view-open` 直接回 `panel_unavailable`，不改尺寸。
+- 測試：單元測試涵蓋「沒有 ack 就不顯示、逾時關閉、hide 時關閉、token 不符的 ack 無效」；實機重做上表 ❌ 那一列，結果應為「沒有 view 或 view 不可見並在 2 秒內關閉，視窗尺寸還原」。
+
+### P5（低）正式程式碼裡的測試專用掛鉤
+
+- `electron/main.ts` 的 `onBlockedRequest` 寫死 `example.com` 計數，屬於測試細節；實測該計數一直是 0（CSP 在網路層前就擋掉）。請移除 `example.com` 特例，只保留通用計數，或整段移除並改在 phase report 記錄 CDP 證據。
+
+### P6（低）tokens 打包檢查沒有接到任何流程
+
+- `scripts/check-plugin-panel-tokens-bundle.mjs` 目前只能手動執行。請在 `package.json` 新增 `check:bundle` 指令，交接 §0.4 的檢查清單加上「build 後執行 `pnpm check:bundle`」，並在 `.github/workflows/release.yml` 的 build 之後執行一次。
