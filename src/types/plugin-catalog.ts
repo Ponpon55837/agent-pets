@@ -1,5 +1,14 @@
 import type { PluginLocalizedText } from './plugin.ts'
 
+export const DEFAULT_PLUGIN_CATALOG_URL = 'https://raw.githubusercontent.com/Ponpon55837/agent-pets-plugins/main/index.json'
+
+export function shouldShowCatalogPermissionCheck(
+  permissionsIncreased: boolean | null,
+  updateAvailable: boolean,
+): boolean {
+  return updateAvailable && permissionsIncreased === null
+}
+
 export interface PluginCatalogVersion {
   version: string
   apiVersion: string

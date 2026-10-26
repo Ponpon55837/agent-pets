@@ -1,6 +1,7 @@
 import { comparePluginSemver } from './plugin-catalog.ts'
 
 const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
+export const DEFAULT_PLUGIN_ISSUE_REPORT_URL = 'https://github.com/Ponpon55837/agent-pets-plugins/issues/new'
 
 export function buildPluginIssueReportUrl(
   baseUrl: unknown,

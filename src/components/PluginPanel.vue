@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { locale, t, type TranslationKey } from '@/i18n'
 import { isCurrentPluginPanelViewClose, pluginPanelViewCloseError } from '@/utils/plugin-panel-view'
+import { resolvePluginIconUrl } from '@/utils/plugin-icon'
 import type {
   PluginBrokerDiagnostic,
   PluginBrokerLogEntry,
@@ -18,6 +19,7 @@ import type {
   PluginSettingScalar,
 } from '@/types/plugin'
 import type { PluginCatalogPanelItem } from '@/types/plugin-catalog'
+import { DEFAULT_PLUGIN_CATALOG_URL, shouldShowCatalogPermissionCheck } from '@/types/plugin-catalog'
 import { isValidPetId } from '@/utils/pet-id'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
@@ -98,9 +100,24 @@ function pluginName(plugin: PluginPanelPlugin): string {
 }
 
 function pluginIconUrl(plugin: PluginPanelPlugin): string | null {
-  const icon = plugin.manifest?.icon
-  if (!icon) return null
-  return `agent-pets://plugin/${plugin.id}/${icon.split('/').map(encodeURIComponent).join('/')}`
+  return resolvePluginIconUrl(
+    plugin.id,
+    plugin.manifest?.icon,
+    plugin.preference.enabled,
+    snapshot.value?.preferences.pluginsEnabled === true,
+    failedPluginIconIds.value.has(plugin.id),
+  )
+}
+
+const failedPluginIconIds = ref(new Set<string>())
+
+function hidePluginIcon(pluginId: string): void {
+  failedPluginIconIds.value = new Set([...failedPluginIconIds.value, pluginId])
+}
+
+async function restoreCatalogUrl(): Promise<void> {
+  catalogUrlDraft.value = DEFAULT_PLUGIN_CATALOG_URL
+  await saveCatalogUrl()
 }
 
 function displayFingerprint(value: string | undefined): string {
@@ -240,6 +257,7 @@ function localizedError(code: string): string {
     catalog_disabled: 'pluginCatalogDisabledError',
     catalog_url_invalid: 'pluginCatalogUrlInvalid',
     catalog_unavailable: 'pluginCatalogUnavailable',
+    catalog_not_found: 'pluginCatalogNotFound',
     catalog_invalid: 'pluginCatalogInvalid',
     download_mismatch: 'pluginCatalogDownloadMismatch',
     signature_mismatch: 'pluginCatalogSignatureMismatch',
@@ -893,7 +911,7 @@ onUnmounted(() => {
     data-testid="plugin-panel-view-frame"
   >
     <header class="plugin-panel-view-chrome">
-      <img v-if="pluginIconUrl(panelViewPlugin)" :src="pluginIconUrl(panelViewPlugin) ?? ''" alt="" />
+      <img v-if="pluginIconUrl(panelViewPlugin)" :src="pluginIconUrl(panelViewPlugin) ?? ''" alt="" @error="hidePluginIcon(panelViewPlugin.id)" />
       <span v-else class="plugin-panel-view-icon" aria-hidden="true">◇</span>
       <div class="plugin-panel-view-title">
         <strong>{{ pluginName(panelViewPlugin) }}</strong>
@@ -975,6 +993,14 @@ onUnmounted(() => {
             <Button variant="secondary" size="sm" :disabled="busy || loading" @click="saveCatalogUrl">
               {{ t('pluginCatalogSaveUrl') }}
             </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              :disabled="busy || loading || snapshot?.preferences.catalogUrl === DEFAULT_PLUGIN_CATALOG_URL"
+              @click="restoreCatalogUrl"
+            >
+              {{ t('pluginCatalogRestoreDefault') }}
+            </Button>
             <Button variant="primary" size="sm" :disabled="busy || loading || !snapshot?.preferences.catalogUrl" @click="loadPluginCatalog">
               {{ t('pluginCatalogLoad') }}
             </Button>
@@ -1008,7 +1034,7 @@ onUnmounted(() => {
                 <span v-if="item.installedVersion">
                   {{ t('pluginCatalogInstalledVersion', { version: item.installedVersion }) }}
                 </span>
-                <span v-if="item.updateAvailable && item.permissionsIncreased === null">
+                <span v-if="shouldShowCatalogPermissionCheck(item.permissionsIncreased, item.updateAvailable)">
                   {{ t('pluginCatalogPermissionsCheckOnUpdate') }}
                 </span>
                 <span v-if="item.updateAvailable && item.signingKeyChange === 'changed'" class="plugin-development-badge">
@@ -1051,7 +1077,7 @@ onUnmounted(() => {
       <div v-else class="plugin-list" role="list" :aria-label="t('pluginInstalledHeading')">
         <Card v-for="plugin in plugins" :key="plugin.id" class="plugin-card" role="listitem" :tone="pluginStatusTone(plugin)">
           <div class="plugin-row">
-            <img v-if="pluginIconUrl(plugin)" class="plugin-icon" :src="pluginIconUrl(plugin) ?? ''" alt="" />
+            <img v-if="pluginIconUrl(plugin)" class="plugin-icon" :src="pluginIconUrl(plugin) ?? ''" alt="" @error="hidePluginIcon(plugin.id)" />
             <div v-else class="plugin-icon plugin-icon-placeholder" aria-hidden="true">◇</div>
             <div class="plugin-copy">
               <strong :title="pluginName(plugin)">{{ pluginName(plugin) }}</strong>

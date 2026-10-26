@@ -12,6 +12,7 @@ import {
   PluginPreferencesFileError,
   PluginPreferencesStore,
 } from '../electron/plugin-preferences.ts'
+import { DEFAULT_PLUGIN_CATALOG_URL } from '../src/types/plugin-catalog.ts'
 
 function withUserData(run: (userData: string) => void): void {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-preferences-'))
@@ -248,7 +249,7 @@ test('online catalog stays off by default and persists only allowed HTTPS GitHub
     const store = new PluginPreferencesStore(userData)
     assert.equal(store.get().onlineCatalogEnabled, false)
     assert.equal(store.get().dailyUpdateCheck, false)
-    assert.equal(store.get().catalogUrl, '')
+    assert.equal(store.get().catalogUrl, DEFAULT_PLUGIN_CATALOG_URL)
     assert.throws(() => store.updateGlobal({ catalogUrl: 'http://raw.githubusercontent.com/example/index.json' }), /catalog URL/)
     assert.throws(() => store.updateGlobal({ catalogUrl: 'https://example.com/index.json' }), /catalog URL/)
     assert.throws(() => store.updateGlobal({ catalogUrl: 'https://user:pass@github.com/example/index.json' }), /catalog URL/)
@@ -266,6 +267,16 @@ test('online catalog stays off by default and persists only allowed HTTPS GitHub
     assert.throws(() => store.updateGlobal({ dailyUpdateCheck: 'yes' as unknown as boolean }), /must be boolean/)
     assert.equal(store.updateGlobal({ onlineCatalogEnabled: false }).dailyUpdateCheck, false)
     assert.throws(() => store.updateGlobal({ dailyUpdateCheck: true }), /require the online catalog/)
+  })
+})
+
+test('legacy preferences without catalogUrl adopt the default while explicit empty stays editable', () => {
+  withUserData((userData) => {
+    const file = path.join(userData, PLUGIN_PREFERENCES_FILENAME)
+    fs.writeFileSync(file, JSON.stringify({ pluginsEnabled: false, plugins: {} }))
+    const store = new PluginPreferencesStore(userData)
+    assert.equal(store.get().catalogUrl, DEFAULT_PLUGIN_CATALOG_URL)
+    assert.equal(store.updateGlobal({ catalogUrl: '' }).catalogUrl, '')
   })
 })
 

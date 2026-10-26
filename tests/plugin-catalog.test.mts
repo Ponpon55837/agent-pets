@@ -16,6 +16,15 @@ import {
 } from '../electron/plugin-catalog.ts'
 import { PluginNetworkClient } from '../electron/plugin-net.ts'
 import type { PluginCatalogPlugin, PluginCatalogVersion } from '../src/types/plugin-catalog.ts'
+import { DEFAULT_PLUGIN_CATALOG_URL, shouldShowCatalogPermissionCheck } from '../src/types/plugin-catalog.ts'
+
+test('default catalog URL is the public index and unknown permission changes require post-download confirmation', () => {
+  assert.equal(DEFAULT_PLUGIN_CATALOG_URL,
+    'https://raw.githubusercontent.com/Ponpon55837/agent-pets-plugins/main/index.json')
+  assert.equal(shouldShowCatalogPermissionCheck(null, true), true)
+  assert.equal(shouldShowCatalogPermissionCheck(false, true), false)
+  assert.equal(shouldShowCatalogPermissionCheck(null, false), false)
+})
 
 function version(overrides: Partial<PluginCatalogVersion> = {}): PluginCatalogVersion {
   const bytes = Buffer.from('sample package')
@@ -242,6 +251,14 @@ test('catalog URLs reject unsupported hosts and fingerprint pins must match the 
   assert.equal(catalogFingerprintMatches('0123456789abcdef', '0123456789abcdef'), true)
   assert.equal(catalogFingerprintMatches('0123456789abcdef', 'fedcba9876543210'), false)
   assert.equal(catalogFingerprintMatches('bad', 'bad'), false)
+})
+
+test('catalog gateway distinguishes a missing default index from other network failures', async () => {
+  const gateway = createPluginCatalogGateway({
+    fetchRegistry: async () => { throw Object.assign(new Error('Not found'), { code: 'catalog_not_found' }) },
+    downloadArchive: async () => Buffer.alloc(0),
+  })
+  assert.deepEqual(await gateway.load(DEFAULT_PLUGIN_CATALOG_URL), { ok: false, error: 'catalog_not_found' })
 })
 
 test('plugin network redirects are revalidated and cannot escape the fixed catalog hosts', async () => {

@@ -66,6 +66,7 @@ import { PluginSecretsStore } from './plugin-secrets.ts'
 import { PluginSecretConsentStore } from './plugin-secret-consent.ts'
 import { PluginSettingsStore, publishPluginSettingsChanged } from './plugin-settings.ts'
 import { PluginAgentStatusController } from './plugin-agent-status.ts'
+import { buildPluginIssueReportUrl, DEFAULT_PLUGIN_ISSUE_REPORT_URL } from './plugin-report.ts'
 import { effectivePluginScheduleMinimum } from './plugin-schedule.ts'
 import { PluginUiMessageGuard } from './plugin-ui-messages.ts'
 import { PluginDeveloperModeWatcher } from './plugin-developer-mode.ts'
@@ -77,7 +78,6 @@ import {
   PLUGIN_CATALOG_MAX_PACKAGE_BYTES,
   selectLatestCompatiblePluginVersion,
 } from './plugin-catalog.ts'
-import { buildPluginIssueReportUrl } from './plugin-report.ts'
 import {
   buildPluginCatalogPanelItems,
   PluginCatalogAutoCheckSchedule,
@@ -1015,6 +1015,7 @@ function createMainPluginCatalogGateway() {
       const result = await pluginNetworkClient.fetch('agent-pets-catalog', url, undefined,
         PLUGIN_CATALOG_ALLOWED_HOSTS, { maxResponseBytes: maxBytes, timeoutMs: 15_000, requestsPerMinute: 10 })
       if (!result.ok) throw Object.assign(new Error('Catalog unavailable'), { code: result.error })
+      if (result.value.status === 404) throw Object.assign(new Error('Catalog not found'), { code: 'catalog_not_found' })
       if (result.value.status < 200 || result.value.status >= 300) throw new Error('Catalog unavailable')
       return result.value.isBase64Encoded
         ? Buffer.from(decodeCatalogBase64(result.value.body)).toString('utf8')
@@ -1627,9 +1628,9 @@ function createPluginServices(): void {
     const e2e = (globalThis as typeof globalThis & {
       __agentPetsE2E?: { pluginIssueReportBaseUrl?: string }
     }).__agentPetsE2E
-    const baseUrl = Object.prototype.hasOwnProperty.call(globalThis, '__agentPetsE2E')
-      ? (typeof e2e?.pluginIssueReportBaseUrl === 'string' ? e2e.pluginIssueReportBaseUrl : '')
-      : process.env.AGENT_PETS_PLUGIN_ISSUE_REPORT_URL ?? ''
+    const baseUrl = typeof e2e?.pluginIssueReportBaseUrl === 'string'
+      ? e2e.pluginIssueReportBaseUrl
+      : DEFAULT_PLUGIN_ISSUE_REPORT_URL
     const url = buildPluginIssueReportUrl(baseUrl, installed.id, installed.currentVersion, localInstall)
     if (!url) return { ok: false, error: 'report_unavailable' }
     try {

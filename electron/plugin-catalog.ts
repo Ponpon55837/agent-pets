@@ -25,6 +25,7 @@ export type PluginCatalogError =
   | 'catalog_disabled'
   | 'catalog_url_invalid'
   | 'catalog_unavailable'
+  | 'catalog_not_found'
   | 'catalog_invalid'
   | 'host_not_allowed'
   | 'download_mismatch'
@@ -271,6 +272,7 @@ export function createPluginCatalogGateway(dependencies: PluginCatalogDependenci
         const code = transportErrorCode(error)
         if (code === 'host_not_allowed') return { ok: false, error: 'host_not_allowed' }
         if (code === 'too_large') return { ok: false, error: 'catalog_invalid' }
+        if (code === 'catalog_not_found') return { ok: false, error: 'catalog_not_found' }
         return { ok: false, error: 'catalog_unavailable' }
       }
     },

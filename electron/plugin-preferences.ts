@@ -4,6 +4,7 @@ import type { PluginInstancePreferences, PluginPreferences, PluginResourceLimits
 import { isValidPetId } from '../src/utils/pet-id.ts'
 import { isValidPluginNetworkHost } from './plugin-manifest.ts'
 import { isPluginCatalogUrl } from './plugin-catalog.ts'
+import { DEFAULT_PLUGIN_CATALOG_URL } from '../src/types/plugin-catalog.ts'
 import { writeJsonAtomic } from './desktop-preferences.ts'
 
 export const PLUGIN_PREFERENCES_FILENAME = 'plugin-preferences.json'
@@ -45,7 +46,7 @@ export const DEFAULT_PLUGIN_PREFERENCES = Object.freeze({
   developerMode: false,
   onlineCatalogEnabled: false,
   dailyUpdateCheck: false,
-  catalogUrl: '',
+  catalogUrl: DEFAULT_PLUGIN_CATALOG_URL,
   resources: DEFAULT_PLUGIN_RESOURCES,
   plugins: Object.freeze({}),
 }) as PluginPreferences
@@ -147,8 +148,10 @@ function parseStoredPreferences(value: unknown): PluginPreferences | null {
   const developerMode = typeof value.developerMode === 'boolean' ? value.developerMode : false
   const onlineCatalogEnabled = value.onlineCatalogEnabled === true
   const dailyUpdateCheck = onlineCatalogEnabled && value.dailyUpdateCheck === true
-  const catalogUrl = typeof value.catalogUrl === 'string' && value.catalogUrl.length <= 2_048
-    && (value.catalogUrl === '' || isPluginCatalogUrl(value.catalogUrl)) ? value.catalogUrl : ''
+  const catalogUrl = value.catalogUrl === undefined
+    ? DEFAULT_PLUGIN_CATALOG_URL
+    : typeof value.catalogUrl === 'string' && value.catalogUrl.length <= 2_048
+      && (value.catalogUrl === '' || isPluginCatalogUrl(value.catalogUrl)) ? value.catalogUrl : DEFAULT_PLUGIN_CATALOG_URL
   const resources = parseStoredResourceValues(value.resources)
 
   const plugins: Record<string, PluginInstancePreferences> = {}
