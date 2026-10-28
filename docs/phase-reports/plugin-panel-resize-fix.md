@@ -2,7 +2,7 @@
 
 日期：2026-10-28
 分支：`fix/plugin-host-resize-memory`（基準 `main` 871af28）
-Agent Pets 版本：`1.3.1`（未變更，等待使用者確認）
+Agent Pets 版本：`1.3.1` → `1.3.2`
 
 ## 問題
 
