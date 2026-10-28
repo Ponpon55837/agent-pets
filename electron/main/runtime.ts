@@ -29,7 +29,7 @@ import { normalizePresentationStatus, PresentationController } from '../presenta
 
 import { ProjectRoutingStore } from '../project-routing'
 import { PluginRegistry, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES, PLUGIN_ARCHIVE_SKIN_MAX_BYTES } from '../plugin-registry'
-import { PluginPreferencesStore } from '../plugin-preferences'
+import { PluginPreferencesStore, pluginHostMemoryBudgetMb } from '../plugin-preferences'
 import { PluginHostWindowController, type PluginHostDescriptor } from '../plugin-host-window'
 import { selectEnabledPluginDescriptors } from '../plugin-host-selection'
 import { PluginBroker, type PluginBrokerContext, type PluginReactionRequest } from '../plugin-broker.ts'
@@ -1131,7 +1131,7 @@ export async function createPluginServices(): Promise<void> {
     onPluginReset: pluginId => mainState.pluginEventSourceController?.clearPlugin(pluginId),
     getMemoryBudgetMb: activePluginCount => {
       const perPlugin = mainState.pluginPreferencesSnapshot?.resources.memoryMbPerPlugin ?? 0
-      return perPlugin * activePluginCount
+      return pluginHostMemoryBudgetMb(perPlugin, activePluginCount)
     },
   })
   mainState.pluginCommandController = new PluginCommandController({
