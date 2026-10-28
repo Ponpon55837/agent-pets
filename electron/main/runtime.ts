@@ -1761,6 +1761,8 @@ export function createPanelWindow() {
   mainState.panelWindow.webContents.on('did-start-loading', () => mainState.pluginPanelViewController?.onPanelRendererReload())
   mainState.panelWindow.on('resize', () => {
     if (!mainState.panelWindow || mainState.panelWindow.isDestroyed()) return
+    const contentBounds = mainState.panelWindow.getContentBounds()
+    mainState.pluginPanelViewController?.relayout({ width: contentBounds.width, height: contentBounds.height })
     const pluginId = mainState.pluginPanelWindowSizer.activePluginId()
     if (!pluginId) return
     const [width, height] = mainState.panelWindow.getSize()

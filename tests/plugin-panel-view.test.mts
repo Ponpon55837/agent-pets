@@ -258,6 +258,29 @@ test('plugin panel remains hidden until the renderer acknowledges legal bounds',
   fake.controller.close()
 })
 
+test('plugin panel relayouts from insets on window resize and only hides while too small', async () => {
+  const fake = fakeController()
+  await fake.controller.open({
+    pluginId: 'sample-plugin', entry: 'ui/index.html', openToken: 1, bounds: initialBounds,
+  })
+  const insets = { left: 10, top: 60, right: 10, bottom: 20 }
+  assert.equal(fake.controller.setLayout(2, insets, { width: 720, height: 580 }), false)
+  assert.equal(fake.controller.setLayout(1, insets, { width: 720, height: 580 }), true)
+  assert.deepEqual(fake.views[0]?.bounds.at(-1), { x: 10, y: 60, width: 700, height: 500 })
+
+  fake.controller.relayout({ width: 460, height: 420 })
+  assert.deepEqual(fake.views[0]?.bounds.at(-1), { x: 10, y: 60, width: 440, height: 340 })
+
+  fake.controller.relayout({ width: 15, height: 70 })
+  assert.equal(fake.views[0]?.visibility.at(-1), false)
+  assert.equal(fake.controller.activePluginId(), 'sample-plugin')
+  assert.deepEqual(fake.closedEvents, [])
+
+  fake.controller.relayout({ width: 460, height: 420 })
+  assert.equal(fake.views[0]?.visibility.at(-1), true)
+  fake.controller.close()
+})
+
 test('plugin panel closes after the renderer bounds acknowledgement times out', async () => {
   const fake = fakeController({ ackTimeoutMs: 5 })
   await fake.controller.open({
