@@ -30,13 +30,10 @@ export const PLUGIN_RESOURCE_BOUNDS = Object.freeze({
   scheduleMinIntervalSeconds: Object.freeze({ default: 60, min: 30, max: 3_600 }),
 } as const satisfies Record<keyof PluginResourceLimits, { default: number; min: number; max: number }>)
 
-// Plugin Host 是獨立的 Chromium renderer，空載就約 80–90 MB；量測的是整個程序的
-// working set，若只用「每插件預算 × 數量」計算，單一插件時必定超標並被誤判崩潰停用。
-export const PLUGIN_HOST_BASE_MEMORY_MB = 192
-
+// 預算是相對於 host 自身基準的「增長」上限，Chromium 本身的開銷由 PluginHostMemoryMonitor 扣除。
 export function pluginHostMemoryBudgetMb(memoryMbPerPlugin: number, activePluginCount: number): number {
   if (!Number.isFinite(memoryMbPerPlugin) || memoryMbPerPlugin <= 0 || activePluginCount <= 0) return 0
-  return PLUGIN_HOST_BASE_MEMORY_MB + memoryMbPerPlugin * activePluginCount
+  return memoryMbPerPlugin * activePluginCount
 }
 
 export const DEFAULT_PLUGIN_RESOURCES = Object.freeze({

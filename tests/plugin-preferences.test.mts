@@ -8,7 +8,6 @@ import {
   DEFAULT_PLUGIN_RESOURCES,
   PLUGIN_PREFERENCES_FILENAME,
   PLUGIN_PREFERENCES_MAX_BYTES,
-  PLUGIN_HOST_BASE_MEMORY_MB,
   PLUGIN_RESOURCE_BOUNDS,
   PluginPreferencesFileError,
   PluginPreferencesStore,
@@ -293,11 +292,11 @@ test('daily catalog check date persists privately and rejects malformed dates', 
   })
 })
 
-test('plugin host memory budget includes the host renderer baseline', () => {
-  // 實測空載 Plugin Host 約 80–90 MB；預設單一插件的總預算必須高於此值，否則會被誤判崩潰停用。
-  assert.equal(pluginHostMemoryBudgetMb(DEFAULT_PLUGIN_RESOURCES.memoryMbPerPlugin, 1), PLUGIN_HOST_BASE_MEMORY_MB + 64)
-  assert.ok(pluginHostMemoryBudgetMb(PLUGIN_RESOURCE_BOUNDS.memoryMbPerPlugin.min, 1) > 120)
-  assert.equal(pluginHostMemoryBudgetMb(64, 3), PLUGIN_HOST_BASE_MEMORY_MB + 192)
+test('plugin host memory budget is the combined per-plugin growth allowance', () => {
+  assert.equal(pluginHostMemoryBudgetMb(DEFAULT_PLUGIN_RESOURCES.memoryMbPerPlugin, 1), 64)
+  assert.equal(pluginHostMemoryBudgetMb(PLUGIN_RESOURCE_BOUNDS.memoryMbPerPlugin.min, 2), 32)
+  assert.equal(pluginHostMemoryBudgetMb(64, 3), 192)
   assert.equal(pluginHostMemoryBudgetMb(64, 0), 0)
   assert.equal(pluginHostMemoryBudgetMb(0, 2), 0)
+  assert.equal(pluginHostMemoryBudgetMb(Number.NaN, 2), 0)
 })
