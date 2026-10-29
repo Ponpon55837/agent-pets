@@ -5,6 +5,7 @@ import * as path from 'node:path'
 import test from 'node:test'
 import { strToU8, zipSync } from 'fflate'
 import { PluginRegistry } from '../electron/plugin-registry.ts'
+import { SKIP_WITHOUT_FILE_SYMLINKS } from './support/fs-capabilities.mts'
 
 function withUserData(run: (directory: string) => void): void {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-registry-'))
@@ -99,7 +100,7 @@ test('plugin registry loads a developer folder through the archive validation pa
   })
 })
 
-test('plugin registry refuses symlinks and unsupported files in developer folders', async () => {
+test('plugin registry refuses symlinks and unsupported files in developer folders', { skip: SKIP_WITHOUT_FILE_SYMLINKS }, async () => {
   await withUserDataAsync(async (userData) => {
     const source = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-source-'))
     const outside = path.join(source, '..', `${path.basename(source)}-outside.js`)
