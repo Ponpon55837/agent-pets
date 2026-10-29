@@ -24,6 +24,7 @@ import { AchievementStore } from '../achievements'
 import { HistoryStore } from '../history'
 import { LocalUsageReader } from '../local-usage'
 import { createPresentationMcpServer, PRESENTATION_MCP_PORT } from '../presentation-mcp'
+import { listenOnLocalPort } from '../local-server-listen'
 import { normalizePresentationStatus, PresentationController } from '../presentation-controller'
 
 
@@ -2355,17 +2356,11 @@ export function createPresentationServices(presentationToken: string): void {
     token: presentationToken,
     controller: mainState.presentationController,
   })
-  server.on('error', (error: NodeJS.ErrnoException) => {
-    if (error.code === 'EADDRINUSE') {
-      console.error(`Presentation MCP port ${PRESENTATION_MCP_PORT} is already in use.`)
-      return
-    }
-    console.error('Presentation MCP server error:', error)
-  })
-  server.listen(PRESENTATION_MCP_PORT, '127.0.0.1', () => {
-    if (!app.isPackaged) {
-      console.log(`Presentation MCP control listening on http://127.0.0.1:${PRESENTATION_MCP_PORT}`)
-    }
+  listenOnLocalPort(server, PRESENTATION_MCP_PORT, {
+    label: 'Presentation MCP',
+    onListening: () => {
+      if (!app.isPackaged) console.log(`Presentation MCP control listening on http://127.0.0.1:${PRESENTATION_MCP_PORT}`)
+    },
   })
   mainState.presentationMcpServer = server
 }
@@ -2513,17 +2508,11 @@ export function createPermissionServices(permissionToken: string): void {
   broker.registerAdapter(relay.createPort('opencode-cli'))
   broker.registerAdapter(relay.createPort('opencode-desktop'))
   const server = createPermissionAdapterServer({ token: permissionToken, broker, relay })
-  server.on('error', (error: NodeJS.ErrnoException) => {
-    if (error.code === 'EADDRINUSE') {
-      console.error(`Permission adapter port ${PERMISSION_ADAPTER_PORT} is already in use.`)
-      return
-    }
-    console.error('Permission adapter server error:', error)
-  })
-  server.listen(PERMISSION_ADAPTER_PORT, '127.0.0.1', () => {
-    if (!app.isPackaged) {
-      console.log(`Permission adapter listening on http://127.0.0.1:${PERMISSION_ADAPTER_PORT}`)
-    }
+  listenOnLocalPort(server, PERMISSION_ADAPTER_PORT, {
+    label: 'Permission adapter',
+    onListening: () => {
+      if (!app.isPackaged) console.log(`Permission adapter listening on http://127.0.0.1:${PERMISSION_ADAPTER_PORT}`)
+    },
   })
 
   mainState.permissionRelay = relay
