@@ -13,6 +13,7 @@ const UUID_TOKEN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f
 const PANEL_ENTRY_METHODS = new Set<PluginPanelApiMethod>([
   'feed.notify', 'pet.status', 'storage.get', 'storage.set', 'storage.remove',
   'settings.get', 'log.info', 'log.warn', 'log.error', 'net.fetch', 'ui.postMessage',
+  'links.openExternal',
 ])
 const PANEL_ERROR_CODES: ReadonlySet<string> = new Set(PLUGIN_PANEL_IPC_ERROR_CODES)
 
@@ -342,6 +343,7 @@ export class PluginPanelViewController {
     if (typeof method !== 'string' || !PANEL_ENTRY_METHODS.has(method as PluginPanelApiMethod)
       || !Array.isArray(args) || args.length > 32 || !isJsonValue(args)) return errorResult('not_permitted')
     if (method === 'ui.postMessage' && args.length !== 1) return errorResult('invalid_request')
+    if (method === 'links.openExternal' && args.length !== 2) return errorResult('invalid_request')
     let serialized: string
     try { serialized = JSON.stringify(method === 'ui.postMessage' ? args[0] : args) } catch { return errorResult('invalid_request') }
     if (Buffer.byteLength(serialized, 'utf8') > PLUGIN_PANEL_MESSAGE_MAX_BYTES) return errorResult('too_large')

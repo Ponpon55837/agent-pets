@@ -25,6 +25,7 @@ function makeArchive(options: {
   extraFiles?: Record<string, string>
   panelView?: unknown
   eventSource?: unknown
+  links?: string[]
 } = {}): Uint8Array {
   const manifest = {
     id: 'sample-plugin',
@@ -34,7 +35,10 @@ function makeArchive(options: {
     author: 'Test Author',
     entry: 'dist/main.js',
     ...(options.icon ? { icon: options.icon } : {}),
-    permissions: options.storage ? { storage: true } : {},
+    permissions: {
+      ...(options.storage ? { storage: true } : {}),
+      ...(options.links ? { links: { hosts: options.links } } : {}),
+    },
     contributes: {
       ...(options.feed ? { feed: true } : {}),
       ...(options.panelView ? { panelView: options.panelView } : {}),
@@ -173,11 +177,13 @@ test('plugin registry detects update, downgrade, reinstall and requests permissi
 
     const update = plan(registry, makeArchive({
       version: '2.0.0', storage: true, feed: true,
+      links: ['docs.example.com'],
       eventSource: { family: 'build-watch', displayName: { 'zh-TW': '建置狀態', 'en-US': 'Build status' } },
     }))
     assert.equal(update.kind, 'update')
     assert.equal(update.requiresReconsent, true)
     assert.equal(update.addedPermissions.includes('contributes:eventSource'), true)
+    assert.equal(update.addedPermissions.includes('links:docs.example.com'), true)
     assert.deepEqual(registry.install(update.token), { ok: false, error: 'permission_reconsent_required' })
     assert.equal(registry.install(update.token, true).ok, true)
     assert.equal(fs.readFileSync(path.join(userData, 'plugins', 'sample-plugin', 'data', 'storage.json'), 'utf8'), '{"kept":true}')

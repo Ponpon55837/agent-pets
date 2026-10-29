@@ -702,6 +702,7 @@ function permissionLabel(unit: string): string {
   const kind = separator < 0 ? unit : unit.slice(0, separator)
   const detail = separator < 0 ? '' : unit.slice(separator + 1)
   if (kind === 'network') return t('pluginPermissionNetwork', { host: detail })
+  if (kind === 'links') return t('pluginPermissionLinks', { host: detail })
   if (kind === 'storage') return t('pluginPermissionStorage')
   if (kind === 'agentStatus') return t('pluginPermissionAgentStatus')
   if (kind === 'schedule') return t('pluginPermissionSchedule')
@@ -722,6 +723,7 @@ const pendingPermissions = computed(() => {
   if (!plan) return []
   const permissionUnits: string[] = []
   for (const host of plan.permissions?.network?.hosts ?? []) permissionUnits.push(`network:${host}`)
+  for (const host of plan.permissions?.links?.hosts ?? []) permissionUnits.push(`links:${host}`)
   if (plan.permissions?.storage) permissionUnits.push('storage')
   if (plan.permissions?.agentStatus) permissionUnits.push('agentStatus')
   if (plan.permissions?.schedule) permissionUnits.push('schedule')

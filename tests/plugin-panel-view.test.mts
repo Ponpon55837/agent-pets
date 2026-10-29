@@ -191,6 +191,14 @@ test('plugin panel uses an ephemeral plugin-specific WebContentsView and a token
   const contents = fake.addedView?.webContents
   const success = await fake.controller.handleApiRequest(contents, 'feed.notify', [{ title: 'ok' }])
   assert.deepEqual(success, { ok: true, value: { method: 'feed.notify' } })
+  assert.deepEqual(
+    await fake.controller.handleApiRequest(contents, 'links.openExternal', ['https://example.com/', true]),
+    { ok: true, value: { method: 'links.openExternal' } },
+  )
+  assert.deepEqual(
+    await fake.controller.handleApiRequest(contents, 'links.openExternal', ['https://example.com/']),
+    { ok: false, error: 'invalid_request' },
+  )
   assert.deepEqual(fake.controller.postMessage('sample-plugin', { type: 'from-worker' }), { ok: true, value: { delivered: true } })
   assert.deepEqual(fake.controller.postMessage('another-plugin', { type: 'private' }), { ok: true, value: { delivered: false } })
   assert.deepEqual(fake.sentMessages, [{ type: 'from-worker' }])
@@ -200,7 +208,10 @@ test('plugin panel uses an ephemeral plugin-specific WebContentsView and a token
     await fake.controller.handleApiRequest(contents, 'ui.postMessage', ['x'.repeat(PLUGIN_PANEL_MESSAGE_MAX_BYTES + 1)]),
     { ok: false, error: 'too_large' },
   )
-  assert.deepEqual(fake.apiRequests, [{ pluginId: 'sample-plugin', method: 'feed.notify' }])
+  assert.deepEqual(fake.apiRequests, [
+    { pluginId: 'sample-plugin', method: 'feed.notify' },
+    { pluginId: 'sample-plugin', method: 'links.openExternal' },
+  ])
   assert.deepEqual(await fake.controller.handleApiRequest({}, 'storage.get', ['key']), { ok: false, error: 'not_permitted' })
 
   fake.controller.close()
@@ -392,20 +403,38 @@ test('plugin panel request policy rejects external, cross-token, non-GET, and tr
 
 test('plugin panel preload bridge exposes only the approved API subset and unwraps coded errors', async () => {
   const messages = new Set<(data: unknown) => void>()
+  let activated = true
+  const invocations: Array<{ method: string; args: unknown[] }> = []
   const api = createPluginPanelPublicApi({
     invoke: async (method, args) => {
+      invocations.push({ method, args })
       if (method === 'feed.notify') return { ok: true, value: { itemId: 'item-1' } }
+      if (method === 'links.openExternal' && args[1] === true) return { ok: true, value: { opened: true } }
+      if (method === 'links.openExternal') return { ok: false, error: 'denied' }
       if (method === 'ui.postMessage' && args[0] && typeof args[0] === 'object'
         && 'type' in args[0] && args[0].type === 'limited') return { ok: false, error: 'rate_limited' }
       if (method === 'ui.postMessage') return { ok: true, value: { delivered: true } }
       return { ok: false, error: 'not_permitted' }
     },
+    consumeUserActivation: () => {
+      const value = activated
+      activated = false
+      return value
+    },
     onMessage: listener => { messages.add(listener); return () => messages.delete(listener) },
   })
-  assert.deepEqual(Object.keys(api).sort(), ['feed', 'log', 'net', 'pet', 'settings', 'storage', 'ui'])
+  assert.deepEqual(Object.keys(api).sort(), ['feed', 'links', 'log', 'net', 'pet', 'settings', 'storage', 'ui'])
   assert.equal('secrets' in api, false)
   assert.equal('requestHost' in api.net, false)
   assert.deepEqual(await api.feed.notify({ title: 'test' }), { itemId: 'item-1' })
+  assert.deepEqual(await api.links.openExternal('https://example.com/source'), { opened: true })
+  assert.deepEqual(invocations.at(-1), {
+    method: 'links.openExternal',
+    args: ['https://example.com/source', true],
+  })
+  await assert.rejects(api.links.openExternal('https://example.com/source'), (error: unknown) => (
+    error instanceof Error && 'code' in error && error.code === 'denied'
+  ))
   assert.deepEqual(await api.ui.postMessage({ type: 'panel' }), { delivered: true })
   await assert.rejects(api.ui.postMessage({ type: 'limited' }), (error: unknown) => (
     error instanceof Error && 'code' in error && error.code === 'rate_limited'

@@ -89,6 +89,8 @@ function permissionUnits(manifest: PluginManifest): string[] {
       const network = value as { hosts: string[]; userGranted?: boolean }
       for (const host of network.hosts) result.add(`network:${host}`)
       if (network.userGranted) result.add('network:userGranted')
+    } else if (key === 'links' && value && typeof value === 'object' && !Array.isArray(value) && 'hosts' in value) {
+      for (const host of (value as { hosts: string[] }).hosts) result.add(`links:${host}`)
     } else if (key === 'secrets' && Array.isArray(value)) {
       for (const secret of value) result.add(`secrets:${secret}`)
     } else if (key === 'schedule' && value) {
