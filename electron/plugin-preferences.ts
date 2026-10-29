@@ -1,5 +1,6 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { renameSyncWithRetry } from './fs-rename.ts'
 import type { PluginInstancePreferences, PluginPreferences, PluginResourceLimits } from '../src/types/plugin.ts'
 import { isValidPetId } from '../src/utils/pet-id.ts'
 import { isValidPluginNetworkHost } from './plugin-manifest.ts'
@@ -446,7 +447,7 @@ export class PluginPreferencesStore {
       timestamp += 1
       backupPath = `${this.filePath}.corrupt-${timestamp}`
     }
-    fs.renameSync(this.filePath, backupPath)
+    renameSyncWithRetry(this.filePath, backupPath)
     this.corruptBackupRequired = false
   }
 
