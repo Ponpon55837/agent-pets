@@ -3,6 +3,7 @@ import type { PluginPanelApiMethod } from './plugin-panel-view-bridge.ts'
 import type { PluginPanelViewClosedEvent, PluginPanelViewCloseReason } from '../src/types/plugin.ts'
 import { isIpcErrorCode, PLUGIN_PANEL_IPC_ERROR_CODES } from '../src/types/ipc.ts'
 import { dispatchPluginUiMessage, PLUGIN_UI_MESSAGE_MAX_BYTES, PluginUiMessageGuard } from './plugin-ui-messages.ts'
+import { layoutPluginPanelView, type PluginPanelInsets, type PluginPanelSize } from './plugin-panel-window.ts'
 
 export const PLUGIN_PANEL_PARTITION_PREFIX = 'plugin-ui-'
 export const PLUGIN_PANEL_MESSAGE_MAX_BYTES = PLUGIN_UI_MESSAGE_MAX_BYTES
@@ -99,6 +100,7 @@ interface ActivePanelView {
   attached: boolean
   acknowledged: boolean
   ackTimeout: ReturnType<typeof setTimeout> | null
+  insets: PluginPanelInsets | null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -204,7 +206,7 @@ export class PluginPanelViewController {
         },
       })
       const active: ActivePanelView = {
-        pluginId, token, parent, view, openToken, attached: false, acknowledged: false, ackTimeout: null,
+        pluginId, token, parent, view, openToken, attached: false, acknowledged: false, ackTimeout: null, insets: null,
       }
       this.active = active
       view.setBounds(descriptor.bounds)
@@ -272,6 +274,29 @@ export class PluginPanelViewController {
     }
     active.view.setVisible(true)
     return true
+  }
+
+  setLayout(openToken: number, insets: PluginPanelInsets, windowSize: PluginPanelSize): boolean {
+    const active = this.active
+    if (!active || active.openToken !== openToken) return false
+    active.insets = insets
+    return this.applyLayout(active, windowSize)
+  }
+
+  relayout(windowSize: PluginPanelSize): void {
+    const active = this.active
+    if (active?.insets) this.applyLayout(active, windowSize)
+  }
+
+  // 尺寸暫時不合法（例如視窗縮到比邊距還小）只隱藏內容、保留插件狀態；
+  // 真正無法顯示時交給 ack timeout 與視窗隱藏事件關閉。
+  private applyLayout(active: ActivePanelView, windowSize: PluginPanelSize): boolean {
+    const bounds = active.insets ? layoutPluginPanelView(active.insets, windowSize) : null
+    if (!bounds) {
+      try { active.view.setVisible(false) } catch {}
+      return false
+    }
+    return this.setBounds(active.openToken, bounds)
   }
 
   onPanelWindowHidden(): void {

@@ -185,7 +185,7 @@ test('settings reject a symlinked data directory and settings file', () => {
     fs.rmSync(path.join(state.dataDirectory, 'settings.json'), { force: true })
     fs.symlinkSync(path.join(outside, 'settings.json'), path.join(state.dataDirectory, 'settings.json'))
     assert.throws(() => state.settings.set('sample', manifest, { username: 'Alice' }))
-    fs.rmSync(path.join(state.dataDirectory, 'settings.json'))
+    fs.unlinkSync(path.join(state.dataDirectory, 'settings.json'))
     fs.rmdirSync(state.dataDirectory)
     fs.symlinkSync(outside, state.dataDirectory)
     assert.throws(() => state.settings.set('sample', manifest, { username: 'Alice' }))

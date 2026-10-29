@@ -135,6 +135,7 @@ function sendPluginPanelViewBounds(): void {
     openToken,
     { x: bounds.frame.left, y: bounds.frame.top, width: bounds.frame.width, height: bounds.frame.height },
     { x: bounds.content.left, y: bounds.content.top, width: bounds.content.width, height: bounds.content.height },
+    { width: window.innerWidth, height: window.innerHeight },
   )
 }
 
