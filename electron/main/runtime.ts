@@ -44,6 +44,7 @@ import { PluginSecretConsentStore } from '../plugin-secret-consent.ts'
 import { PluginSettingsStore } from '../plugin-settings.ts'
 import { PluginAgentStatusController } from '../plugin-agent-status.ts'
 import { PluginEventSourceController } from '../plugin-event-source.ts'
+import { PluginExternalLinkController } from '../plugin-external-links.ts'
 import { DEFAULT_PLUGIN_ISSUE_REPORT_URL } from '../plugin-report.ts'
 import { effectivePluginScheduleMinimum } from '../plugin-schedule.ts'
 
@@ -1183,6 +1184,11 @@ export async function createPluginServices(): Promise<void> {
           ?? { ok: false as const, error: 'disabled' }
         return { id: request.id, ...response }
       }
+      if (request.method === 'links.openExternal') {
+        if (request.args.length !== 2) return { ok: false, error: 'invalid_request' }
+        return mainState.pluginExternalLinkController?.open(pluginId, request.args[0], request.args[1])
+          ?? { ok: false, error: 'disabled' }
+      }
       return mainState.pluginBroker?.handle(pluginId, request) ?? { ok: false, error: 'disabled' }
     },
     onClosed: event => {
@@ -1197,6 +1203,18 @@ export async function createPluginServices(): Promise<void> {
       }).__agentPetsE2E
       if (e2e) e2e.panelViewBlockedRequests = (e2e.panelViewBlockedRequests ?? 0) + 1
     },
+  })
+
+  mainState.pluginExternalLinkController = new PluginExternalLinkController({
+    getContext: pluginId => {
+      const context = mainState.pluginRuntimeContexts.get(pluginId)
+      return context ? {
+        enabled: context.enabled,
+        pluginsEnabled: context.pluginsEnabled,
+        hosts: context.manifest.permissions.links?.hosts ?? [],
+      } : null
+    },
+    openExternal: url => shell.openExternal(url),
   })
 
   registerPluginFeedIpc({
