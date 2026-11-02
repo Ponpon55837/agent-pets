@@ -58,6 +58,12 @@ test('native content bounds are restricted to the host frame below the chrome he
   ), null)
 })
 
+test('maximized plugin content bounds fit a typical 460 by 720 panel below the host header', () => {
+  const frame = { x: 8, y: 8, width: 444, height: 704 }
+  const content = { x: 9, y: 61, width: 442, height: 650 }
+  assert.deepEqual(validatePluginPanelViewBounds(frame, content, { width: 460, height: 720 }), content)
+})
+
 test('plugin panel insets come from the renderer viewport and lay out against the live window size', () => {
   const insets = pluginPanelViewInsets({ x: 10, y: 60, width: 700, height: 500 }, { width: 720, height: 580 })
   assert.deepEqual(insets, { left: 10, top: 60, right: 10, bottom: 20 })

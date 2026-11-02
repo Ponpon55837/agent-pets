@@ -8,6 +8,10 @@ export function isCurrentPluginPanelViewClose(
   return Boolean(event && event.pluginId === pluginId && event.openToken === openToken)
 }
 
+export function shouldResetPluginPanelMaximized(previousPluginId: string, nextPluginId: string): boolean {
+  return previousPluginId !== nextPluginId || !nextPluginId
+}
+
 export function pluginPanelViewCloseError(reason: PluginPanelViewCloseReason): string {
   if (reason === 'hidden') return 'hidden'
   if (reason === 'load_failed') return 'panel_load_failed'
