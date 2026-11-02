@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { locale, t, type TranslationKey } from '@/i18n'
 import {
   isCurrentPluginPanelViewClose,
+  maximizedPluginPanelWindowSize,
   pluginPanelViewCloseError,
   shouldResetPluginPanelMaximized,
 } from '@/utils/plugin-panel-view'
@@ -60,6 +61,7 @@ let panelViewBoundsObserver: ResizeObserver | null = null
 let panelViewRequestSequence = 0
 let panelViewScrollContainer: HTMLElement | null = null
 let panelViewScrollTop: number | null = null
+let panelViewWindowSizeBeforeMaximize: { width: number; height: number } | null = null
 
 const plugins = computed(() => snapshot.value?.plugins ?? [])
 const selectedPlugin = computed(() => plugins.value.find(plugin => plugin.id === selectedPluginId.value) ?? null)
@@ -146,9 +148,15 @@ function sendPluginPanelViewBounds(): void {
   )
 }
 
-async function restorePluginPanelViewMaximized(): Promise<void> {
+// 放大是透過 resizePanel 加大視窗，主行程會把它記成這個插件的手動尺寸；
+// 還原、Esc、關閉或切換插件時先送回放大前的尺寸，下次開啟才不會直接是放大後的視窗。
+// 插件頁已被主行程關閉（隱藏、崩潰等）時主行程自己會還原尺寸，這裡不再調整。
+async function restorePluginPanelViewMaximized(restoreWindowSize = false): Promise<void> {
   if (!panelViewMaximized.value) return
   panelViewMaximized.value = false
+  const previousSize = panelViewWindowSizeBeforeMaximize
+  panelViewWindowSizeBeforeMaximize = null
+  if (restoreWindowSize && previousSize) window.electronAPI?.resizePanel(previousSize.height, previousSize.width)
   const scrollContainer = panelViewScrollContainer
   const scrollTop = panelViewScrollTop
   panelViewScrollContainer = null
@@ -161,11 +169,17 @@ async function restorePluginPanelViewMaximized(): Promise<void> {
 function setPluginPanelViewMaximized(maximized: boolean): void {
   if (!panelViewPluginId.value || panelViewMaximized.value === maximized) return
   if (!maximized) {
-    void restorePluginPanelViewMaximized()
+    void restorePluginPanelViewMaximized(true)
     return
   }
   panelViewScrollContainer = panelViewFrame.value?.closest<HTMLElement>('.settings-content') ?? null
   panelViewScrollTop = panelViewScrollContainer?.scrollTop ?? null
+  const current = { width: window.outerWidth, height: window.outerHeight }
+  const target = maximizedPluginPanelWindowSize(current, { width: window.screen.availWidth, height: window.screen.availHeight })
+  if (target.width !== current.width || target.height !== current.height) {
+    panelViewWindowSizeBeforeMaximize = current
+    window.electronAPI?.resizePanel(target.height, target.width)
+  }
   panelViewMaximized.value = true
   void nextTick(() => sendPluginPanelViewBounds())
 }
@@ -177,7 +191,7 @@ function togglePluginPanelViewMaximized(): void {
 function onPluginPanelViewKeydown(event: KeyboardEvent): void {
   if (event.key !== 'Escape' || !panelViewMaximized.value) return
   event.preventDefault()
-  void restorePluginPanelViewMaximized()
+  void restorePluginPanelViewMaximized(true)
 }
 
 async function openPluginPanelView(pluginId: string): Promise<void> {
@@ -190,7 +204,7 @@ async function openPluginPanelView(pluginId: string): Promise<void> {
   const previousOpenToken = panelViewOpenToken.value
   panelViewOpenToken.value = 0
   if (previousOpenToken) window.electronAPI?.closePluginPanelView(previousOpenToken)
-  if (panelViewMaximized.value) await restorePluginPanelViewMaximized()
+  if (panelViewMaximized.value) await restorePluginPanelViewMaximized(true)
   if (requestSequence !== panelViewRequestSequence) return
   selectedPluginId.value = pluginId
   panelViewPluginId.value = pluginId
@@ -230,7 +244,7 @@ async function openPluginPanelView(pluginId: string): Promise<void> {
 
 function closePluginPanelView(): void {
   panelViewRequestSequence += 1
-  void restorePluginPanelViewMaximized()
+  void restorePluginPanelViewMaximized(true)
   const openToken = panelViewOpenToken.value
   panelViewOpenToken.value = 0
   panelViewPluginId.value = ''
