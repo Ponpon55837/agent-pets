@@ -148,8 +148,8 @@ function sendPluginPanelViewBounds(): void {
   )
 }
 
-// 放大是透過 resizePanel 加大視窗，主行程會把它記成這個插件的手動尺寸；
-// 還原、Esc、關閉或切換插件時先送回放大前的尺寸，下次開啟才不會直接是放大後的視窗。
+// resizePanel 走主行程的程式化縮放路徑，不覆寫插件的手動尺寸；
+// 還原、Esc、關閉或切換插件時送回放大前的視窗尺寸。
 // 插件頁已被主行程關閉（隱藏、崩潰等）時主行程自己會還原尺寸，這裡不再調整。
 async function restorePluginPanelViewMaximized(restoreWindowSize = false): Promise<void> {
   if (!panelViewMaximized.value) return

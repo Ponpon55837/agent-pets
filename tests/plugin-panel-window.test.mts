@@ -3,10 +3,20 @@ import test from 'node:test'
 import {
   clampPluginPanelSize,
   layoutPluginPanelView,
+  matchesProgrammaticPluginPanelSize,
   pluginPanelViewInsets,
   PluginPanelWindowSizer,
   validatePluginPanelViewBounds,
 } from '../electron/plugin-panel-window.ts'
+
+test('programmatic panel sizes tolerate fractional-DPI rounding without accepting manual resizes', () => {
+  const expected = { width: 640, height: 541 }
+  assert.equal(matchesProgrammaticPluginPanelSize(expected, { width: 640, height: 541 }), true)
+  assert.equal(matchesProgrammaticPluginPanelSize(expected, { width: 640, height: 542 }), true)
+  assert.equal(matchesProgrammaticPluginPanelSize(expected, { width: 639, height: 540 }), true)
+  assert.equal(matchesProgrammaticPluginPanelSize(expected, { width: 640, height: 543 }), false)
+  assert.equal(matchesProgrammaticPluginPanelSize(expected, { width: 642, height: 541 }), false)
+})
 
 test('plugin panel preferred and manual sizes stay within the display work area', () => {
   assert.deepEqual(clampPluginPanelSize({ width: 1200, height: 1000 }, { width: 900, height: 700 }), {
