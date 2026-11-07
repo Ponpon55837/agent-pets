@@ -1,34 +1,81 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { t } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
+import Chip from '@/components/ui/Chip.vue'
+import Select from '@/components/ui/Select.vue'
 import { usePluginController } from '@/composables/plugin/context'
+import type { PluginBrokerLogEntry } from '@/types/plugin'
 
-const { logs, diagnostics, selectedPluginId, refreshDiagnostics, diagnosticTime, diagnosticCodeLabel } = usePluginController()
+const {
+  logs, diagnostics, selectedPluginId, refreshDiagnostics, diagnosticTime, diagnosticCodeLabel, setStatus,
+} = usePluginController()
+
+type LevelFilter = 'all' | 'error' | 'warn'
+const level = ref<LevelFilter>('all')
+const showAll = ref(false)
+const SUMMARY_COUNT = 3
+
+const filteredLogs = computed(() => logs.value.filter(entry => level.value === 'all' || entry.level === level.value))
+const shownLogs = computed(() => (showAll.value ? filteredLogs.value : filteredLogs.value.slice(-SUMMARY_COUNT)))
+const shownDiagnostics = computed(() => (showAll.value ? diagnostics.value : diagnostics.value.slice(-SUMMARY_COUNT)))
+const hiddenCount = computed(() => filteredLogs.value.length - shownLogs.value.length + diagnostics.value.length - shownDiagnostics.value.length)
+
+const levelTone = { error: 'danger', warn: 'warn', info: 'neutral' } as const
+const levelKey = { error: 'plugins.levelError', warn: 'plugins.levelWarn', info: 'plugins.levelInfo' } as const
+const levelIcon = { error: 'warning', warn: 'warning', info: 'info' } as const
+
+function line(entry: PluginBrokerLogEntry): string {
+  return `${new Date(entry.at).toISOString()} [${entry.level}] ${entry.message}`
+}
+
+async function copy(): Promise<void> {
+  const text = [
+    ...logs.value.map(line),
+    ...diagnostics.value.map(entry => `${new Date(entry.at).toISOString()} [rejected] ${entry.code} ${entry.method ?? ''}`.trim()),
+  ].join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    setStatus(t('plugins.diagnosticsCopied'))
+  } catch {
+    setStatus(t('plugins.diagnosticsCopyFailed'))
+  }
+}
 </script>
 
 <template>
   <section class="diagnostics" :aria-label="t('pluginDiagnosticsHeading')">
     <p class="help">{{ t('pluginDiagnosticsHelp') }}</p>
-    <h4 class="subheading">{{ t('pluginRecentLogs') }}</h4>
-    <p v-if="logs.length === 0" class="empty">{{ t('pluginNoLogs') }}</p>
+    <div class="toolbar">
+      <Select v-model="level" size="sm" :aria-label="t('plugins.levelFilter')">
+        <option value="all">{{ t('plugins.levelAll') }}</option>
+        <option value="error">{{ t('plugins.levelError') }}</option>
+        <option value="warn">{{ t('plugins.levelWarn') }}</option>
+      </Select>
+      <span class="spacer" />
+      <Button variant="secondary" size="sm" :disabled="logs.length + diagnostics.length === 0" @click="copy">{{ t('plugins.copyDiagnostics') }}</Button>
+      <Button variant="secondary" size="sm" @click="refreshDiagnostics(selectedPluginId)">{{ t('refresh') }}</Button>
+    </div>
+    <h4 class="subheading">{{ t('pluginRecentLogs') }} <span class="note">{{ t('plugins.providedByPlugin') }}</span></h4>
+    <p v-if="shownLogs.length === 0" class="empty">{{ t('pluginNoLogs') }}</p>
     <ul v-else class="entries">
-      <li v-for="(entry, index) in logs" :key="`${entry.at}-${index}`">
+      <li v-for="(entry, index) in shownLogs" :key="`${entry.at}-${index}`">
         <time>{{ diagnosticTime(entry.at) }}</time>
-        <span class="level" :class="`level-${entry.level}`">{{ entry.level }}</span>
+        <Chip :tone="levelTone[entry.level]" :icon="levelIcon[entry.level]">{{ t(levelKey[entry.level]) }}</Chip>
         <span class="message">{{ entry.message }}</span>
       </li>
     </ul>
     <h4 class="subheading">{{ t('pluginRejectedCalls') }}</h4>
-    <p v-if="diagnostics.length === 0" class="empty">{{ t('pluginNoDiagnostics') }}</p>
+    <p v-if="shownDiagnostics.length === 0" class="empty">{{ t('pluginNoDiagnostics') }}</p>
     <ul v-else class="entries">
-      <li v-for="(entry, index) in diagnostics" :key="`${entry.at}-${index}`">
+      <li v-for="(entry, index) in shownDiagnostics" :key="`${entry.at}-${index}`">
         <time>{{ diagnosticTime(entry.at) }}</time>
         <span class="message">{{ diagnosticCodeLabel(entry) }}</span>
       </li>
     </ul>
-    <div class="actions">
-      <Button variant="secondary" size="sm" @click="refreshDiagnostics(selectedPluginId)">{{ t('refresh') }}</Button>
-    </div>
+    <Button v-if="hiddenCount > 0 || showAll" variant="ghost" size="sm" class="toggle" :aria-expanded="showAll" @click="showAll = !showAll">
+      {{ showAll ? t('plugins.showRecentOnly') : t('plugins.showAllEntries', { count: hiddenCount }) }}
+    </Button>
   </section>
 </template>
 
@@ -40,11 +87,27 @@ const { logs, diagnostics, selectedPluginId, refreshDiagnostics, diagnosticTime,
 }
 
 .help,
-.empty {
+.empty,
+.note {
   margin: 0;
   color: var(--text-muted);
   font-size: var(--font-xs);
   line-height: 1.5;
+}
+
+.note {
+  font-weight: var(--weight-normal);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.spacer {
+  flex: 1 1 auto;
 }
 
 .subheading {
@@ -55,7 +118,7 @@ const { logs, diagnostics, selectedPluginId, refreshDiagnostics, diagnosticTime,
 }
 
 .entries {
-  max-height: 180px;
+  max-height: 240px;
   margin: 0;
   padding: 0;
   overflow: auto;
@@ -84,22 +147,13 @@ time {
   font-size: var(--font-xs);
 }
 
-.level {
-  flex: 0 0 auto;
-  text-transform: uppercase;
-}
-
-.level-error {
-  color: var(--state-error-soft);
-}
-
-.level-warn {
-  color: var(--state-warn-bright);
-}
-
 .message {
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--text-secondary);
+}
+
+.toggle {
+  align-self: flex-start;
 }
 </style>

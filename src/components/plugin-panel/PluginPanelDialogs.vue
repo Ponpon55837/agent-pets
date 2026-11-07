@@ -5,11 +5,14 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
 defineProps<{
   removeName: string
+  reportName: string
   keepData: boolean
   secretConsentOpen: boolean
 }>()
 
 const emit = defineEmits<{
+  confirmReport: []
+  cancelReport: []
   confirmRemove: []
   cancelRemove: []
   updateKeepData: [value: boolean]
@@ -46,5 +49,14 @@ const emit = defineEmits<{
     @confirm="emit('confirmSecretConsent')"
     @cancel="emit('cancelSecretConsent')"
   />
-</template>
 
+  <ConfirmDialog
+    :open="Boolean(reportName)"
+    :title="t('plugins.reportTitle', { name: reportName })"
+    :message="t('plugins.reportPreview')"
+    :confirm-label="t('plugins.reportOpen')"
+    :cancel-label="t('cancel')"
+    @confirm="emit('confirmReport')"
+    @cancel="emit('cancelReport')"
+  />
+</template>

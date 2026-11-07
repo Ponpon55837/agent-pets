@@ -24,13 +24,14 @@ provide(PLUGIN_PANEL_CONTROLLER, controller)
 const {
   snapshot, visibleNotifications, plugins, catalogItems, busy, loading, toasts, dismissToast, runToastAction,
   detailPlugin, panelViewPlugin, panelViewFrame, panelViewContent, pendingRemove, pendingSecretConsentKey,
-  keepData, enabledGlobally, pluginName, refreshPanel, selectArchive, selectDeveloperFolder,
+  pendingReportPluginId, confirmReport, keepData, enabledGlobally, pluginName, refreshPanel, selectArchive, selectDeveloperFolder,
   updateGlobalPreferences, confirmRemove, confirmSecretConsent,
 } = controller
 
 type PluginTab = 'installed' | 'explore' | 'notifications' | 'advanced'
 const activeTab = ref<PluginTab>('installed')
 
+const reportPlugin = computed(() => plugins.value.find(plugin => plugin.id === pendingReportPluginId.value) ?? null)
 const enabledCount = computed(() => plugins.value.filter(plugin => plugin.preference.enabled).length)
 const updateCount = computed(() => catalogItems.value.filter(item => item.updateAvailable).length)
 const unreadCount = computed(() => visibleNotifications.value.filter(record => !record.read).length)
@@ -174,8 +175,11 @@ function showTab(tab: PluginTab): void {
     <PluginInstallSheet />
     <PluginPanelDialogs
       :remove-name="pendingRemove ? pluginName(pendingRemove) : ''"
+      :report-name="reportPlugin ? pluginName(reportPlugin) : ''"
       :keep-data="keepData"
       :secret-consent-open="pendingSecretConsentKey !== ''"
+      @confirm-report="confirmReport"
+      @cancel-report="pendingReportPluginId = ''"
       @confirm-remove="confirmRemove"
       @cancel-remove="pendingRemove = null"
       @update-keep-data="keepData = $event"

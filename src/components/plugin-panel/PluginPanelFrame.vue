@@ -10,7 +10,7 @@ import { usePluginController } from '@/composables/plugin/context'
 const {
   panelViewPlugin, panelViewMaximized, panelViewError, panelViewOpenToken, pluginName, pluginIconUrl, hidePluginIcon,
   localizedError, togglePluginPanelViewMaximized, closePluginPanelView, reloadPluginPanelView,
-  openPluginDetailFromPanel, reportPluginIssue,
+  openPluginDetailFromPanel, requestReport,
 } = usePluginController()
 const emit = defineEmits<{ frame: [el: HTMLElement | null]; content: [el: HTMLElement | null] }>()
 
@@ -108,7 +108,7 @@ onBeforeUnmount(() => { if (slowTimer) clearTimeout(slowTimer) })
         <div class="state-actions">
           <Button variant="primary" size="sm" @click="reloadPluginPanelView">{{ t('plugins.reloadPanel') }}</Button>
           <Button variant="secondary" size="sm" @click="closePluginPanelView">{{ t('plugins.backToList') }}</Button>
-          <Button variant="ghost" size="sm" @click="reportPluginIssue(panelViewPlugin.id)">{{ t('pluginReportIssue') }}</Button>
+          <Button variant="ghost" size="sm" @click="requestReport(panelViewPlugin.id)">{{ t('pluginReportIssue') }}</Button>
         </div>
       </div>
       <div v-else class="plugin-panel-view-state" role="status">

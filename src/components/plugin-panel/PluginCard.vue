@@ -14,7 +14,7 @@ const props = defineProps<{ plugin: PluginPanelPlugin }>()
 
 const {
   pluginBusy, enabledGlobally, pluginName, pluginIconUrl, hidePluginIcon, pluginStatusLabel, pluginStatusTone,
-  catalogItemFor, catalogCheckComplete, installCatalogPlugin, openPluginDetail, openPluginPanelView, updatePluginPreference, requestRemove, reportPluginIssue,
+  catalogItemFor, catalogCheckComplete, installCatalogPlugin, openPluginDetail, openPluginPanelView, updatePluginPreference, requestRemove, requestReport,
 } = usePluginController()
 
 const name = computed(() => pluginName(props.plugin))
@@ -32,7 +32,7 @@ const menuItems = computed(() => [
 
 function onMenu(id: string): void {
   if (id === 'detail') openPluginDetail(props.plugin.id)
-  else if (id === 'report') void reportPluginIssue(props.plugin.id)
+  else if (id === 'report') requestReport(props.plugin.id)
   else if (id === 'remove') requestRemove(props.plugin)
 }
 </script>

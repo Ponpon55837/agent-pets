@@ -20,7 +20,7 @@ import type { PluginDetailSection } from '@/composables/usePluginPanelController
 const {
   pluginBusy, enabledGlobally, detailPlugin: plugin, detailSection, petOptions, invokingCommandId,
   pluginName, pluginIconUrl, hidePluginIcon, displayFingerprint, pluginStatusLabel, pluginStatusTone,
-  pendingLeave, confirmDiscardSettings, closePluginDetail, openPluginPanelView, updatePluginPreference, requestRemove, reportPluginIssue,
+  pendingLeave, confirmDiscardSettings, closePluginDetail, openPluginPanelView, updatePluginPreference, requestRemove, requestReport,
   commandTitle, invokePluginCommand,
 } = usePluginController()
 
@@ -58,7 +58,7 @@ const targetPet = computed({
 
 function onMenu(id: string): void {
   if (!plugin.value) return
-  if (id === 'report') void reportPluginIssue(plugin.value.id)
+  if (id === 'report') requestReport(plugin.value.id)
   else if (id === 'remove') requestRemove(plugin.value)
 }
 

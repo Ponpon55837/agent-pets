@@ -73,6 +73,7 @@ const settingsErrors = ref<Record<string, SettingErrorCode>>({})
 // 有未儲存變更時要離開詳情頁，先暫存要執行的動作，等使用者在對話框確認放棄。
 const pendingLeave = ref<(() => void) | null>(null)
 const pendingSecretRemoveKey = ref('')
+const pendingReportPluginId = ref('')
 const detailPluginId = ref('')
 const detailSection = ref<PluginDetailSection>('overview')
 const panelViewPluginId = ref('')
@@ -842,6 +843,17 @@ async function installCatalogPlugin(item: PluginCatalogPanelItem): Promise<void>
   }
 }
 
+// 回報問題先預覽會帶出的資訊，使用者確認後才開啟瀏覽器。
+function requestReport(pluginId: string): void {
+  pendingReportPluginId.value = pluginId
+}
+
+async function confirmReport(): Promise<void> {
+  const pluginId = pendingReportPluginId.value
+  pendingReportPluginId.value = ''
+  if (pluginId) await reportPluginIssue(pluginId)
+}
+
 async function reportPluginIssue(pluginId: string): Promise<void> {
   const scope = `plugin:${pluginId}`
   if (isBusy(scope)) return
@@ -1402,6 +1414,9 @@ onUnmounted(() => {
     loadPluginCatalog,
     installCatalogPlugin,
     reportPluginIssue,
+    pendingReportPluginId,
+    requestReport,
+    confirmReport,
     updateResourceLimit,
     resourceInputValue,
     resourceBoundText,
