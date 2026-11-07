@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { PAIRS, contrast, evaluate, parseTokens, resolveHex } from '../scripts/check-contrast.mjs'
+import { PAIRS, PET_BUBBLE_PAIRS, contrast, evaluate, parseTokens, resolveHex } from '../scripts/check-contrast.mjs'
 
 test('contrast maths matches known WCAG values', () => {
   assert.equal(Math.round(contrast('#000000', '#ffffff')), 21)
@@ -27,4 +27,12 @@ test('the dark theme actually overrides the panel palette', () => {
 test('alias tokens resolve through var()', () => {
   const map = parseTokens()
   assert.equal(resolveHex(map, '--color-text'), resolveHex(map, '--organic-text'))
+})
+
+test('light pet appearance meets AA on the opaque bubble surface', () => {
+  const map = parseTokens(undefined, 'pet-light')
+  assert.notEqual(resolveHex(map, '--pet-bubble-surface-opaque'), resolveHex(parseTokens(), '--pet-bubble-surface-opaque'))
+  for (const r of evaluate(map, PET_BUBBLE_PAIRS)) {
+    assert.ok(r.ok, `${r.fg} on ${r.bg} is ${r.ratio?.toFixed(2)}, needs ${r.min} (${r.note})`)
+  }
 })

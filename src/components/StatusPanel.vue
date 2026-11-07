@@ -6,6 +6,8 @@ import { useProgressionLabels } from '@/composables/useProgressionLabels'
 import type { PluginEventSourceStatusView } from '@/types/plugin'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
+import ActionMenu, { type ActionMenuItem } from '@/components/ui/ActionMenu.vue'
+import { type ThemePreference, nextThemePreference, setThemePreference, themePreference } from '@/composables/useTheme'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import InlinePermissionCard from '@/components/ui/InlinePermissionCard.vue'
 import PermissionOutcomeNotice from '@/components/permission/PermissionOutcomeNotice.vue'
@@ -20,6 +22,28 @@ import { DEFAULT_SETTINGS_GROUP, SETTINGS_GROUPS, isSettingsGroupId, type Settin
 const store = useAgentStore()
 const panelRoot = ref<HTMLElement | null>(null)
 const settingsShortcut = /Mac/i.test(navigator.platform) ? '\u2318,' : 'Ctrl+,'
+
+const themeLabel = (preference: ThemePreference) =>
+  preference === 'light' ? t('design.theme.light') : preference === 'dark' ? t('design.theme.dark') : t('design.theme.system')
+
+// Toggles close the menu after the click (ActionMenu's single behaviour); the
+// current state stays visible in each row and, for DND, as a dot on the trigger.
+const headerMenuItems = computed<ActionMenuItem[]>(() => [
+  { id: 'dnd', icon: 'bell-off', label: t('dnd'), role: 'menuitemcheckbox', checked: store.dndEnabled, state: store.dndEnabled ? t('panel.stateOn') : t('panel.stateOff') },
+  { id: 'pin', icon: 'pin', label: t('panel.menuKeepOpen'), role: 'menuitemcheckbox', checked: store.panelPinned, state: store.panelPinned ? t('panel.stateOn') : t('panel.stateOff') },
+  {
+    id: 'theme',
+    icon: themePreference.value === 'light' ? 'sun' : themePreference.value === 'dark' ? 'moon' : 'theme-auto',
+    label: t('design.theme.menuLabel'),
+    state: t('design.theme.cycle', { current: themeLabel(themePreference.value), next: themeLabel(nextThemePreference(themePreference.value)) }),
+  },
+])
+
+function onHeaderMenu(id: string): void {
+  if (id === 'dnd') store.setDndEnabled(!store.dndEnabled)
+  else if (id === 'pin') store.setPanelPinned(!store.panelPinned)
+  else if (id === 'theme') setThemePreference(nextThemePreference(themePreference.value))
+}
 
 type DashboardTab = 'sessions' | 'usage' | 'history'
 
@@ -205,14 +229,22 @@ onUnmounted(() => {
         {{ t('settings') }}<Icon class="breadcrumb-sep" name="chevron-right" :size="12" /><span class="breadcrumb-current">{{ settingsGroupLabel }}</span>
       </h1>
       <div class="header-right">
+        <ActionMenu
+          v-if="store.panelView === 'sessions'"
+          class="header-more"
+          :items="headerMenuItems"
+          :aria-label="t('panel.more')"
+          icon-only
+          variant="ghost"
+          @select="onHeaderMenu"
+        >
+          <span class="header-more-icon">
+            <Icon name="more" :size="18" />
+            <span v-if="store.dndEnabled" class="header-more-dot" role="img" :aria-label="t('panel.dndActive')" />
+          </span>
+        </ActionMenu>
         <Button v-if="store.panelView === 'sessions'" variant="ghost" icon-only :title="`${t('settings')} (${settingsShortcut})`" :aria-label="t('settings')" @click="store.openSettings()">
           <Icon name="settings" />
-        </Button>
-        <Button v-if="store.panelView === 'sessions'" variant="ghost" icon-only :active="store.dndEnabled" :title="`${t('dnd')}: ${store.dndEnabled ? t('panel.stateOn') : t('panel.stateOff')}`" :aria-label="t('dnd')" :aria-pressed="store.dndEnabled" @click="store.setDndEnabled(!store.dndEnabled)">
-          <Icon name="bell-off" />
-        </Button>
-        <Button v-if="store.panelView === 'sessions'" variant="ghost" icon-only :active="store.panelPinned" :title="store.panelPinned ? t('panel.unpin') : t('panel.pin')" :aria-label="store.panelPinned ? t('panel.unpin') : t('panel.pin')" :aria-pressed="store.panelPinned" @click="store.setPanelPinned(!store.panelPinned)">
-          <Icon name="pin" />
         </Button>
         <Button variant="ghost" icon-only :title="`${t('close')} (Esc)`" :aria-label="t('close')" @click="store.closePanel()">
           <Icon name="close" />

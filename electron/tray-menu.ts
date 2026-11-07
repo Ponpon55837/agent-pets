@@ -133,7 +133,9 @@ export function buildTrayMenuTemplate(context: TrayMenuContext, actions: TrayMen
           click: item => update({ fullscreenAutoHideEnabled: item.checked }),
         },
         {
-          label: t('launchAtStartup'),
+          label: preferences.launchAtStartup && preferences.launchAtStartupStatus === 'requires-approval'
+            ? `${t('launchAtStartup')}${t('reliability.launch.trayPending')}`
+            : t('launchAtStartup'),
           type: 'checkbox',
           checked: preferences.launchAtStartup,
           enabled: preferences.launchAtStartupSupported,

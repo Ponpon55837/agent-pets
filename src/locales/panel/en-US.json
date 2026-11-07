@@ -1,6 +1,4 @@
 {
-  "panel.pin": "Keep panel open",
-  "panel.unpin": "Unpin panel",
   "panel.groupGeneral": "General",
   "panel.groupPets": "Pets",
   "panel.groupDesktop": "Desktop",
@@ -57,5 +55,8 @@
   "panel.subtitleActive": "{running} running · {attention} need attention",
   "panel.progressUnavailable": "Growth data unavailable",
   "panel.groupPlugins": "Plugins",
-  "panel.setupWizardHelp": "Re-run hook installation and integration checks."
+  "panel.setupWizardHelp": "Re-run hook installation and integration checks.",
+  "panel.more": "More options",
+  "panel.menuKeepOpen": "Keep open",
+  "panel.dndActive": "Do Not Disturb is on"
 }

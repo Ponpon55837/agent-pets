@@ -72,7 +72,7 @@ Sprite requirements (checked on import):
 
 ## Control panel
 
-Open it with a click on the pet or the Tray. The header shows the pet, its level and the number of running / attention sessions, plus Settings (`Cmd/Ctrl+,`), Do Not Disturb and a pin that keeps the panel open. **Esc** steps back one level, then hides the panel.
+Open it with a click on the pet or the Tray. The header shows the pet, its level and the number of running / attention sessions, plus, left to right, a **⋯ menu** (Do Not Disturb, Keep open, and a quick Appearance toggle that cycles system / light / dark; a dot on the button shows Do Not Disturb is on), Settings (`Cmd/Ctrl+,`) and Close. **Esc** steps back one level, then hides the panel.
 
 - **Sessions** — grouped into **Needs attention**, **Running** and **Idle & finished**. Filter by All / Needs attention / Running and by tool, and sort by urgency or most recent. Live states show elapsed time; a row expands to show path, tool, last seen and session ID. **Clear offline items** removes ended sessions from view; sessions silent for 15 minutes go stale. A banner appears if a local server port is busy, with **Retry now**.
 - **Quota** — the remaining Codex and Claude Code subscription quota (session and weekly windows, reset times in your local time). Agent Pets has no account system and never asks for agent credentials: it reuses the CLI's local sign-in, queries the provider from the main process and passes only percentages to the UI. If the CLI session is missing or expired, sign in again in that CLI. Results refresh every 2 minutes while the panel is open (**Refresh now** is rate limited); the last good reading stays visible if a refresh fails. A thin quota meter also appears in the pet's status pill while that tool is active.
@@ -92,7 +92,7 @@ Open from the panel header or the pet menu. Settings are in four groups, with **
 
 | Group | Contents |
 |-------|----------|
-| General | Language (Traditional Chinese / English), **Theme** (match system / light / dark; pet bubbles always stay dark), pet size, bounce & shake, status bubble, ambient motion, working hint |
+| General | Language (Traditional Chinese / English), **Theme** (Panel: match system / light / dark; Pet: dark by default, light, or follow the panel — set separately, e.g. a dark system with a light pet), pet size, bounce & shake, status bubble, ambient motion, working hint |
 | Pets | Pet library and imports, multiple pets, project pets, Growth (mood, XP, achievements) |
 | Desktop & alerts | Notifications, Do Not Disturb, sound; Mini mode, Edge peek, Shimeji, capture exclusion, fullscreen auto-hide, right-click hide, permission bubble, Presentation MCP, launch at startup (packaged builds), permission log |
 | Integrations | Advanced (Setup Wizard, project MCP, diagnostics, restart, quit) and Plugins |
@@ -173,6 +173,8 @@ The main-process log is `logs/main.log` inside the app's userData folder (`~/Lib
 | Hook script out of date | **Repair** redeploys it. |
 | Claude Code does not show the project MCP | Approve `agent-pets` in `/mcp`. Codex needs the project to be trusted. |
 | Pet frozen or blank | Use **Reload pet** in the Tray (Advanced) or **Restart Pet** in Settings → Advanced. |
+| macOS: **Launch at login** stays pending | Approve Agent Pets in System Settings → General → Login Items (the toggle has a button). Move the app to the Applications folder first; a login item cannot be registered from a disk image or Downloads. |
+| Windows: **Restart** closes the app without reopening | Fixed for the portable build: it now relaunches the original `.exe`, not its temporary extraction folder. If it still fails, start the `.exe` again by hand. |
 | Bug report | Export diagnostics and attach the file. |
 
 ## Development

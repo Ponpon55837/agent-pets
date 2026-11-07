@@ -21,6 +21,10 @@ export const ICON_PATHS: Record<string, string> = {
   bell: 'M8 2.2a4 4 0 0 0-4 4v2.1c0 1.1-.4 2.2-1.1 3.1h10.2c-.7-.9-1.1-2-1.1-3.1V6.2a4 4 0 0 0-4-4ZM6.4 13.2a1.7 1.7 0 0 0 3.2 0',
   // Do Not Disturb: a struck-through bell. Not a moon, which reads as a dark-mode toggle.
   'bell-off': 'M8 2.2a4 4 0 0 0-4 4v2.1c0 1.1-.4 2.2-1.1 3.1h10.2c-.7-.9-1.1-2-1.1-3.1V6.2a4 4 0 0 0-4-4ZM6.4 13.2a1.7 1.7 0 0 0 3.2 0M2.4 2.4l11.2 11.2',
+  // Light mode: a sun with eight rays.
+  sun: 'M8 5.4a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2M8 1.6v1.4M8 13v1.4M1.6 8H3M13 8h1.4M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M4.5 11.5l-1 1',
+  // Follow system: a circle with the left half filled by an outline.
+  'theme-auto': 'M8 1.8a6.2 6.2 0 1 0 0 12.4 6.2 6.2 0 0 0 0-12.4ZM8 1.8a6.2 6.2 0 0 0 0 12.4Z',
   moon: 'M10.7 2.2a5.6 5.6 0 1 0 3.1 8.9A5.6 5.6 0 0 1 10.7 2.2Z',
   'volume-off': 'M2.2 6.2v3.6h2.1l3 2.4V3.8l-3 2.4H2.2ZM10.8 6.1l2.8 3.8M13.6 6.1l-2.8 3.8',
   maximize: 'M5.5 2.5h-3v3M10.5 2.5h3v3M13.5 10.5v3h-3M5.5 13.5h-3v-3',
@@ -49,7 +53,8 @@ export const ICON_PATHS: Record<string, string> = {
   plugin: 'M6 2.4v2.4M10 2.4v2.4M4 4.8h8v3.2a4 4 0 0 1-8 0V4.8ZM8 12v2',
   'external-link': 'M9.4 2.6h4v4M13.4 2.6 7.4 8.6M11.6 9.4v3.2a1 1 0 0 1-1 1H3.4a1 1 0 0 1-1-1V5.4a1 1 0 0 1 1-1h3.2',
   // Plugin area: overflow menu, refresh, trust shield, trash, update arrow.
-  more: 'M3.2 8h.01M8 8h.01M12.8 8h.01',
+  // Vertical kebab (⋮) for every overflow menu.
+  more: 'M8 3.2v.01M8 8v.01M8 12.8v.01',
   refresh: 'M13.2 8a5.2 5.2 0 1 1-1.6-3.7M13.2 2.6v2.8H10.4',
   shield: 'M8 1.8 13 3.6v4c0 3-2.2 5.2-5 6.6-2.8-1.4-5-3.6-5-6.6v-4zM5.8 8l1.6 1.6 3-3.2',
   trash: 'M3 4.4h10M6.2 4.4V2.8h3.6v1.6M4.4 4.4l.5 8.8h6.2l.5-8.8M6.8 7v3.8M9.2 7v3.8',

@@ -269,6 +269,10 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.desktopPreferencesInit, legacySoundEnabled)
   },
 
+  openLoginItemsSettings: (): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.desktopOpenLoginItemsSettings)
+  },
+
   setDesktopPreferences: (patch: DesktopPreferencesPatch): Promise<DesktopPreferences> => {
     return ipcRenderer.invoke(IPC_CHANNELS.desktopPreferencesSet, patch)
   },

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { locale, t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
 import { PERMISSION_DEFAULT_TTL_SECONDS } from '@/types/permission'
@@ -17,6 +17,18 @@ const APPROVER_AGENTS = 'OpenCode'
 const REMINDER_AGENTS = 'Codex · Claude'
 
 const store = useAgentStore()
+
+const launchHelp = computed(() => {
+  if (!store.launchAtStartupSupported) return t('availablePackaged')
+  if (store.launchAtStartup) {
+    if (store.launchAtStartupStatus === 'requires-approval') return t('reliability.launch.pending')
+    if (store.launchAtStartupStatus === 'not-in-applications') return t('reliability.launch.notInApplications')
+    if (store.launchAtStartupStatus === 'error') return t('reliability.launch.error')
+  }
+  return t('launchAtStartupHelp')
+})
+const showOpenLoginItems = computed(() =>
+  store.launchAtStartupSupported && store.launchAtStartup && store.launchAtStartupStatus === 'requires-approval')
 
 const auditEntries = ref<PermissionAuditEntry[]>([])
 const confirmClearAudit = ref(false)
@@ -154,14 +166,21 @@ function preview(cue: SoundCue): void {
     <ToggleRow
       :model-value="store.launchAtStartup"
       :label="t('launchAtStartup')"
-      :help="store.launchAtStartupSupported ? t('launchAtStartupHelp') : t('availablePackaged')"
+      :help="launchHelp"
       :disabled="!store.launchAtStartupSupported"
       @update:model-value="store.setLaunchAtStartup($event)"
     />
+    <div v-if="showOpenLoginItems" class="launch-action">
+      <Button size="sm" variant="secondary" @click="store.openLoginItemsSettings()">{{ t('reliability.launch.openSettings') }}</Button>
+    </div>
   </Card>
 </template>
 
 <style scoped>
+.launch-action {
+  padding-bottom: var(--space-2);
+}
+
 .permission-audit-list {
   display: flex;
   max-height: 180px;

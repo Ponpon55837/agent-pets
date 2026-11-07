@@ -1,9 +1,7 @@
 {
-  "panel.pin": "釘選面板（失焦不隱藏）",
-  "panel.unpin": "取消釘選",
   "panel.groupGeneral": "通用",
   "panel.groupPets": "寵物",
-  "panel.groupDesktop": "桌面與通知",
+  "panel.groupDesktop": "桌面",
   "panel.groupIntegrations": "進階",
   "panel.searchLabel": "搜尋設定",
   "panel.searchPlaceholder": "搜尋設定…",
@@ -57,5 +55,8 @@
   "panel.subtitleActive": "{running} 個執行中 · {attention} 個待處理",
   "panel.progressUnavailable": "成長資料暫時無法使用",
   "panel.groupPlugins": "插件",
-  "panel.setupWizardHelp": "重新執行 Hook 安裝與整合檢查。"
+  "panel.setupWizardHelp": "重新執行 Hook 安裝與整合檢查。",
+  "panel.more": "更多選項",
+  "panel.menuKeepOpen": "保持開啟",
+  "panel.dndActive": "勿擾模式已開啟"
 }
