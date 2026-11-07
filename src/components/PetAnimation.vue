@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import type { AgentState } from '@/types/agent'
 import type { PetAutonomousBehavior, PetBehaviorManifest } from '@/types/pet'
 import { useAgentStore } from '@/stores/agentStore'
+import { getCachedSprite, getCachedTint, loadPetSprite, setCachedTint } from '@/composables/usePetSpriteCache'
 import { frameDelayMultiplier, isSignificantTransition, motionPlanFor } from '@/utils/pet-motion-plan'
 
 const props = defineProps<{
@@ -36,6 +37,10 @@ const moodEnergyTier = computed<MoodEnergyTier>(() => {
   if (moodValue.value >= 40) return 'charged'
   return 'resting'
 })
+// The glow canvases only exist (and are only redrawn) while the mood makes
+// them visible; at resting mood they are fully transparent anyway.
+const auraInnerVisible = computed(() => props.mood !== undefined && moodValue.value > 10)
+const auraOuterVisible = computed(() => props.mood !== undefined && moodValue.value > 60)
 const moodAuraStyle = computed<Record<string, string>>(() => {
   const energy = Math.max(0, (moodValue.value - 10) / 90)
   const auraSpeed = 3.8 - energy * 2.1
@@ -122,11 +127,8 @@ const canvasRef = ref<HTMLCanvasElement | null>(null)
 const auraInnerRef = ref<HTMLCanvasElement | null>(null)
 const auraOuterRef = ref<HTMLCanvasElement | null>(null)
 const imgRef = ref<HTMLImageElement | null>(null)
-const imageCache = new Map<string, HTMLImageElement>()
-const auraTintCache = new Map<string, string>()
 let auraTint = 'rgb(235, 242, 255)'
-let animationFrameId: number | null = null
-let frameStartedAt = 0
+let frameTimerId: ReturnType<typeof setTimeout> | null = null
 let animationFinished = false
 let currentFrame = 0
 let currentStep = 0
@@ -343,49 +345,57 @@ function deriveAuraTint(img: HTMLImageElement): string {
   }
 }
 
+let loadSequence = 0
+
+function applyImage(img: HTMLImageElement, cacheKey: string): void {
+  imgRef.value = img
+  auraTint = getCachedTint(cacheKey) ?? deriveAuraTint(img)
+  setCachedTint(cacheKey, auraTint)
+  currentFrame = 0
+  draw()
+  if (props.autonomousBehavior === 'walk' || props.autonomousBehavior === 'sleep') {
+    startAnimation()
+  }
+}
+
+async function spriteSourceFor(pet: (typeof store.pets)[number] | undefined, targetId: string): Promise<string | null> {
+  if (pet?.pluginSkin) return pet.pluginSkin.spriteUrl
+  if (pet && !pet.builtIn) return (await window.electronAPI?.getCustomPetSprite(targetId)) ?? null
+  return getSrc(targetId)
+}
+
 async function loadImage() {
-  const id = props.petId || 'qitian-dasheng'
+  // A newer request (pet switched while an older one is in flight) wins.
+  const sequence = ++loadSequence
+  const id = props.petId || store.defaultPetId
   const pet = store.pets.find(p => p.id === id)
 
   if (!pet && !store.petsLoaded) {
     return
   }
 
-  const targetId = pet ? id : 'qitian-dasheng'
-
-  const imageCacheKey = pet?.pluginSkin?.cacheKey ?? targetId
-  const cached = imageCache.get(imageCacheKey)
+  const targetId = pet ? id : store.defaultPetId
+  const cacheKey = pet?.pluginSkin?.cacheKey ?? targetId
+  const cached = getCachedSprite(cacheKey)
   if (cached) {
-    imgRef.value = cached
-    auraTint = auraTintCache.get(imageCacheKey) || deriveAuraTint(cached)
-    auraTintCache.set(imageCacheKey, auraTint)
-    currentFrame = 0
-    draw()
+    applyImage(cached, cacheKey)
     return
   }
 
-  const img = new Image()
-
-  if (pet?.pluginSkin) {
-    img.src = pet.pluginSkin.spriteUrl
-  } else if (pet && !pet.builtIn) {
-    const fileUrl = await window.electronAPI?.getCustomPetSprite(targetId)
-    if (!fileUrl) return
-    img.src = fileUrl
-  } else {
-    img.src = getSrc(targetId)
+  const source = await spriteSourceFor(pet, targetId)
+  if (sequence !== loadSequence) return
+  const loaded = source ? await loadPetSprite(cacheKey, source) : null
+  if (sequence !== loadSequence) return
+  if (loaded) {
+    applyImage(loaded, cacheKey)
+    return
   }
 
-  img.onload = () => {
-    imageCache.set(imageCacheKey, img)
-    imgRef.value = img
-    auraTint = deriveAuraTint(img)
-    auraTintCache.set(imageCacheKey, auraTint)
-    currentFrame = 0
-    draw()
-    if (props.autonomousBehavior === 'walk' || props.autonomousBehavior === 'sleep') {
-      startAnimation()
-    }
+  // The sheet failed to load: show the default pet instead of an empty canvas.
+  if (targetId !== store.defaultPetId) {
+    const fallbackKey = store.defaultPetId
+    const fallback = await loadPetSprite(fallbackKey, getSrc(store.defaultPetId))
+    if (sequence === loadSequence && fallback) applyImage(fallback, fallbackKey)
   }
 }
 
@@ -399,13 +409,13 @@ function draw() {
 
   const targets = [
     { canvas: canvasRef.value, tint: false },
-    { canvas: auraInnerRef.value, tint: true },
-    { canvas: auraOuterRef.value, tint: true },
+    ...(auraInnerVisible.value ? [{ canvas: auraInnerRef.value, tint: true }] : []),
+    ...(auraOuterVisible.value ? [{ canvas: auraOuterRef.value, tint: true }] : []),
   ]
   for (const target of targets) {
     const { canvas, tint } = target
     if (!canvas) continue
-    const ctx = canvas.getContext('2d', canvas === canvasRef.value ? { willReadFrequently: true } : undefined)
+    const ctx = canvas.getContext('2d')
     if (!ctx) continue
 
     ctx.clearRect(0, 0, CELL_W, CELL_H)
@@ -416,14 +426,6 @@ function draw() {
       0, 0,
       CELL_W, CELL_H
     )
-    if (!tint) {
-      try {
-        auraTint = deriveAuraTintFromPixels(ctx.getImageData(0, 0, CELL_W, CELL_H).data)
-      } catch {
-        // Custom file URLs can make the canvas unreadable on some platforms.
-        // Keep the last safe tint instead of interrupting the pet animation.
-      }
-    }
     if (tint) {
       ctx.globalCompositeOperation = 'source-in'
       ctx.fillStyle = auraTint
@@ -461,46 +463,43 @@ function prefersReducedMotion(): boolean {
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
+function clearFrameTimer(): void {
+  if (frameTimerId !== null) clearTimeout(frameTimerId)
+  frameTimerId = null
+}
+
+// One timer per frame, sized to that frame's delay, rather than a 60fps poll
+// that wakes the main thread just to find out nothing is due yet.
+function scheduleNextFrame(): void {
+  clearFrameTimer()
+  frameTimerId = setTimeout(animationStep, frameDelay())
+}
+
 function startAnimation() {
-  if (animationFrameId !== null) cancelAnimationFrame(animationFrameId)
-  animationFrameId = null
-  frameStartedAt = performance.now()
+  clearFrameTimer()
   animationFinished = false
 
   motionPlan = motionPlanForState()
   selectStep(0)
   draw()
   if (isPaused.value) return
-  animationFrameId = requestAnimationFrame(animationTick)
+  scheduleNextFrame()
 }
 
 function pauseAnimation(): void {
-  if (animationFrameId !== null) cancelAnimationFrame(animationFrameId)
-  animationFrameId = null
-  frameStartedAt = 0
+  clearFrameTimer()
 }
 
 function resumeAnimation(): void {
-  if (isPaused.value || animationFrameId !== null || animationFinished) return
-  frameStartedAt = performance.now()
-  animationFrameId = requestAnimationFrame(animationTick)
+  if (isPaused.value || frameTimerId !== null || animationFinished) return
+  scheduleNextFrame()
 }
 
-function animationTick(timestamp: number): void {
-  if (isPaused.value || animationFinished) {
-    animationFrameId = null
-    return
-  }
-  if (timestamp - frameStartedAt < frameDelay()) {
-    animationFrameId = requestAnimationFrame(animationTick)
-    return
-  }
-  frameStartedAt = timestamp
-  if (advanceAnimationFrame()) animationFrameId = requestAnimationFrame(animationTick)
-  else {
-    animationFinished = true
-    animationFrameId = null
-  }
+function animationStep(): void {
+  frameTimerId = null
+  if (isPaused.value || animationFinished) return
+  if (advanceAnimationFrame()) scheduleNextFrame()
+  else animationFinished = true
 }
 
 function advanceAnimationFrame(): boolean {
@@ -530,6 +529,9 @@ function advanceAnimationFrame(): boolean {
   // frame until the store reports the next state.
   return false
 }
+
+// A glow canvas that just appeared has no pixels until the next frame.
+watch([auraInnerVisible, auraOuterVisible], () => { void nextTick(draw) })
 
 watch(() => props.petId, () => {
   currentFrame = 0
@@ -613,7 +615,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (animationFrameId !== null) cancelAnimationFrame(animationFrameId)
+  clearFrameTimer()
   document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
   if (reactionTimer !== null) {
     clearTimeout(reactionTimer)
@@ -640,6 +642,7 @@ onUnmounted(() => {
     data-pet-context-target="hide"
   >
     <canvas
+      v-if="auraOuterVisible"
       ref="auraOuterRef"
       :width="CELL_W"
       :height="CELL_H"
@@ -648,6 +651,7 @@ onUnmounted(() => {
       aria-hidden="true"
     />
     <canvas
+      v-if="auraInnerVisible"
       ref="auraInnerRef"
       :width="CELL_W"
       :height="CELL_H"

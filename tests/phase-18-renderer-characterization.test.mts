@@ -89,7 +89,7 @@ test('pet animation cadence and terminal frame behavior stay fixed', () => {
   assert.ok(source.includes('hold their final'))
   assert.ok(source.includes('frame until the store reports the next state'))
   assert.match(source, /function frameDelay\(\): number/)
-  assert.match(source, /animationFrameId = requestAnimationFrame\(animationTick\)/)
+  assert.match(source, /frameTimerId = setTimeout\(animationStep, frameDelay\(\)\)/)
   assert.match(source, /document\.addEventListener\('visibilitychange', handleDocumentVisibilityChange\)/)
   assert.doesNotMatch(source, /setTimeout\(tick, frameDelay\(\)\)/)
   const desktopPet = read('../src/components/DesktopPet.vue')
