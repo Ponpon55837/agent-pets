@@ -273,6 +273,17 @@
 .setup-overlay,
 .mcp-overlay {
   --accent-on: var(--organic-accent-contrast);
+  --focus-ring-color: var(--focus-ring-color-on-light);
+}
+
+/* Windows high-contrast / forced colours: the ring must use a system colour. */
+@media (forced-colors: active) {
+  :root,
+  .status-panel,
+  .setup-overlay,
+  .mcp-overlay {
+    --focus-ring-color: Highlight;
+  }
 }
 
 /* Honour the OS "reduce motion" setting in one place rather than auditing
