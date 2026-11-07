@@ -321,7 +321,7 @@ watch(plugin, async (value, previous) => {
 
 .help {
   margin: 0;
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .command-list {
@@ -338,7 +338,7 @@ watch(plugin, async (value, previous) => {
   padding-left: var(--space-4);
   color: var(--text-secondary);
   font-size: var(--font-sm);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .pet-target {

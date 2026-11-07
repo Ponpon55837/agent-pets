@@ -94,7 +94,7 @@ const helpOpen = ref(false)
 .permission-notice-explain {
   margin: 0;
   font-size: var(--font-sm);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .permission-notice-hint,
@@ -108,7 +108,7 @@ const helpOpen = ref(false)
   padding-left: var(--space-4);
   color: var(--text-primary);
   font-size: var(--font-xs);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .permission-notice-actions {

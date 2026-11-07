@@ -224,7 +224,7 @@
   padding: var(--organic-space-6) var(--organic-space-3);
   color: var(--text-muted);
   font-size: var(--font-body-sm);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
   text-align: center;
 }
 
@@ -859,7 +859,7 @@
   max-width: 52%;
   color: var(--text-muted);
   font-size: var(--font-body-sm);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .status-panel :deep(.history-actions) {
@@ -1114,7 +1114,7 @@
   margin: 0;
   color: var(--text-muted);
   font-size: var(--font-body-sm);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .status-panel :deep(.scale-options), .status-panel :deep(.import-row), .status-panel :deep(.advanced-actions) {
@@ -1143,7 +1143,7 @@
   padding: var(--organic-space-4);
   color: var(--text-muted);
   font-size: var(--font-body-sm);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
   text-align: center;
 }
 

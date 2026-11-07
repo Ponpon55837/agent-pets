@@ -370,7 +370,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: var(--font-md);
-  line-height: 1.25;
+  line-height: var(--leading-tight);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -504,7 +504,7 @@ onBeforeUnmount(() => {
 .permission-outcome-text {
   margin: 0 1px var(--space-2);
   font-size: var(--font-sm);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .permission-request-actions {

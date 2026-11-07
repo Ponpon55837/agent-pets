@@ -118,7 +118,7 @@
 .wizard-header h2 {
   color: var(--organic-text);
   font-family: var(--organic-font-heading);
-  font-size: 24px;
+  font-size: var(--font-2xl);
   line-height: 1.1;
 }
 
@@ -127,7 +127,7 @@
   margin-top: 3px;
   color: var(--organic-text-muted);
   font-size: var(--font-md);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .mcp-toolbar {
@@ -181,7 +181,7 @@
 .mcp-message {
   grid-column: 2;
   color: var(--organic-text-muted);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .mcp-inline-error,
@@ -315,7 +315,7 @@
   margin: 0;
   color: var(--organic-text-muted);
   font-size: var(--font-body-sm);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .wizard-actions {

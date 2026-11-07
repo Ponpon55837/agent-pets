@@ -40,7 +40,7 @@ const KEYS: Record<PermissionOutcomeKind, TranslationKey> = {
   background: var(--surface-raised);
   color: var(--text-primary);
   font-size: var(--font-sm);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .permission-outcome-notice-text {

@@ -72,7 +72,7 @@ function resetResources(): void {
   margin: 0;
   color: var(--text-muted);
   font-size: var(--font-xs);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .dev-warning {
@@ -85,7 +85,7 @@ function resetResources(): void {
   box-shadow: inset 0 0 0 1px var(--state-warn);
   color: var(--state-warn-bright);
   font-size: var(--font-xs);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .resource-summary {

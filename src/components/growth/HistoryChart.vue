@@ -271,7 +271,7 @@ const detail = computed(() => {
   margin: 0;
   color: var(--text-secondary);
   font-size: var(--font-xs);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .sr-only {

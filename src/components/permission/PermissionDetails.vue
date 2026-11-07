@@ -83,7 +83,7 @@ async function copy(): Promise<void> {
   margin: 0 1px;
   overflow: hidden;
   font-size: var(--font-sm);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;

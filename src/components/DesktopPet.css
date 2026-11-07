@@ -449,7 +449,7 @@
   color: var(--organic-status-text);
   font-size: var(--font-xs);
   font-weight: 600;
-  line-height: 1.25;
+  line-height: var(--leading-tight);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -552,7 +552,7 @@
   text-shadow: var(--text-shadow-panel);
   font-size: var(--font-sm);
   font-weight: 500;
-  line-height: 1.4;
+  line-height: var(--leading-normal);
   text-align: left;
   white-space: normal;
   opacity: 0;

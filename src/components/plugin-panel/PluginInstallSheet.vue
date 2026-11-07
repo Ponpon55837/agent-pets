@@ -316,7 +316,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
   background: var(--surface-sunken);
   color: var(--text-secondary);
   font-size: var(--font-xs);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .notice :deep(.icon) {
@@ -336,7 +336,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
   margin: 0;
   color: var(--text-muted);
   font-size: var(--font-xs);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
   overflow-wrap: anywhere;
 }
 
@@ -407,7 +407,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
 .perm-hint {
   color: var(--text-muted);
   font-size: var(--font-xs);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .existing {
@@ -438,7 +438,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
   padding-left: var(--space-4);
   color: var(--text-secondary);
   font-size: var(--font-xs);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .sheet-actions {

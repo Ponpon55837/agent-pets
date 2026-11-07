@@ -49,7 +49,7 @@ const label = computed(() => t(LABEL_KEYS[props.risk]))
   gap: var(--space-1);
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
-  line-height: 1.2;
+  line-height: var(--leading-tight);
 }
 
 .permission-risk-icon {

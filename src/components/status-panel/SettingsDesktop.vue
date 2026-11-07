@@ -226,7 +226,7 @@ function preview(cue: SoundCue): void {
   margin: 0 0 var(--space-3);
   color: var(--text-secondary);
   font-size: var(--font-sm);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .permission-settings-list {
