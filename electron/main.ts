@@ -330,6 +330,7 @@ async function bootstrapApp(): Promise<void> {
       if (event.originalEvent === 'AgentPetsIntegrationTest') {
         mainState.pendingIntegrationTests.get(event.sessionId)?.()
       }
+      try { mainState.sessionSnapshot.record(event) } catch {}
       try {
         mainState.desktopNotifications?.handleEvent(event)
       } catch {
@@ -382,6 +383,7 @@ async function bootstrapApp(): Promise<void> {
     assertTrustedIpcSender,
     getPanelWindow: () => mainState.panelWindow,
     getServerHealth: () => serverHealthTracker().snapshot(),
+    getSessionSnapshot: () => mainState.sessionSnapshot.list(),
     retryServer: id => serverHealthTracker().retry(id),
   })
 

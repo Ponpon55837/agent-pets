@@ -35,6 +35,7 @@ import type {
 } from '../src/types/project-mcp'
 import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from '../src/types/project-pet'
 import type { AgentAdapterId } from '../src/types/agent-adapter'
+import type { SessionSnapshotEntry } from './main/session-snapshot'
 import type { LocalServerHealthSnapshot, LocalServerId } from '../src/types/reliability'
 
 const electronAPI: ElectronAPI = {
@@ -191,6 +192,8 @@ const electronAPI: ElectronAPI = {
   hidePanel: () => {
     ipcRenderer.send(IPC_CHANNELS.panelHide)
   },
+
+  getSessionSnapshot: (): Promise<SessionSnapshotEntry[]> => ipcRenderer.invoke(IPC_CHANNELS.sessionSnapshotGet),
 
   getServerHealth: (): Promise<LocalServerHealthSnapshot> => ipcRenderer.invoke(IPC_CHANNELS.serverHealthGet),
 

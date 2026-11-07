@@ -40,6 +40,7 @@ import type { WindowsFullscreenDetector, WindowsFullscreenState } from '../windo
 import type { PluginAgentStatusController } from '../plugin-agent-status.ts'
 
 import type { ServerHealthTracker } from './server-health'
+import { SessionSnapshotStore } from './session-snapshot'
 
 export interface PluginSkinFallbackInfo {
   pluginId: string
@@ -128,6 +129,7 @@ export const mainState = {
   edgeDwellCandidate: null as { displayId: number; edge: PetEdge } | null,
   isQuitting: false,
   serverHealth: null as ServerHealthTracker | null,
+  sessionSnapshot: new SessionSnapshotStore() as SessionSnapshotStore,
   notificationAttentionCount: 0,
   permissionAttentionCount: 0,
   pendingIntegrationTests: new Map<string, () => void>(),

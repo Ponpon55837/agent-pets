@@ -29,6 +29,7 @@ import type {
 import { PRESENTATION_REACTIONS } from '@/types/presentation'
 import { formatProject } from '@/utils/format'
 import { AgentSessionIndex } from '@/utils/agent-session-index'
+import { SESSION_REMOVE_MS, sessionLifecycleAction } from '@/utils/session-lifecycle'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
 import {
@@ -47,7 +48,6 @@ export interface PetEntry {
 }
 
 const SUCCESS_DISPLAY_MS = 4_000
-const SESSION_STALE_MS = 15 * 60_000
 const MAX_SESSION_COUNT = 200
 const ACHIEVEMENT_DEFINITION_BY_ID = new Map(ACHIEVEMENT_DEFINITIONS.map(entry => [entry.id, entry]))
 // Kept at/below the main process' quota cache TTL so a poll that arrives on
@@ -1119,8 +1119,14 @@ export const useAgentStore = defineStore('agent', () => {
 
   function cleanupStale() {
     const now = Date.now()
-    for (const session of sessionIndex.values()) {
-      if (now - session.lastSeenAt > SESSION_STALE_MS && session.state !== 'offline') {
+    const hasPendingPermission = permissionRequests.value.length > 0
+    for (const session of [...sessionIndex.values()]) {
+      const action = sessionLifecycleAction(session, now, { hasPendingPermission })
+      if (action === 'remove') {
+        // Offline long enough that nobody is looking for it any more.
+        sessionIndex.delete(session.key)
+        moodTaskProgress.delete(session.key)
+      } else if (action === 'offline') {
         // No update in a long time means the process died without sending a
         // terminal event (Stop/SessionEnd) — treat it as gone rather than
         // letting a stuck thinking/tool-running state mask real sessions.
@@ -1129,6 +1135,38 @@ export const useAgentStore = defineStore('agent', () => {
         moodTaskProgress.delete(session.key)
       }
     }
+  }
+
+  // After a renderer reload/crash the in-memory list is empty although agents
+  // may still be running. Main keeps a light mirror; merge it in without
+  // replaying events (no toasts, mood or sound) and never over live data.
+  function restoreSessionSnapshot(entries: unknown): number {
+    if (!Array.isArray(entries)) return 0
+    const now = Date.now()
+    let restored = 0
+    for (const raw of entries.slice(0, MAX_SESSION_COUNT)) {
+      if (!raw || typeof raw !== 'object') continue
+      const entry = raw as Partial<AgentSession>
+      if (typeof entry.source !== 'string' || typeof entry.sessionId !== 'string') continue
+      if (typeof entry.state !== 'string' || !(entry.state in STATE_PRIORITY)) continue
+      if (typeof entry.lastSeenAt !== 'number' || !Number.isFinite(entry.lastSeenAt)) continue
+      if (now - entry.lastSeenAt > SESSION_REMOVE_MS) continue
+      const key = getSessionKey(entry.source as AgentSource, entry.sessionId)
+      if (sessionIndex.get(key)) continue
+      sessionIndex.upsert({
+        key,
+        source: entry.source as AgentSource,
+        sessionId: entry.sessionId,
+        project: typeof entry.project === 'string' ? entry.project : undefined,
+        projectId: typeof entry.projectId === 'string' ? entry.projectId : undefined,
+        routedPetId: typeof entry.routedPetId === 'string' ? entry.routedPetId : undefined,
+        state: entry.state,
+        lastSeenAt: entry.lastSeenAt,
+        toolName: typeof entry.toolName === 'string' ? entry.toolName : undefined,
+      }, MAX_SESSION_COUNT)
+      restored += 1
+    }
+    return restored
   }
 
   function handleSuccessTimeout() {
@@ -1747,6 +1785,7 @@ export const useAgentStore = defineStore('agent', () => {
     decidePermission,
     handleEvent,
     cleanupStale,
+    restoreSessionSnapshot,
     handleSuccessTimeout,
     removeSession,
     clearOfflineSessions,

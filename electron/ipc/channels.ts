@@ -102,6 +102,7 @@ export const IPC_CHANNELS = {
   quotaUsageUpdated: 'quota-usage-updated',
   removeCustomPet: 'remove-custom-pet',
   renameCustomPet: 'rename-custom-pet',
+  sessionSnapshotGet: 'session-snapshot-get',
   serverHealthChanged: 'server-health-changed',
   serverHealthGet: 'server-health-get',
   serverHealthRetry: 'server-health-retry',

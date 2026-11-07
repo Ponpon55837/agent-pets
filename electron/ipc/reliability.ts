@@ -1,5 +1,6 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import type { LocalServerHealthSnapshot, LocalServerId } from '../../src/types/reliability.ts'
+import type { SessionSnapshotEntry } from '../main/session-snapshot.ts'
 import { IPC_CHANNELS } from './channels.ts'
 
 export interface ReliabilityIpcDependencies {
@@ -8,6 +9,7 @@ export interface ReliabilityIpcDependencies {
   getPanelWindow(): BrowserWindow | null
   getServerHealth(): LocalServerHealthSnapshot
   retryServer(id?: LocalServerId): void
+  getSessionSnapshot(): SessionSnapshotEntry[]
 }
 
 const SERVER_IDS: readonly LocalServerId[] = ['event', 'permission', 'presentation']
@@ -16,6 +18,11 @@ export function registerReliabilityIpc(deps: ReliabilityIpcDependencies): void {
   deps.ipcMain.handle(IPC_CHANNELS.serverHealthGet, (event): LocalServerHealthSnapshot => {
     deps.assertTrustedIpcSender(event)
     return deps.getServerHealth()
+  })
+
+  deps.ipcMain.handle(IPC_CHANNELS.sessionSnapshotGet, (event): SessionSnapshotEntry[] => {
+    deps.assertTrustedIpcSender(event)
+    return deps.getSessionSnapshot()
   })
 
   deps.ipcMain.handle(IPC_CHANNELS.serverHealthRetry, (event, id: unknown): LocalServerHealthSnapshot => {
