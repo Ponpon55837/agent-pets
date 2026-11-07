@@ -287,3 +287,22 @@ export function isCodexHooksFeatureEnabled(config: string | null): boolean {
   }
   return false
 }
+
+// ---- Hook command construction (quoting) ----
+
+/**
+ * Shell-form command Codex runs. Every path is double-quoted so spaces, non-ASCII characters and
+ * cmd/sh metacharacters in a user name cannot split or alter the command. On Windows the batch
+ * wrapper receives the node path itself, so only the wrapper is referenced.
+ */
+export function codexHookCommand(options: { isWindows: boolean, nodeBin: string, hookScript: string, wrapper: string }): string {
+  return options.isWindows
+    ? `"${options.wrapper}" codex`
+    : `"${options.nodeBin}" "${options.hookScript}" codex`
+}
+
+/** Escapes a path for use inside a double-quoted string in a .cmd file. */
+export function escapeCmdQuotedPath(value: string): string {
+  if (/["\r\n\0]/.test(value)) throw new Error('Path contains characters that cannot be used in a Windows batch file')
+  return value.replace(/%/g, '%%')
+}

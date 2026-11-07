@@ -253,3 +253,25 @@ test('configured hook executable is read from exec-form and shell-form hooks', (
     assert.equal(leadingExecutable('node /x/.desktop-pet/agent-hook.mjs codex'), 'node')
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
+
+import { codexHookCommand, escapeCmdQuotedPath } from '../electron/hook-config.ts'
+
+test('Codex hook commands quote every path (spaces, non-ASCII, shell metacharacters)', () => {
+  const nasty = ["C:\\Users\\Jane Doe", "C:\\Users\\王小明", "C:\\Users\\a&b", "C:\\Users\\50%off", "/Users/o'brien", "C:\\Users\\a^b"]
+  for (const home of nasty) {
+    const win = codexHookCommand({ isWindows: true, nodeBin: '', hookScript: `${home}\\.desktop-pet\\agent-hook.mjs`, wrapper: `${home}\\.desktop-pet\\agent-hook.cmd` })
+    assert.equal(win, `"${home}\\.desktop-pet\\agent-hook.cmd" codex`)
+    assert.equal(leadingExecutable(win), `${home}\\.desktop-pet\\agent-hook.cmd`)
+    const mac = codexHookCommand({ isWindows: false, nodeBin: `${home}/node`, hookScript: `${home}/.desktop-pet/agent-hook.mjs`, wrapper: '' })
+    assert.equal(mac, `"${home}/node" "${home}/.desktop-pet/agent-hook.mjs" codex`)
+    assert.equal(leadingExecutable(mac), `${home}/node`)
+  }
+})
+
+test('batch wrapper path escaping doubles percent signs and rejects quotes', () => {
+  assert.equal(escapeCmdQuotedPath('C:\\Users\\50%off\\node.exe'), 'C:\\Users\\50%%off\\node.exe')
+  assert.equal(escapeCmdQuotedPath('C:\\Users\\a&b^c\\node.exe'), 'C:\\Users\\a&b^c\\node.exe')
+  assert.throws(() => escapeCmdQuotedPath('C:\\bad"name\\node.exe'))
+  // $-sequences must reach the file literally (function replacer, not a replacement pattern).
+  assert.equal('X __N__ Y'.replace('__N__', () => escapeCmdQuotedPath('C:\\a$&b\\node.exe')), 'X C:\\a$&b\\node.exe Y')
+})

@@ -7,6 +7,8 @@ import { createNodeResolver, NodeNotFoundError, NodeUnsupportedError, type NodeI
 import type { PetEdge, PetWindowMode } from '../src/types/pet-window'
 import { readConfigText, writeConfigSafely, writeTextAtomic, type ConfigWriteResult } from './safe-config-write.ts'
 import {
+  codexHookCommand,
+  escapeCmdQuotedPath,
   disableCodexHooksFeatureText,
   enableCodexHooksFeatureText,
   fileHasAgentPetsHooks,
@@ -364,7 +366,7 @@ function hookScriptContent(): string {
 function hookWrapperContent(): string {
   return fs
     .readFileSync(path.join(integrationsDir(), 'agent-hook.cmd'), 'utf-8')
-    .replace('__NODE_EXECUTABLE__', () => requireNodeBin())
+    .replace('__NODE_EXECUTABLE__', () => escapeCmdQuotedPath(requireNodeBin()))
 }
 
 function installHookScript(): ConfigWriteResult[] {
@@ -659,7 +661,7 @@ const CODEX_HOOK_EVENTS = [
 function codexHooksJson(): any {
   const hook = hookScriptPath()
   const nodeBin = IS_WIN ? '' : requireNodeBin()
-  const command = IS_WIN ? `${hookWrapperPath()} codex` : `${nodeBin} "${hook}" codex`
+  const command = codexHookCommand({ isWindows: IS_WIN, nodeBin, hookScript: hook, wrapper: hookWrapperPath() })
   const handler = () => ({
     hooks: [
       {
@@ -784,7 +786,7 @@ function uninstallClaudeCode(): void {
 // Agent Pets.exe and recursively launch the desktop app on every event.
 function rewriteInstalledAgentPetsHooks(filePath: string, target: 'codex' | 'claude'): boolean {
   const hookPath = hookScriptPath()
-  const codexCommand = `${hookWrapperPath()} codex`
+  const codexCommand = codexHookCommand({ isWindows: true, nodeBin: '', hookScript: hookPath, wrapper: hookWrapperPath() })
   const nodeBin = target === 'claude' ? (nodeResolver.resolveSync()?.path ?? '') : ''
   if (target === 'claude' && !nodeBin) return false // cannot repair without a real Node path
   return rewriteAgentPetsHookCommands(filePath, (hook) => {
@@ -882,7 +884,9 @@ function installIntegration(target?: IntegrationTarget): ConfigWriteResult[] {
     case 'claude': return installClaude()
     case 'claudeCode': return installClaudeCode()
     default:
-      return [...installOpenCode(), ...installCodex(), ...installClaude(), ...installClaudeCode()]
+      // Claude Desktop's `agent` key is not a documented setting, so it is no longer written by default
+      // (it is still removed on uninstall for older installs). Claude Code covers CLI and Desktop.
+      return [...installOpenCode(), ...installCodex(), ...installClaudeCode()]
   }
 }
 
