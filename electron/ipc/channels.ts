@@ -30,6 +30,8 @@ export const IPC_CHANNELS = {
   panelOpenSettings: 'panel-open-settings',
   panelResize: 'panel-resize',
   panelToggle: 'panel-toggle',
+  permissionAuditClear: 'permission-audit-clear',
+  permissionAuditList: 'permission-audit-list',
   permissionDecide: 'permission-decide',
   permissionRequestsInit: 'permission-requests-init',
   permissionRequestsUpdated: 'permission-requests-updated',

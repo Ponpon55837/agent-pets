@@ -13,7 +13,12 @@ import { classifyPermissionRisk, isNetworkPermission } from './permission-risk.t
 export const PERMISSION_ADAPTER_PORT = 17_374
 
 const MAX_BODY_BYTES = 16 * 1024
+// Per plugin instance (source + instanceId), so one noisy instance cannot use up
+// another's budget; the per-host cap is a looser backstop for unparsed bodies.
 const MAX_CREATE_REQUESTS_PER_MINUTE = 60
+const MAX_CREATE_REQUESTS_PER_MINUTE_PER_HOST = 240
+const MAX_BUDGET_WINDOWS = 256
+const MAX_EXTERNAL_RECORDS = 400
 const ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
 // The broker applies the final display limits (and counts what it cuts); the
 // adapter only bounds how much it accepts so memory use stays predictable.
@@ -156,7 +161,7 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
 
     const route = `${request.method ?? ''} ${request.url?.split('?')[0] ?? ''}`
     if (route === 'POST /v1/permission/request') {
-      if (!consumeCreateBudget(createWindows, request.socket.remoteAddress ?? 'loopback', now())) {
+      if (!consumeCreateBudget(createWindows, `host:${request.socket.remoteAddress ?? 'loopback'}`, now(), MAX_CREATE_REQUESTS_PER_MINUTE_PER_HOST)) {
         sendJson(response, 429, { error: 'rate_limited' })
         return
       }
@@ -164,6 +169,10 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
       const payload = normalizeCreatePayload(body)
       if (!payload) {
         sendJson(response, 400, { error: 'invalid_request' })
+        return
+      }
+      if (!consumeCreateBudget(createWindows, `instance:${payload.source}:${payload.instanceId}`, now(), MAX_CREATE_REQUESTS_PER_MINUTE)) {
+        sendJson(response, 429, { error: 'rate_limited' })
         return
       }
 
@@ -195,6 +204,13 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
         const status = created.error === 'capacity_exceeded' ? 503 : 400
         sendJson(response, status, { error: created.error })
         return
+      }
+      // Drop index entries whose broker request has been forgotten, so the
+      // external index cannot grow for the lifetime of the app.
+      if (records.size >= MAX_EXTERNAL_RECORDS) {
+        for (const [key, record] of records) {
+          if (!options.broker.hasRecord(record.brokerRequestId)) records.delete(key)
+        }
       }
       records.set(externalKey, { brokerRequestId, relayKey })
       sendJson(response, 201, { requestId: brokerRequestId })
@@ -410,13 +426,19 @@ function consumeCreateBudget(
   windows: Map<string, { startedAt: number; count: number }>,
   key: string,
   now: number,
+  limit: number,
 ): boolean {
   const current = windows.get(key)
   if (!current || now - current.startedAt >= 60_000 || now < current.startedAt) {
+    if (windows.size >= MAX_BUDGET_WINDOWS) {
+      for (const [existingKey, window] of windows) {
+        if (now - window.startedAt >= 60_000 || now < window.startedAt) windows.delete(existingKey)
+      }
+    }
     windows.set(key, { startedAt: now, count: 1 })
     return true
   }
-  if (current.count >= MAX_CREATE_REQUESTS_PER_MINUTE) return false
+  if (current.count >= limit) return false
   current.count += 1
   return true
 }

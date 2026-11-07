@@ -23,7 +23,9 @@
 | `onboarding-get` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getOnboardingState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `onboarding-update` | `handle` | 受信任寵物或設定面板 main frame | isOnboardingAction；無效輸入回安全預設或錯誤 | updateOnboardingState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `permission-requests-init` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | initializePermissionRequests (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `permission-decide` | `handle` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | 型別；無效輸入回安全預設或錯誤 | decidePermission (invoke) | `tests/phase-18-renderer-characterization.test.mts` |
+| `permission-decide` | `handle` | 受信任寵物或設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | decidePermission (invoke) | `tests/phase-18-renderer-characterization.test.mts` |
+| `permission-audit-list` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | listPermissionAudit (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `permission-audit-clear` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | clearPermissionAudit (invoke) | `tests/permission-audit.test.mts` |
 | `add-custom-pet` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | addCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `rename-custom-pet` | `handle` | 設定面板 main frame | 型別；長度／數量上限；isFile, isSymbolicLink；無效輸入回安全預設或錯誤 | renameCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `remove-custom-pet` | `handle` | 設定面板 main frame | isDirectory, isSymbolicLink；無效輸入回安全預設或錯誤 | removeCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |

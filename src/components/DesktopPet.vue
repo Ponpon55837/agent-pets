@@ -22,6 +22,7 @@ import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 import { describeTool } from '@/utils/pet-toast'
 import PermissionBubble from '@/components/permission/PermissionBubble.vue'
+import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
 
 const store = useAgentStore()
 const clickAreaRef = ref<HTMLElement | null>(null)
@@ -771,19 +772,7 @@ watch(() => store.levelUpEvent, (event) => {
       </Transition>
 
       <Transition v-else-if="bubbleSelection === 'permission-notice' && store.permissionBubbleActive && store.permissionNotice" name="toast" mode="out-in">
-        <div
-          key="permission"
-          class="pet-toast permission-notice"
-          role="status"
-          aria-live="polite"
-          data-pet-hit-target="solid"
-        >
-          <span class="permission-notice-icon" aria-hidden="true">!</span>
-          <span class="permission-notice-copy">
-            <strong>{{ store.permissionNotice.title }}</strong>
-            <span>{{ store.permissionNotice.detail }}</span>
-          </span>
-        </div>
+        <PermissionNoticeBubble key="permission-notice" />
       </Transition>
 
       <Transition v-else-if="bubbleSelection === 'presentation-say' && store.presentationSay" name="toast" mode="out-in">

@@ -24,9 +24,10 @@ import { DesktopPreferencesStore, resolveLoginItemExecutable } from '../desktop-
 import { DesktopNotificationService } from '../desktop-notifications'
 import { DesktopTrayController } from '../desktop-tray'
 import type { PluginTrayCommandItem } from '../plugin-tray'
-import { desktopVisibilityCapabilitiesForPlatform } from '../desktop-visibility'
+import { desktopVisibilityCapabilitiesForPlatform, macVisibleOnFullScreen } from '../desktop-visibility'
 import { PermissionBroker } from '../permission-broker'
-import { appendPermissionAudit } from '../permission-audit'
+import { appendPermissionAudit, clearPermissionAudit, readPermissionAudit } from '../permission-audit'
+import type { PermissionAuditEntry } from '../../src/types/permission'
 import { ProgressionStore } from '../progression'
 import { AchievementStore } from '../achievements'
 import { HistoryStore } from '../history'
@@ -106,10 +107,26 @@ import { registerPluginPreferencesIpc } from '../ipc/plugin-preferences'
 import { registerPluginCatalogIpc } from '../ipc/plugin-catalog'
 import { registerPluginInstallIpc } from '../ipc/plugin-install'
 import { mainState, type PluginSkinFallbackInfo } from './state'
+import { EMPTY_ATTENTION } from '../attention-tracker'
+import { attachHotkeyInfo, PermissionHotkeys } from '../permission-hotkeys'
 import { PANEL_GAP, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_WIDTH, PANEL_SIZES, PANEL_BLUR_HIDE_DELAY_MS, computePanelPlacement, fitPanelHeight, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
 
-const PERMISSION_ALLOW_HOTKEY = 'CommandOrControl+Shift+Y'
-const PERMISSION_DENY_HOTKEY = 'CommandOrControl+Shift+N'
+let permissionHotkeys: PermissionHotkeys | null = null
+
+function getPermissionHotkeys(): PermissionHotkeys {
+  permissionHotkeys ??= new PermissionHotkeys({
+    platform: process.platform,
+    shortcuts: {
+      register: (accelerator, callback) => globalShortcut.register(accelerator, callback),
+      unregister: (accelerator) => globalShortcut.unregister(accelerator),
+      isRegistered: (accelerator) => globalShortcut.isRegistered(accelerator),
+    },
+    decide: (requestId, decision) => {
+      void mainState.permissionBroker?.decide(requestId, decision, 'hotkey')
+    },
+  })
+  return permissionHotkeys
+}
 
 export { PANEL_GAP, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_WIDTH }
 // petWindow's actual bounds include a fixed, unscaled band of transparent
@@ -1656,7 +1673,10 @@ export function applyMacFullscreenVisibilityPolicy(): void {
   if (!IS_MAC) return
   const preferences = currentDesktopPreferences()
   if (!preferences.visibilityCapabilities.fullscreenAutoHide.supported) return
-  const visibleOnFullScreen = !preferences.fullscreenAutoHideEnabled
+  const visibleOnFullScreen = macVisibleOnFullScreen(
+    preferences.fullscreenAutoHideEnabled,
+    mainState.permissionAttentionCount > 0,
+  )
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
     if (!window || window.isDestroyed()) continue
     try {
@@ -2183,7 +2203,6 @@ export function showPanelWindow(view: 'sessions' | 'settings' | 'restore' = 'ses
   mainState.panelWindow.show()
   mainState.panelWindow.focus()
   if (wasHidden) revealPanelWindowAfterFirstFrame(mainState.panelWindow)
-  mainState.desktopNotifications?.clearAttention()
 
   const notifyRenderer = () => {
     if (!mainState.panelWindow || mainState.panelWindow.isDestroyed()) return
@@ -2202,6 +2221,7 @@ export function currentDesktopPreferences(): DesktopPreferences {
   if (!mainState.desktopPreferences) {
     return {
       dndEnabled: false,
+      dndUntil: null,
       notificationsEnabled: true,
       permissionBubbleEnabled: true,
       presentationMcpEnabled: true,
@@ -2212,6 +2232,10 @@ export function currentDesktopPreferences(): DesktopPreferences {
       fullscreenAutoHideEnabled: false,
       rightClickHideEnabled: false,
       soundEnabled: false,
+      soundVolume: 60,
+      soundOnPermission: true,
+      soundOnError: true,
+      soundOnSuccess: true,
       launchAtStartup: false,
       launchAtStartupSupported: false,
       locale: 'zh-TW',
@@ -2387,12 +2411,31 @@ export function createWindowsFullscreenServices(): void {
   }
 }
 
+let dndExpiryTimer: ReturnType<typeof setTimeout> | null = null
+
+// A timed Do Not Disturb ends by itself; when it does, summarise what was
+// silenced so the user is not left wondering what they missed.
+function scheduleDndExpiry(preferences: DesktopPreferences): void {
+  if (dndExpiryTimer) clearTimeout(dndExpiryTimer)
+  dndExpiryTimer = null
+  if (!preferences.dndEnabled || preferences.dndUntil === null) return
+  const delay = Math.min(Math.max(0, preferences.dndUntil - Date.now()) + 50, 2_147_483_647)
+  dndExpiryTimer = setTimeout(() => {
+    dndExpiryTimer = null
+    const missed = mainState.desktopNotifications?.takeDndMissedCount() ?? 0
+    updateDesktopPreferences({ dndEnabled: false, dndUntil: null })
+    if (missed > 0) mainState.desktopNotifications?.showDndSummary(missed)
+  }, delay)
+  dndExpiryTimer.unref?.()
+}
+
 export function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   if (!mainState.desktopPreferences) throw new Error('Desktop preferences are not ready')
   const previousPreferences = mainState.desktopPreferences.get()
   const achievementsWereEnabled = previousPreferences.achievementsEnabled
   const preferences = mainState.desktopPreferences.update(patch)
   if (previousPreferences.dndEnabled !== preferences.dndEnabled) mainState.pluginFeedController?.onVisibilityChanged()
+  scheduleDndExpiry(preferences)
   setLocale(preferences.locale)
   if (!preferences.edgeModeEnabled && mainState.petWindowMode === 'edge') applyNormalPetBounds()
   applyPetCaptureProtection()
@@ -2413,54 +2456,41 @@ export function updateDesktopPreferences(patch: unknown): DesktopPreferences {
 
 export function unregisterPermissionHotkeys(): void {
   if (!app.isReady()) return
-  for (const accelerator of [PERMISSION_ALLOW_HOTKEY, PERMISSION_DENY_HOTKEY]) {
-    if (globalShortcut.isRegistered(accelerator)) globalShortcut.unregister(accelerator)
-  }
+  permissionHotkeys?.clear()
 }
 
 export function syncTrayAttention(): void {
-  mainState.desktopTray?.setAttentionCount(mainState.notificationAttentionCount + mainState.permissionAttentionCount)
+  mainState.desktopTray?.setAttention(mainState.desktopNotifications?.getAttention() ?? EMPTY_ATTENTION)
 }
 
 export function broadcastPermissionRequests(): void {
-  const requests = mainState.permissionBroker?.listRequests() ?? []
-  if (requests.length > 0 && mainState.petWindowMode !== 'normal') {
+  const listed = mainState.permissionBroker?.listRequests() ?? []
+  if (listed.length > 0 && mainState.petWindowMode !== 'normal') {
     applyNormalPetBounds()
   }
-  mainState.permissionAttentionCount = requests.length
-  syncTrayAttention()
+  const hadPermissionRequests = mainState.permissionAttentionCount > 0
+  mainState.permissionAttentionCount = listed.length
+  if (hadPermissionRequests !== listed.length > 0) applyMacFullscreenVisibilityPolicy()
+  if (mainState.desktopNotifications) mainState.desktopNotifications.setPermissionRequests(listed)
+  else syncTrayAttention()
+
+  const top = listed[0]
+  const hotkeyInfo = app.isReady()
+    ? getPermissionHotkeys().sync(
+      top,
+      Boolean(
+        currentDesktopPreferences().permissionBubbleEnabled
+        && mainState.petWindow
+        && !mainState.petWindow.isDestroyed()
+        && mainState.petWindow.isVisible(),
+      ),
+    )
+    : null
+  const requests = attachHotkeyInfo(listed, hotkeyInfo)
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
     if (window && !window.isDestroyed()) {
       window.webContents.send(IPC_CHANNELS.permissionRequestsUpdated, requests)
     }
-  }
-
-  unregisterPermissionHotkeys()
-  const top = requests[0]
-  const permissionBubbleEnabled = currentDesktopPreferences().permissionBubbleEnabled
-  if (
-    !permissionBubbleEnabled
-    || !top
-    || top.status !== 'pending'
-    || !top.hotkeyEligible
-    || !mainState.petWindow
-    || mainState.petWindow.isDestroyed()
-    || !mainState.petWindow.isVisible()
-  ) return
-
-  try {
-    if (top.allowedDecisions.includes('allow_once')) {
-      globalShortcut.register(PERMISSION_ALLOW_HOTKEY, () => {
-        void mainState.permissionBroker?.decide(top.requestId, 'allow_once', 'hotkey')
-      })
-    }
-    if (top.allowedDecisions.includes('deny')) {
-      globalShortcut.register(PERMISSION_DENY_HOTKEY, () => {
-        void mainState.permissionBroker?.decide(top.requestId, 'deny', 'hotkey')
-      })
-    }
-  } catch {
-    unregisterPermissionHotkeys()
   }
 }
 
@@ -2778,6 +2808,28 @@ export function cancelPermissionRequests(
   }
 }
 
+function permissionAuditPath(): string {
+  return join(app.getPath('userData'), 'permission-audit.jsonl')
+}
+
+export function listPermissionAuditEntries(limit: number): PermissionAuditEntry[] {
+  return readPermissionAudit(permissionAuditPath(), limit)
+    .filter(record => typeof record.action === 'string' && record.risk)
+    .map(record => ({
+      resolvedAt: record.resolvedAt,
+      agentId: record.agentId,
+      action: record.action as string,
+      risk: record.risk as PermissionAuditEntry['risk'],
+      status: record.status,
+      ...(record.decidedBy ? { decidedBy: record.decidedBy } : {}),
+      terminalReason: record.terminalReason,
+    }))
+}
+
+export function clearPermissionAuditLog(): void {
+  clearPermissionAudit(permissionAuditPath())
+}
+
 export function createPermissionServices(permissionToken: string): void {
   if (mainState.permissionBroker || mainState.permissionRelay || mainState.permissionAdapterServer) return
 
@@ -2786,7 +2838,7 @@ export function createPermissionServices(permissionToken: string): void {
     onChanged: schedulePermissionUiSync,
     onAudit: record => {
       try {
-        appendPermissionAudit(join(app.getPath('userData'), 'permission-audit.json'), record)
+        appendPermissionAudit(permissionAuditPath(), record)
       } catch (error) {
         console.error('Failed to persist permission audit record', error)
       }
@@ -2849,11 +2901,10 @@ export function createDesktopServices(): void {
     getPreferences: currentDesktopPreferences,
     isAppFocused: () => [mainState.petWindow, mainState.panelWindow].some(window => window?.isFocused()),
     onNotificationClick: () => showPanelWindow('sessions'),
-    onAttentionChanged: count => {
-      mainState.notificationAttentionCount = count
-      syncTrayAttention()
-    },
+    onAttentionChanged: () => syncTrayAttention(),
   })
+
+  scheduleDndExpiry(currentDesktopPreferences())
 
   mainState.desktopTray = new DesktopTrayController(
     join(__dirname, '..', 'build', 'icon.png'),

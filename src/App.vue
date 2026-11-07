@@ -6,7 +6,8 @@ import GrowthCelebration from '@/components/growth/GrowthCelebration.vue'
 import StatusPanel from '@/components/StatusPanel.vue'
 import SetupWizard from '@/components/SetupWizard.vue'
 import ProjectMcpPanel from '@/components/ProjectMcpPanel.vue'
-import { playCue, type SoundCue } from '@/utils/sound'
+import { playCue, setSoundVolume, type SoundCue } from '@/utils/sound'
+import { shouldPlayCue } from '@/utils/sound-policy'
 import type { DesktopPreferences } from '@/types/desktop'
 import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
 import { setLocale as applyLocale } from '@/i18n'
@@ -264,15 +265,33 @@ function handleStorage(e: StorageEvent) {
   }
 }
 
+function soundGate() {
+  return {
+    soundEnabled: store.soundEnabled,
+    dndEnabled: store.dndEnabled,
+    soundOnPermission: store.soundOnPermission,
+    soundOnError: store.soundOnError,
+    soundOnSuccess: store.soundOnSuccess,
+    petVisible: document.visibilityState === 'visible',
+  }
+}
+
+watch(() => store.soundVolume, setSoundVolume, { immediate: true })
+
+// A broker request can arrive without a status event (relay timing), so the
+// permission cue also follows new requests; playCue throttles the overlap.
+watch(() => store.permissionRequests.map(request => request.requestId).join(','), (ids, previous) => {
+  if (isPanelWindow || !store.desktopPreferencesReady || !ids) return
+  const known = new Set((previous ?? '').split(','))
+  if (ids.split(',').some(id => !known.has(id))) {
+    playCueIfAllowed('waiting-permission')
+  }
+})
+
 // Both windows' stores process every event identically, so only the pet
 // window actually plays audio — otherwise it'd sound twice.
 function playCueIfAllowed(cue: SoundCue): void {
-  if (
-    !isPanelWindow
-    && store.desktopPreferencesReady
-    && store.soundEnabled
-    && !store.dndEnabled
-  ) {
+  if (!isPanelWindow && store.desktopPreferencesReady && shouldPlayCue(cue, soundGate())) {
     playCue(cue)
   }
 }

@@ -3,7 +3,7 @@ import type { ElectronAPI } from '../src/types/electron-api'
 import type { AdapterDiagnoseIpcResult, AdapterInstallIpcResult, AdapterUninstallIpcResult } from '../src/types/ipc'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
-import type { PermissionDecisionValue, PermissionRequestView } from '../src/types/permission'
+import type { PermissionDecisionValue, PermissionRequestView, PermissionAuditEntry } from '../src/types/permission'
 import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySummary } from '../src/types/history'
@@ -350,6 +350,14 @@ const electronAPI: ElectronAPI = {
 
   decidePermission: (requestId: string, decision: PermissionDecisionValue) => {
     return ipcRenderer.invoke(IPC_CHANNELS.permissionDecide, { requestId, decision })
+  },
+
+  listPermissionAudit: (): Promise<PermissionAuditEntry[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.permissionAuditList)
+  },
+
+  clearPermissionAudit: (): Promise<{ ok: boolean }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.permissionAuditClear)
   },
 
   quitApp: () => {

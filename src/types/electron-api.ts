@@ -2,7 +2,7 @@
 
 import type { OnboardingAction, OnboardingState } from './onboarding'
 import type { DesktopPreferences, DesktopPreferencesPatch } from './desktop'
-import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView } from './permission'
+import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView, PermissionAuditEntry } from './permission'
 import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from './progression'
 import type { AchievementSnapshot, AchievementUnlock } from './achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySummary } from './history'
@@ -137,6 +137,8 @@ export interface ElectronAPI {
         status?: PermissionRequestStatus
         error?: 'not_found' | 'invalid_decision' | 'conflict'
       }>
+      listPermissionAudit: () => Promise<PermissionAuditEntry[]>
+      clearPermissionAudit: () => Promise<{ ok: boolean }>
       quitApp: () => void
       restartApp: () => void
       checkIntegration: () => Promise<AdapterIntegrationStatusIpcResult>
