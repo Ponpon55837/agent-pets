@@ -471,7 +471,7 @@ node scripts/e2e-isolated-electron.mjs
 node integrations/install.mjs
 ```
 
-這會幫所有偵測到的工具安裝 hooks，安裝位置為：
+這會幫所有支援的工具安裝 hooks（與設定精靈相同的保護機制），安裝位置為：
 
 - `~/.codex/hooks.json`（Codex）
 - `~/.claude/settings.json`（Claude Code CLI & Desktop）
