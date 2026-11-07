@@ -2598,10 +2598,14 @@ export function scheduleAchievementStoreRetry(): void {
 }
 
 const HISTORY_STORE_RETRY_DELAYS_MS = [30_000, 120_000, 600_000] as const
+const STARTUP_DEFERRED_WORK_MS = 10_000
+let deferredHistoryWorkTimer: ReturnType<typeof setTimeout> | null = null
 let historyStoreRetryTimer: ReturnType<typeof setTimeout> | null = null
 let historyStoreRetryAttempt = 0
 
 export function cancelHistoryStoreRetry(): void {
+  if (deferredHistoryWorkTimer) clearTimeout(deferredHistoryWorkTimer)
+  deferredHistoryWorkTimer = null
   if (historyStoreRetryTimer) clearTimeout(historyStoreRetryTimer)
   historyStoreRetryTimer = null
 }
@@ -2629,8 +2633,14 @@ export function createHistoryServices(): void {
       void refreshLocalUsage()
     }, LOCAL_USAGE_TICK_MS)
     mainState.localUsageScanTimer.unref?.()
-    reconcileAchievementsFromHistory()
-    void refreshLocalUsage()
+    // Heavy first-run work waits until the pet has been on screen for a while.
+    if (deferredHistoryWorkTimer) clearTimeout(deferredHistoryWorkTimer)
+    deferredHistoryWorkTimer = setTimeout(() => {
+      deferredHistoryWorkTimer = null
+      reconcileAchievementsFromHistory()
+      void refreshLocalUsage()
+    }, STARTUP_DEFERRED_WORK_MS)
+    deferredHistoryWorkTimer.unref?.()
   } catch (error) {
     // History is an additive HUD feature. A broken history database must not
     // prevent the pet, event receiver, XP, or permission controls from booting.

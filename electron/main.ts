@@ -252,7 +252,17 @@ const startupLog = (level: 'error' | 'warn', message: string, detail?: unknown) 
   console.error(message, ...(detail === undefined ? [] : [detail]))
   logMain(level, 'startup', message)
 }
-const startupStep = (name: string, fn: () => void | Promise<void>) => runStartupStep(name, fn, startupLog, startupResults)
+const startupTimings: Array<{ name: string; startMs: number; durationMs: number }> = []
+const startupStep = async (name: string, fn: () => void | Promise<void>) => {
+  const startMs = performance.now()
+  try {
+    return await runStartupStep(name, fn, startupLog, startupResults)
+  } finally {
+    const durationMs = performance.now() - startMs
+    performance.mark(`agent-pets:startup:${name}`)
+    startupTimings.push({ name, startMs: Math.round(startMs), durationMs: Math.round(durationMs * 10) / 10 })
+  }
+}
 
 async function showStartupFailureDialog(): Promise<void> {
   try {
@@ -276,7 +286,7 @@ async function showStartupFailureDialog(): Promise<void> {
 async function bootstrapApp(): Promise<void> {
   if (!hasSingleInstanceLock) return
 
-  registerRuntimeDiagnostics(() => startupResults.map(result => ({ name: result.name, ok: result.ok })), () => crashGuard.stats(), runMarker.previousRunUnclean)
+  registerRuntimeDiagnostics(() => startupResults.map(result => ({ name: result.name, ok: result.ok, ...startupTimings.find(timing => timing.name === result.name) })), () => crashGuard.stats(), runMarker.previousRunUnclean)
   if (runMarker.previousRunUnclean) {
     logMain('warn', 'startup', 'previous run did not exit cleanly')
     try {
@@ -299,7 +309,6 @@ async function bootstrapApp(): Promise<void> {
     )
   })
   await startupStep('project-routing', createProjectRoutingServices)
-  await startupStep('plugins', createPluginServices)
   let permissionToken = ''
   let presentationToken = ''
   await startupStep('tokens', () => {
@@ -309,8 +318,11 @@ async function bootstrapApp(): Promise<void> {
   await startupStep('protocol', configureSecureProtocol)
   await startupStep('windows-fullscreen', createWindowsFullscreenServices)
   await startupStep('desktop', createDesktopServices)
+  // The pet becomes visible before plugins, history or achievements spin up,
+  // so a slow plugin directory or disk never delays the first paint.
   await startupStep('pet-window', createPetWindow)
   await startupStep('panel-window', createPanelWindow)
+  await startupStep('plugins', createPluginServices)
   await startupStep('fullscreen-targets', () => {
     syncWindowsFullscreenTargets()
     mainState.windowsFullscreenDetector?.refresh()
