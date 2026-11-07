@@ -9,6 +9,7 @@ import { playCue, type SoundCue } from '@/utils/sound'
 import type { DesktopPreferences } from '@/types/desktop'
 import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
 import { setLocale as applyLocale } from '@/i18n'
+import { EDGE_HOVER_EXPAND_MS } from '@/utils/pet-edge'
 import { HIT_DILATE_PX, decidePassthrough, hasOpaquePixel } from '@/utils/pet-hit-test'
 
 const store = useAgentStore()
@@ -126,7 +127,6 @@ function sendPassthrough(ignore: boolean): void {
 
 function evaluatePointer(clientX: number, clientY: number): void {
   if (store.petWindowMode.mode === 'edge') {
-    window.electronAPI?.notifyPetHover()
     sendPassthrough(false)
     return
   }
@@ -137,6 +137,23 @@ function handlePetMouseMove(event: MouseEvent) {
   lastPointer = { x: event.clientX, y: event.clientY }
   lastPointerAt = performance.now()
   evaluatePointer(event.clientX, event.clientY)
+}
+
+// Edge handle: expand only when the cursor lingers, so sweeping past on the way
+// elsewhere does not pop the pet out.
+let edgeHoverTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelEdgeHover(): void {
+  if (edgeHoverTimer) clearTimeout(edgeHoverTimer)
+  edgeHoverTimer = null
+}
+
+function handleEdgeHoverEnter(): void {
+  if (store.petWindowMode.mode !== 'edge' || edgeHoverTimer) return
+  edgeHoverTimer = setTimeout(() => {
+    edgeHoverTimer = null
+    if (store.petWindowMode.mode === 'edge') window.electronAPI?.notifyPetHover()
+  }, EDGE_HOVER_EXPAND_MS)
 }
 
 function scheduleReevaluate(): void {
@@ -323,6 +340,8 @@ onMounted(() => {
   if (!isPanelWindow && electronAPI?.setMousePassthrough) {
     window.addEventListener('mousemove', handlePetMouseMove, true)
     startLayoutWatch()
+    document.documentElement.addEventListener('mouseenter', handleEdgeHoverEnter)
+    document.documentElement.addEventListener('mouseleave', cancelEdgeHover)
   }
 
   window.addEventListener('storage', handleStorage)
@@ -410,6 +429,9 @@ onUnmounted(() => {
   cleanupPluginSkinsChanged?.()
   window.removeEventListener('mousemove', handlePetMouseMove, true)
   stopLayoutWatch()
+  cancelEdgeHover()
+  document.documentElement.removeEventListener('mouseenter', handleEdgeHoverEnter)
+  document.documentElement.removeEventListener('mouseleave', cancelEdgeHover)
   window.removeEventListener('storage', handleStorage)
   document.removeEventListener('visibilitychange', onDocumentVisibilityChange)
   stopRecurringTimers()

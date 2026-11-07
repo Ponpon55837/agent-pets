@@ -35,6 +35,8 @@ export interface PetMotionIpcDependencies {
   scheduleShimejiPositionPersist(): void
   /** Optional: when present the panel follows the pet during a drag instead of hiding. */
   repositionVisiblePanel?(): void
+  /** Optional: re-dock to the edge once the cursor stays away after a hover expand. */
+  scheduleEdgeRedock?(): void
 }
 
 const DRAG_POLL_MS = 16
@@ -115,7 +117,10 @@ export function registerPetMotionIpc(deps: PetMotionIpcDependencies): void {
   deps.ipcMain.on(IPC_CHANNELS.petWindowHover, event => {
     const petWindow = deps.getPetWindow()
     if (!petWindow || !deps.isTrustedIpcSender(event, petWindow)) return
-    if (deps.getPetWindowMode() === 'edge') deps.applyNormalPetBounds()
+    if (deps.getPetWindowMode() === 'edge') {
+      deps.applyNormalPetBounds()
+      deps.scheduleEdgeRedock?.()
+    }
   })
 
   deps.ipcMain.on(IPC_CHANNELS.shimejiWalkStep, (event, payload: unknown) => {
