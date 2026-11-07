@@ -21,6 +21,10 @@ export const ICON_PATHS: Record<string, string> = {
   bell: 'M8 2.2a4 4 0 0 0-4 4v2.1c0 1.1-.4 2.2-1.1 3.1h10.2c-.7-.9-1.1-2-1.1-3.1V6.2a4 4 0 0 0-4-4ZM6.4 13.2a1.7 1.7 0 0 0 3.2 0',
   // Do Not Disturb: a struck-through bell. Not a moon, which reads as a dark-mode toggle.
   'bell-off': 'M8 2.2a4 4 0 0 0-4 4v2.1c0 1.1-.4 2.2-1.1 3.1h10.2c-.7-.9-1.1-2-1.1-3.1V6.2a4 4 0 0 0-4-4ZM6.4 13.2a1.7 1.7 0 0 0 3.2 0M2.4 2.4l11.2 11.2',
+  // Light mode: a sun with eight rays.
+  sun: 'M8 5.4a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2M8 1.6v1.4M8 13v1.4M1.6 8H3M13 8h1.4M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M4.5 11.5l-1 1',
+  // Follow system: a circle with the left half filled by an outline.
+  'theme-auto': 'M8 1.8a6.2 6.2 0 1 0 0 12.4 6.2 6.2 0 0 0 0-12.4ZM8 1.8a6.2 6.2 0 0 0 0 12.4Z',
   moon: 'M10.7 2.2a5.6 5.6 0 1 0 3.1 8.9A5.6 5.6 0 0 1 10.7 2.2Z',
   'volume-off': 'M2.2 6.2v3.6h2.1l3 2.4V3.8l-3 2.4H2.2ZM10.8 6.1l2.8 3.8M13.6 6.1l-2.8 3.8',
   maximize: 'M5.5 2.5h-3v3M10.5 2.5h3v3M13.5 10.5v3h-3M5.5 13.5h-3v-3',

@@ -43,6 +43,23 @@ export const PAIRS = [
   ['--focus-ring-color-on-light', '--organic-surface', 3, 'focus ring on cream'],
 ]
 
+// Pet bubble text on the opaque bubble surface (the translucent surface sits
+// over a wallpaper, so the opaque fallback is the guaranteed worst case base).
+// Checked for both pet appearances.
+export const PET_BUBBLE_PAIRS = [
+  ['--pet-bubble-text', '--pet-bubble-surface-opaque', 4.5, 'bubble text'],
+  ['--pet-bubble-success-text', '--pet-bubble-surface-opaque', 4.5, 'bubble success text'],
+  ['--pet-bubble-error-text', '--pet-bubble-surface-opaque', 4.5, 'bubble error text'],
+  ['--pet-bubble-warn-text', '--pet-bubble-surface-opaque', 4.5, 'bubble warn text'],
+  ['--pet-bubble-warn-accent', '--pet-bubble-surface-opaque', 4.5, 'bubble waiting text'],
+  ['--pet-bubble-info-text', '--pet-bubble-surface-opaque', 4.5, 'bubble info text'],
+  ['--pet-bubble-info-accent', '--pet-bubble-surface-opaque', 3, 'bubble info icon'],
+  ['--pet-bubble-plugin-text', '--pet-bubble-surface-opaque', 4.5, 'bubble plugin text'],
+  ['--organic-status-text', '--organic-status-surface-fallback', 4.5, 'pet status line text'],
+  ['--organic-status-tooltip-text', '--organic-status-surface-fallback', 4.5, 'pet quota tooltip text'],
+  ['--text-primary', '--organic-status-surface-fallback', 4.5, 'pet mini badge text'],
+]
+
 // The dark layer renders over an arbitrary wallpaper; this is the opaque
 // colour of the reduced-transparency fallback (rgba(18,18,26) fully opaque).
 const EXTRA = { '--dark-base': '#12121a' }
@@ -54,6 +71,16 @@ export function parseTokens(css = readFileSync(tokensPath, 'utf8'), theme = 'lig
   const baseEnd = stripped.indexOf('\n}')
   for (const m of stripped.slice(0, baseEnd).matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/gi)) {
     if (!(m[1] in map)) map[m[1]] = m[2].trim()
+  }
+  // Pet bubble tokens live in later :root blocks; the light variant overlays.
+  for (const m of stripped.matchAll(/(?:^|\n):root\s*\{([^}]*)\}/g)) {
+    for (const d of m[1].matchAll(/(--pet-bubble-[a-z0-9-]+)\s*:\s*([^;]+);/gi)) if (!(d[1] in map)) map[d[1]] = d[2].trim()
+  }
+  if (theme === 'pet-light') {
+    for (const sel of [`:root\\[data-pet-theme='light'\\]`, `:root\\[data-pet-theme='light'\\] \\.desktop-pet`]) {
+      const block = stripped.match(new RegExp(`${sel}\\s*\\{([^}]*)\\}`))
+      for (const m of (block?.[1] ?? '').matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/gi)) map[m[1]] = m[2].trim()
+    }
   }
   if (theme === 'dark') {
     const block = stripped.match(/:root\[data-theme='dark'\]\s*\{([^}]*)\}/)
@@ -85,8 +112,8 @@ export function contrast(a, b) {
   return (hi + 0.05) / (lo + 0.05)
 }
 
-export function evaluate(map = parseTokens()) {
-  return PAIRS.map(([fg, bg, min, note]) => {
+export function evaluate(map = parseTokens(), pairs = PAIRS) {
+  return pairs.map(([fg, bg, min, note]) => {
     const f = resolveHex(map, fg)
     const b = resolveHex(map, bg)
     const ratio = f && b ? contrast(f, b) : null
@@ -96,9 +123,10 @@ export function evaluate(map = parseTokens()) {
 
 function main() {
   let failed = 0
-  for (const theme of ['light', 'dark']) {
+  for (const theme of ['light', 'dark', 'pet-light']) {
     console.log(`# ${theme} theme`)
-    for (const r of evaluate(parseTokens(undefined, theme))) {
+    const pairs = theme === 'pet-light' ? PET_BUBBLE_PAIRS : [...PAIRS, ...PET_BUBBLE_PAIRS]
+    for (const r of evaluate(parseTokens(undefined, theme), pairs)) {
       const shown = r.ratio === null ? 'unresolved' : r.ratio.toFixed(2)
       if (!r.ok) failed++
       console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${shown.padStart(6)} (min ${r.min})  ${r.fg} on ${r.bg}  — ${r.note}`)

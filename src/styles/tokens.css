@@ -273,7 +273,8 @@
 
 /* ── Pet bubbles ───────────────────────────────────────────────────────
    One material for every bubble the pet shows (result toast, say, plugin feed,
-   notices). The pet layer is always dark, so there is no light variant. The
+   notices). The pet layer is dark by default; `data-pet-theme='light'` (below) swaps in a
+   light palette. The
    opaque surface is the fallback for reduced-transparency / high contrast. */
 :root {
   --pet-bubble-surface: rgba(30, 30, 40, 0.93);
@@ -293,9 +294,61 @@
   --pet-bubble-info-accent: #aab8ff;
   --pet-bubble-plugin-border: rgba(112, 189, 158, 0.56);
   --pet-bubble-plugin-text: #e4fff3;
+  --pet-bubble-warn-accent: #ffe37c;
   --scrollbar-thumb: rgba(255, 255, 255, 0.2);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.34);
   --pet-drag-shadow: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.35));
+}
+
+/* Light pet appearance (Settings -> Appearance -> Pet). Bubble tokens apply
+   globally; the surface tokens the pet's own status lines, handle and badges
+   read are re-pointed only inside .desktop-pet so the panel window is
+   untouched. The *-opaque / high-contrast fallbacks keep working because
+   they read the same tokens. */
+:root[data-pet-theme='light'] {
+  --pet-bubble-surface: rgba(252, 249, 243, 0.94);
+  --pet-bubble-surface-opaque: #fbf7f0;
+  --pet-bubble-border: rgba(32, 30, 29, 0.16);
+  --pet-bubble-sheen: linear-gradient(155deg, rgba(255, 255, 255, 0.7), transparent 54%);
+  --pet-bubble-shadow:
+    0 6px 18px rgba(46, 43, 37, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --pet-bubble-text: #2a2622;
+  --pet-bubble-success-text: #17683a;
+  --pet-bubble-error-text: #a3261f;
+  --pet-bubble-warn-border: rgba(150, 100, 0, 0.55);
+  --pet-bubble-warn-text: #6e4600;
+  --pet-bubble-warn-accent: #7a4f00;
+  --pet-bubble-info-border: rgba(63, 81, 181, 0.5);
+  --pet-bubble-info-text: #2c3a96;
+  --pet-bubble-info-accent: #3a4bb5;
+  --pet-bubble-plugin-border: rgba(30, 120, 90, 0.5);
+  --pet-bubble-plugin-text: #145a45;
+  --scrollbar-thumb: rgba(32, 30, 29, 0.28);
+  --scrollbar-thumb-hover: rgba(32, 30, 29, 0.45);
+  --pet-drag-shadow: drop-shadow(0 10px 14px rgba(46, 43, 37, 0.28));
+}
+
+:root[data-pet-theme='light'] .desktop-pet {
+  --surface-panel: rgba(252, 249, 243, 0.92);
+  --surface-overlay: rgba(252, 249, 243, 0.98);
+  --surface-raised-hover: rgba(255, 255, 255, 0.6);
+  --border-strong: rgba(32, 30, 29, 0.2);
+  --text-primary: #2a2622;
+  --text-shadow-panel: none;
+  --organic-status-surface: rgba(252, 249, 243, 0.92);
+  --organic-status-surface-fallback: #fbf7f0;
+  --organic-status-border: rgba(32, 30, 29, 0.16);
+  --organic-status-text: #2a2622;
+  --organic-status-tooltip-surface: rgba(252, 249, 243, 0.97);
+  --organic-status-tooltip-border: rgba(168, 92, 40, 0.4);
+  --organic-status-tooltip-text: #2a2622;
+  --organic-status-tooltip-muted: rgba(42, 38, 34, 0.78);
+  --organic-status-track: rgba(32, 30, 29, 0.14);
+  --organic-status-shadow: 0 2px 8px rgba(46, 43, 37, 0.16);
+  --organic-status-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --organic-status-tooltip-shadow: 0 5px 16px rgba(46, 43, 37, 0.24);
+  --shadow-edge-handle: 0 3px 12px rgba(46, 43, 37, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 /* Panel layer: the status panel and plugin pages render on cream surfaces,
