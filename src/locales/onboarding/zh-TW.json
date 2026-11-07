@@ -115,5 +115,17 @@
   "onboarding.testReceiverTitle": "只檢查這個 Agent Pets 能不能接收本機事件，不會經過你的工具；hook 壞掉時它仍會成功。",
   "onboarding.waitingReal": "請到 {name} 執行任意提示…（剩 {seconds} 秒）",
   "onboarding.realEventOk": "已收到來自 {source} 的真實事件（{time}）。連線正常。",
-  "onboarding.realEventTimeout": "30 秒內沒有收到 {name} 的事件。請依序確認：1) 已重新啟動該工具；2) 按「診斷」看 hook 與 Node 路徑；3) 確認本機 17373 埠沒有被其他程式占用。"
+  "onboarding.realEventTimeout": "30 秒內沒有收到 {name} 的事件。請依序確認：1) 已重新啟動該工具；2) 按「診斷」看 hook 與 Node 路徑；3) 確認本機 17373 埠沒有被其他程式占用。",
+  "onboarding.capTitle": "這個工具能做到的事",
+  "onboarding.capSupported": "支援",
+  "onboarding.capUnsupported": "不支援",
+  "onboarding.capStatus": "在寵物上顯示狀態（思考中、完成、錯誤）",
+  "onboarding.capTools": "顯示正在執行的工具",
+  "onboarding.capInput": "偵測「等待你輸入」",
+  "onboarding.capPermissionRespond": "直接在寵物氣泡上允許或拒絕 Permission",
+  "onboarding.capPermissionObserve": "寵物會顯示「等待 Permission」，但要回到 {name} 裡核准",
+  "onboarding.capPermissionNone": "不處理 Permission",
+  "onboarding.capTokensEstimated": "估算 Token 用量",
+  "onboarding.capTokensExact": "精確 Token 用量",
+  "onboarding.capQuota": "顯示訂閱額度"
 }

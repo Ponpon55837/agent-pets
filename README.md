@@ -25,11 +25,13 @@ Desktop pet that shows real-time status of your AI coding agents.
 
 ## Supported Agents
 
-| Agent | CLI | Desktop |
-|-------|-----|---------|
-| OpenCode | ✅ | ✅ |
-| Codex | ✅ | ✅ |
-| Claude Code | ✅ | ✅ |
+| Agent | CLI | Desktop | Permission | Quota | Token usage |
+|-------|-----|---------|------------|-------|-------------|
+| OpenCode | ✅ | ✅ | respond (allow / deny on the pet) | — | estimated |
+| Codex | ✅ | ⚠️ | observe (approve in the tool) | provider | estimated |
+| Claude Code | ✅ | ✅ | observe (approve in the tool) | provider | estimated |
+
+⚠️ Codex Desktop shares `~/.codex` with the CLI, but there is no separate Desktop install API, so Desktop support depends on that build running the same hooks; verify it with **Wait for real event** in the Setup Wizard. *Permission*: `respond` agents can be allowed or denied on the pet; `observe` agents show a Waiting Permission state and must be approved in the tool itself. Codex does not report a "waiting for input" state.
 
 The **Generic HTTP** adapter is available to local integrations through the authenticated `/v1/events` endpoint. It is observe-only and has no permission-response capability.
 

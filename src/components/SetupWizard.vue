@@ -379,18 +379,30 @@ function healthLabel(tool: ToolStatus): string {
   return t(HEALTH_LABEL_KEYS[tool.health] ?? 'healthError')
 }
 
-function capabilityLabels(tool: ToolStatus): string[] {
-  const capabilities = tool.capabilities
-  const labels: string[] = []
-  if (capabilities.lifecycle) labels.push(t('capabilityLifecycle'))
-  if (capabilities.sessions) labels.push(t('capabilitySessions'))
-  if (capabilities.projects) labels.push(t('capabilityProjects'))
-  if (capabilities.toolActivity) labels.push(t('capabilityToolActivity'))
-  if (capabilities.waitingInput) labels.push(t('capabilityInput'))
-  if (capabilities.tokenUsage !== 'none') labels.push(`Token: ${capabilities.tokenUsage}`)
-  if (capabilities.quota !== 'none') labels.push(`Quota: ${capabilities.quota}`)
-  labels.push(`Permission: ${capabilities.permissions}`)
-  return labels
+interface CapabilityRow {
+  id: string
+  supported: boolean
+  label: string
+}
+
+// Plain-language capability matrix. Permission distinguishes "answer on the pet" from "shown on the
+// pet, answer in the tool" because that is the difference users actually run into.
+function capabilityRows(tool: ToolStatus): CapabilityRow[] {
+  const c = tool.capabilities
+  const name = tool.displayName
+  const permission = c.permissions === 'respond'
+    ? t('onboarding.capPermissionRespond')
+    : c.permissions === 'observe'
+      ? t('onboarding.capPermissionObserve', { name })
+      : t('onboarding.capPermissionNone')
+  return [
+    { id: 'status', supported: c.lifecycle, label: t('onboarding.capStatus') },
+    { id: 'tools', supported: c.toolActivity, label: t('onboarding.capTools') },
+    { id: 'input', supported: c.waitingInput, label: t('onboarding.capInput') },
+    { id: 'permission', supported: c.permissions !== 'none', label: permission },
+    { id: 'tokens', supported: c.tokenUsage !== 'none', label: t(c.tokenUsage === 'exact' ? 'onboarding.capTokensExact' : 'onboarding.capTokensEstimated') },
+    { id: 'quota', supported: c.quota !== 'none', label: t('onboarding.capQuota') },
+  ]
 }
 
 onMounted(() => {
@@ -510,9 +522,13 @@ onUnmounted(() => {
           <div class="source-list">
             <span v-for="source in tool.sourceLabels" :key="source" class="source-chip">{{ source }}</span>
           </div>
-          <div class="capability-list">
-            <span v-for="capability in capabilityLabels(tool)" :key="capability" class="capability-chip">{{ capability }}</span>
-          </div>
+          <ul class="capability-list" :aria-label="t('onboarding.capTitle')">
+            <li v-for="row in capabilityRows(tool)" :key="row.id" :class="row.supported ? 'cap-yes' : 'cap-no'">
+              <Icon :name="row.supported ? 'check' : 'close'" :size="13" />
+              <span>{{ row.label }}</span>
+              <span class="visually-hidden">{{ row.supported ? t('onboarding.capSupported') : t('onboarding.capUnsupported') }}</span>
+            </li>
+          </ul>
           <div
             v-if="tool.outcome"
             class="test-result"

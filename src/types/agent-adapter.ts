@@ -18,7 +18,7 @@ const OPENCODE_CAPABILITIES = freezeCapabilities({
 })
 const CODEX_CAPABILITIES = freezeCapabilities({
   lifecycle: true, sessions: true, projects: true, toolActivity: true, tokenUsage: 'estimated', quota: 'provider',
-  waitingInput: true, permissions: 'observe', permissionModes: [], orderedEvents: false, healthCheck: true,
+  waitingInput: false, permissions: 'observe', permissionModes: [], orderedEvents: false, healthCheck: true,
 })
 const CLAUDE_CAPABILITIES = freezeCapabilities({
   lifecycle: true, sessions: true, projects: true, toolActivity: true, tokenUsage: 'estimated', quota: 'provider',

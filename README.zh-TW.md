@@ -25,11 +25,13 @@
 
 ## 支援的工具
 
-| 工具        | CLI | Desktop |
-| ----------- | --- | ------- |
-| OpenCode    | ✅  | ✅      |
-| Codex       | ✅  | ✅      |
-| Claude Code | ✅  | ✅      |
+| 工具 | CLI | Desktop | Permission | 額度 | Token 用量 |
+| ---- | --- | ------- | ---------- | ---- | ---------- |
+| OpenCode | ✅ | ✅ | respond（可在寵物上允許／拒絕） | — | estimated |
+| Codex | ✅ | ⚠️ | observe（需回工具核准） | provider | estimated |
+| Claude Code | ✅ | ✅ | observe（需回工具核准） | provider | estimated |
+
+⚠️ Codex Desktop 與 CLI 共用 `~/.codex`，但沒有獨立的 Desktop 安裝介面，是否支援取決於該版本是否執行相同的 hooks；請在設定精靈用 **等待真實事件** 自行驗證。*Permission*：`respond` 的工具可直接在寵物上允許或拒絕；`observe` 的工具只會顯示「等待 Permission」，必須回工具本身核准。Codex 不會回報「等待輸入」狀態。
 
 **Generic HTTP** Adapter 可供本機整合透過經驗證的 `/v1/events` 使用；它永遠是 observe-only，不具備回覆權限的能力。
 

@@ -115,5 +115,17 @@
   "onboarding.testReceiverTitle": "Only checks that this Agent Pets can receive a local event; it does not involve your tool and still passes when the hook is broken.",
   "onboarding.waitingReal": "Run any prompt in {name}… ({seconds}s left)",
   "onboarding.realEventOk": "Received a real event from {source} ({time}). The connection works.",
-  "onboarding.realEventTimeout": "No event from {name} within 30 seconds. Check in order: 1) the tool was restarted; 2) press Diagnose to inspect the hook and Node path; 3) nothing else is using local port 17373."
+  "onboarding.realEventTimeout": "No event from {name} within 30 seconds. Check in order: 1) the tool was restarted; 2) press Diagnose to inspect the hook and Node path; 3) nothing else is using local port 17373.",
+  "onboarding.capTitle": "What this tool supports",
+  "onboarding.capSupported": "Supported",
+  "onboarding.capUnsupported": "Not supported",
+  "onboarding.capStatus": "Status on the pet (thinking, done, error)",
+  "onboarding.capTools": "Shows the tool being run",
+  "onboarding.capInput": "Detects \"waiting for your input\"",
+  "onboarding.capPermissionRespond": "Allow or deny Permission right on the pet bubble",
+  "onboarding.capPermissionObserve": "The pet shows \"Waiting Permission\", but you approve inside {name}",
+  "onboarding.capPermissionNone": "Does not handle Permission",
+  "onboarding.capTokensEstimated": "Estimated token usage",
+  "onboarding.capTokensExact": "Exact token usage",
+  "onboarding.capQuota": "Shows subscription quota"
 }
