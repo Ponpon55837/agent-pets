@@ -123,6 +123,7 @@ export const IPC_CHANNELS = {
   rendererReload: 'renderer-reload',
   removeCustomPet: 'remove-custom-pet',
   renameCustomPet: 'rename-custom-pet',
+  sessionJump: 'session-jump',
   sessionSnapshotGet: 'session-snapshot-get',
   serverHealthChanged: 'server-health-changed',
   serverHealthGet: 'server-health-get',

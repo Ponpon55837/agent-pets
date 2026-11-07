@@ -10,6 +10,7 @@ import { resolveLocalPorts } from './ports'
 import { openWithCorruptionRecovery } from './db-recovery'
 import { localUsageCatchUpDelayMs, LOCAL_USAGE_TICK_MS, shouldRunLocalUsageTick } from './scan-schedule'
 import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
+import { createSessionJumpService, withSessionJumpContext } from './session-jump-runtime'
 import { join, resolve } from 'path'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
@@ -2308,6 +2309,8 @@ export function currentDesktopPreferences(): DesktopPreferences {
       captureExclusionEnabled: false,
       fullscreenAutoHideEnabled: false,
       rightClickHideEnabled: false,
+      sessionJumpEnabled: true,
+      sessionJumpSwitchAppEnabled: true,
       soundEnabled: false,
       soundVolume: 60,
       soundOnPermission: true,
@@ -3115,6 +3118,19 @@ export function createPermissionServices(permissionToken: string): void {
   powerMonitor.on('suspend', () => cancelPermissionRequests('system_suspend'))
 }
 
+/**
+ * A notification about exactly one session switches to that session's app when that is allowed
+ * (macOS, built-in adapter, allowlisted app, both toggles on); anything else opens the Sessions tab.
+ */
+export async function openNotificationTarget(target?: { source: string; sessionId: string }): Promise<void> {
+  try {
+    if (target && await mainState.sessionJump?.switchFromNotification(target)) return
+  } catch (error) {
+    console.error('Switching to the session app failed', error)
+  }
+  showPanelWindow('sessions')
+}
+
 export function createDesktopServices(): void {
   if (mainState.desktopPreferences || mainState.desktopTray || mainState.desktopNotifications) return
 
@@ -3131,11 +3147,13 @@ export function createDesktopServices(): void {
   setLocale(currentDesktopPreferences().locale)
   applyClaudePermissionRespond(currentDesktopPreferences())
 
+  mainState.sessionJump = createSessionJumpService(currentDesktopPreferences)
+
   mainState.desktopNotifications = new DesktopNotificationService({
     logFilePath: join(app.getPath('userData'), 'notification-log.json'),
     getPreferences: currentDesktopPreferences,
     isAppFocused: () => [mainState.petWindow, mainState.panelWindow].some(window => window?.isFocused()),
-    onNotificationClick: () => showPanelWindow('sessions'),
+    onNotificationClick: target => { void openNotificationTarget(target) },
     onAttentionChanged: () => syncTrayAttention(),
   })
 
@@ -3265,6 +3283,12 @@ export function rawProjectPath(input: unknown): string | undefined {
 }
 
 export async function normalizeIngressEvent(input: unknown, receivedAt?: number) {
+  const routed = await routeIngressEvent(input, receivedAt)
+  if (!routed.ok) return routed
+  return { ok: true as const, event: withSessionJumpContext(input, routed.event) }
+}
+
+async function routeIngressEvent(input: unknown, receivedAt?: number) {
   const normalized = withAnswerableClaudeNotice(
     await mainState.agentAdapterRegistry?.normalize(input, receivedAt) ?? { ok: false as const, error: 'adapter_registry_unavailable' },
     {

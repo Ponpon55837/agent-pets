@@ -93,6 +93,8 @@ import { registerWindowControlsIpc } from './ipc/window-controls'
 import { registerQuotaIpc } from './ipc/quota'
 import { registerPetsIpc } from './ipc/pets'
 import { registerReliabilityIpc } from './ipc/reliability'
+import { registerSessionJumpIpc } from './ipc/session-jump'
+import { takeSessionJumpContext } from './main/session-jump-runtime'
 
 import { registerPetMotionIpc } from './ipc/pet-motion'
 import { registerPetContextMenuIpc } from './ipc/pet-context-menu'
@@ -405,6 +407,7 @@ async function bootstrapApp(): Promise<void> {
         mainState.pendingIntegrationTests.get(event.sessionId)?.()
       }
       try { mainState.sessionSnapshot.record(event) } catch {}
+      try { mainState.sessionJump?.record(event, takeSessionJumpContext(event)) } catch {}
       try {
         mainState.desktopNotifications?.handleEvent(event)
       } catch {
@@ -452,6 +455,12 @@ async function bootstrapApp(): Promise<void> {
       return { port: localPorts().event, onStatus: health.onStatus, onPersistentFailure: health.onPersistentFailure, onHandle: health.attach }
     })(),
   )
+  })
+
+  registerSessionJumpIpc({
+    ipcMain,
+    assertTrustedIpcSender,
+    runSessionJump: async (action, key) => mainState.sessionJump?.run(action, key) ?? { ok: false, error: 'unsupported' },
   })
 
   registerReliabilityIpc({

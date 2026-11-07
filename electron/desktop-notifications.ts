@@ -29,11 +29,17 @@ interface NotificationLogRecord {
   count: number
 }
 
+export interface NotificationTarget {
+  source: string
+  sessionId: string
+}
+
 interface DesktopNotificationServiceOptions {
   logFilePath: string
   getPreferences: () => DesktopPreferences
   isAppFocused: () => boolean
-  onNotificationClick: () => void
+  /** `target` is set when the notification is about exactly one session. */
+  onNotificationClick: (target?: NotificationTarget) => void
   onAttentionChanged: (summary: AttentionSummary) => void
   batchWindowMs?: number
 }
@@ -81,7 +87,7 @@ export class DesktopNotificationService {
       return
     }
 
-    this.deliver(candidate.title, candidate.body, candidate.kind, 1, candidate.key)
+    this.deliver(candidate.title, candidate.body, candidate.kind, 1, candidate.key, candidate.session)
   }
 
   showAchievement(unlock: AchievementUnlock): void {
@@ -149,7 +155,7 @@ export class DesktopNotificationService {
     if (candidates.length === 0) return
 
     const message = aggregateTerminalNotifications(candidates)
-    this.deliver(message.title, message.body, candidates[0].kind, candidates.length)
+    this.deliver(message.title, message.body, candidates[0].kind, candidates.length, undefined, candidates.length === 1 ? candidates[0].session : undefined)
   }
 
   private deliver(
@@ -158,6 +164,7 @@ export class DesktopNotificationService {
     kind: NotificationKind,
     count: number,
     key?: string,
+    target?: NotificationTarget,
   ): void {
     const preferences = this.options.getPreferences()
     if (!preferences.notificationsEnabled) {
@@ -187,7 +194,7 @@ export class DesktopNotificationService {
       if (this.shown.size > 200) this.shown.delete(this.shown.keys().next().value as string)
       notification.on('click', () => {
         this.log(kind, 'clicked', count)
-        this.options.onNotificationClick()
+        this.options.onNotificationClick(target ? { ...target } : undefined)
       })
       notification.show()
       this.log(kind, 'shown', count)

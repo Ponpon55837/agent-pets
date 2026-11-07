@@ -9,6 +9,8 @@ export interface NotificationCandidate {
   title: string
   body: string
   terminal: boolean
+  /** The one session this notification is about (lets a click jump back to it). */
+  session: { source: string; sessionId: string }
 }
 
 const SOURCE_NAMES: Record<string, string> = {
@@ -35,6 +37,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
   const project = displayText(event.project)
   const body = project || t('agentTask')
   const keyBase = `${event.source}:${event.sessionId}`
+  const session = { source: event.source, sessionId: event.sessionId }
 
   switch (event.state) {
     case 'waiting-permission':
@@ -48,6 +51,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
           : t('notificationNeedsPermission', { source }),
         body,
         terminal: false,
+        session,
       }
     case 'waiting-input':
       return {
@@ -56,6 +60,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
         title: t('notificationWaitingInput', { source }),
         body,
         terminal: false,
+        session,
       }
     case 'success':
       return {
@@ -64,6 +69,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
         title: t('notificationCompleted', { source }),
         body,
         terminal: true,
+        session,
       }
     case 'error':
       return {
@@ -72,6 +78,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
         title: t('notificationFailed', { source }),
         body,
         terminal: true,
+        session,
       }
     default:
       return null

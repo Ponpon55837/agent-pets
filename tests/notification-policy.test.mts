@@ -73,3 +73,8 @@ test('mixed aggregate title does not claim everything completed', () => {
   const allOk = aggregateTerminalNotifications([ok, classifyNotification(event('success', { sessionId: 'c' }) as any)!])
   assert.match(allOk.title, /已完成/)
 })
+
+test('each candidate names its one session so a click can jump back to it', () => {
+  assert.deepEqual(classifyNotification(event('waiting-input') as any)?.session, { source: 'codex', sessionId: 'session-1' })
+  assert.deepEqual(classifyNotification(event('error', { source: 'claude', sessionId: 's-9' }) as any)?.session, { source: 'claude', sessionId: 's-9' })
+})

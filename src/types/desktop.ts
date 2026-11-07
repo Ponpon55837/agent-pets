@@ -26,6 +26,10 @@ export interface DesktopPreferences {
   captureExclusionEnabled: boolean
   fullscreenAutoHideEnabled: boolean
   rightClickHideEnabled: boolean
+  /** Per-session "open project folder" / "copy project path" actions. */
+  sessionJumpEnabled: boolean
+  /** Per-session "switch to app" (macOS only; brings the app forward, not a specific window). */
+  sessionJumpSwitchAppEnabled: boolean
   soundEnabled: boolean
   /** 0-100 master volume for the pet's synthesized cues. */
   soundVolume: number
@@ -55,6 +59,8 @@ export type DesktopPreferencesPatch = Partial<Pick<
   | 'captureExclusionEnabled'
   | 'fullscreenAutoHideEnabled'
   | 'rightClickHideEnabled'
+  | 'sessionJumpEnabled'
+  | 'sessionJumpSwitchAppEnabled'
   | 'soundEnabled'
   | 'soundVolume'
   | 'soundOnPermission'

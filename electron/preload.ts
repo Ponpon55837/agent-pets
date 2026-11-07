@@ -3,6 +3,7 @@ import type { ElectronAPI } from '../src/types/electron-api'
 import type { AdapterDiagnoseIpcResult, AdapterInstallIpcResult, AdapterUninstallIpcResult } from '../src/types/ipc'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
+import type { SessionJumpRequest, SessionJumpResult } from '../src/types/session-jump'
 import type { PermissionDecisionValue, PermissionRequestView, PermissionAuditEntry } from '../src/types/permission'
 import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
@@ -235,6 +236,8 @@ const electronAPI: ElectronAPI = {
   exportDiagnostics: (): Promise<{ ok: boolean; canceled?: boolean }> => ipcRenderer.invoke(IPC_CHANNELS.diagnosticsExport),
 
   getSessionSnapshot: (): Promise<SessionSnapshotEntry[]> => ipcRenderer.invoke(IPC_CHANNELS.sessionSnapshotGet),
+
+  runSessionJump: (request: SessionJumpRequest): Promise<SessionJumpResult> => ipcRenderer.invoke(IPC_CHANNELS.sessionJump, request),
 
   getServerHealth: (): Promise<LocalServerHealthSnapshot> => ipcRenderer.invoke(IPC_CHANNELS.serverHealthGet),
 

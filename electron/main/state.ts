@@ -34,6 +34,7 @@ import type { ProgressionStore } from '../progression'
 import type { PresentationController } from '../presentation-controller'
 import type { ProjectMcpRegistryStore } from '../project-mcp-registry'
 import type { ProjectRoutingStore } from '../project-routing'
+import type { SessionJumpService } from '../session-jump'
 import type { PetEdge, PetWindowMode } from '../../src/types/pet-window'
 import type { PresentationStatusSnapshot } from '../../src/types/presentation'
 import type { WindowBounds } from '../pet-window-mode'
@@ -142,6 +143,7 @@ export const mainState = {
   rendererErrorCount: 0,
   serverHealth: null as ServerHealthTracker | null,
   sessionSnapshot: new SessionSnapshotStore() as SessionSnapshotStore,
+  sessionJump: null as SessionJumpService | null,
   notificationAttentionCount: 0,
   permissionAttentionCount: 0,
   pendingIntegrationTests: new Map<string, () => void>(),
