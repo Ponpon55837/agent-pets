@@ -421,3 +421,43 @@ test('incremental byte budgets charge only bytes read after the cached offset', 
   assert.equal(resumed.filesScanned, 2)
   assert.equal(resumed.filesSkipped, 0)
 })
+
+test('a file larger than maxFileBytes is consumed in chunks instead of being skipped, and scans expose diagnostics', async t => {
+  const fixture = setup()
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const store = new HistoryStore(fixture.database, { now: () => now, localDate: () => '2026-08-13' })
+  t.after(() => { store.close(); fixture.cleanup() })
+
+  const file = path.join(fixture.home, '.claude', 'projects', 'big', 'session.jsonl')
+  const assistant = (id: string) => ({
+    type: 'assistant',
+    timestamp: new Date(now).toISOString(),
+    session_id: 'big',
+    message: { id, usage: { input_tokens: 10, output_tokens: 5 } },
+  })
+  const filler = (index: number) => ({ type: 'user', message: { content: `f-${index}-` + 'x'.repeat(200) } })
+  writeJsonl(file, [
+    ...Array.from({ length: 400 }, (_, index) => filler(index)),
+    assistant('late-message'),
+  ])
+  assert.ok(fs.statSync(file).size > 64 * 1024)
+
+  const reader = new LocalUsageReader({
+    homeDir: fixture.home,
+    history: store,
+    now: () => now,
+    maxFileBytes: 64 * 1024,
+    maxTotalBytes: 1024 * 1024,
+  })
+  assert.equal(reader.getDiagnostics(), null)
+  let imported = 0
+  for (let pass = 0; pass < 4; pass += 1) {
+    const scan = await reader.scan()
+    assert.equal(scan.filesSkipped, 0)
+    imported += scan.recordsImported
+  }
+  assert.equal(imported, 1)
+  assert.equal(store.getSummary().totals.tokenInput, 10)
+  const diagnostics = reader.getDiagnostics()
+  assert.ok(diagnostics && diagnostics.durationMs >= 0 && diagnostics.finishedAt > 0)
+})

@@ -69,6 +69,15 @@ export interface HistorySummary {
   // the UI needs it to tell the user what window the totals actually cover.
   tokenTrackingSince: number
   quota: HistoryQuotaSnapshot | null
+  /** Diagnostics of the last local log scan (attached by the main process). */
+  scan?: HistoryScanDiagnostics
+}
+
+export interface HistoryScanDiagnostics {
+  finishedAt: number
+  durationMs: number
+  filesScanned: number
+  filesSkipped: number
 }
 
 export interface HistoryExport {
