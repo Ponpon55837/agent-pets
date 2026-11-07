@@ -335,6 +335,10 @@ export const useAgentStore = defineStore('agent', () => {
   // Off by default so the app doesn't surprise anyone with sudden audio;
   // opt-in via the Settings toggle.
   const soundEnabled = ref(localStorage.getItem('agent-pet-sound') === '1')
+  const soundVolume = ref(60)
+  const soundOnPermission = ref(true)
+  const soundOnError = ref(true)
+  const soundOnSuccess = ref(true)
 
   // Off by default — showing one pet per active tool family is a bigger
   // visual/layout change than the other additions, so it stays opt-in
@@ -696,6 +700,10 @@ export const useAgentStore = defineStore('agent', () => {
     updateDesktopPreferences({ soundEnabled: enabled })
   }
 
+  function setSoundOption(patch: Pick<DesktopPreferencesPatch, 'soundVolume' | 'soundOnPermission' | 'soundOnError' | 'soundOnSuccess'>) {
+    updateDesktopPreferences(patch)
+  }
+
   // --- 桌面偏好設定（同步自 Electron 主行程） -------------------------------
 
   function applyDesktopPreferences(preferences: DesktopPreferences) {
@@ -712,6 +720,10 @@ export const useAgentStore = defineStore('agent', () => {
     rightClickHideEnabled.value = preferences.rightClickHideEnabled
     desktopVisibilityCapabilities.value = preferences.visibilityCapabilities
     soundEnabled.value = preferences.soundEnabled
+    soundVolume.value = preferences.soundVolume
+    soundOnPermission.value = preferences.soundOnPermission
+    soundOnError.value = preferences.soundOnError
+    soundOnSuccess.value = preferences.soundOnSuccess
     launchAtStartup.value = preferences.launchAtStartup
     launchAtStartupSupported.value = preferences.launchAtStartupSupported
     desktopPreferencesReady.value = true
@@ -1844,6 +1856,11 @@ export const useAgentStore = defineStore('agent', () => {
     mood,
     moodVisualsEnabled,
     soundEnabled,
+    soundVolume,
+    soundOnPermission,
+    soundOnError,
+    soundOnSuccess,
+    setSoundOption,
     dndEnabled,
     notificationsEnabled,
     permissionBubbleEnabled,

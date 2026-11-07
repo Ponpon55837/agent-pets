@@ -92,6 +92,9 @@ const BOOLEAN_KEYS = [
   'fullscreenAutoHideEnabled',
   'rightClickHideEnabled',
   'soundEnabled',
+  'soundOnPermission',
+  'soundOnError',
+  'soundOnSuccess',
   'launchAtStartup',
 ] as const
 
@@ -108,8 +111,16 @@ const DEFAULTS: StoredDesktopPreferences = {
   fullscreenAutoHideEnabled: false,
   rightClickHideEnabled: false,
   soundEnabled: false,
+  soundVolume: 60,
+  soundOnPermission: true,
+  soundOnError: true,
+  soundOnSuccess: true,
   launchAtStartup: false,
   locale: DEFAULT_LOCALE,
+}
+
+function isVolume(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -123,6 +134,7 @@ function sanitizeStored(value: unknown): Partial<StoredDesktopPreferences> {
     if (typeof value[key] === 'boolean') result[key] = value[key]
   }
   if (isAppLocale(value.locale)) result.locale = value.locale
+  if (isVolume(value.soundVolume)) result.soundVolume = Math.round(value.soundVolume)
   if (value.dndUntil === null) result.dndUntil = null
   else if (typeof value.dndUntil === 'number' && Number.isFinite(value.dndUntil) && value.dndUntil > 0) {
     result.dndUntil = Math.floor(value.dndUntil)
@@ -133,11 +145,15 @@ function sanitizeStored(value: unknown): Partial<StoredDesktopPreferences> {
 export function parseDesktopPreferencesPatch(value: unknown): DesktopPreferencesPatch {
   if (!isRecord(value)) throw new TypeError('Desktop preferences patch must be an object')
 
-  const allowed = new Set<string>([...BOOLEAN_KEYS, 'locale', 'dndUntil'])
+  const allowed = new Set<string>([...BOOLEAN_KEYS, 'locale', 'dndUntil', 'soundVolume'])
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) throw new TypeError(`Unsupported desktop preference: ${key}`)
     if (key === 'locale') {
       if (!isAppLocale(value[key])) throw new TypeError('Desktop preference locale is unsupported')
+      continue
+    }
+    if (key === 'soundVolume') {
+      if (!isVolume(value[key])) throw new TypeError('Desktop preference soundVolume must be a number from 0 to 100')
       continue
     }
     if (key === 'dndUntil') {
@@ -290,6 +306,10 @@ export class DesktopPreferencesStore {
       fullscreenAutoHideEnabled: next.fullscreenAutoHideEnabled,
       rightClickHideEnabled: next.rightClickHideEnabled,
       soundEnabled: next.soundEnabled,
+      soundVolume: next.soundVolume,
+      soundOnPermission: next.soundOnPermission,
+      soundOnError: next.soundOnError,
+      soundOnSuccess: next.soundOnSuccess,
       launchAtStartup: next.launchAtStartup,
       locale: next.locale,
     }
@@ -311,6 +331,10 @@ export class DesktopPreferencesStore {
       fullscreenAutoHideEnabled: preferences.fullscreenAutoHideEnabled,
       rightClickHideEnabled: preferences.rightClickHideEnabled,
       soundEnabled: preferences.soundEnabled,
+      soundVolume: preferences.soundVolume,
+      soundOnPermission: preferences.soundOnPermission,
+      soundOnError: preferences.soundOnError,
+      soundOnSuccess: preferences.soundOnSuccess,
       launchAtStartup: preferences.launchAtStartup,
       locale: preferences.locale,
     } satisfies StoredDesktopPreferences)

@@ -15,6 +15,11 @@ export interface DesktopPreferences {
   fullscreenAutoHideEnabled: boolean
   rightClickHideEnabled: boolean
   soundEnabled: boolean
+  /** 0-100 master volume for the pet's synthesized cues. */
+  soundVolume: number
+  soundOnPermission: boolean
+  soundOnError: boolean
+  soundOnSuccess: boolean
   launchAtStartup: boolean
   launchAtStartupSupported: boolean
   locale: AppLocale
@@ -35,6 +40,10 @@ export type DesktopPreferencesPatch = Partial<Pick<
   | 'fullscreenAutoHideEnabled'
   | 'rightClickHideEnabled'
   | 'soundEnabled'
+  | 'soundVolume'
+  | 'soundOnPermission'
+  | 'soundOnError'
+  | 'soundOnSuccess'
   | 'launchAtStartup'
   | 'locale'
 >>

@@ -4,8 +4,18 @@ import { useAgentStore } from '@/stores/agentStore'
 import { PERMISSION_DEFAULT_TTL_SECONDS } from '@/types/permission'
 import Card from '@/components/ui/Card.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
+import Button from '@/components/ui/Button.vue'
+import { playCue, type SoundCue } from '@/utils/sound'
 
 const store = useAgentStore()
+
+function setVolume(event: Event): void {
+  store.setSoundOption({ soundVolume: Number((event.target as HTMLInputElement).value) })
+}
+
+function preview(cue: SoundCue): void {
+  playCue(cue, { preview: true })
+}
 </script>
 
 <template>
@@ -32,6 +42,32 @@ const store = useAgentStore()
     />
     <ToggleRow :model-value="store.rightClickHideEnabled" :label="t('rightClickHide')" :help="t('rightClickHideHelp')" @update:model-value="store.setRightClickHideEnabled($event)" />
     <ToggleRow :model-value="store.permissionBubbleEnabled" :label="t('permissionBubble')" :help="t('permissionBubbleHelp', { seconds: PERMISSION_DEFAULT_TTL_SECONDS })" @update:model-value="store.setPermissionBubbleEnabled($event)" />
+  </Card>
+
+  <Card :title="t('permission.soundHeading')">
+    <ToggleRow :model-value="store.soundEnabled" :label="t('sound')" :help="t('soundHelp')" @update:model-value="store.setSoundEnabled($event)" />
+    <label class="permission-sound-volume">
+      <span>{{ t('permission.soundVolume') }}</span>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        step="5"
+        :value="store.soundVolume"
+        :disabled="!store.soundEnabled"
+        :aria-valuetext="`${store.soundVolume}%`"
+        @input="setVolume"
+      />
+      <output>{{ store.soundVolume }}%</output>
+    </label>
+    <ToggleRow :model-value="store.soundOnPermission" :disabled="!store.soundEnabled" :label="t('permission.soundOnPermission')" @update:model-value="store.setSoundOption({ soundOnPermission: $event })" />
+    <ToggleRow :model-value="store.soundOnError" :disabled="!store.soundEnabled" :label="t('permission.soundOnError')" @update:model-value="store.setSoundOption({ soundOnError: $event })" />
+    <ToggleRow :model-value="store.soundOnSuccess" :disabled="!store.soundEnabled" :label="t('permission.soundOnSuccess')" @update:model-value="store.setSoundOption({ soundOnSuccess: $event })" />
+    <div class="permission-sound-preview">
+      <Button size="sm" variant="secondary" @click="preview('waiting-permission')">{{ t('permission.soundPreviewPermission') }}</Button>
+      <Button size="sm" variant="secondary" @click="preview('error')">{{ t('permission.soundPreviewError') }}</Button>
+      <Button size="sm" variant="secondary" @click="preview('success')">{{ t('permission.soundPreviewSuccess') }}</Button>
+    </div>
   </Card>
 
   <Card :title="t('permission.settingsHeading')">
@@ -62,6 +98,39 @@ const store = useAgentStore()
 </template>
 
 <style scoped>
+.permission-sound-volume {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  font-size: var(--font-sm);
+}
+
+.permission-sound-volume input[type='range'] {
+  min-width: 0;
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.permission-sound-volume input[type='range']:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.permission-sound-volume output {
+  min-width: 3ch;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.permission-sound-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+}
+
 .permission-settings-intro {
   margin: 0 0 var(--space-3);
   color: var(--text-secondary);

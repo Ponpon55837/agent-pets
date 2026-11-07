@@ -52,5 +52,13 @@
   "permission.trayDndTomorrow": "到明天 09:00",
   "permission.trayDndAlways": "持續",
   "permission.trayAdvanced": "進階",
-  "permission.trayPluginsOmitted": "還有 {count} 個指令未顯示，請於面板使用"
+  "permission.trayPluginsOmitted": "還有 {count} 個指令未顯示，請於面板使用",
+  "permission.soundHeading": "音效",
+  "permission.soundVolume": "音量",
+  "permission.soundOnPermission": "需要權限時",
+  "permission.soundOnError": "工作失敗時",
+  "permission.soundOnSuccess": "工作完成時",
+  "permission.soundPreviewPermission": "試聽：權限",
+  "permission.soundPreviewError": "試聽：失敗",
+  "permission.soundPreviewSuccess": "試聽：完成"
 }

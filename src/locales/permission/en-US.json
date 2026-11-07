@@ -52,5 +52,13 @@
   "permission.trayDndTomorrow": "Until 9:00 tomorrow",
   "permission.trayDndAlways": "Until turned off",
   "permission.trayAdvanced": "Advanced",
-  "permission.trayPluginsOmitted": "{count} more command(s) not shown; use the panel"
+  "permission.trayPluginsOmitted": "{count} more command(s) not shown; use the panel",
+  "permission.soundHeading": "Sound",
+  "permission.soundVolume": "Volume",
+  "permission.soundOnPermission": "When permission is needed",
+  "permission.soundOnError": "When a task fails",
+  "permission.soundOnSuccess": "When a task completes",
+  "permission.soundPreviewPermission": "Preview: permission",
+  "permission.soundPreviewError": "Preview: failure",
+  "permission.soundPreviewSuccess": "Preview: done"
 }

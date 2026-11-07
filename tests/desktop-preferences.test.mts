@@ -188,3 +188,10 @@ test('dndUntil is validated, bounded, and cleared when DND is off', async () => 
   assert.throws(() => parseDesktopPreferencesPatch({ dndUntil: 'soon' }))
   assert.throws(() => parseDesktopPreferencesPatch({ dndUntil: -5 }))
 })
+
+test('soundVolume must be a number from 0 to 100', async () => {
+  const { parseDesktopPreferencesPatch } = await import('../electron/desktop-preferences.ts')
+  assert.deepEqual(parseDesktopPreferencesPatch({ soundVolume: 35 }), { soundVolume: 35 })
+  assert.throws(() => parseDesktopPreferencesPatch({ soundVolume: 101 }))
+  assert.throws(() => parseDesktopPreferencesPatch({ soundVolume: '50' }))
+})
