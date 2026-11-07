@@ -347,8 +347,8 @@
 .multi-pet-status-line {
   /* Keep the same status-pill treatment as single-pet mode, but constrain
      each pill to its own sprite column instead of the full pet window. */
-  width: calc(192px - 12px);
-  max-width: calc(192px - 12px);
+  width: calc(192px * var(--pet-scale, 1) - 12px);
+  max-width: calc(192px * var(--pet-scale, 1) - 12px);
   margin-top: -8px;
 }
 

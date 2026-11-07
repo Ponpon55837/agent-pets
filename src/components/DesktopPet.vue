@@ -17,18 +17,29 @@ import { quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
 import { selectBubble } from '@/utils/feed-arbiter'
 import { summarizePluginBadgesForPet } from '@/utils/plugin-badges'
 import PetAnimation from '@/components/PetAnimation.vue'
+import { useKeyedRefs, usePetBubbleAnchor } from '@/composables/usePetBubbleAnchor'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 import { describeTool } from '@/utils/pet-toast'
 import PermissionBubble from '@/components/permission/PermissionBubble.vue'
 
 const store = useAgentStore()
+const clickAreaRef = ref<HTMLElement | null>(null)
 const dragOffset = ref({ x: 0, y: 0 })
 const hasMoved = ref(false)
 let mouseDownTime = 0
 const petAnimRef = ref<InstanceType<typeof PetAnimation> | null>(null)
-const multiPetRefs = ref<InstanceType<typeof PetAnimation>[]>([])
-const multiPetItemElements = ref<HTMLElement[]>([])
+const { items: multiPetInstances, setRef: setMultiPetRef } = useKeyedRefs<InstanceType<typeof PetAnimation>>()
+const { items: multiPetItemElements, setRef: setMultiPetItem } = useKeyedRefs<HTMLElement>()
+
+function multiPetAnimations(): InstanceType<typeof PetAnimation>[] {
+  return [...multiPetInstances.values()]
+}
+
+function multiPetAnimationForPet(petId: string): InstanceType<typeof PetAnimation> | undefined {
+  const line = store.familyLines.find(candidate => candidate.petId === petId)
+  return line ? multiPetInstances.get(line.key) : undefined
+}
 const pluginBadges = ref<PluginBadgeView[]>([])
 const petDocumentVisible = ref(true)
 let cleanupPluginBadgeListener: (() => void) | null = null
@@ -368,17 +379,22 @@ function onPetDocumentVisibilityChange(): void {
   petDocumentVisible.value = document.visibilityState === 'visible'
 }
 
-const pluginFeedTargetStyle = computed<Record<string, string>>(() => {
-  if (!isMultiPet.value || !store.pluginFeedItem) return {} as Record<string, string>
-  const clickArea = clickAreaRef.value
-  if (!clickArea) return {} as Record<string, string>
-  const targetIndex = store.familyLines.findIndex(line => line.petId === pluginFeedTargetPetId.value)
-  const target = targetIndex >= 0 ? multiPetItemElements.value[targetIndex] : undefined
-  if (!target) return {} as Record<string, string>
-  const targetBounds = target.getBoundingClientRect()
-  const areaBounds = clickArea.getBoundingClientRect()
-  return { left: `${targetBounds.left - areaBounds.left + targetBounds.width / 2}px` }
-})
+const pluginFeedTargetStyle = usePetBubbleAnchor(
+  clickAreaRef,
+  multiPetItemElements,
+  () => store.familyLines,
+  () => isMultiPet.value && Boolean(store.pluginFeedItem),
+  () => pluginFeedTargetPetId.value,
+)
+
+// pet_say bubbles follow the pet they were addressed to when several are shown.
+const sayTargetStyle = usePetBubbleAnchor(
+  clickAreaRef,
+  multiPetItemElements,
+  () => store.familyLines,
+  () => isMultiPet.value && Boolean(store.presentationSay?.petId),
+  () => store.presentationSay?.petId,
+)
 
 function quotaColor(familyKey: string): string {
   const quota = store.quotaByFamily[familyKey]
@@ -491,7 +507,6 @@ function quotaTitle(familyKey: string): string | undefined {
 // window is actually painted varies with pet size and status-line count.
 // Main can't derive that, and it's what the status panel anchors to, so
 // measure it here and report every change.
-const clickAreaRef = ref<HTMLElement | null>(null)
 let contentObserver: ResizeObserver | null = null
 
 onMounted(() => {
@@ -548,7 +563,7 @@ function onPetMouseMove(e: MouseEvent): void {
   lastCursorLookAt = now
   lastCursorLookDirection = direction
   if (isMultiPet.value) {
-    multiPetRefs.value.forEach(anim => anim?.playCursorLook(direction))
+    multiPetAnimations().forEach(anim => anim.playCursorLook(direction))
   } else {
     petAnimRef.value?.playCursorLook(direction)
   }
@@ -603,7 +618,7 @@ function onMouseDown(e: MouseEvent) {
     window.electronAPI?.notifyDragEnd(hasMoved.value)
     if (dragStarted) {
       // Landing squash: the pet settles where it was dropped.
-      if (isMultiPet.value) multiPetRefs.value.forEach(anim => anim?.playReaction())
+      if (isMultiPet.value) multiPetAnimations().forEach(anim => anim.playReaction())
       else petAnimRef.value?.playReaction()
     }
   }
@@ -626,7 +641,7 @@ function onClick(e: MouseEvent) {
   if (hasMoved.value) return
   store.clearUnreadResults()
   if (isMultiPet.value) {
-    multiPetRefs.value.forEach((anim) => anim?.playReaction())
+    multiPetAnimations().forEach(anim => anim.playReaction())
   } else {
     petAnimRef.value?.playReaction()
   }
@@ -651,10 +666,9 @@ watch(() => store.presentationReaction, (reaction) => {
   if (!reaction || !store.reactionsActive) return
   if (isMultiPet.value) {
     if (reaction.petId) {
-      const index = store.familyLines.findIndex(line => line.petId === reaction.petId)
-      if (index >= 0) multiPetRefs.value[index]?.playReaction()
+      multiPetAnimationForPet(reaction.petId)?.playReaction()
     } else {
-      multiPetRefs.value.forEach(anim => anim?.playReaction())
+      multiPetAnimations().forEach(anim => anim.playReaction())
     }
     return
   }
@@ -666,12 +680,12 @@ watch(() => store.presentationReaction, (reaction) => {
 function playAchievementReward(unlock: AchievementUnlock): void {
   if (!store.reactionsActive) return
   if (isMultiPet.value) {
-    const index = store.familyLines.findIndex(line => line.petId === unlock.petId)
-    if (index >= 0) {
-      multiPetRefs.value[index]?.playReward()
+    const target = multiPetAnimationForPet(unlock.petId)
+    if (target) {
+      target.playReward()
       return
     }
-    multiPetRefs.value.forEach(anim => anim?.playReward())
+    multiPetAnimations().forEach(anim => anim.playReward())
     return
   }
   if (unlock.petId === store.activePetId) petAnimRef.value?.playReward()
@@ -771,6 +785,7 @@ watch(() => store.achievementUnlock, (unlock) => {
         <div
           key="presentation-say"
           class="pet-toast presentation-say"
+          :style="sayTargetStyle"
           role="status"
           aria-live="polite"
           data-pet-hit-target="solid"
@@ -920,9 +935,9 @@ watch(() => store.achievementUnlock, (unlock) => {
 
       <template v-if="isMultiPet">
         <div class="multi-pet-row">
-          <div v-for="line in store.familyLines" :key="line.key" ref="multiPetItemElements" class="multi-pet-item">
+          <div v-for="line in store.familyLines" :key="line.key" :ref="(el) => setMultiPetItem(line.key, el)" class="multi-pet-item">
             <PetAnimation
-              ref="multiPetRefs"
+              :ref="(el) => setMultiPetRef(line.key, el)"
               :state="line.state"
               :pet-id="line.petId"
               :since="line.since"
