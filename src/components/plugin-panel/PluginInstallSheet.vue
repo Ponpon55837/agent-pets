@@ -2,7 +2,7 @@
 import { computed, nextTick, onUnmounted, ref, useId, watch } from 'vue'
 import { t } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
-import CheckField from '@/components/ui/CheckField.vue'
+import Checkbox from '@/components/ui/Checkbox.vue'
 import Chip from '@/components/ui/Chip.vue'
 import Icon from '@/components/ui/Icon.vue'
 import { usePluginController } from '@/composables/plugin/context'
@@ -213,7 +213,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
               <ul class="ack-reasons">
                 <li v-for="reason in reasons" :key="reason">{{ t(reasonKeys[reason]) }}</li>
               </ul>
-              <CheckField v-model="acknowledged" :label="t('plugins.ackLabel')" />
+              <Checkbox v-model="acknowledged" :label="t('plugins.ackLabel')" />
             </section>
           </template>
         </div>
