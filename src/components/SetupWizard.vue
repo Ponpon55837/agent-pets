@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, useId } from 'vue'
+import { useDialogA11y } from '@/composables/useDialogA11y'
 import type {
   AdapterRuntimeStatus,
   AgentAdapterId,
@@ -408,6 +409,16 @@ function capabilityRows(tool: ToolStatus): CapabilityRow[] {
   ]
 }
 
+const overlayRef = ref<HTMLElement | null>(null)
+const wizardRef = ref<HTMLElement | null>(null)
+const titleId = `setup-wizard-${useId()}-title`
+useDialogA11y({
+  open: ref(true),
+  container: wizardRef,
+  scope: overlayRef,
+  onClose: finish,
+})
+
 onMounted(() => {
   detectTools()
 })
@@ -419,11 +430,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="setup-overlay" @click.self="finish">
-    <div class="setup-wizard">
+  <div ref="overlayRef" class="setup-overlay" @click.self="finish">
+    <div ref="wizardRef" class="setup-wizard" role="dialog" aria-modal="true" tabindex="-1" :aria-labelledby="titleId">
       <div class="wizard-header">
         <div class="wizard-title-copy">
-          <h2>{{ t('setupWizardTitle') }}</h2>
+          <h2 :id="titleId">{{ t('setupWizardTitle') }}</h2>
           <p>{{ t('setupWizardHelp') }}</p>
         </div>
         <Button variant="ghost" icon-only :aria-label="t('close')" @click="finish">

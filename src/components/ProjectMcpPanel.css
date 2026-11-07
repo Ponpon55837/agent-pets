@@ -68,7 +68,8 @@
   align-items: center;
   justify-content: center;
   background: var(--surface-scrim);
-  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: var(--blur-scrim);
+  backdrop-filter: var(--blur-scrim);
 }
 
 .mcp-wizard {
