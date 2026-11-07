@@ -6,11 +6,11 @@ import { registerHistoryIpc } from '../electron/ipc/history.ts'
 function createHistoryIpcHarness() {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const panelWindow = { id: 'panel' }
-  const records = { trusted: [] as Array<unknown>, broadcasts: 0, refreshes: 0, writes: [] as Array<{ path: string; value: unknown }> }
+  const records = { trusted: [] as Array<unknown>, broadcasts: 0, refreshes: 0, writes: [] as Array<{ path: string; value: unknown }>, reveals: [] as string[] }
   let dialogResult: { canceled: boolean; filePath?: string } = { canceled: true }
   const historyStore = {
     clear() {},
-    getExport: (petId: string) => ({ petId, rows: [] }),
+    getExport: (petId: string, _projectId?: string, rangeDays?: number) => ({ petId, rows: [], rangeDays, summary: { localDate: '2026-08-13', days: [{ localDate: '2026-08-13', sessionsCompleted: 1, sessionsFailed: 0, activeMs: 120000, tokenInput: 5, tokenOutput: 6, tokenCacheRead: 7, tokenCacheWrite: 8 }] } }),
   }
 
   registerHistoryIpc({
@@ -19,7 +19,7 @@ function createHistoryIpcHarness() {
     getPanelWindow: () => panelWindow,
     getHistoryStore: () => historyStore,
     refreshLocalUsage: async () => { records.refreshes += 1 },
-    currentHistorySummary: projectId => ({ projectId: projectId ?? null }),
+    currentHistorySummary: (projectId, rangeDays) => ({ projectId: projectId ?? null, rangeDays }),
     broadcastHistoryUpdated: () => { records.broadcasts += 1 },
     documentsPath: () => 'test-documents',
     joinPath: (...parts: string[]) => parts.join('/'),
@@ -28,6 +28,8 @@ function createHistoryIpcHarness() {
       return dialogResult
     },
     writeJsonAtomic: (path: string, value: unknown) => records.writes.push({ path, value }),
+    writeTextFile: (path: string, text: string) => records.writes.push({ path, value: text }),
+    revealPath: (path: string) => records.reveals.push(path),
     activePetId: () => 'sample-pet',
   })
 
@@ -47,9 +49,10 @@ test('history IPC registration uses injected services and preserves handler beha
     IPC_CHANNELS.historySummary,
     IPC_CHANNELS.historyClear,
     IPC_CHANNELS.historyExport,
+    IPC_CHANNELS.historyRevealExport,
   ])
-  assert.deepEqual(await invoke(IPC_CHANNELS.historySummary, 'project-a'), { projectId: 'project-a' })
-  assert.deepEqual(await invoke(IPC_CHANNELS.historySummary, 7), { projectId: null })
+  assert.deepEqual(await invoke(IPC_CHANNELS.historySummary, 'project-a'), { projectId: 'project-a', rangeDays: 7 })
+  assert.deepEqual(await invoke(IPC_CHANNELS.historySummary, 7), { projectId: null, rangeDays: 7 })
   assert.equal(harness.records.refreshes, 2)
 
   assert.deepEqual(await invoke(IPC_CHANNELS.historyClear), { ok: true })
@@ -59,9 +62,35 @@ test('history IPC registration uses injected services and preserves handler beha
   assert.deepEqual(harness.records.writes, [])
   harness.setDialogResult({ canceled: false, filePath: 'test-documents/history.json' })
   assert.deepEqual(await invoke(IPC_CHANNELS.historyExport), { ok: true, path: 'test-documents/history.json' })
-  assert.deepEqual(harness.records.writes, [
-    { path: 'test-documents/history.json', value: { petId: 'sample-pet', rows: [] } },
-  ])
+  assert.equal(harness.records.writes.length, 1)
+  assert.equal(harness.records.writes[0].path, 'test-documents/history.json')
   assert.equal(harness.records.refreshes, 4)
   assert.equal(harness.records.trusted.length, 7)
+})
+
+test('history summary range is limited to the supported 7/30/90 windows', async () => {
+  const harness = createHistoryIpcHarness()
+  const invoke = (...args: unknown[]) => harness.handlers.get(IPC_CHANNELS.historySummary)?.({}, ...args) as Promise<{ rangeDays: number }>
+  assert.equal((await invoke(undefined, 30)).rangeDays, 30)
+  assert.equal((await invoke(undefined, 90)).rangeDays, 90)
+  assert.equal((await invoke(undefined, 365)).rangeDays, 7)
+  assert.equal((await invoke(undefined, '30')).rangeDays, 7)
+})
+
+test('export honours format/range, names files by local date and only reveals what it exported', async () => {
+  const harness = createHistoryIpcHarness()
+  const invoke = (channel: string, ...args: unknown[]) => harness.handlers.get(channel)?.({}, ...args) as Promise<unknown>
+  assert.equal(await invoke(IPC_CHANNELS.historyRevealExport), false)
+  harness.setDialogResult({ canceled: false, filePath: 'out/history.csv' })
+  assert.deepEqual(await invoke(IPC_CHANNELS.historyExport, { format: 'csv', rangeDays: 30, projectId: 'a'.repeat(32) }), { ok: true, path: 'out/history.csv' })
+  const csv = harness.records.writes.at(-1)!.value as string
+  assert.equal(csv.split('\n')[0], 'date,sessions_completed,sessions_failed,active_minutes,tokens_input_fresh,tokens_output,tokens_cache_read,tokens_cache_write')
+  assert.equal(csv.split('\n')[1], '2026-08-13,1,0,2,5,6,7,8')
+  const saveCall = harness.records.trusted.find(entry => (entry as { options?: unknown }).options) as { options: { defaultPath: string; filters: Array<{ extensions: string[] }> } }
+  assert.equal(saveCall.options.defaultPath, 'test-documents/agent-pets-history-30d-aaaaaaaa-2026-08-13.csv')
+  assert.deepEqual(saveCall.options.filters[0].extensions, ['csv'])
+  assert.equal(await invoke(IPC_CHANNELS.historyRevealExport), true)
+  assert.deepEqual(harness.records.reveals, ['out/history.csv'])
+  // A bogus request degrades to a plain 7-day JSON export.
+  assert.deepEqual(await invoke(IPC_CHANNELS.historyExport, { format: 'exe', rangeDays: 5, projectId: '../x' }), { ok: true, path: 'out/history.csv' })
 })

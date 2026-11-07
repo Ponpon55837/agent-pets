@@ -1,7 +1,7 @@
 import type { AgentStatusEvent } from './event-server'
 import { t } from '../src/i18n.ts'
 
-export type NotificationKind = 'waiting-permission' | 'waiting-input' | 'success' | 'error' | 'achievement'
+export type NotificationKind = 'waiting-permission' | 'waiting-input' | 'success' | 'error' | 'achievement' | 'summary'
 
 export interface NotificationCandidate {
   key: string
@@ -41,7 +41,11 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
       return {
         key: `${keyBase}:waiting-permission`,
         kind: 'waiting-permission',
-        title: t('notificationNeedsPermission', { source }),
+        // Codex / Claude cannot be answered from Agent Pets; say so in the title so
+        // clicking the notification is not mistaken for a way to approve here.
+        title: event.permissionNotice?.responseMode === 'external_only'
+          ? t('permission.notifyExternal', { source })
+          : t('notificationNeedsPermission', { source }),
         body,
         terminal: false,
       }
@@ -108,7 +112,9 @@ export function aggregateTerminalNotifications(candidates: NotificationCandidate
   const completed = candidates.filter(candidate => candidate.kind === 'success').length
   const failed = candidates.filter(candidate => candidate.kind === 'error').length
   return {
-    title: t('notificationAggregate', { count: candidates.length }),
+    title: failed > 0
+      ? t('permission.notifyAggregateFailed', { count: candidates.length, failed })
+      : t('notificationAggregate', { count: candidates.length }),
     body: [
       completed > 0 ? t('notificationCompletedCount', { count: completed }) : '',
       failed > 0 ? t('notificationFailedCount', { count: failed }) : '',

@@ -26,10 +26,10 @@ test('migrates legacy sound once and persists desktop preferences', (t) => {
   let openAtLogin = false
   const store = new DesktopPreferencesStore(filePath, {
     supported: true,
-    getOpenAtLogin: () => openAtLogin,
-    setOpenAtLogin: (enabled) => {
+    getStatus: () => (openAtLogin ? 'enabled' : 'disabled'),
+    setLaunchAtStartup: (enabled) => {
       openAtLogin = enabled
-      return openAtLogin
+      return openAtLogin ? 'enabled' : 'disabled'
     },
   }, TEST_VISIBILITY_CAPABILITIES)
 
@@ -107,8 +107,8 @@ test('rejects unknown and non-boolean preference fields', () => {
 test('keeps launch at startup disabled when the runtime does not support it', (t) => {
   const store = new DesktopPreferencesStore(tempPreferencesFile(t), {
     supported: false,
-    getOpenAtLogin: () => true,
-    setOpenAtLogin: () => true,
+    getStatus: () => 'unsupported',
+    setLaunchAtStartup: () => 'unsupported',
   })
 
   const updated = store.update({ launchAtStartup: true })
@@ -121,15 +121,15 @@ test('projects stale visibility toggles to false on an unsupported runtime', (t)
   let openAtLogin = false
   const supportedStore = new DesktopPreferencesStore(filePath, {
     supported: true,
-    getOpenAtLogin: () => openAtLogin,
-    setOpenAtLogin: enabled => { openAtLogin = enabled; return enabled },
+    getStatus: () => (openAtLogin ? 'enabled' : 'disabled'),
+    setLaunchAtStartup: enabled => { openAtLogin = enabled; return enabled ? 'enabled' : 'disabled' },
   }, TEST_VISIBILITY_CAPABILITIES)
   supportedStore.update({ captureExclusionEnabled: true, fullscreenAutoHideEnabled: true })
 
   const unsupportedStore = new DesktopPreferencesStore(filePath, {
     supported: true,
-    getOpenAtLogin: () => openAtLogin,
-    setOpenAtLogin: enabled => { openAtLogin = enabled; return enabled },
+    getStatus: () => (openAtLogin ? 'enabled' : 'disabled'),
+    setLaunchAtStartup: enabled => { openAtLogin = enabled; return enabled ? 'enabled' : 'disabled' },
   })
   assert.equal(unsupportedStore.get().captureExclusionEnabled, false)
   assert.equal(unsupportedStore.get().fullscreenAutoHideEnabled, false)
@@ -180,4 +180,57 @@ test('uses only the original regular portable executable for Windows startup', (
     null,
   )
   assert.equal(resolveLoginItemExecutable('win32', false, portablePath, portablePath), null)
+})
+
+test('dndUntil is validated, bounded, and cleared when DND is off', async () => {
+  const { parseDesktopPreferencesPatch } = await import('../electron/desktop-preferences.ts')
+  assert.deepEqual(parseDesktopPreferencesPatch({ dndUntil: null }), { dndUntil: null })
+  assert.throws(() => parseDesktopPreferencesPatch({ dndUntil: 'soon' }))
+  assert.throws(() => parseDesktopPreferencesPatch({ dndUntil: -5 }))
+})
+
+test('soundVolume must be a number from 0 to 100', async () => {
+  const { parseDesktopPreferencesPatch } = await import('../electron/desktop-preferences.ts')
+  assert.deepEqual(parseDesktopPreferencesPatch({ soundVolume: 35 }), { soundVolume: 35 })
+  assert.throws(() => parseDesktopPreferencesPatch({ soundVolume: 101 }))
+  assert.throws(() => parseDesktopPreferencesPatch({ soundVolume: '50' }))
+})
+
+test('keeps the launch-at-login intent while macOS approval is pending', (t) => {
+  const filePath = tempPreferencesFile(t)
+  let status: 'requires-approval' | 'enabled' | 'not-in-applications' | 'error' = 'requires-approval'
+  const adapter = {
+    supported: true,
+    getStatus: () => status,
+    setLaunchAtStartup: () => status,
+  }
+  const store = new DesktopPreferencesStore(filePath, adapter, TEST_VISIBILITY_CAPABILITIES)
+
+  const pending = store.update({ launchAtStartup: true })
+  assert.equal(pending.launchAtStartup, true)
+  assert.equal(pending.launchAtStartupStatus, 'requires-approval')
+
+  // Persisted intent survives a restart and an unrelated update.
+  const reloaded = new DesktopPreferencesStore(filePath, adapter, TEST_VISIBILITY_CAPABILITIES)
+  assert.equal(reloaded.get().launchAtStartup, true)
+  assert.equal(reloaded.update({ soundEnabled: true }).launchAtStartup, true)
+
+  status = 'enabled'
+  assert.equal(reloaded.get().launchAtStartupStatus, 'enabled')
+  status = 'not-in-applications'
+  const outside = reloaded.update({ launchAtStartup: true })
+  assert.equal(outside.launchAtStartup, true)
+  assert.equal(outside.launchAtStartupStatus, 'not-in-applications')
+  status = 'error'
+  assert.equal(reloaded.update({ launchAtStartup: false }).launchAtStartup, false)
+})
+
+test('reports unsupported status and rejects status in patches', (t) => {
+  const store = new DesktopPreferencesStore(tempPreferencesFile(t), {
+    supported: false,
+    getStatus: () => 'unsupported',
+    setLaunchAtStartup: () => 'unsupported',
+  })
+  assert.equal(store.get().launchAtStartupStatus, 'unsupported')
+  assert.throws(() => parseDesktopPreferencesPatch({ launchAtStartupStatus: 'enabled' }), /Unsupported desktop preference/)
 })

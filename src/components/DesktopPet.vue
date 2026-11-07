@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
-import { STATE_LABELS_SHORT, STATE_COLORS } from '@/types/agent'
+import { STATE_COLORS } from '@/types/agent'
 import { locale, t, type TranslationKey } from '@/i18n'
 import type { AchievementUnlock } from '@/types/achievement'
 import type { PluginBadgeView } from '@/types/plugin'
@@ -9,6 +9,7 @@ import {
   canRunAutonomousBehavior,
   ShimejiScheduler,
   SHIMEJI_IDLE_DELAY_MS,
+  SHIMEJI_IDLE_DELAY_MIN_MS,
   type PetAutonomousBehavior,
   type ShimejiContext,
 } from '@/types/pet'
@@ -16,14 +17,31 @@ import { quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
 import { selectBubble } from '@/utils/feed-arbiter'
 import { summarizePluginBadgesForPet } from '@/utils/plugin-badges'
 import PetAnimation from '@/components/PetAnimation.vue'
+import { useKeyedRefs, usePetBubbleAnchor } from '@/composables/usePetBubbleAnchor'
+import Button from '@/components/ui/Button.vue'
+import Icon from '@/components/ui/Icon.vue'
+import { describeTool } from '@/utils/pet-toast'
+import PermissionBubble from '@/components/permission/PermissionBubble.vue'
+import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
+import { formatDateParts } from '@/utils/intl-format'
 
 const store = useAgentStore()
+const clickAreaRef = ref<HTMLElement | null>(null)
 const dragOffset = ref({ x: 0, y: 0 })
 const hasMoved = ref(false)
 let mouseDownTime = 0
 const petAnimRef = ref<InstanceType<typeof PetAnimation> | null>(null)
-const multiPetRefs = ref<InstanceType<typeof PetAnimation>[]>([])
-const multiPetItemElements = ref<HTMLElement[]>([])
+const { items: multiPetInstances, setRef: setMultiPetRef } = useKeyedRefs<InstanceType<typeof PetAnimation>>()
+const { items: multiPetItemElements, setRef: setMultiPetItem } = useKeyedRefs<HTMLElement>()
+
+function multiPetAnimations(): InstanceType<typeof PetAnimation>[] {
+  return [...multiPetInstances.values()]
+}
+
+function multiPetAnimationForPet(petId: string): InstanceType<typeof PetAnimation> | undefined {
+  const line = store.familyLines.find(candidate => candidate.petId === petId)
+  return line ? multiPetInstances.get(line.key) : undefined
+}
 const pluginBadges = ref<PluginBadgeView[]>([])
 const petDocumentVisible = ref(true)
 let cleanupPluginBadgeListener: (() => void) | null = null
@@ -32,6 +50,8 @@ let pluginBadgeRevision = 0
 // --- Shimeji 行為排程 -------------------------------------------------------
 
 const shimejiBehavior = ref<PetAutonomousBehavior>('idle')
+const shimejiFacing = ref<-1 | 1>(1)
+const pointerOverPet = ref(false)
 const shimejiScheduler = new ShimejiScheduler()
 const shimejiReducedMotion = ref(false)
 const shimejiPowerSave = ref(false)
@@ -89,6 +109,12 @@ function shimejiContext(random?: number): ShimejiContext {
   }
 }
 
+// The cursor arriving wakes a sleeping pet and holds it in place.
+function onPetPointerEnter(): void {
+  pointerOverPet.value = true
+  if (shimejiScheduler.isSleeping) restartShimeji()
+}
+
 function stopShimejiTimer(): void {
   if (shimejiTimer) clearTimeout(shimejiTimer)
   shimejiTimer = null
@@ -100,12 +126,30 @@ function scheduleShimeji(delayMs: number = SHIMEJI_IDLE_DELAY_MS): void {
   shimejiTimer = setTimeout(runShimejiTick, Math.max(1_500, delayMs))
 }
 
+// Would the next step run into the edge of the current display? Then the pet
+// turns around instead of marching on the spot against the wall.
+function walkDeltaAwayFromWall(deltaX: number): number {
+  const margin = 4
+  const left = (window.screen as Screen & { availLeft?: number }).availLeft ?? 0
+  const right = left + window.screen.availWidth
+  const nextLeft = window.screenX + deltaX
+  const nextRight = window.screenX + window.outerWidth + deltaX
+  return nextLeft < left + margin || nextRight > right - margin ? -deltaX : deltaX
+}
+
 function runShimejiTick(): void {
   shimejiTimer = null
+  // A pet under the cursor stays put rather than walking away from it.
+  if (pointerOverPet.value) {
+    scheduleShimeji(SHIMEJI_IDLE_DELAY_MIN_MS)
+    return
+  }
   const tick = shimejiScheduler.next(shimejiContext(Math.random()))
   shimejiBehavior.value = tick.behavior
   if (tick.walkDeltaX !== undefined && tick.behavior === 'walk') {
-    window.electronAPI?.shimejiWalkStep(tick.walkDeltaX)
+    const deltaX = walkDeltaAwayFromWall(tick.walkDeltaX)
+    shimejiFacing.value = deltaX < 0 ? -1 : 1
+    window.electronAPI?.shimejiWalkStep(deltaX)
   }
   scheduleShimeji(tick.delayMs)
 }
@@ -199,12 +243,67 @@ const displayLines = computed(() => {
 // toggle on — showing a single pet forces picking a "winner", so instead
 // show one small pet per family, side by side.
 const isMultiPet = computed(() => store.isMultiPet)
-const petAnimationFrozen = computed(() => shimejiReducedMotion.value || store.petWindowMode.mode === 'mini')
+// Reduced motion degrades the pet instead of freezing it: states that carry
+// information (working, waiting, failed) keep stepping at a very low rate, and
+// only a resting pet is held still.
+const petAnimationFrozen = computed(() => (
+  shimejiReducedMotion.value && (store.currentState === 'idle' || store.currentState === 'offline')
+))
+const petLowFps = computed(() => store.petWindowMode.mode === 'mini' || shimejiReducedMotion.value)
+
+const STATE_LABEL_KEYS: Record<string, TranslationKey> = {
+  offline: 'pet.stateOffline',
+  idle: 'pet.stateIdle',
+  thinking: 'pet.stateThinking',
+  'tool-running': 'pet.stateWorking',
+  'waiting-permission': 'pet.statePermission',
+  'waiting-input': 'pet.stateWaitingInput',
+  success: 'pet.stateSuccess',
+  error: 'pet.stateError',
+}
+
+function stateAriaLabel(state: string): string {
+  return t(STATE_LABEL_KEYS[state] ?? 'pet.stateIdle')
+}
+
+const petAriaLabel = computed(() => t('pet.ariaLabel', { state: stateAriaLabel(store.currentState) }))
+// Spoken when the visible state changes, not on every session update.
+const stateAnnouncement = ref('')
+watch(() => store.currentState, (state, previous) => {
+  if (state === previous) return
+  stateAnnouncement.value = stateAriaLabel(state)
+})
+
+function onPetKeydown(e: KeyboardEvent): void {
+  if (e.target !== e.currentTarget) return
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    store.markPetInteraction()
+    store.clearUnreadResults()
+    store.togglePanel()
+  }
+}
+
+// Mini mode shrinks the sprite to fit the fixed small window, whatever the pet size.
+const MINI_FIT_PX = 88
+const miniScale = computed(() => Math.min(0.42, MINI_FIT_PX / (208 * store.petScale)))
+const miniStatus = computed(() => {
+  const state = store.currentState
+  switch (state) {
+    case 'error': return { icon: 'warning', label: t('pet.miniError') }
+    case 'waiting-permission': return { icon: 'lock', label: t('pet.miniPermission') }
+    case 'waiting-input': return { icon: 'bell', label: t('pet.miniWaiting') }
+    case 'success': return { icon: 'check', label: t('pet.miniSuccess') }
+    case 'thinking':
+    case 'tool-running': return { icon: null, label: t('pet.miniWorking') }
+    default: return { icon: null, label: t('pet.miniIdle') }
+  }
+})
 
 const bubbleSelection = computed(() => {
-  const permissionRequest = Boolean(store.permissionBubbleActive && store.permissionRequest)
+  const permissionRequest = Boolean(store.permissionBubbleActive && (store.permissionRequest || store.permissionOutcome))
   const permissionNotice = Boolean(store.permissionBubbleActive && store.permissionNotice)
-  const agentBubbleEnabled = !store.permissionRequest && !store.permissionNotice && store.bubbleActive
+  const agentBubbleEnabled = !store.permissionRequest && !store.permissionOutcome && !store.permissionNotice && store.bubbleActive
   const pluginFeed = store.pluginFeedItem
 
   return selectBubble({
@@ -212,7 +311,7 @@ const bubbleSelection = computed(() => {
     permissionNotice,
     agentToast: Boolean(agentBubbleEnabled && store.toast),
     presentationSay: Boolean(store.presentationSay),
-    activity: Boolean(agentBubbleEnabled && !store.toast && !isMultiPet.value && store.activityText),
+    activity: Boolean(store.activityBubbleActive && agentBubbleEnabled && !store.toast && !isMultiPet.value && store.activityText),
     pluginFeed: pluginFeed ? {
       priority: pluginFeed.priority,
       controls: {
@@ -225,6 +324,71 @@ const bubbleSelection = computed(() => {
     } : null,
   })
 })
+
+// --- 首次啟動引導（coach mark）-----------------------------------------------
+
+const COACH_STORAGE_KEY = 'agent-pet-coach-v1'
+const COACH_VISIBLE_MS = 20_000
+const coachArmed = ref(false)
+let coachTimer: ReturnType<typeof setTimeout> | null = null
+
+function coachAlreadySeen(): boolean {
+  try {
+    return localStorage.getItem(COACH_STORAGE_KEY) === '1'
+  } catch {
+    return true
+  }
+}
+
+function dismissCoach(): void {
+  if (coachTimer) clearTimeout(coachTimer)
+  coachTimer = null
+  if (!coachArmed.value) return
+  coachArmed.value = false
+  try {
+    localStorage.setItem(COACH_STORAGE_KEY, '1')
+  } catch {}
+}
+
+function armCoach(): void {
+  if (coachAlreadySeen()) return
+  coachArmed.value = true
+  coachTimer = setTimeout(dismissCoach, COACH_VISIBLE_MS)
+}
+
+const coachShown = computed(() => (
+  coachArmed.value
+  && bubbleSelection.value === null
+  && store.petWindowMode.mode === 'normal'
+  && store.desktopPreferencesReady
+  && !store.dndEnabled
+))
+
+const activityLabel = computed(() => {
+  const raw = store.activityText
+  if (!raw) return ''
+  const description = describeTool(raw)
+  return t(description.key as TranslationKey, description.params)
+})
+
+const toastIconName = computed(() => {
+  switch (store.toast?.tone) {
+    case 'error': return 'warning'
+    case 'waiting': return 'bell'
+    default: return 'check'
+  }
+})
+
+const toastAutoCloseSeconds = computed(() => (
+  store.toast ? Math.max(1, Math.round(store.toast.countdown.durationMs / 1000)) : 0
+))
+
+function openFromToast(): void {
+  store.markPetInteraction()
+  store.clearUnreadResults()
+  store.dismissToast()
+  store.togglePanel()
+}
 
 function openPluginFeedLink(itemId: string): void {
   store.openPluginFeedLink(itemId)
@@ -255,17 +419,22 @@ function onPetDocumentVisibilityChange(): void {
   petDocumentVisible.value = document.visibilityState === 'visible'
 }
 
-const pluginFeedTargetStyle = computed<Record<string, string>>(() => {
-  if (!isMultiPet.value || !store.pluginFeedItem) return {} as Record<string, string>
-  const clickArea = clickAreaRef.value
-  if (!clickArea) return {} as Record<string, string>
-  const targetIndex = store.familyLines.findIndex(line => line.petId === pluginFeedTargetPetId.value)
-  const target = targetIndex >= 0 ? multiPetItemElements.value[targetIndex] : undefined
-  if (!target) return {} as Record<string, string>
-  const targetBounds = target.getBoundingClientRect()
-  const areaBounds = clickArea.getBoundingClientRect()
-  return { left: `${targetBounds.left - areaBounds.left + targetBounds.width / 2}px` }
-})
+const pluginFeedTargetStyle = usePetBubbleAnchor(
+  clickAreaRef,
+  multiPetItemElements,
+  () => store.familyLines,
+  () => isMultiPet.value && Boolean(store.pluginFeedItem),
+  () => pluginFeedTargetPetId.value,
+)
+
+// pet_say bubbles follow the pet they were addressed to when several are shown.
+const sayTargetStyle = usePetBubbleAnchor(
+  clickAreaRef,
+  multiPetItemElements,
+  () => store.familyLines,
+  () => isMultiPet.value && Boolean(store.presentationSay?.petId),
+  () => store.presentationSay?.petId,
+)
 
 function quotaColor(familyKey: string): string {
   const quota = store.quotaByFamily[familyKey]
@@ -316,7 +485,7 @@ function quotaResetLabel(resetsAt?: string): string {
   if (!Number.isFinite(reset.getTime())) return t('resetTimeUnavailable')
   // No year: the longest quota window is 7 days out, so it carries no
   // information and is the single widest chunk of the tooltip.
-  return t('resetAt', { time: reset.toLocaleString(locale.value, {
+  return t('resetAt', { time: formatDateParts(reset, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -371,22 +540,6 @@ function quotaTitle(familyKey: string): string | undefined {
 
 // --- Permission 泡泡 --------------------------------------------------------
 
-const PERMISSION_RISK_LABEL_KEYS: Record<string, TranslationKey> = {
-  high: 'permissionRiskHigh',
-  medium: 'permissionRiskMedium',
-  low: 'permissionRiskLow',
-}
-
-function permissionRiskLabel(risk: string): string {
-  return t(PERMISSION_RISK_LABEL_KEYS[risk] ?? 'permissionRiskUnknown')
-}
-
-function decidePermission(decision: 'allow_once' | 'deny'): void {
-  const request = store.permissionRequest
-  if (!request || request.status !== 'pending') return
-  void store.decidePermission(request.requestId, decision)
-}
-
 // --- 視窗高度回報（ResizeObserver）------------------------------------------
 
 // The sprite is bottom-anchored inside a window that reserves fixed
@@ -394,10 +547,10 @@ function decidePermission(decision: 'allow_once' | 'deny'): void {
 // window is actually painted varies with pet size and status-line count.
 // Main can't derive that, and it's what the status panel anchors to, so
 // measure it here and report every change.
-const clickAreaRef = ref<HTMLElement | null>(null)
 let contentObserver: ResizeObserver | null = null
 
 onMounted(() => {
+  armCoach()
   store.loadPets()
   void initializeShimejiEnvironment()
   petDocumentVisible.value = document.visibilityState === 'visible'
@@ -422,6 +575,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (singleClickTimer) clearTimeout(singleClickTimer)
+  if (coachTimer) clearTimeout(coachTimer)
   contentObserver?.disconnect()
   contentObserver = null
   cleanupPluginBadgeListener?.()
@@ -435,6 +590,7 @@ onBeforeUnmount(() => {
 let lastCursorLookAt = 0
 let lastCursorLookDirection: -1 | 0 | 1 = 0
 function onPetMouseMove(e: MouseEvent): void {
+  store.markPetInteraction()
   if (!store.shimejiEnabled || !store.reactionsActive || store.currentState !== 'idle') return
   if (store.petWindowMode.mode !== 'normal' || store.isDragging) return
   const area = clickAreaRef.value
@@ -448,53 +604,64 @@ function onPetMouseMove(e: MouseEvent): void {
   lastCursorLookAt = now
   lastCursorLookDirection = direction
   if (isMultiPet.value) {
-    multiPetRefs.value.forEach(anim => anim?.playCursorLook(direction))
+    multiPetAnimations().forEach(anim => anim.playCursorLook(direction))
   } else {
     petAnimRef.value?.playCursorLook(direction)
   }
 }
 
+// A press only becomes a drag after the pointer travels this far; a shaky
+// click on a trackpad must still open the panel.
+const DRAG_START_DISTANCE_PX = 4
+const dragLift = ref(false)
+
 function onMouseDown(e: MouseEvent) {
   if (e.button !== 0) return
+  dismissCoach()
+  store.markPetInteraction()
   hasMoved.value = false
   mouseDownTime = Date.now()
+  // Keeps the window catching events while the button is held, even before a
+  // drag has actually begun.
   store.isDragging = true
   dragOffset.value = { x: e.screenX, y: e.screenY }
+  let dragStarted = false
 
   // Actual window movement is driven entirely by the main process polling
-  // screen.getCursorScreenPoint() (see electron/main.ts's 'pet-drag-start'
-  // handler) rather than by accumulating deltas between renderer mousemove
-  // events. On Windows, moving a frameless window under the cursor makes
-  // the OS resend a synthetic mousemove for the new window position; a
-  // delta-from-previous-event approach picks that up as extra "movement"
-  // and re-moves the window again, which re-triggers another synthetic
-  // event — a feedback loop that reads as the pet continuously drifting
-  // down for as long as the button is held, even with the mouse stationary.
-  // Polling the OS cursor position directly sidesteps that loop entirely.
-  window.electronAPI?.startDrag()
-
+  // screen.getCursorScreenPoint() (see electron/ipc/pet-motion.ts) rather than
+  // by accumulating deltas between renderer mousemove events. On Windows,
+  // moving a frameless window under the cursor makes the OS resend a
+  // synthetic mousemove for the new window position; a delta-from-previous
+  // approach picks that up as extra "movement" and re-moves the window again —
+  // a feedback loop that reads as the pet drifting for as long as the button
+  // is held. Polling the OS cursor position directly sidesteps that loop.
   const onMove = (moveEvent: MouseEvent) => {
+    if (dragStarted) return
     const dx = moveEvent.screenX - dragOffset.value.x
     const dy = moveEvent.screenY - dragOffset.value.y
-
-    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+    if (Math.abs(dx) > DRAG_START_DISTANCE_PX || Math.abs(dy) > DRAG_START_DISTANCE_PX) {
+      dragStarted = true
       hasMoved.value = true
+      dragLift.value = true
+      window.electronAPI?.startDrag()
     }
   }
 
   const onUp = () => {
     store.isDragging = false
+    dragLift.value = false
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
-    // Must fire unconditionally, even on a plain click with no movement:
-    // 'pet-drag-start' unconditionally started a cursor-poll loop in the
-    // main process (see electron/main.ts), and this is the only signal
-    // that tells it to stop. Gating it on hasMoved (as the old "did we
-    // actually move, so is there anything worth writing to disk" check
-    // did) left that poll loop running after a plain click, so the pet
-    // kept chasing the cursor around indefinitely after the button was
-    // released, right up until the next mousedown replaced it.
+    // Must fire unconditionally, even on a plain click with no movement: it is
+    // the only signal that stops the main process' cursor-poll loop, and
+    // gating it on hasMoved left that loop running after a plain click so the
+    // pet kept chasing the cursor until the next mousedown replaced it.
     window.electronAPI?.notifyDragEnd(hasMoved.value)
+    if (dragStarted) {
+      // Landing squash: the pet settles where it was dropped.
+      if (isMultiPet.value) multiPetAnimations().forEach(anim => anim.playReaction())
+      else petAnimRef.value?.playReaction()
+    }
   }
 
   window.addEventListener('mousemove', onMove)
@@ -510,19 +677,39 @@ function onEdgeMouseDown(e: MouseEvent): void {
   onMouseDown(e)
 }
 
+// A single click waits briefly so a double click (pat) can cancel it instead of
+// also toggling the panel twice.
+const SINGLE_CLICK_DELAY_MS = 220
+let singleClickTimer: ReturnType<typeof setTimeout> | null = null
+
+function onDoubleClick(e: MouseEvent): void {
+  if (e.button !== 0 || hasMoved.value) return
+  if (singleClickTimer) clearTimeout(singleClickTimer)
+  singleClickTimer = null
+  // Rewarded pats show a heart and bump mood; capped pats still react.
+  store.patPet()
+  const reaction = 'encouraging' as const
+  if (isMultiPet.value) multiPetAnimations().forEach(anim => anim.playReaction(reaction))
+  else petAnimRef.value?.playReaction(reaction)
+}
+
 function onClick(e: MouseEvent) {
   if (e.button !== 0) return
   if (hasMoved.value) return
+  store.clearUnreadResults()
   if (isMultiPet.value) {
-    multiPetRefs.value.forEach((anim) => anim?.playReaction())
+    multiPetAnimations().forEach(anim => anim.playReaction())
   } else {
     petAnimRef.value?.playReaction()
   }
-  store.togglePanel()
+  if (singleClickTimer) clearTimeout(singleClickTimer)
+  singleClickTimer = setTimeout(() => {
+    singleClickTimer = null
+    store.togglePanel()
+  }, SINGLE_CLICK_DELAY_MS)
 }
 
 function onPetContextMenu(e: MouseEvent): void {
-  if (!store.rightClickHideEnabled) return
   const target = e.target instanceof Element ? e.target : null
   if (!target) return
   // Only the actual sprite and its compact Edge representation are hide
@@ -530,36 +717,40 @@ function onPetContextMenu(e: MouseEvent): void {
   // inherit this shortcut.
   const isPetSurface = Boolean(target.closest('[data-pet-context-target="hide"]'))
   if (!isPetSurface) return
-  window.electronAPI?.requestPetHide()
+  // "Hide on right-click" is an explicit opt-in; otherwise show the full menu.
+  if (store.rightClickHideEnabled) window.electronAPI?.requestPetHide()
+  else window.electronAPI?.showPetContextMenu()
 }
 
 // --- Presentation 與成就回饋動畫 ---------------------------------------------
 
 watch(() => store.presentationReaction, (reaction) => {
-  if (!reaction || !store.reactionsActive) return
+  // An explicit MCP request is always shown: with motion effects off the pet
+  // still gets its icon mark, just without the movement.
+  if (!reaction) return
+  const kind = reaction.reaction
   if (isMultiPet.value) {
     if (reaction.petId) {
-      const index = store.familyLines.findIndex(line => line.petId === reaction.petId)
-      if (index >= 0) multiPetRefs.value[index]?.playReaction()
+      multiPetAnimationForPet(reaction.petId)?.playReaction(kind)
     } else {
-      multiPetRefs.value.forEach(anim => anim?.playReaction())
+      multiPetAnimations().forEach(anim => anim.playReaction(kind))
     }
     return
   }
   if (!reaction.petId || reaction.petId === store.activePetId) {
-    petAnimRef.value?.playReaction()
+    petAnimRef.value?.playReaction(kind)
   }
 }, { deep: true })
 
 function playAchievementReward(unlock: AchievementUnlock): void {
   if (!store.reactionsActive) return
   if (isMultiPet.value) {
-    const index = store.familyLines.findIndex(line => line.petId === unlock.petId)
-    if (index >= 0) {
-      multiPetRefs.value[index]?.playReward()
+    const target = multiPetAnimationForPet(unlock.petId)
+    if (target) {
+      target.playReward()
       return
     }
-    multiPetRefs.value.forEach(anim => anim?.playReward())
+    multiPetAnimations().forEach(anim => anim.playReward())
     return
   }
   if (unlock.petId === store.activePetId) petAnimRef.value?.playReward()
@@ -568,19 +759,32 @@ function playAchievementReward(unlock: AchievementUnlock): void {
 watch(() => store.achievementUnlock, (unlock) => {
   if (unlock) playAchievementReward(unlock)
 })
+
+// Level-up / evolution reuses the reward animation (growth stream).
+watch(() => store.levelUpEvent, (event) => {
+  if (event && store.reactionsActive) petAnimRef.value?.playReward()
+})
 </script>
 
 <template>
   <div
     class="desktop-pet"
     :class="[`mode-${store.petWindowMode.mode}`, store.petWindowMode.edge ? `edge-${store.petWindowMode.edge}` : '']"
-    :data-pet-mode="store.petWindowMode.mode"
+:data-pet-mode="store.petWindowMode.mode"
+    :style="{ '--mini-scale': miniScale }"
   >
     <div
       ref="clickAreaRef"
       class="pet-click-area"
-      :class="{ dragging: store.isDragging }"
+      :class="{ dragging: dragLift }"
+      :role="store.petWindowMode.mode === 'edge' ? undefined : 'button'"
+      :tabindex="store.petWindowMode.mode === 'edge' ? undefined : 0"
+      :aria-label="store.petWindowMode.mode === 'edge' ? undefined : petAriaLabel"
+      @keydown="onPetKeydown"
+      @dblclick="onDoubleClick"
       @mousedown="onMouseDown"
+      @mouseenter="onPetPointerEnter"
+      @mouseleave="pointerOverPet = false"
       @mousemove="onPetMouseMove"
       @click="onClick"
       @contextmenu.prevent="onPetContextMenu"
@@ -609,9 +813,19 @@ watch(() => store.achievementUnlock, (unlock) => {
             :since="store.highestPrioritySession?.lastSeenAt"
             autonomous-behavior="idle"
             :freeze="petAnimationFrozen"
+          :low-fps="petLowFps"
+          :facing="shimejiFacing"
           />
         </span>
         <span class="edge-peek-grip" aria-hidden="true" />
+        <span
+          v-if="store.unreadResults.count > 0"
+          class="edge-peek-result-badge"
+          :class="{ error: store.unreadResults.hasError }"
+          :aria-label="t('pet.unreadResultsAria', { count: store.unreadResults.count })"
+        >
+          {{ store.unreadResults.count }}
+        </span>
         <span
           v-if="store.pluginFeedUnreadCount > 0"
           class="edge-peek-unread-badge"
@@ -622,85 +836,25 @@ watch(() => store.achievementUnlock, (unlock) => {
       </div>
 
       <template v-else>
-      <Transition v-if="bubbleSelection === 'permission-request' && store.permissionBubbleActive && store.permissionRequest" name="toast" mode="out-in">
-        <section
-          :key="`permission-${store.permissionRequest.requestId}`"
-          class="permission-request"
-          :class="[`risk-${store.permissionRequest.risk}`, { deciding: store.permissionRequest.status === 'deciding' }]"
-          role="alertdialog"
-          aria-labelledby="permission-request-title"
-          aria-describedby="permission-request-description"
-          data-pet-hit-target="solid"
-          @mousedown.stop
-          @click.stop
-        >
-          <header class="permission-request-header">
-            <span class="permission-request-icon" aria-hidden="true">!</span>
-            <span class="permission-request-heading">
-              <strong id="permission-request-title">{{ store.permissionRequest.action }}</strong>
-              <span>{{ permissionRiskLabel(store.permissionRequest.risk) }}</span>
-            </span>
-            <span class="permission-request-queue">
-              {{ store.permissionRequest.queuePosition }}/{{ store.permissionRequest.queueSize }}
-            </span>
-          </header>
-          <p id="permission-request-description" class="permission-request-description">
-            {{ store.permissionRequest.description }}
-          </p>
-          <p v-if="store.permissionRequest.truncated" class="permission-request-warning">
-            {{ t('permissionWarning') }}
-          </p>
-          <div class="permission-request-actions">
-            <button
-              type="button"
-              class="permission-button deny"
-              :disabled="store.permissionRequest.status !== 'pending'"
-              @mousedown.stop
-              @click.stop="decidePermission('deny')"
-            >
-              Deny
-              <kbd v-if="store.permissionRequest.hotkeyEligible">Ctrl Shift N</kbd>
-            </button>
-            <button
-              type="button"
-              class="permission-button allow"
-              :disabled="store.permissionRequest.status !== 'pending'"
-              @mousedown.stop
-              @click.stop="decidePermission('allow_once')"
-            >
-              {{ store.permissionRequest.status === 'deciding' ? t('sending') : 'Allow once' }}
-              <kbd v-if="store.permissionRequest.hotkeyEligible">Ctrl Shift Y</kbd>
-            </button>
-          </div>
-        </section>
+      <Transition v-if="bubbleSelection === 'permission-request'" name="toast" mode="out-in">
+        <PermissionBubble :key="store.permissionRequest ? `permission-${store.permissionRequest.requestId}` : `permission-outcome-${store.permissionOutcome?.requestId}`" />
       </Transition>
 
       <Transition v-else-if="bubbleSelection === 'permission-notice' && store.permissionBubbleActive && store.permissionNotice" name="toast" mode="out-in">
-        <div
-          key="permission"
-          class="pet-toast permission-notice"
-          role="status"
-          aria-live="polite"
-          data-pet-hit-target="solid"
-        >
-          <span class="permission-notice-icon" aria-hidden="true">!</span>
-          <span class="permission-notice-copy">
-            <strong>{{ store.permissionNotice.title }}</strong>
-            <span>{{ store.permissionNotice.detail }}</span>
-          </span>
-        </div>
+        <PermissionNoticeBubble key="permission-notice" />
       </Transition>
 
       <Transition v-else-if="bubbleSelection === 'presentation-say' && store.presentationSay" name="toast" mode="out-in">
         <div
           key="presentation-say"
           class="pet-toast presentation-say"
+          :style="sayTargetStyle"
           role="status"
           aria-live="polite"
           data-pet-hit-target="solid"
         >
-          <span class="presentation-say-icon" aria-hidden="true">✦</span>
-          <span>{{ store.presentationSay.message }}</span>
+          <Icon class="presentation-say-icon" name="pets" :size="14" />
+          <span class="presentation-say-text">{{ store.presentationSay.message }}</span>
         </div>
       </Transition>
 
@@ -709,12 +863,26 @@ watch(() => store.achievementUnlock, (unlock) => {
           v-if="store.toast"
           :key="`toast-${store.toast.id}`"
           class="pet-toast timed-toast"
-          :class="store.toast.tone"
+          :class="[store.toast.tone, { paused: store.toastPaused }]"
           role="status"
           aria-live="polite"
           data-pet-hit-target="solid"
+          @mousedown.stop
+          @mouseenter="store.pauseToast()"
+          @mouseleave="store.resumeToast()"
+          @focusin="store.pauseToast()"
+          @focusout="store.resumeToast()"
+          @click.stop="openFromToast"
         >
-          <span class="timed-toast-copy">{{ store.toast.text }}</span>
+          <span class="timed-toast-head">
+            <Icon class="timed-toast-icon" :name="toastIconName" :size="14" />
+            <strong class="timed-toast-title">{{ store.toast.title }}</strong>
+            <span v-if="store.toast.meta" class="timed-toast-meta">{{ store.toast.meta }}</span>
+          </span>
+          <span v-if="store.toast.detail" class="timed-toast-detail">{{ store.toast.detail }}</span>
+          <Button variant="ghost" size="sm" class="timed-toast-action" @mousedown.stop @click.stop="openFromToast">
+            {{ t('pet.toastOpen') }}
+          </Button>
           <span
             class="toast-countdown-track"
             aria-hidden="true"
@@ -724,10 +892,11 @@ watch(() => store.achievementUnlock, (unlock) => {
               :style="{ '--toast-duration': `${store.toast.countdown.durationMs}ms` }"
             />
           </span>
-          <span class="sr-only">{{ t('permissionCountdown') }}</span>
+          <span class="sr-only">{{ t('pet.toastAutoClose', { seconds: toastAutoCloseSeconds }) }}</span>
         </div>
         <div v-else-if="!isMultiPet && store.activityText" key="activity" class="pet-toast activity" data-pet-hit-target="solid">
-          🔧 {{ store.activityText }}
+          <Icon class="activity-icon" name="settings" :size="14" />
+          <span class="activity-text">{{ activityLabel }}</span>
         </div>
       </Transition>
 
@@ -761,39 +930,90 @@ watch(() => store.achievementUnlock, (unlock) => {
               <strong>{{ store.pluginFeedItem.title }}</strong>
               <span>{{ store.pluginFeedItem.body }}</span>
             </div>
-            <button
+            <Button
               v-if="store.pluginFeedItem.panelViewAvailable"
-              type="button"
+              variant="secondary"
+              size="sm"
               class="plugin-feed-open-panel"
               @mousedown.stop
               @click.stop="openPluginPanelFromFeed(store.pluginFeedItem.pluginId)"
             >
               {{ t('pluginOpenPanel') }}
-            </button>
+            </Button>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
+            icon-only
             class="plugin-feed-close"
             :aria-label="t('close')"
             @mousedown.stop
             @click.stop="store.completePluginFeed(store.pluginFeedItem.id)"
           >
-            ×
-          </button>
+            <Icon name="close" :size="12" />
+          </Button>
         </article>
       </Transition>
 
+      <Transition v-else-if="coachShown" name="toast">
+        <div
+          key="coach"
+          class="pet-toast coach-mark"
+          role="status"
+          aria-live="polite"
+          data-pet-hit-target="solid"
+          @mousedown.stop
+          @click.stop
+        >
+          <span class="coach-copy">{{ t('pet.coachText') }}</span>
+          <Button size="sm" variant="secondary" @mousedown.stop @click.stop="dismissCoach">{{ t('pet.coachDismiss') }}</Button>
+        </div>
+      </Transition>
+
+      <span class="sr-only" role="status" aria-live="polite">{{ stateAnnouncement }}</span>
+
+      <span
+        v-if="store.petWindowMode.mode === 'mini'"
+        class="mini-status"
+        role="status"
+        :aria-label="miniStatus.label"
+        :title="miniStatus.label"
+        :style="{ '--mini-ring': STATE_COLORS[store.currentState] }"
+      >
+        <span class="mini-status-badge" :class="{ pulse: store.currentState !== 'idle' && store.currentState !== 'offline' }">
+          <Icon v-if="miniStatus.icon" :name="miniStatus.icon" :size="11" />
+          <span v-else class="mini-status-dot" />
+        </span>
+        <span v-if="store.unreadResults.count > 0" class="mini-status-count">{{ store.unreadResults.count }}</span>
+      </span>
+
+      <span
+        v-if="store.unreadResults.count > 0"
+        class="unread-badge"
+        :class="{ error: store.unreadResults.hasError }"
+        role="status"
+        :aria-label="t('pet.unreadResultsAria', { count: store.unreadResults.count })"
+        data-pet-hit-target="solid"
+        @mousedown.stop
+        @click.stop="store.clearUnreadResults()"
+      >
+        <Icon :name="store.unreadResults.hasError ? 'warning' : 'check'" :size="11" />
+        {{ store.unreadResults.count }}
+      </span>
+
       <template v-if="isMultiPet">
         <div class="multi-pet-row">
-          <div v-for="line in store.familyLines" :key="line.key" ref="multiPetItemElements" class="multi-pet-item">
+          <div v-for="line in store.familyLines" :key="line.key" :ref="(el) => setMultiPetItem(line.key, el)" class="multi-pet-item">
             <PetAnimation
-              ref="multiPetRefs"
+              :ref="(el) => setMultiPetRef(line.key, el)"
               :state="line.state"
               :pet-id="line.petId"
               :since="line.since"
               :mood="store.moodVisualsEnabled ? store.mood : undefined"
               :autonomous-behavior="shimejiBehavior"
               :freeze="petAnimationFrozen"
+          :low-fps="petLowFps"
+          :facing="shimejiFacing"
             />
             <div
               class="status-line multi-pet-status-line"
@@ -808,10 +1028,10 @@ watch(() => store.achievementUnlock, (unlock) => {
               :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
               data-pet-hit-target="solid"
             >
-              <span class="line-dot" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
+              <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
               <span class="line-text">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
-                <span class="line-sep">·</span>{{ STATE_LABELS_SHORT[line.state] }}
+                <span class="line-sep">·</span>{{ stateAriaLabel(line.state) }}
               </span>
               <span v-if="pluginBadgesVisible" class="plugin-status-badges">
                 <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
@@ -867,6 +1087,8 @@ watch(() => store.achievementUnlock, (unlock) => {
           :mood="store.moodVisualsEnabled ? store.mood : undefined"
           :autonomous-behavior="shimejiBehavior"
           :freeze="petAnimationFrozen"
+          :low-fps="petLowFps"
+          :facing="shimejiFacing"
         />
         <TransitionGroup tag="div" name="status-line" class="status-lines">
           <div
@@ -884,12 +1106,12 @@ watch(() => store.achievementUnlock, (unlock) => {
             :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
             data-pet-hit-target="solid"
           >
-            <span class="line-dot" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
+            <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
             <span class="line-text">
               <template v-if="line.label">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
                 <span class="line-sep">·</span>
-              </template>{{ STATE_LABELS_SHORT[line.state] }}
+              </template>{{ stateAriaLabel(line.state) }}
             </span>
             <span v-if="pluginBadgesVisible" class="plugin-status-badges">
               <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
@@ -940,3 +1162,4 @@ watch(() => store.achievementUnlock, (unlock) => {
 </template>
 
 <style scoped src="@/components/DesktopPet.css"></style>
+<style scoped src="@/components/DesktopPetBubbles.css"></style>

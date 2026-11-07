@@ -22,7 +22,7 @@ import type { PluginHostGrantController } from '../plugin-host-grants.ts'
 import type { PluginHostWindowController } from '../plugin-host-window'
 import type { PluginNetworkClient } from '../plugin-net.ts'
 import type { PluginPanelViewController } from '../plugin-panel-view.ts'
-import { PluginPanelWindowSizer } from '../plugin-panel-window.ts'
+import type { PanelSizeStore } from '../panel-size-store.ts'
 import { PluginUiMessageGuard } from '../plugin-ui-messages.ts'
 import type { PluginPreferencesStore } from '../plugin-preferences'
 import type { PluginRegistry } from '../plugin-registry'
@@ -38,6 +38,9 @@ import type { PresentationStatusSnapshot } from '../../src/types/presentation'
 import type { WindowBounds } from '../pet-window-mode'
 import type { WindowsFullscreenDetector, WindowsFullscreenState } from '../windows-fullscreen-detector'
 import type { PluginAgentStatusController } from '../plugin-agent-status.ts'
+
+import type { ServerHealthTracker } from './server-health'
+import { SessionSnapshotStore } from './session-snapshot'
 
 export interface PluginSkinFallbackInfo {
   pluginId: string
@@ -81,9 +84,14 @@ export const mainState = {
   pluginPanelViewController: null as PluginPanelViewController | null,
   pluginPanelViewOpenSequence: 0,
   pluginUiMessageGuard: new PluginUiMessageGuard() as PluginUiMessageGuard,
-  pluginPanelWindowSizer: new PluginPanelWindowSizer() as PluginPanelWindowSizer,
-  programmaticPluginPanelSize: null as { width: number; height: number } | null,
-  pluginPanelResizeResetTimer: null as ReturnType<typeof setTimeout> | null,
+  // Resize bookkeeping: programmatic setBounds window end, and the last native 'will-resize' (user drag).
+  programmaticPluginPanelUntil: 0,
+  lastUserPanelResizeAt: 0,
+  // The user's own panel size (persisted), a transient wizard / MCP minimum, and the settle timer.
+  panelUserSize: null as { width: number; height: number } | null,
+  panelMinimumSize: null as { width: number; height: number } | null,
+  panelSizeStore: null as PanelSizeStore | null,
+  panelSettleTimer: null as ReturnType<typeof setTimeout> | null,
   pluginBroker: null as PluginBroker | null,
   pluginCommandController: null as PluginCommandController | null,
   pluginBadgeController: null as PluginBadgeController | null,
@@ -91,6 +99,7 @@ export const mainState = {
   pluginNetworkClient: null as PluginNetworkClient | null,
   pluginCatalogCache: null as { url: string; document: PluginCatalogDocument } | null,
   pluginCatalogAutoCheckSchedule: null as PluginCatalogAutoCheckSchedule | null,
+  pluginCatalogAutoCheckTimer: null as ReturnType<typeof setInterval> | null,
   pluginHostGrantController: null as PluginHostGrantController | null,
   pluginFeedController: null as PluginFeedController | null,
   pluginAgentStatusController: null as PluginAgentStatusController | null,
@@ -117,6 +126,9 @@ export const mainState = {
   windowsFullscreenAutoHiddenPet: false,
   windowsFullscreenAutoHiddenPanel: false,
   panelBlurHideHandle: null as ReturnType<typeof setTimeout> | null,
+  // Renderer-reported locks that suspend hide-on-blur: user pin and open modal flows.
+  panelPinned: false,
+  panelModalOpen: false,
   petCaptureProtectionApplied: null as boolean | null,
   petWindowMode: 'normal' as PetWindowMode,
   petWindowEdge: null as PetEdge | null,
@@ -125,6 +137,9 @@ export const mainState = {
   edgeDwellHandle: null as ReturnType<typeof setTimeout> | null,
   edgeDwellCandidate: null as { displayId: number; edge: PetEdge } | null,
   isQuitting: false,
+  rendererErrorCount: 0,
+  serverHealth: null as ServerHealthTracker | null,
+  sessionSnapshot: new SessionSnapshotStore() as SessionSnapshotStore,
   notificationAttentionCount: 0,
   permissionAttentionCount: 0,
   pendingIntegrationTests: new Map<string, () => void>(),

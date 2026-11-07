@@ -1,6 +1,8 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import { guardArchive } from '../archive-guard.ts'
 import type { SanitizedPetBehaviorManifest } from '../pet-behavior-manifest'
+import { t as translate } from '../../src/i18n.ts'
+import { SPRITE_ERROR_MESSAGES, validateSpriteSheet } from '../pet-sprite-validation.ts'
 import { IPC_CHANNELS } from './channels.ts'
 
 type OpenDialogResult = { canceled: boolean; filePaths: string[] }
@@ -105,7 +107,10 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
     try {
       const stat = await deps.fs.lstat(spritePath)
       if (stat.isFile() && !stat.isSymbolicLink()) {
-      return `agent-pets://custom/${encodeURIComponent(safeId)}/spritesheet.webp`
+        // The modification time versions the URL so a re-import of the same id
+        // never serves the previously cached sheet.
+        const version = Number.isFinite(stat.mtimeMs) ? `?v=${Math.floor(stat.mtimeMs)}` : ''
+        return `agent-pets://custom/${encodeURIComponent(safeId)}/spritesheet.webp${version}`
       }
     } catch {}
     return null
@@ -121,7 +126,7 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
 
     deps.setDialogOpen(true)
     const result = await deps.showOpenDialog(owner, {
-      title: '選擇寵物素材包（.codex-pet.zip）',
+      title: translate('pet.importZipTitle'),
       filters: [{ name: 'Pet sprite kit', extensions: ['zip'] }],
       properties: ['openFile'],
     })
@@ -190,6 +195,10 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
       if (!deps.isSupportedRasterImage(spriteData)) {
         return { ok: false, error: 'Spritesheet content is not a valid PNG, JPEG, or WebP image' }
       }
+      const sheetCheck = validateSpriteSheet(spriteData)
+      if (!sheetCheck.ok) {
+        return { ok: false, code: sheetCheck.code, error: SPRITE_ERROR_MESSAGES[sheetCheck.code] }
+      }
 
       const customDir = deps.safeJoin(deps.customPetsRoot(), 'custom', safeId)
       if (!customDir) return { ok: false, error: 'Invalid destination path' }
@@ -225,7 +234,7 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
     if (!safeId || !owner) return null
     deps.setDialogOpen(true)
     const result = await deps.showOpenDialog(owner, {
-      title: '選擇 spritesheet（每格 192x208，.webp）',
+      title: translate('pet.importSpriteTitle'),
       filters: [{ name: 'Images', extensions: ['webp', 'png', 'jpg'] }],
       properties: ['openFile'],
     })
@@ -236,6 +245,7 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
     if (!sourceStat.isFile() || sourceStat.isSymbolicLink() || sourceStat.size > deps.maxPetImageBytes) return null
     const sourceData = await deps.fs.readFile(src)
     if (sourceData.length > deps.maxPetImageBytes || !deps.isSupportedRasterImage(sourceData)) return null
+    if (!validateSpriteSheet(sourceData).ok) return null
     const customDir = deps.safeJoin(deps.customPetsRoot(), 'custom', safeId)
     if (!customDir) return null
     await deps.ensureDir(customDir)

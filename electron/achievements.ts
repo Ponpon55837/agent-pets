@@ -14,6 +14,8 @@ import {
   type AchievementTokenQuality,
   type AchievementUnlock,
 } from '../src/types/achievement.ts'
+import { localDateKey, localHour as localHourOf } from '../src/utils/local-date.ts'
+import { applyWalPragmas, type SqlitePragmaState } from './sqlite-pragmas.ts'
 import { StatementCache } from './sqlite-statements.ts'
 
 type SqliteRow = Record<string, unknown>
@@ -147,18 +149,6 @@ function eventTokenKey(event: AgentStatusEvent, petId: string): string {
   ].join(':'))
 }
 
-function defaultLocalDate(timestamp: number): string {
-  const date = new Date(timestamp)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function defaultLocalHour(timestamp: number): number {
-  return new Date(timestamp).getHours()
-}
-
 function rowQuality(row: SqliteRow | undefined): AchievementTokenQuality {
   if (!row || asInteger(row.total) <= 0) return 'none'
   return asInteger(row.estimated) > 0 ? 'estimated' : 'exact'
@@ -167,6 +157,7 @@ function rowQuality(row: SqliteRow | undefined): AchievementTokenQuality {
 export class AchievementStore {
   private readonly database: SqliteDatabase
   private readonly statements: StatementCache<SqliteStatement>
+  private pragmas: SqlitePragmaState = { journalMode: '', synchronous: -1 }
   private readonly now: () => number
   private readonly localDate: (timestamp: number) => string
   private readonly localHour: (timestamp: number) => number
@@ -178,8 +169,8 @@ export class AchievementStore {
     this.database = new DatabaseSync(filePath)
     this.statements = new StatementCache(sql => this.database.prepare(sql))
     this.now = options.now ?? Date.now
-    this.localDate = options.localDate ?? defaultLocalDate
-    this.localHour = options.localHour ?? defaultLocalHour
+    this.localDate = options.localDate ?? localDateKey
+    this.localHour = options.localHour ?? localHourOf
     try {
       this.migrate()
     } catch (error) {
@@ -218,6 +209,7 @@ export class AchievementStore {
         )) > 0
 
         if (completed) {
+          this.bumpCounters(petId, 1, 0, 0, 0)
           this.statement(`
             INSERT INTO daily_completions(pet_id, local_date, sessions_completed)
             VALUES (?, ?, 1)
@@ -251,9 +243,14 @@ export class AchievementStore {
           safeToken(tokenUsage?.output),
           quality,
         )) > 0
+        if (tokenRecorded) {
+          this.bumpCounters(petId, 0, 1, quality === 'estimated' ? 1 : 0, safeToken(tokenUsage?.input) + safeToken(tokenUsage?.output))
+        }
       }
 
-      if (!completed && !tokenRecorded && event.state !== 'success') return []
+      // A replayed success (session already counted, nothing new) cannot change
+      // any counter, so skip the unlock evaluation entirely.
+      if (!completed && !tokenRecorded) return []
       return this.evaluateAndUnlock(petId, occurredAt, nightOwlCompletion, progression)
     })
   }
@@ -287,6 +284,7 @@ export class AchievementStore {
           completedAt,
         )) > 0
         if (!inserted) continue
+        this.bumpCounters(petId, 1, 0, 0, 0)
         this.statement(`
           INSERT INTO daily_completions(pet_id, local_date, sessions_completed)
           VALUES (?, ?, 1)
@@ -308,6 +306,9 @@ export class AchievementStore {
       }
 
       const unlocks: AchievementUnlock[] = []
+      // Reconcile is the self-healing path: recompute the touched pets' counters
+      // from the indexed base tables instead of trusting the increments.
+      for (const petId of touchedPets.keys()) this.recomputeCounters(petId)
       for (const [petId, context] of touchedPets) {
         unlocks.push(...this.evaluateAndUnlock(
           petId,
@@ -320,8 +321,11 @@ export class AchievementStore {
     })
   }
 
-  getSnapshot(petIdValue: string): AchievementSnapshot {
+  getSnapshot(petIdValue: string, progression?: ProgressionSnapshot): AchievementSnapshot {
     const petId = safePetId(petIdValue)
+    // Progress is read from the same facts evaluate() uses, so a bar can never
+    // disagree with the unlock rule.
+    const context = this.readContext(petId, this.localDate(this.now()), false, progression)
     const rows = this.statement(`
       SELECT achievement_id, version, unlocked_at, token_quality
       FROM achievement_unlocks
@@ -353,6 +357,9 @@ export class AchievementStore {
           unlocked: Boolean(row),
           ...(unlockedAt > 0 ? { unlockedAt } : {}),
           tokenQuality,
+          category: definition.category,
+          hidden: definition.hidden === true,
+          progress: definition.progress(context),
         }
       }),
     }
@@ -411,20 +418,14 @@ export class AchievementStore {
     nightOwlCompletion: boolean,
     progression?: ProgressionSnapshot,
   ): AchievementEvaluationContext {
-    const completed = this.statement(
-      'SELECT COUNT(*) AS total FROM completed_sessions WHERE pet_id = ?',
-    ).get(petId)
+    // O(1) primary-key read; the counters are maintained incrementally.
+    const counters = this.statement(`
+      SELECT completed_sessions, token_rows, token_estimated, token_total
+      FROM pet_counters WHERE pet_id = ?
+    `).get(petId)
     const today = this.statement(
       'SELECT sessions_completed FROM daily_completions WHERE pet_id = ? AND local_date = ?',
     ).get(petId, localDate)
-    const token = this.statement(`
-      SELECT COUNT(*) AS total, SUM(CASE WHEN quality = 'estimated' THEN 1 ELSE 0 END) AS estimated
-      FROM token_usage WHERE pet_id = ?
-    `).get(petId)
-    const tokenTotals = this.statement(`
-      SELECT COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0) AS total
-      FROM token_usage WHERE pet_id = ?
-    `).get(petId)
     const adapters = this.statement(
       'SELECT COUNT(*) AS total FROM adapter_usage WHERE pet_id = ?',
     ).get(petId)
@@ -432,10 +433,10 @@ export class AchievementStore {
       'SELECT COUNT(*) AS total FROM active_days WHERE pet_id = ?',
     ).get(petId)
     return {
-      completedSessions: Math.max(0, asInteger(completed?.total)),
+      completedSessions: Math.max(0, asInteger(counters?.completed_sessions)),
       completedSessionsToday: Math.max(0, asInteger(today?.sessions_completed)),
-      tokenTotal: Math.min(MAX_TOKEN_COUNT, Math.max(0, asInteger(tokenTotals?.total))),
-      tokenQuality: rowQuality(token),
+      tokenTotal: Math.min(MAX_TOKEN_COUNT, Math.max(0, asInteger(counters?.token_total))),
+      tokenQuality: rowQuality({ total: counters?.token_rows, estimated: counters?.token_estimated }),
       adapterCount: Math.max(0, asInteger(adapters?.total)),
       activeDays: Math.max(0, asInteger(activeDays?.total)),
       nightOwlCompletion,
@@ -445,10 +446,8 @@ export class AchievementStore {
   }
 
   private migrate(): void {
+    this.pragmas = applyWalPragmas(this.database)
     this.database.exec(`
-      PRAGMA foreign_keys = ON;
-      PRAGMA busy_timeout = 5000;
-      PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS schema_migrations(
         version INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
@@ -508,6 +507,64 @@ export class AchievementStore {
         VALUES (1, 'achievements-v1', ?, 'achievements-v1')
       `).run(this.now())
     })
+    const hasV2 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 2').get())
+    if (!hasV2) this.transaction(() => {
+      // pet_id indexes for the base tables (previously full scans) and the
+      // incremental per-pet counters that make readContext O(1).
+      this.database.exec(`
+        CREATE INDEX IF NOT EXISTS idx_token_usage_pet ON token_usage(pet_id);
+        CREATE INDEX IF NOT EXISTS idx_completed_sessions_pet ON completed_sessions(pet_id);
+        CREATE TABLE IF NOT EXISTS pet_counters(
+          pet_id TEXT PRIMARY KEY,
+          completed_sessions INTEGER NOT NULL DEFAULT 0,
+          token_rows INTEGER NOT NULL DEFAULT 0,
+          token_estimated INTEGER NOT NULL DEFAULT 0,
+          token_total INTEGER NOT NULL DEFAULT 0
+        );
+      `)
+      const pets = this.statement(`
+        SELECT pet_id FROM completed_sessions UNION SELECT pet_id FROM token_usage
+      `).all()
+      for (const row of pets) this.recomputeCounters(String(row.pet_id))
+      this.statement(`
+        INSERT INTO schema_migrations(version, name, applied_at, checksum)
+        VALUES (2, 'achievements-pet-counters', ?, 'achievements-pet-counters')
+      `).run(this.now())
+    })
+  }
+
+  private bumpCounters(petId: string, completed: number, tokenRows: number, tokenEstimated: number, tokenTotal: number): void {
+    this.statement(`
+      INSERT INTO pet_counters(pet_id, completed_sessions, token_rows, token_estimated, token_total)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(pet_id) DO UPDATE SET
+        completed_sessions = completed_sessions + excluded.completed_sessions,
+        token_rows = token_rows + excluded.token_rows,
+        token_estimated = token_estimated + excluded.token_estimated,
+        token_total = token_total + excluded.token_total
+    `).run(petId, completed, tokenRows, tokenEstimated, tokenTotal)
+  }
+
+  /** Full recompute from the base tables (indexed by pet_id); used by reconcile and the v2 migration. */
+  private recomputeCounters(petId: string): void {
+    this.statement(`
+      INSERT INTO pet_counters(pet_id, completed_sessions, token_rows, token_estimated, token_total)
+      SELECT ?,
+             (SELECT COUNT(*) FROM completed_sessions WHERE pet_id = ?),
+             COUNT(*),
+             COALESCE(SUM(quality = 'estimated'), 0),
+             COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0)
+      FROM token_usage WHERE pet_id = ?
+      ON CONFLICT(pet_id) DO UPDATE SET
+        completed_sessions = excluded.completed_sessions,
+        token_rows = excluded.token_rows,
+        token_estimated = excluded.token_estimated,
+        token_total = excluded.token_total
+    `).run(petId, petId, petId)
+  }
+
+  getPragmaState(): SqlitePragmaState {
+    return this.pragmas
   }
 
   private statement(sql: string): SqliteStatement {

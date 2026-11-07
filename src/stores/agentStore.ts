@@ -8,10 +8,17 @@ import type {
   AgentStatusEvent,
 } from '@/types/agent'
 import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
-import type { DesktopPreferences, DesktopPreferencesPatch } from '@/types/desktop'
+import type { DesktopPreferences, DesktopPreferencesPatch, LaunchAtStartupStatus } from '@/types/desktop'
 import type { DesktopVisibilityCapabilities } from '@/types/desktop-visibility'
 import type { AppLocale } from '@/types/locale'
-import type { PermissionDecisionValue, PermissionRequestView } from '@/types/permission'
+import type {
+  PermissionDecideResult,
+  PermissionDecisionValue,
+  PermissionOutcome,
+  PermissionOutcomeKind,
+  PermissionRequestView,
+} from '@/types/permission'
+import { classifyDecideResponse, inferVanishedOutcome, outcomeVisibleMs } from '@/utils/permission-view'
 import type { ProgressionSnapshot } from '@/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
 import { ACHIEVEMENT_DEFINITIONS } from '@/types/achievement'
@@ -29,11 +36,37 @@ import type {
 import { PRESENTATION_REACTIONS } from '@/types/presentation'
 import { formatProject } from '@/utils/format'
 import { AgentSessionIndex } from '@/utils/agent-session-index'
+import {
+  UNREAD_AWAY_MS,
+  WAITING_INPUT_DELAY_MS,
+  formatElapsedShort,
+  shouldPlaySuccessSound,
+  toastDurationFor,
+  type ToastTone,
+} from '@/utils/pet-toast'
+import type { SoundCue } from '@/utils/sound'
+import { SUCCESS_DISPLAY_MS } from '@/utils/pet-motion-plan'
+import { readPetFeedbackDefaults } from '@/utils/pet-defaults'
+import { SESSION_REMOVE_MS, sessionLifecycleAction } from '@/utils/session-lifecycle'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
+import {
+  levelUpFromAward,
+  normalizeProgressionAwardEvent,
+  RECENT_AWARD_LIMIT,
+  recentAwardsFromEvent,
+  type LevelUpEvent,
+  type RecentAward,
+} from '@/utils/progression-events'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
 import {
+  INITIAL_PANEL_ROUTE,
+  panelResizeRequest,
+  reducePanelRoute,
+  type PanelRouteAction,
+  type PanelRouteState,
+} from '@/utils/panel-route'
+import {
   createToastCountdown,
-  getToastRemainingMs,
   type ToastCountdown,
 } from '@/utils/toast-countdown'
 
@@ -46,8 +79,6 @@ export interface PetEntry {
   pluginSkin?: PluginSkinPetSource
 }
 
-const SUCCESS_DISPLAY_MS = 4_000
-const SESSION_STALE_MS = 15 * 60_000
 const MAX_SESSION_COUNT = 200
 const ACHIEVEMENT_DEFINITION_BY_ID = new Map(ACHIEVEMENT_DEFINITIONS.map(entry => [entry.id, entry]))
 // Kept at/below the main process' quota cache TTL so a poll that arrives on
@@ -94,6 +125,8 @@ const PRESENTATION_MAX_QUEUE = 8
 const PRESENTATION_HIGH_PRIORITY = STATE_PRIORITY['waiting-input']
 
 type QuotaUsage = Awaited<ReturnType<NonNullable<Window['electronAPI']>['getQuotaUsage']>>
+type QuotaProviderErrorKind = NonNullable<QuotaUsage['providers'][number]['errorKind']>
+const QUOTA_ERROR_KINDS = new Set<string>(['not-signed-in', 'expired', 'timeout', 'rate-limited', 'unavailable'])
 
 function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
@@ -115,15 +148,18 @@ function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
       if (typeof window.id !== 'string' || typeof window.label !== 'string') continue
       if (typeof window.usedPercent !== 'number' || !Number.isFinite(window.usedPercent)) continue
       if (typeof window.remainingPercent !== 'number' || !Number.isFinite(window.remainingPercent)) continue
-      if (window.usedPercent < 0 || window.usedPercent > 100 || window.remainingPercent < 0 || window.remainingPercent > 100) continue
+      // Clamp rather than drop: an over-quota reading must show as exhausted.
+      const usedPercent = Math.min(100, Math.max(0, window.usedPercent))
+      const remainingPercent = Math.min(100, Math.max(0, window.remainingPercent))
       const resetsAt = typeof window.resetsAt === 'string' && Number.isFinite(Date.parse(window.resetsAt))
         ? new Date(window.resetsAt).toISOString()
         : undefined
       windows.push({
         id: window.id.slice(0, MAX_QUOTA_TEXT_LENGTH),
         label: window.label.slice(0, MAX_QUOTA_TEXT_LENGTH),
-        usedPercent: window.usedPercent,
-        remainingPercent: window.remainingPercent,
+        usedPercent,
+        remainingPercent,
+        ...(window.overage === true || window.usedPercent > 100 ? { overage: true } : {}),
         ...(resetsAt ? { resetsAt } : {}),
       })
     }
@@ -134,6 +170,11 @@ function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
       ...(typeof provider.plan === 'string' ? { plan: provider.plan.slice(0, MAX_QUOTA_TEXT_LENGTH) } : {}),
       windows,
       ...(typeof provider.error === 'string' ? { error: provider.error.slice(0, 240) } : {}),
+      ...(QUOTA_ERROR_KINDS.has(provider.errorKind as string) ? { errorKind: provider.errorKind as QuotaProviderErrorKind } : {}),
+      ...(typeof provider.fetchedAt === 'string' && Number.isFinite(Date.parse(provider.fetchedAt))
+        ? { fetchedAt: new Date(provider.fetchedAt).toISOString() }
+        : {}),
+      ...(provider.stale === true ? { stale: true } : {}),
     })
   }
   return { updatedAt: new Date(raw.updatedAt).toISOString(), providers }
@@ -204,7 +245,11 @@ export const useAgentStore = defineStore('agent', () => {
   const sessions = computed(() => Object.fromEntries(sessionsByKey))
   const isDragging = ref(false)
   const petWindowMode = ref<PetWindowModeState>({ mode: 'normal' })
-  const panelView = ref<'sessions' | 'settings'>('sessions')
+  // Panel navigation: one state machine (utils/panel-route.ts) replaces three flags.
+  const panelRoute = ref<PanelRouteState>(INITIAL_PANEL_ROUTE)
+  const panelView = computed(() => panelRoute.value.view)
+  const showWizard = computed(() => panelRoute.value.overlay === 'wizard')
+  const showProjectMcpPanel = computed(() => panelRoute.value.overlay === 'mcp')
   const selectedPet = ref<string>(localStorage.getItem('agent-pet-id') || 'aang-airbender')
   const petScale = ref(parseFloat(localStorage.getItem('agent-pet-scale') || '1'))
   const pets = ref<PetEntry[]>([])
@@ -219,6 +264,11 @@ export const useAgentStore = defineStore('agent', () => {
   const quotaUsage = shallowRef<QuotaUsage | null>(null)
   const quotaLoading = ref(false)
   const quotaError = ref('')
+  // Seconds a forced refresh must wait (cooldown answer from the main
+  // process), or null. Lets the UI say "wait N s" instead of silently no-op.
+  const quotaThrottleSec = ref<number | null>(null)
+  // When the last refresh request completed (ms), for "next auto refresh".
+  const quotaCheckedAt = ref(0)
   // Bumped whenever a Codex/Claude session reaches a terminal state, i.e.
   // right after quota was actually spent. App.vue watches this and schedules
   // one settled refresh, so the meter tracks real usage instead of only the
@@ -282,14 +332,21 @@ export const useAgentStore = defineStore('agent', () => {
     return selectedPet.value
   }
 
-  const showWizard = ref(false)
-  const showProjectMcpPanel = ref(false)
   const toast = ref<{
     id: number
-    text: string
-    tone: 'success' | 'error'
+    tone: ToastTone
+    /** Semantic headline, e.g. "Done" / "Failed" / "3 tasks done". */
+    title: string
+    /** Source and project, e.g. "Claude · my-repo". */
+    meta: string
+    /** Optional second line (elapsed time). */
+    detail?: string
+    /** How many finished results this bubble stands for. */
+    count: number
     countdown: ToastCountdown
   } | null>(null)
+  const toastPaused = ref(false)
+  let toastPausedRemainingMs: number | null = null
   const toastRemainingMs = ref(0)
   let toastTimer: ReturnType<typeof setTimeout> | null = null
   let toastProgressTimer: ReturnType<typeof setTimeout> | null = null
@@ -324,6 +381,10 @@ export const useAgentStore = defineStore('agent', () => {
   // Off by default so the app doesn't surprise anyone with sudden audio;
   // opt-in via the Settings toggle.
   const soundEnabled = ref(localStorage.getItem('agent-pet-sound') === '1')
+  const soundVolume = ref(60)
+  const soundOnPermission = ref(true)
+  const soundOnError = ref(true)
+  const soundOnSuccess = ref(true)
 
   // Off by default — showing one pet per active tool family is a bigger
   // visual/layout change than the other additions, so it stays opt-in
@@ -333,10 +394,16 @@ export const useAgentStore = defineStore('agent', () => {
   // Off by default — the click/state-change bounce, idle fidget sway, and
   // waiting-permission shake found it distracting. Off leaves the core
   // sprite state animation (and frame speed-up / mood glow) untouched.
-  const reactionsEnabled = ref(localStorage.getItem('agent-pet-fx') === '1')
+  // On by default (key-event feedback: reaction bounce, urgency shake, reward
+  // glow). Decorative ambient motion is a separate, opt-in switch below.
+  const feedbackDefaults = readPetFeedbackDefaults(localStorage)
+  const reactionsEnabled = ref(feedbackDefaults.reactions)
 
-  // Off by default — the completion toast / "what's it doing" bubble.
-  const bubbleEnabled = ref(localStorage.getItem('agent-pet-bubble') === '1')
+  // On by default — completion / failure / waiting bubbles. The noisier
+  // "what's it doing" tool-activity bubble is its own opt-in switch.
+  const bubbleEnabled = ref(feedbackDefaults.bubble)
+  const ambientEnabled = ref(feedbackDefaults.ambient)
+  const activityBubbleEnabled = ref(feedbackDefaults.activity)
   // shallowRef: all three are always replaced wholesale (setPermissionRequests,
   // setProgressionSnapshot, setAchievementsSnapshot each assign a fresh value),
   // never mutated in place — see the comment on quotaUsage above.
@@ -344,6 +411,12 @@ export const useAgentStore = defineStore('agent', () => {
   const progression = shallowRef<ProgressionSnapshot | null>(null)
   const achievements = shallowRef<AchievementSnapshot | null>(null)
   const achievementUnlock = ref<AchievementUnlock | null>(null)
+  // XP the main process actually granted (newest first), and the last
+  // level-up/evolution. Both come only from main's award notifications, so a
+  // cold load or a replayed event can never look like a fresh celebration.
+  const recentAwards = shallowRef<RecentAward[]>([])
+  const levelUpEvent = shallowRef<LevelUpEvent | null>(null)
+  let awardSequence = 0
   const presentationQueue = ref<PresentationIntent[]>([])
   const presentationActive = ref<PresentationIntent | null>(null)
   const presentationReaction = ref<{
@@ -372,6 +445,7 @@ export const useAgentStore = defineStore('agent', () => {
   })
   const launchAtStartup = ref(false)
   const launchAtStartupSupported = ref(false)
+  const launchAtStartupStatus = ref<LaunchAtStartupStatus>('unsupported')
   const desktopPreferencesReady = ref(false)
   const reactionsActive = computed(() => isDesktopEffectActive(
     desktopPreferencesReady.value,
@@ -383,6 +457,12 @@ export const useAgentStore = defineStore('agent', () => {
     dndEnabled.value,
     bubbleEnabled.value,
   ))
+  const ambientActive = computed(() => isDesktopEffectActive(
+    desktopPreferencesReady.value,
+    dndEnabled.value,
+    ambientEnabled.value,
+  ))
+  const activityBubbleActive = computed(() => bubbleActive.value && activityBubbleEnabled.value)
   // Presentation-only preference; it never changes Broker or adapter state.
   const permissionBubbleActive = computed(() => (
     desktopPreferencesReady.value && permissionBubbleEnabled.value
@@ -418,6 +498,23 @@ export const useAgentStore = defineStore('agent', () => {
     localStorage.setItem('agent-pet-mood-version', MOOD_SYSTEM_VERSION)
   }
 
+  // Petting the pet lifts its mood a little, capped per day so it cannot be farmed.
+  const PAT_DAILY_LIMIT = 5
+
+  function patPet(): boolean {
+    let count = 0
+    try {
+      const [day, saved] = (localStorage.getItem('agent-pet-pat') ?? '').split(':')
+      if (day === todayKey()) count = Number(saved) || 0
+    } catch {}
+    if (count >= PAT_DAILY_LIMIT) return false
+    try {
+      localStorage.setItem('agent-pet-pat', `${todayKey()}:${count + 1}`)
+    } catch {}
+    adjustMood(1)
+    return true
+  }
+
   function setMoodVisualsEnabled(enabled: boolean) {
     moodVisualsEnabled.value = enabled
     localStorage.setItem('agent-pet-mood-visuals', enabled ? '1' : '0')
@@ -425,46 +522,140 @@ export const useAgentStore = defineStore('agent', () => {
 
   // --- Toast 提示 ----------------------------------------------------------
 
-  function showToast(source: AgentSource, project: string | undefined, tone: 'success' | 'error') {
+  function clearToastTimers() {
+    if (toastTimer) clearTimeout(toastTimer)
+    if (toastProgressTimer) clearTimeout(toastProgressTimer)
+    toastTimer = null
+    toastProgressTimer = null
+  }
+
+  function armToastTimers(toastId: number, remainingMs: number) {
+    clearToastTimers()
+    toastRemainingMs.value = remainingMs
+    const startedAt = Date.now()
+    const tick = () => {
+      if (toast.value?.id !== toastId) return
+      const remaining = Math.max(0, remainingMs - (Date.now() - startedAt))
+      toastRemainingMs.value = remaining
+      toastProgressTimer = remaining > 0 ? setTimeout(tick, Math.min(100, remaining)) : null
+    }
+    toastProgressTimer = setTimeout(tick, 100)
+    toastTimer = setTimeout(() => {
+      if (toast.value?.id !== toastId) return
+      dismissToast()
+    }, remainingMs)
+  }
+
+  // --- 不在場時的未讀結果 / 等待輸入提醒 ----------------------------------------
+
+  const unreadResults = ref({ count: 0, hasError: false })
+  let lastPetInteractionAt = Date.now()
+  let cueSink: ((cue: SoundCue) => void) | null = null
+  const waitingInputTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  function markPetInteraction() {
+    lastPetInteractionAt = Date.now()
+  }
+
+  function clearUnreadResults() {
+    if (unreadResults.value.count === 0) return
+    unreadResults.value = { count: 0, hasError: false }
+  }
+
+  function noteUnreadResult(tone: 'success' | 'error') {
+    if (Date.now() - lastPetInteractionAt < UNREAD_AWAY_MS) return
+    unreadResults.value = {
+      count: Math.min(99, unreadResults.value.count + 1),
+      hasError: unreadResults.value.hasError || tone === 'error',
+    }
+  }
+
+  // App.vue decides whether this window may actually make sound.
+  function setCueSink(sink: ((cue: SoundCue) => void) | null) {
+    cueSink = sink
+  }
+
+  function cancelWaitingInputReminder(key: string) {
+    const timer = waitingInputTimers.get(key)
+    if (timer) clearTimeout(timer)
+    waitingInputTimers.delete(key)
+  }
+
+  // The prompt must still be unanswered after a short grace period before the
+  // pet speaks up, so a question answered at once never flashes a bubble.
+  function scheduleWaitingInputReminder(key: string) {
+    cancelWaitingInputReminder(key)
+    waitingInputTimers.set(key, setTimeout(() => {
+      waitingInputTimers.delete(key)
+      const session = sessionsByKey.get(key)
+      if (!session || session.state !== 'waiting-input') return
+      showToast(session.source, session.project, 'waiting')
+      cueSink?.('waiting-input')
+    }, WAITING_INPUT_DELAY_MS))
+  }
+
+  function dismissToast() {
+    clearToastTimers()
+    toast.value = null
+    toastRemainingMs.value = 0
+    toastPaused.value = false
+    toastPausedRemainingMs = null
+  }
+
+  // Hovering the bubble freezes its countdown so a slow reader never loses it.
+  function pauseToast() {
+    const current = toast.value
+    if (!current || toastPaused.value) return
+    toastPausedRemainingMs = toastRemainingMs.value
+    toastPaused.value = true
+    clearToastTimers()
+  }
+
+  function resumeToast() {
+    const current = toast.value
+    if (!current || !toastPaused.value) return
+    const remaining = toastPausedRemainingMs ?? 0
+    toastPaused.value = false
+    toastPausedRemainingMs = null
+    if (remaining <= 0) dismissToast()
+    else armToastTimers(current.id, remaining)
+  }
+
+  function showToast(
+    source: AgentSource,
+    project: string | undefined,
+    tone: ToastTone,
+    elapsedMs?: number,
+  ) {
     const label = SOURCE_LABELS[source]
     const proj = formatProject(project)
     const startedAt = Date.now()
-    const countdown = createToastCountdown(tone, startedAt)
+    const durationMs = toastDurationFor(tone)
+    const countdown = createToastCountdown(tone, startedAt, durationMs)
     if (!countdown) return
+
+    // Several tasks finishing back to back collapse into one count instead of
+    // each bubble overwriting the previous one.
+    const previous = toast.value
+    const merge = tone === 'success' && previous?.tone === 'success'
+    const count = merge ? previous.count + 1 : 1
+    const elapsed = formatElapsedShort(elapsedMs)
     const nextToast = {
       id: ++toastSequence,
-      text: proj ? `${label} · ${proj}` : label,
       tone,
+      title: count > 1
+        ? t('pet.toastManyDone', { count })
+        : t(tone === 'success' ? 'pet.toastDone' : tone === 'error' ? 'pet.toastFailed' : 'pet.toastWaiting'),
+      meta: count > 1 ? '' : proj ? `${label} · ${proj}` : label,
+      ...(count === 1 && elapsed ? { detail: t('pet.toastElapsed', { time: elapsed }) } : {}),
+      count,
       countdown,
     }
 
-    if (toastTimer) clearTimeout(toastTimer)
-    if (toastProgressTimer) clearTimeout(toastProgressTimer)
-
     toast.value = nextToast
-    toastRemainingMs.value = getToastRemainingMs(countdown, startedAt)
-
-    const updateRemainingTime = () => {
-      if (toast.value?.id !== nextToast.id) return
-
-      const remaining = getToastRemainingMs(countdown, Date.now())
-      toastRemainingMs.value = remaining
-      if (remaining > 0) {
-        toastProgressTimer = setTimeout(updateRemainingTime, Math.min(100, remaining))
-      } else {
-        toastProgressTimer = null
-      }
-    }
-
-    toastProgressTimer = setTimeout(updateRemainingTime, 100)
-    toastTimer = setTimeout(() => {
-      if (toast.value?.id !== nextToast.id) return
-      toast.value = null
-      toastRemainingMs.value = 0
-      if (toastProgressTimer) clearTimeout(toastProgressTimer)
-      toastProgressTimer = null
-      toastTimer = null
-    }, getToastRemainingMs(countdown, startedAt))
+    toastPaused.value = false
+    toastPausedRemainingMs = null
+    armToastTimers(nextToast.id, durationMs)
   }
 
   // --- Presentation MCP（本機 MCP client 的簡短反應/語音佇列） -----------------
@@ -685,6 +876,10 @@ export const useAgentStore = defineStore('agent', () => {
     updateDesktopPreferences({ soundEnabled: enabled })
   }
 
+  function setSoundOption(patch: Pick<DesktopPreferencesPatch, 'soundVolume' | 'soundOnPermission' | 'soundOnError' | 'soundOnSuccess'>) {
+    updateDesktopPreferences(patch)
+  }
+
   // --- 桌面偏好設定（同步自 Electron 主行程） -------------------------------
 
   function applyDesktopPreferences(preferences: DesktopPreferences) {
@@ -701,8 +896,13 @@ export const useAgentStore = defineStore('agent', () => {
     rightClickHideEnabled.value = preferences.rightClickHideEnabled
     desktopVisibilityCapabilities.value = preferences.visibilityCapabilities
     soundEnabled.value = preferences.soundEnabled
+    soundVolume.value = preferences.soundVolume
+    soundOnPermission.value = preferences.soundOnPermission
+    soundOnError.value = preferences.soundOnError
+    soundOnSuccess.value = preferences.soundOnSuccess
     launchAtStartup.value = preferences.launchAtStartup
     launchAtStartupSupported.value = preferences.launchAtStartupSupported
+    launchAtStartupStatus.value = preferences.launchAtStartupStatus ?? 'unsupported'
     desktopPreferencesReady.value = true
     localStorage.setItem('agent-pet-sound', preferences.soundEnabled ? '1' : '0')
     if (preferences.dndEnabled) clearPresentation()
@@ -797,6 +997,10 @@ export const useAgentStore = defineStore('agent', () => {
     updateDesktopPreferences({ launchAtStartup: enabled })
   }
 
+  function openLoginItemsSettings() {
+    void window.electronAPI?.openLoginItemsSettings?.().catch(() => {})
+  }
+
   function setMultiPetEnabled(enabled: boolean) {
     multiPetEnabled.value = enabled
     localStorage.setItem('agent-pet-multi', enabled ? '1' : '0')
@@ -810,6 +1014,16 @@ export const useAgentStore = defineStore('agent', () => {
   function setBubbleEnabled(enabled: boolean) {
     bubbleEnabled.value = enabled
     localStorage.setItem('agent-pet-bubble', enabled ? '1' : '0')
+  }
+
+  function setAmbientEnabled(enabled: boolean) {
+    ambientEnabled.value = enabled
+    localStorage.setItem('agent-pet-ambient', enabled ? '1' : '0')
+  }
+
+  function setActivityBubbleEnabled(enabled: boolean) {
+    activityBubbleEnabled.value = enabled
+    localStorage.setItem('agent-pet-activity', enabled ? '1' : '0')
   }
 
   // --- 寵物選擇與視窗模式 -----------------------------------------------------
@@ -856,6 +1070,17 @@ export const useAgentStore = defineStore('agent', () => {
     return true
   }
 
+  function handleProgressionAwarded(value: unknown): boolean {
+    const event = normalizeProgressionAwardEvent(value)
+    if (!event) return false
+    const fresh = recentAwardsFromEvent(event, awardSequence)
+    awardSequence += fresh.length
+    recentAwards.value = [...fresh, ...recentAwards.value].slice(0, RECENT_AWARD_LIMIT)
+    const levelUp = levelUpFromAward(event, `${event.petId}:${event.levelAfter}:${event.at}`)
+    if (levelUp) levelUpEvent.value = levelUp
+    return true
+  }
+
   function setAchievementsSnapshot(value: unknown): boolean {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false
     const raw = value as Partial<AchievementSnapshot>
@@ -885,6 +1110,13 @@ export const useAgentStore = defineStore('agent', () => {
         || typeof item.unlocked !== 'boolean'
         || (item.unlockedAt !== undefined && (!Number.isSafeInteger(item.unlockedAt) || item.unlockedAt < 0))
         || (item.tokenQuality !== 'none' && item.tokenQuality !== 'estimated' && item.tokenQuality !== 'exact')
+        || item.category !== definition.category
+        || typeof item.hidden !== 'boolean'
+        || !item.progress
+        || !Number.isSafeInteger(item.progress.current)
+        || !Number.isSafeInteger(item.progress.target)
+        || item.progress.current < 0
+        || item.progress.target <= 0
       ) return null
       seen.add(definition.id)
       return {
@@ -896,6 +1128,9 @@ export const useAgentStore = defineStore('agent', () => {
         unlocked: item.unlocked,
         ...(item.unlockedAt === undefined ? {} : { unlockedAt: item.unlockedAt }),
         tokenQuality: item.tokenQuality,
+        category: definition.category,
+        hidden: item.hidden,
+        progress: { current: Math.min(item.progress.current, item.progress.target), target: item.progress.target },
       }
     })
     if (normalized.some(item => item === null)) return false
@@ -1101,13 +1336,37 @@ export const useAgentStore = defineStore('agent', () => {
       clearPresentation()
     }
 
+    // Read before awardMoodProgress clears it on a terminal state.
+    const taskStartedAt = moodTaskProgress.get(key)?.startedAt
+
     awardMoodProgress(event, key, prevState)
+
+    if (event.state === 'waiting-input') {
+      if (prevState !== 'waiting-input') scheduleWaitingInputReminder(key)
+    } else {
+      cancelWaitingInputReminder(key)
+    }
 
     if ((event.state === 'success' || event.state === 'error') && prevState !== event.state) {
       if (isQuotaCapableSource(event.source)) quotaStaleSignal.value += 1
-      showToast(event.source, event.project, event.state)
+      showToast(
+        event.source,
+        event.project,
+        event.state,
+        taskStartedAt === undefined ? undefined : Date.now() - taskStartedAt,
+      )
+      noteUnreadResult(event.state)
       adjustMood(event.state === 'success' ? MOOD_SUCCESS_REWARD : -MOOD_ERROR_PENALTY)
+      if (event.state === 'success' && !shouldPlaySuccessSound(
+        taskStartedAt === undefined ? undefined : Date.now() - taskStartedAt,
+      )) return null
       return event.state
+    }
+
+    if (event.state !== 'waiting-permission' && dismissedPermissionNotices.value.has(key)) {
+      const next = new Set(dismissedPermissionNotices.value)
+      next.delete(key)
+      dismissedPermissionNotices.value = next
     }
 
     if (event.state === 'waiting-permission' && prevState !== 'waiting-permission') {
@@ -1119,8 +1378,14 @@ export const useAgentStore = defineStore('agent', () => {
 
   function cleanupStale() {
     const now = Date.now()
-    for (const session of sessionIndex.values()) {
-      if (now - session.lastSeenAt > SESSION_STALE_MS && session.state !== 'offline') {
+    const hasPendingPermission = permissionRequests.value.length > 0
+    for (const session of [...sessionIndex.values()]) {
+      const action = sessionLifecycleAction(session, now, { hasPendingPermission })
+      if (action === 'remove') {
+        // Offline long enough that nobody is looking for it any more.
+        sessionIndex.delete(session.key)
+        moodTaskProgress.delete(session.key)
+      } else if (action === 'offline') {
         // No update in a long time means the process died without sending a
         // terminal event (Stop/SessionEnd) — treat it as gone rather than
         // letting a stuck thinking/tool-running state mask real sessions.
@@ -1129,6 +1394,38 @@ export const useAgentStore = defineStore('agent', () => {
         moodTaskProgress.delete(session.key)
       }
     }
+  }
+
+  // After a renderer reload/crash the in-memory list is empty although agents
+  // may still be running. Main keeps a light mirror; merge it in without
+  // replaying events (no toasts, mood or sound) and never over live data.
+  function restoreSessionSnapshot(entries: unknown): number {
+    if (!Array.isArray(entries)) return 0
+    const now = Date.now()
+    let restored = 0
+    for (const raw of entries.slice(0, MAX_SESSION_COUNT)) {
+      if (!raw || typeof raw !== 'object') continue
+      const entry = raw as Partial<AgentSession>
+      if (typeof entry.source !== 'string' || typeof entry.sessionId !== 'string') continue
+      if (typeof entry.state !== 'string' || !(entry.state in STATE_PRIORITY)) continue
+      if (typeof entry.lastSeenAt !== 'number' || !Number.isFinite(entry.lastSeenAt)) continue
+      if (now - entry.lastSeenAt > SESSION_REMOVE_MS) continue
+      const key = getSessionKey(entry.source as AgentSource, entry.sessionId)
+      if (sessionIndex.get(key)) continue
+      sessionIndex.upsert({
+        key,
+        source: entry.source as AgentSource,
+        sessionId: entry.sessionId,
+        project: typeof entry.project === 'string' ? entry.project : undefined,
+        projectId: typeof entry.projectId === 'string' ? entry.projectId : undefined,
+        routedPetId: typeof entry.routedPetId === 'string' ? entry.routedPetId : undefined,
+        state: entry.state,
+        lastSeenAt: entry.lastSeenAt,
+        toolName: typeof entry.toolName === 'string' ? entry.toolName : undefined,
+      }, MAX_SESSION_COUNT)
+      restored += 1
+    }
+    return restored
   }
 
   function handleSuccessTimeout() {
@@ -1144,6 +1441,7 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   function removeSession(key: string) {
+    cancelWaitingInputReminder(key)
     sessionIndex.delete(key)
     moodTaskProgress.delete(key)
   }
@@ -1200,12 +1498,16 @@ export const useAgentStore = defineStore('agent', () => {
     if (!force && quotaUsage.value && now - quotaRequestedAt < QUOTA_REFRESH_MS) return quotaUsage.value
     quotaLoading.value = true
     quotaError.value = ''
+    quotaThrottleSec.value = null
     quotaRequestedAt = now
     try {
       const usage = await window.electronAPI.getQuotaUsage(force)
+      const throttled = (usage as { throttled?: { retryInSec?: unknown } } | null)?.throttled?.retryInSec
+      if (typeof throttled === 'number' && Number.isFinite(throttled)) quotaThrottleSec.value = Math.max(1, Math.round(throttled))
       if (!setQuotaUsage(usage)) {
         quotaError.value = 'Quota service returned invalid data.'
       }
+      quotaCheckedAt.value = Date.now()
       return quotaUsage.value
     } catch (error) {
       quotaError.value = translateBackendError(error instanceof Error ? error.message : t('quotaLoadFailed'))
@@ -1330,15 +1632,50 @@ export const useAgentStore = defineStore('agent', () => {
     return s.toolName
   })
 
+  // Codex / Claude can only *report* a permission wait; the answer has to be
+  // given in the original tool. Every such session is listed (not just the
+  // highest-priority one) so the user can see how many agents are blocked.
+  const dismissedPermissionNotices = shallowRef<ReadonlySet<string>>(new Set())
+
+  const permissionNoticeItems = computed(() => (
+    sessionList.value
+      .filter(session => (
+        session.state === 'waiting-permission'
+        && session.permissionNotice?.responseMode === 'external_only'
+        && !dismissedPermissionNotices.value.has(session.key)
+      ))
+      .map(session => ({
+        key: session.key,
+        source: SOURCE_FAMILIES.find(family => family.sources.includes(session.source))?.label
+          ?? SOURCE_LABELS[session.source] ?? session.source,
+        project: session.project ?? '',
+        desktop: session.source.endsWith('-desktop'),
+      }))
+  ))
+
   const permissionNotice = computed(() => {
-    const session = highestPrioritySession.value
-    if (session?.state !== 'waiting-permission') return null
-    if (session.permissionNotice?.responseMode !== 'external_only') return null
+    const items = permissionNoticeItems.value
+    const first = items[0]
+    if (!first) return null
+    const multiple = items.length > 1
     return {
-      title: t('permissionNeeded'),
-      detail: t('returnToTerminal'),
+      title: multiple
+        ? t('permission.noticeTitleMulti', { count: items.length })
+        : t('permission.noticeTitle', { source: first.source, project: first.project || t('projectUnknown') }),
+      detail: multiple
+        ? t('permission.noticeExternalOnly')
+        : first.desktop
+          ? t('permission.noticeWhereApp', { source: first.source })
+          : t('returnToTerminal'),
+      items,
     }
   })
+
+  function dismissPermissionNotice(): void {
+    const next = new Set(dismissedPermissionNotices.value)
+    for (const item of permissionNoticeItems.value) next.add(item.key)
+    dismissedPermissionNotices.value = next
+  }
 
   function moodLabel(value: number): PresentationMood {
     if (value >= 70) return 'happy'
@@ -1370,6 +1707,37 @@ export const useAgentStore = defineStore('agent', () => {
   // --- Permission 請求 ---------------------------------------------------------
 
   const permissionRequest = computed(() => permissionRequests.value[0] ?? null)
+
+  // Result of the most recent request that left the broker's active queue
+  // (expired, handled elsewhere, delivery failed). Shown briefly so a bubble
+  // never just vanishes silently.
+  const permissionOutcome = shallowRef<PermissionOutcome | null>(null)
+  let permissionOutcomeTimer: ReturnType<typeof setTimeout> | null = null
+  // Requests with a decide() call in flight: the broker's broadcast can land
+  // before the IPC result does, and that result decides what the UI says.
+  const decidingRequestIds = new Set<string>()
+
+  function showPermissionOutcome(
+    request: Pick<PermissionRequestView, 'requestId' | 'agentId' | 'action' | 'projectId'>,
+    kind: PermissionOutcomeKind,
+  ): void {
+    if (permissionOutcomeTimer) clearTimeout(permissionOutcomeTimer)
+    permissionOutcome.value = {
+      kind,
+      requestId: request.requestId,
+      agentId: request.agentId,
+      action: request.action,
+      ...(request.projectId ? { projectId: request.projectId } : {}),
+      at: Date.now(),
+    }
+    permissionOutcomeTimer = setTimeout(dismissPermissionOutcome, outcomeVisibleMs(kind))
+  }
+
+  function dismissPermissionOutcome(): void {
+    if (permissionOutcomeTimer) clearTimeout(permissionOutcomeTimer)
+    permissionOutcomeTimer = null
+    permissionOutcome.value = null
+  }
 
   // The broker's `agentId` is the literal AgentSource string for every
   // respond-capable adapter (see electron/permission-adapter-server.ts,
@@ -1414,8 +1782,14 @@ export const useAgentStore = defineStore('agent', () => {
     // caller at all).
     const stillPending = new Set(next.map(request => request.requestId))
     for (const request of permissionRequests.value) {
-      if (!stillPending.has(request.requestId)) settleWaitingPermission(request.agentId, request.sessionId)
+      if (stillPending.has(request.requestId)) continue
+      // decidePermission() reports and settles these itself once the IPC returns.
+      if (decidingRequestIds.has(request.requestId)) continue
+      settleWaitingPermission(request.agentId, request.sessionId)
+      showPermissionOutcome(request, inferVanishedOutcome(request, now))
     }
+    // A new request supersedes any result card for an older one.
+    if (next.length > 0 && permissionOutcome.value?.kind !== 'error') dismissPermissionOutcome()
     permissionRequests.value = next
   }
 
@@ -1430,17 +1804,27 @@ export const useAgentStore = defineStore('agent', () => {
   async function decidePermission(
     requestId: string,
     decision: PermissionDecisionValue,
-  ): Promise<void> {
-    // Settle locally right away rather than waiting on the broker's own
-    // broadcast round-trip — see settleWaitingPermission for why this can't
-    // just wait for the next hook event.
+  ): Promise<PermissionDecideResult> {
     const request = permissionRequests.value.find(candidate => candidate.requestId === requestId)
-    if (request) settleWaitingPermission(request.agentId, request.sessionId)
+    if (!request) return { ok: false, kind: 'cancelled' }
+    decidingRequestIds.add(requestId)
+    let result: PermissionDecideResult
     try {
-      await window.electronAPI?.decidePermission(requestId, decision)
-    } catch {
-      // Main process remains authoritative; the next broker broadcast restores UI state.
+      result = classifyDecideResponse(await window.electronAPI?.decidePermission(requestId, decision))
+    } catch (error) {
+      console.warn('[permission] decision IPC failed', error instanceof Error ? error.name : 'unknown')
+      result = { ok: false, kind: 'error' }
+    } finally {
+      decidingRequestIds.delete(requestId)
     }
+    // Only a delivered decision means the agent is no longer waiting. For a
+    // failed delivery or IPC error the pet must keep showing the wait — the
+    // agent really is still blocked.
+    if (result.ok || result.kind === 'cancelled' || result.kind === 'expired') {
+      settleWaitingPermission(request.agentId, request.sessionId)
+    }
+    if (!result.ok) showPermissionOutcome(request, result.kind)
+    return result
   }
 
   // --- 控制面板視窗導覽 ---------------------------------------------------------
@@ -1451,56 +1835,72 @@ export const useAgentStore = defineStore('agent', () => {
     window.electronAPI?.togglePanel()
   }
 
+  // Pinning and in-progress modal flows (wizard, MCP setup, confirmations)
+  // suspend the main process's hide-on-blur so the panel stays for reference.
+  const panelPinned = ref(false)
+  const panelModalLocks = reactive(new Set<string>())
+  const panelModalOpen = computed(() => showWizard.value || showProjectMcpPanel.value || panelModalLocks.size > 0)
+  watch(panelModalOpen, open => window.electronAPI?.setPanelBlurLock?.({ modal: open }))
+
+  function setPanelPinned(pinned: boolean) {
+    panelPinned.value = pinned
+    window.electronAPI?.setPanelBlurLock?.({ pinned })
+  }
+
+  function setPanelModalLock(key: string, open: boolean) {
+    if (open) panelModalLocks.add(key)
+    else panelModalLocks.delete(key)
+  }
+
+  // Every transition goes through here so the window size always follows the route.
+  function navigatePanel(action: PanelRouteAction, options: { resize?: boolean } = {}) {
+    const next = reducePanelRoute(panelRoute.value, action)
+    const request = panelResizeRequest(panelRoute.value, next)
+    panelRoute.value = next
+    if (options.resize !== false && request) window.electronAPI?.resizePanel(request)
+  }
+
   function closePanel() {
-    showWizard.value = false
-    showProjectMcpPanel.value = false
+    const before = panelRoute.value
+    navigatePanel({ type: 'close-overlay' }, { resize: false })
     window.electronAPI?.hidePanel()
+    // Hide first, then drop an overlay's minimum size, so the window never visibly resizes on close.
+    if (before.overlay) window.electronAPI?.resizePanel({ release: true })
   }
 
   function openSettings() {
-    panelView.value = 'settings'
-    showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(720, 460)
+    navigatePanel({ type: 'open-settings' })
   }
 
   function openSetupWizard() {
-    showWizard.value = true
-    showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(520, 680)
+    navigatePanel({ type: 'open-overlay', overlay: 'wizard' })
   }
 
   function closeSetupWizard() {
-    showWizard.value = false
-    window.electronAPI?.resizePanel(panelView.value === 'settings' ? 720 : 560, 460)
+    navigatePanel({ type: 'close-overlay' })
   }
 
   function openProjectMcpPanel() {
-    panelView.value = 'settings'
-    showWizard.value = false
-    showProjectMcpPanel.value = true
-    window.electronAPI?.resizePanel(560, 720)
+    navigatePanel({ type: 'open-overlay', overlay: 'mcp' })
   }
 
   function closeProjectMcpPanel() {
-    showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(720, 460)
+    navigatePanel({ type: 'close-overlay' })
   }
 
   function backToSessions() {
-    panelView.value = 'sessions'
-    showWizard.value = false
-    showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(560, 460)
+    navigatePanel({ type: 'back-to-sessions' })
   }
 
   // Called by electron/main.ts whenever the panel window transitions from
   // hidden to visible. A restore keeps the previous screen (including a
-  // suspended plugin panel); any other open goes back to the Sessions view.
+  // suspended plugin panel); any other open goes back to the Sessions view
+  // (the main process already sized the window for it).
+  const panelOpenCount = ref(0)
   function handlePanelOpened(options?: { restore?: boolean }) {
+    panelOpenCount.value += 1
     if (options?.restore) return
-    panelView.value = 'sessions'
-    showWizard.value = false
-    showProjectMcpPanel.value = false
+    navigatePanel({ type: 'reset' }, { resize: false })
   }
 
   // --- 寵物視窗尺寸同步 -----------------------------------------------------
@@ -1658,6 +2058,7 @@ export const useAgentStore = defineStore('agent', () => {
     sessionList,
     isDragging,
     petWindowMode,
+    panelRoute,
     panelView,
     selectedPet,
     petScale,
@@ -1674,6 +2075,8 @@ export const useAgentStore = defineStore('agent', () => {
     quotaUsage,
     quotaLoading,
     quotaError,
+    quotaThrottleSec,
+    quotaCheckedAt,
     quotaByFamily,
     quotaStaleSignal,
     hasQuotaCapableSessions,
@@ -1685,11 +2088,24 @@ export const useAgentStore = defineStore('agent', () => {
     showProjectMcpPanel,
     toast,
     toastRemainingMs,
+    toastPaused,
+    unreadResults,
+    markPetInteraction,
+    clearUnreadResults,
+    setCueSink,
+    pauseToast,
+    resumeToast,
+    dismissToast,
     pluginFeedItem,
     pluginFeedUnreadCount,
     mood,
     moodVisualsEnabled,
     soundEnabled,
+    soundVolume,
+    soundOnPermission,
+    soundOnError,
+    soundOnSuccess,
+    setSoundOption,
     dndEnabled,
     notificationsEnabled,
     permissionBubbleEnabled,
@@ -1703,12 +2119,18 @@ export const useAgentStore = defineStore('agent', () => {
     desktopVisibilityCapabilities,
     launchAtStartup,
     launchAtStartupSupported,
+    launchAtStartupStatus,
+    openLoginItemsSettings,
     desktopPreferencesReady,
     multiPetEnabled,
     reactionsEnabled,
     bubbleEnabled,
+    ambientEnabled,
+    activityBubbleEnabled,
     reactionsActive,
     bubbleActive,
+    ambientActive,
+    activityBubbleActive,
     permissionBubbleActive,
     isMultiPet,
     activeSessions,
@@ -1721,6 +2143,7 @@ export const useAgentStore = defineStore('agent', () => {
     activePetId,
     activityText,
     permissionNotice,
+    dismissPermissionNotice,
     presentationSay,
     presentationReaction,
     handlePresentationIntent,
@@ -1732,9 +2155,14 @@ export const useAgentStore = defineStore('agent', () => {
     getPresentationStatus,
     permissionRequests,
     permissionRequest,
+    permissionOutcome,
+    dismissPermissionOutcome,
     progression,
     achievements,
     achievementUnlock,
+    recentAwards,
+    levelUpEvent,
+    handleProgressionAwarded,
     setProgressionSnapshot,
     setAchievementsSnapshot,
     handleAchievementUnlocked,
@@ -1747,6 +2175,7 @@ export const useAgentStore = defineStore('agent', () => {
     decidePermission,
     handleEvent,
     cleanupStale,
+    restoreSessionSnapshot,
     handleSuccessTimeout,
     removeSession,
     clearOfflineSessions,
@@ -1759,6 +2188,10 @@ export const useAgentStore = defineStore('agent', () => {
     closeProjectMcpPanel,
     backToSessions,
     handlePanelOpened,
+    panelPinned,
+    panelOpenCount,
+    setPanelPinned,
+    setPanelModalLock,
     setPet,
     setScale,
     setPetWindowModeState,
@@ -1782,10 +2215,13 @@ export const useAgentStore = defineStore('agent', () => {
     setMultiPetEnabled,
     setReactionsEnabled,
     setBubbleEnabled,
+    setAmbientEnabled,
+    setActivityBubbleEnabled,
     setFamilyPet,
     getPetForFamily,
     resetMood,
     setMoodVisualsEnabled,
+    patPet,
     resizePetWindow,
     loadPets,
     refreshProjectPets,
