@@ -22,6 +22,10 @@ export interface PermissionRequestView {
   generation: number
   action: string
   description: string
+  /** Sanitized, redacted tool arguments (command / path globs), at most 5 x 120 chars. */
+  details: ReadonlyArray<string>
+  /** Number of characters dropped from description/details; 0 when nothing was cut. */
+  truncatedChars: number
   risk: PermissionRisk
   receivedAt: number
   expiresAt: number

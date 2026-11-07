@@ -8,5 +8,10 @@
   "permission.viewInPanel": "View in panel",
   "permission.remaining": "{time} left",
   "permission.expiringSoon": "expiring soon",
-  "permission.waited": "waited {time}"
+  "permission.waited": "waited {time}",
+  "permission.expand": "Expand",
+  "permission.collapse": "Collapse",
+  "permission.copy": "Copy",
+  "permission.copied": "Copied",
+  "permission.argumentsLabel": "What will run"
 }

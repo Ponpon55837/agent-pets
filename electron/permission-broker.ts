@@ -7,12 +7,15 @@ import type {
   PermissionRequestView,
   PermissionRisk,
 } from '../src/types/permission'
+import { redactSensitiveText } from './permission-redact.ts'
 
 const DEFAULT_TTL_MS = 60_000
 const MIN_TTL_MS = 15_000
 const MAX_TTL_MS = 300_000
 const MAX_ACTION_LENGTH = 80
 const MAX_DESCRIPTION_LENGTH = 280
+const MAX_DETAIL_ITEMS = 5
+const MAX_DETAIL_LENGTH = 120
 const MAX_AUDIT_RECORDS = 500
 const DEFAULT_MAX_REQUEST_RECORDS = 5_000
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
@@ -47,6 +50,8 @@ export interface PermissionRequestInput {
   generation: number
   action: string
   description: string
+  /** Tool arguments (command, path globs). Bounded and redacted here. */
+  details?: ReadonlyArray<string>
   risk?: PermissionRisk
   ttlMs?: number
   allowedDecisions?: ReadonlyArray<PermissionDecisionValue>
@@ -107,6 +112,8 @@ interface InternalPermissionRequest {
   generation: number
   action: string
   description: string
+  details: ReadonlyArray<string>
+  truncatedChars: number
   risk: PermissionRisk
   receivedAt: number
   expiresAt: number
@@ -131,15 +138,19 @@ function isIdentifier(value: unknown): value is string {
   return typeof value === 'string' && IDENTIFIER_PATTERN.test(value)
 }
 
-function sanitizeText(value: unknown, maxLength: number): { value: string; truncated: boolean } {
-  if (typeof value !== 'string') return { value: '', truncated: false }
-  const normalized = value
+function sanitizeText(
+  value: unknown,
+  maxLength: number,
+): { value: string; truncated: boolean; omitted: number } {
+  if (typeof value !== 'string') return { value: '', truncated: false, omitted: 0 }
+  const normalized = redactSensitiveText(value
     .replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ')
     .replace(/\s+/g, ' ')
-    .trim()
+    .trim())
   return {
     value: normalized.slice(0, maxLength),
     truncated: normalized.length > maxLength,
+    omitted: Math.max(0, normalized.length - maxLength),
   }
 }
 
@@ -267,6 +278,22 @@ export class PermissionBroker {
     const action = sanitizeText(candidate.action, MAX_ACTION_LENGTH)
     const description = sanitizeText(candidate.description, MAX_DESCRIPTION_LENGTH)
     if (!action.value || !description.value) return { ok: false, error: 'invalid_request' }
+    const rawDetails = Array.isArray(candidate.details) ? candidate.details : []
+    const details: string[] = []
+    let truncatedChars = action.omitted + description.omitted
+    let detailsTruncated = false
+    rawDetails.forEach((item, index) => {
+      const cleaned = sanitizeText(item, MAX_DETAIL_LENGTH)
+      if (index >= MAX_DETAIL_ITEMS) {
+        detailsTruncated = true
+        truncatedChars += typeof item === 'string' ? item.length : 0
+        return
+      }
+      if (!cleaned.value) return
+      details.push(cleaned.value)
+      truncatedChars += cleaned.omitted
+      if (cleaned.truncated) detailsTruncated = true
+    })
 
     const receivedAt = this.readNow()
     if (receivedAt === null) return { ok: false, error: 'invalid_request' }
@@ -279,12 +306,14 @@ export class PermissionBroker {
       generation: candidate.generation!,
       action: action.value,
       description: description.value,
+      details: Object.freeze(details),
+      truncatedChars,
       risk: isRisk(candidate.risk) ? candidate.risk : 'unknown',
       receivedAt,
       expiresAt: receivedAt + clampTtl(candidate.ttlMs),
       status: 'pending',
       allowedDecisions,
-      truncated: action.truncated || description.truncated,
+      truncated: action.truncated || description.truncated || detailsTruncated,
       responseHandle: candidate.responseHandle,
       adapter,
       order: this.nextOrder++,
@@ -442,6 +471,8 @@ export class PermissionBroker {
       generation: request.generation,
       action: request.action,
       description: request.description,
+      details: [...request.details],
+      truncatedChars: request.truncatedChars,
       risk: request.risk,
       receivedAt: request.receivedAt,
       expiresAt: request.expiresAt,

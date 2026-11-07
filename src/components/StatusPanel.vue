@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
-import { SOURCE_LABELS } from '@/types/agent'
 import { t } from '@/i18n'
 import type { PluginEventSourceStatusView } from '@/types/plugin'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 import InlinePermissionCard from '@/components/ui/InlinePermissionCard.vue'
 import PermissionOutcomeNotice from '@/components/permission/PermissionOutcomeNotice.vue'
-import { formatDuration } from '@/utils/permission-view'
 import PetAnimation from '@/components/PetAnimation.vue'
 import StatusPanelHistory from '@/components/status-panel/StatusPanelHistory.vue'
 import StatusPanelSessions from '@/components/status-panel/StatusPanelSessions.vue'
@@ -107,10 +105,6 @@ function selectDashboardTab(tab: DashboardTab): void {
   if ((tab === 'sessions' || tab === 'usage') && !store.quotaUsage) void store.refreshQuota()
 }
 
-function permissionSourceLabel(agentId: string): string {
-  return SOURCE_LABELS[agentId as keyof typeof SOURCE_LABELS] ?? agentId
-}
-
 watch(() => store.panelView, view => {
   if (view === 'settings') settingsTab.value = 'appearance'
 })
@@ -182,12 +176,6 @@ onUnmounted(() => {
         v-if="store.permissionRequest"
         class="panel-inline-permission"
         :request="store.permissionRequest"
-        :title="`${permissionSourceLabel(store.permissionRequest.agentId)} · ${t('permissionInlineTitle')}`"
-        :project-label="store.permissionRequest.projectId || t('projectUnknown')"
-        :elapsed-label="formatDuration(nowTick - store.permissionRequest.receivedAt)"
-        :allow-label="t('permissionAllowOnce')"
-        :deny-label="t('permissionDeny')"
-        :warning-label="t('permissionWarning')"
         @decide="store.decidePermission(store.permissionRequest.requestId, $event)"
       />
       <PermissionOutcomeNotice v-else-if="store.permissionOutcome" />

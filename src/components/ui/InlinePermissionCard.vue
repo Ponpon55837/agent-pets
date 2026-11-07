@@ -4,19 +4,15 @@ import type { PermissionDecisionValue, PermissionRequestView } from '@/types/per
 import { t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
 import { permissionSourceName } from '@/utils/permission-source'
+import { formatDuration } from '@/utils/permission-view'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
+import PermissionDetails from '@/components/permission/PermissionDetails.vue'
 import PermissionCountdown from '@/components/permission/PermissionCountdown.vue'
 import { usePermissionClock } from '@/components/permission/usePermissionClock'
 
 const props = defineProps<{
   request: PermissionRequestView
-  title: string
-  projectLabel: string
-  elapsedLabel: string
-  allowLabel: string
-  denyLabel: string
-  warningLabel: string
 }>()
 
 const emit = defineEmits<{
@@ -26,6 +22,9 @@ const emit = defineEmits<{
 const store = useAgentStore()
 const now = usePermissionClock()
 const deciding = ref<PermissionDecisionValue | null>(null)
+
+const title = computed(() => `${permissionSourceName(props.request.agentId)} · ${t('permissionInlineTitle')}`)
+const waited = computed(() => formatDuration(now.value - props.request.receivedAt))
 
 // A failed decision leaves the buttons usable again so the user can retry or
 // go back to the agent; the card says why instead of silently resetting.
@@ -60,21 +59,18 @@ function decide(decision: PermissionDecisionValue): void {
   <section
     class="inline-permission-card"
     aria-labelledby="inline-permission-title"
-    aria-describedby="inline-permission-context"
+    aria-describedby="inline-permission-context inline-permission-description"
   >
     <div class="inline-permission-heading">
       <Icon name="warning" :size="18" />
       <div class="inline-permission-copy">
         <strong id="inline-permission-title">{{ title }}</strong>
         <span id="inline-permission-context">
-          {{ projectLabel }} · {{ t('permission.waited', { time: elapsedLabel }) }} · <code>{{ request.action }}</code>
+          {{ request.projectId || t('projectUnknown') }} · {{ t('permission.waited', { time: waited }) }} · <code>{{ request.action }}</code>
         </span>
       </div>
     </div>
-    <p class="inline-permission-description" :title="request.description">
-      {{ request.description }}
-    </p>
-    <p v-if="request.truncated" class="inline-permission-warning">{{ warningLabel }}</p>
+    <PermissionDetails :request="request" id-prefix="inline-permission" />
     <PermissionCountdown class="inline-permission-countdown" :request="request" :now="now" />
     <p v-if="decideError" class="inline-permission-warning" role="alert">{{ decideError }}</p>
     <div class="inline-permission-actions">
@@ -85,7 +81,7 @@ function decide(decision: PermissionDecisionValue): void {
         :disabled="request.status !== 'pending' || deciding !== null"
         @click="decide('allow_once')"
       >
-        {{ deciding === 'allow_once' ? t('sending') : allowLabel }}
+        {{ deciding === 'allow_once' ? t('sending') : t('permissionAllowOnce') }}
       </Button>
       <Button
         v-if="canDeny()"
@@ -94,7 +90,7 @@ function decide(decision: PermissionDecisionValue): void {
         :disabled="request.status !== 'pending' || deciding !== null"
         @click="decide('deny')"
       >
-        {{ deciding === 'deny' ? t('sending') : denyLabel }}
+        {{ deciding === 'deny' ? t('sending') : t('permissionDeny') }}
       </Button>
     </div>
   </section>
@@ -135,15 +131,10 @@ function decide(decision: PermissionDecisionValue): void {
   white-space: nowrap;
 }
 
-.inline-permission-copy span,
-.inline-permission-description,
-.inline-permission-warning {
-  font-size: var(--font-body-sm, var(--font-sm));
-  line-height: 1.45;
-}
-
 .inline-permission-copy span {
   overflow: hidden;
+  font-size: var(--font-body-sm, var(--font-sm));
+  line-height: 1.45;
   opacity: 0.86;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -153,23 +144,12 @@ function decide(decision: PermissionDecisionValue): void {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
-.inline-permission-description,
 .inline-permission-warning {
-  display: -webkit-box;
   margin: 0;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.inline-permission-description {
-  opacity: 0.88;
-}
-
-.inline-permission-warning {
-  -webkit-line-clamp: 1;
   color: var(--accent-bright);
+  font-size: var(--font-body-sm, var(--font-sm));
   font-weight: var(--weight-medium);
+  line-height: 1.45;
 }
 
 .inline-permission-countdown {

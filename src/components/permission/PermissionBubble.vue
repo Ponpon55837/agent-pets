@@ -4,6 +4,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { t, type TranslationKey } from '@/i18n'
 import { permissionSourceName } from '@/utils/permission-source'
 import type { PermissionOutcomeKind } from '@/types/permission'
+import PermissionDetails from '@/components/permission/PermissionDetails.vue'
 import PermissionCountdown from '@/components/permission/PermissionCountdown.vue'
 import { usePermissionClock } from '@/components/permission/usePermissionClock'
 
@@ -62,18 +63,15 @@ function decide(decision: 'allow_once' | 'deny'): void {
     @click.stop
   >
     <header class="permission-request-header">
-      <span class="permission-request-heading">
-        <strong id="permission-request-title">{{ request.action }}</strong>
-        <span>{{ riskLabel(request.risk) }}</span>
-      </span>
+      <span class="permission-request-source">{{ permissionSourceName(request.agentId) }}</span>
+      <span class="permission-request-project" :title="request.projectId">{{ request.projectId || t('projectUnknown') }}</span>
       <span class="permission-request-queue">{{ request.queuePosition }}/{{ request.queueSize }}</span>
     </header>
-    <p id="permission-request-description" class="permission-request-description">
-      {{ request.description }}
+    <p class="permission-request-heading">
+      <strong id="permission-request-title">{{ request.action }}</strong>
+      <span>{{ riskLabel(request.risk) }}</span>
     </p>
-    <p v-if="request.truncated" class="permission-request-warning">
-      {{ t('permissionWarning') }}
-    </p>
+    <PermissionDetails :request="request" id-prefix="permission-request" />
     <PermissionCountdown :request="request" :now="now" />
     <p v-if="inlineError" class="permission-request-error" role="alert">{{ inlineError }}</p>
     <div class="permission-request-actions">
@@ -157,15 +155,38 @@ function decide(decision: 'allow_once' | 'deny'): void {
   gap: var(--space-2);
 }
 
-.permission-request-heading {
-  display: flex;
+.permission-request-source {
+  flex: 0 0 auto;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  white-space: nowrap;
+}
+
+.permission-request-project {
   min-width: 0;
   flex: 1;
-  flex-direction: column;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-request-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: var(--space-2) 1px;
 }
 
 .permission-request-heading strong {
+  min-width: 0;
   overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: var(--font-md);
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -184,19 +205,6 @@ function decide(decision: 'allow_once' | 'deny'): void {
   font-variant-numeric: tabular-nums;
 }
 
-.permission-request-description {
-  display: -webkit-box;
-  margin: var(--space-2) 1px;
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: var(--font-sm);
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
-.permission-request-warning,
 .permission-request-error {
   margin: 0 1px var(--space-2);
   color: var(--state-warn-bright);

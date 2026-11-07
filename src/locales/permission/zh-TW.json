@@ -8,5 +8,10 @@
   "permission.viewInPanel": "在面板檢視",
   "permission.remaining": "剩餘 {time}",
   "permission.expiringSoon": "即將逾時",
-  "permission.waited": "已等待 {time}"
+  "permission.waited": "已等待 {time}",
+  "permission.expand": "展開",
+  "permission.collapse": "收合",
+  "permission.copy": "複製",
+  "permission.copied": "已複製",
+  "permission.argumentsLabel": "要執行的內容"
 }
