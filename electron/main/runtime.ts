@@ -4,6 +4,10 @@ import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
 import { logMain, mainLogger } from '../diagnostics/main-log'
 import { buildDiagnosticsReport, registerDiagnosticsSection } from '../diagnostics/report'
+import { eventPipelineStats } from '../event-stats'
+import { resolveLocalPorts } from './ports'
+import { openWithCorruptionRecovery } from './db-recovery'
+import { LOCAL_USAGE_TICK_MS, shouldRunLocalUsageTick } from './scan-schedule'
 import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
 import { join, resolve } from 'path'
 import { randomUUID } from 'node:crypto'
@@ -198,6 +202,13 @@ export function animateBounds(target: { x: number; y: number; width: number; hei
     mainState.resizeAnimHandle = null
   }
 
+  // A hidden window has nothing to animate; jump straight to the end state.
+  if (!mainState.petWindow.isVisible()) {
+    mainState.petWindow.setBounds({ x: Math.round(target.x), y: Math.round(target.y), width: Math.round(target.width), height: Math.round(target.height) })
+    repositionVisiblePanel()
+    return
+  }
+
   const start = mainState.petWindow.getBounds()
   const startTime = Date.now()
 
@@ -223,7 +234,7 @@ export function animateBounds(target: { x: number; y: number; width: number; hei
       clearInterval(mainState.resizeAnimHandle)
       mainState.resizeAnimHandle = null
     }
-  }, 8)
+  }, 16)
 }
 
 export function clamp(value: number, min: number, max: number): number {
@@ -900,16 +911,21 @@ export function initializePluginCatalogAutoCheck(): void {
     },
   })
   void mainState.pluginCatalogAutoCheckSchedule.checkIfDue()
-  setInterval(() => {
+  if (mainState.pluginCatalogAutoCheckTimer) clearInterval(mainState.pluginCatalogAutoCheckTimer)
+  mainState.pluginCatalogAutoCheckTimer = setInterval(() => {
     void mainState.pluginCatalogAutoCheckSchedule?.checkIfDue()
   }, 60 * 60 * 1_000)
+  mainState.pluginCatalogAutoCheckTimer.unref?.()
 }
 
 export async function createPluginServices(): Promise<void> {
   if (mainState.pluginRegistry || mainState.pluginPreferences || mainState.pluginHostWindow) return
   const userDataDirectory = app.getPath('userData')
   mainState.pluginRegistry = new PluginRegistry(userDataDirectory)
-  mainState.pluginDeveloperModeWatcher = new PluginDeveloperModeWatcher(500)
+  mainState.pluginDeveloperModeWatcher = new PluginDeveloperModeWatcher(500, pluginId => {
+    // Surfaces in the plugin's diagnostics in the manager instead of vanishing.
+    mainState.pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
+  })
   mainState.pluginPreferences = new PluginPreferencesStore(userDataDirectory)
   mainState.pluginSecretsStore = new PluginSecretsStore(userDataDirectory, safeStorage)
   mainState.pluginSecretConsentStore = new PluginSecretConsentStore(userDataDirectory)
@@ -1114,6 +1130,7 @@ export async function createPluginServices(): Promise<void> {
     pluginRootForToken: token => mainState.pluginRootsByToken.get(token) ?? null,
     messageGuard: mainState.pluginUiMessageGuard,
     onPluginCrash: (pluginId, consecutiveCrashes, reason) => {
+      logMain('warn', 'plugin-host', `plugin crash reason=${reason} consecutive=${consecutiveCrashes}`, { pluginId })
       mainState.pluginBadgeController?.clearPlugin(pluginId)
       mainState.pluginEventSourceController?.clearPlugin(pluginId)
       if (consecutiveCrashes >= 3) {
@@ -1654,6 +1671,10 @@ export function applyMacFullscreenVisibilityPolicy(): void {
       console.error('Failed to apply macOS fullscreen visibility policy', error)
     }
   }
+}
+
+export function localPorts() {
+  return resolveLocalPorts(process.env, app.isPackaged)
 }
 
 export function serverHealthTracker(): ServerHealthTracker {
@@ -2552,8 +2573,8 @@ export function createPresentationServices(presentationToken: string): void {
     token: presentationToken,
     controller: mainState.presentationController,
   })
-  const presentationHealth = serverHealthTracker().register('presentation', PRESENTATION_MCP_PORT)
-  const presentationHandle = listenOnLocalPort(server, PRESENTATION_MCP_PORT, {
+  const presentationHealth = serverHealthTracker().register('presentation', localPorts().presentation)
+  const presentationHandle = listenOnLocalPort(server, localPorts().presentation, {
     label: 'Presentation MCP',
     onStatus: presentationHealth.onStatus,
     onPersistentFailure: presentationHealth.onPersistentFailure,
@@ -2622,26 +2643,66 @@ export function scheduleAchievementStoreRetry(): void {
   }, delay)
 }
 
+const HISTORY_STORE_RETRY_DELAYS_MS = [30_000, 120_000, 600_000] as const
+const STARTUP_DEFERRED_WORK_MS = 10_000
+let deferredHistoryWorkTimer: ReturnType<typeof setTimeout> | null = null
+let historyStoreRetryTimer: ReturnType<typeof setTimeout> | null = null
+let historyStoreRetryAttempt = 0
+
+export function cancelHistoryStoreRetry(): void {
+  if (deferredHistoryWorkTimer) clearTimeout(deferredHistoryWorkTimer)
+  deferredHistoryWorkTimer = null
+  if (historyStoreRetryTimer) clearTimeout(historyStoreRetryTimer)
+  historyStoreRetryTimer = null
+}
+
 export function createHistoryServices(): void {
   if (mainState.historyStore) return
   try {
-    mainState.historyStore = new HistoryStore(join(app.getPath('userData'), 'history.sqlite'))
+    const databasePath = join(app.getPath('userData'), 'history.sqlite')
+    mainState.historyStore = openWithCorruptionRecovery(
+      databasePath,
+      () => new HistoryStore(databasePath),
+      { log: (message, detail) => console.error(message, detail) },
+    )
+    if (!mainState.historyStore) throw new Error('History database could not be opened')
+    historyStoreRetryAttempt = 0
     mainState.localUsageReader = new LocalUsageReader({
       homeDir: app.getPath('home'),
       history: mainState.historyStore,
       projectRouting: mainState.projectRoutingStore,
     })
+    let scanTick = 0
     mainState.localUsageScanTimer = setInterval(() => {
+      scanTick += 1
+      if (!shouldRunLocalUsageTick(scanTick, powerMonitor.isOnBatteryPower())) return
       void refreshLocalUsage()
-    }, 60_000)
-    reconcileAchievementsFromHistory()
-    void refreshLocalUsage()
+    }, LOCAL_USAGE_TICK_MS)
+    mainState.localUsageScanTimer.unref?.()
+    // Heavy first-run work waits until the pet has been on screen for a while.
+    if (deferredHistoryWorkTimer) clearTimeout(deferredHistoryWorkTimer)
+    deferredHistoryWorkTimer = setTimeout(() => {
+      deferredHistoryWorkTimer = null
+      reconcileAchievementsFromHistory()
+      void refreshLocalUsage()
+    }, STARTUP_DEFERRED_WORK_MS)
+    deferredHistoryWorkTimer.unref?.()
   } catch (error) {
     // History is an additive HUD feature. A broken history database must not
     // prevent the pet, event receiver, XP, or permission controls from booting.
     console.error('History storage is unavailable', error)
+    try { mainState.historyStore?.close() } catch {}
     mainState.historyStore = null
     mainState.localUsageReader = null
+    const delay = HISTORY_STORE_RETRY_DELAYS_MS[historyStoreRetryAttempt]
+    if (delay !== undefined && !historyStoreRetryTimer && !mainState.isQuitting) {
+      historyStoreRetryAttempt += 1
+      historyStoreRetryTimer = setTimeout(() => {
+        historyStoreRetryTimer = null
+        createHistoryServices()
+      }, delay)
+      historyStoreRetryTimer.unref?.()
+    }
   }
 }
 
@@ -2706,8 +2767,8 @@ export function createPermissionServices(permissionToken: string): void {
   broker.registerAdapter(relay.createPort('opencode-cli'))
   broker.registerAdapter(relay.createPort('opencode-desktop'))
   const server = createPermissionAdapterServer({ token: permissionToken, broker, relay })
-  const permissionHealth = serverHealthTracker().register('permission', PERMISSION_ADAPTER_PORT)
-  const permissionHandle = listenOnLocalPort(server, PERMISSION_ADAPTER_PORT, {
+  const permissionHealth = serverHealthTracker().register('permission', localPorts().permission)
+  const permissionHandle = listenOnLocalPort(server, localPorts().permission, {
     label: 'Permission adapter',
     onStatus: permissionHealth.onStatus,
     onPersistentFailure: permissionHealth.onPersistentFailure,
@@ -2951,6 +3012,9 @@ export function registerRuntimeDiagnostics(startupResults: () => unknown, crashS
   registerDiagnosticsSection('localServers', () => serverHealthTracker().snapshot().servers.map(server => ({
     id: server.id, port: server.port, state: server.state, attempt: server.attempt, code: server.code ?? null,
   })))
+  registerDiagnosticsSection('pluginHost', () => mainState.pluginHostWindow?.diagnostics() ?? null)
+  registerDiagnosticsSection('rendererErrors', () => ({ count: mainState.rendererErrorCount }))
+  registerDiagnosticsSection('eventPipeline', () => ({ ...eventPipelineStats }))
   registerDiagnosticsSection('stores', () => ({
     history: mainState.historyStore ? 'ready' : 'unavailable',
     achievements: mainState.achievementStore ? 'ready' : 'unavailable',

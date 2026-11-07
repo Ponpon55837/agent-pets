@@ -105,6 +105,8 @@ export const IPC_CHANNELS = {
   projectPetsSetEnabled: 'project-pets-set-enabled',
   quotaUsage: 'quota-usage',
   quotaUsageUpdated: 'quota-usage-updated',
+  rendererErrorReport: 'renderer-error-report',
+  rendererReload: 'renderer-reload',
   removeCustomPet: 'remove-custom-pet',
   renameCustomPet: 'rename-custom-pet',
   sessionSnapshotGet: 'session-snapshot-get',
