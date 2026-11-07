@@ -9,13 +9,16 @@ import {
   type HistoryAgentStat,
   type HistoryDailyStat,
   type HistoryExport,
+  type HistoryModelStat,
   type HistoryQuotaSnapshot,
   type HistoryQuotaProvider,
   type HistoryQuotaWindow,
   type HistorySummary,
   type HistoryTokenUsageRecord,
   type HistoryTokenQuality,
+  type HistoryUsageBlock,
 } from '../src/types/history.ts'
+import { latestUsageBlocks, USAGE_BLOCK_MS, type UsageBlockEntry } from '../src/utils/usage-blocks.ts'
 import { dateOffset, localDateKey } from '../src/utils/local-date.ts'
 import { applyWalPragmas, type SqlitePragmaState } from './sqlite-pragmas.ts'
 import { StatementCache } from './sqlite-statements.ts'
@@ -68,6 +71,16 @@ const HISTORY_RANGES: readonly number[] = [7, 30, 90]
 const ACTIVE_STATES = new Set<AgentState>(['thinking', 'tool-running'])
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,256}$/
 const PROJECT_ID = /^[a-f0-9]{32}$/
+// 模型 id 只允許常見識別字元；`<synthetic>` 之類的佔位值或任何含空白/路徑跳脫的字串一律視為未知。
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,95}$/
+// 5 小時區塊要往回找到「≥5 小時空檔」才能定出起點；只回看 24 小時，
+// 連續 24 小時沒有空檔的極端情況下，區塊起點會從回看窗口內第一筆重新對齊。
+const USAGE_BLOCK_LOOKBACK_MS = 24 * 60 * 60 * 1000
+const MAX_USAGE_BLOCK_ROWS = 50_000
+
+export function safeModelId(value: unknown): string {
+  return typeof value === 'string' && MODEL_ID.test(value) && !value.includes('..') ? value : ''
+}
 
 function databaseConstructor(): DatabaseSyncConstructor {
   const moduleRequire = createRequire(import.meta.url)
@@ -208,6 +221,17 @@ function readSession(row: SqliteRow | undefined): SessionRow | null {
   }
 }
 
+interface ModelBatchEntry {
+  localDate: string
+  projectId: string
+  adapterId: string
+  model: string
+  tokenInput: number
+  tokenOutput: number
+  tokenCacheRead: number
+  tokenCacheWrite: number
+}
+
 interface HistoryQueuedEvent { event: AgentStatusEvent, petId: string, receivedAt: number, onRecorded?: () => void }
 
 /** A pure "still active" heartbeat: no token usage and no adapter-supplied identity. */
@@ -246,6 +270,7 @@ export class HistoryStore {
   private pragmas: SqlitePragmaState = { journalMode: '', synchronous: -1 }
   private transactionDepth = 0
   private dailyBatch: Map<string, DailyBatchEntry> | null = null
+  private modelBatch: Map<string, ModelBatchEntry> | null = null
   private queuedEvents: HistoryQueuedEvent[] = []
   private flushHandle: ReturnType<typeof setImmediate> | null = null
   private retryHandle: ReturnType<typeof setTimeout> | null = null
@@ -508,15 +533,24 @@ export class HistoryStore {
     if (records.length === 0) return 0
     return this.transaction(() => {
       const nested = this.dailyBatch !== null
-      if (!nested) this.dailyBatch = new Map()
+      if (!nested) {
+        this.dailyBatch = new Map()
+        this.modelBatch = new Map()
+      }
       let imported = 0
       try {
         for (const record of records) {
           if (this.applyTokenUsage(record, receivedAt)) imported += 1
         }
-        if (!nested) this.flushDailyBatch()
+        if (!nested) {
+          this.flushDailyBatch()
+          this.flushModelBatch()
+        }
       } finally {
-        if (!nested) this.dailyBatch = null
+        if (!nested) {
+          this.dailyBatch = null
+          this.modelBatch = null
+        }
       }
       return imported
     })
@@ -532,6 +566,58 @@ export class HistoryStore {
         entry.tokenInput, entry.tokenOutput, entry.tokenQuality, entry.tokenCacheRead, entry.tokenCacheWrite,
       )
     }
+  }
+
+  private flushModelBatch(): void {
+    const batch = this.modelBatch
+    this.modelBatch = null
+    if (!batch) return
+    for (const entry of batch.values()) {
+      this.updateModelStat(
+        entry.localDate, entry.projectId, entry.adapterId, entry.model,
+        entry.tokenInput, entry.tokenOutput, entry.tokenCacheRead, entry.tokenCacheWrite,
+      )
+    }
+  }
+
+  /** Additive per-model aggregate; batched in memory during recordTokenUsageBatch. */
+  private updateModelStat(
+    localDate: string,
+    projectId: string,
+    adapterId: string,
+    model: string,
+    tokenInput: number,
+    tokenOutput: number,
+    tokenCacheRead: number,
+    tokenCacheWrite: number,
+  ): void {
+    if (tokenInput === 0 && tokenOutput === 0 && tokenCacheRead === 0 && tokenCacheWrite === 0) return
+    if (this.modelBatch) {
+      const key = `${localDate}\u0000${projectId}\u0000${adapterId}\u0000${model}`
+      const entry = this.modelBatch.get(key) ?? {
+        localDate, projectId, adapterId, model, tokenInput: 0, tokenOutput: 0, tokenCacheRead: 0, tokenCacheWrite: 0,
+      }
+      entry.tokenInput += tokenInput
+      entry.tokenOutput += tokenOutput
+      entry.tokenCacheRead += tokenCacheRead
+      entry.tokenCacheWrite += tokenCacheWrite
+      this.modelBatch.set(key, entry)
+      return
+    }
+    this.statement(`
+      INSERT INTO daily_model_stats(
+        local_date, project_id, adapter_id, model, token_input, token_output, token_cache_read, token_cache_write
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(local_date, project_id, adapter_id, model) DO UPDATE SET
+        token_input = MAX(0, token_input + ?),
+        token_output = MAX(0, token_output + ?),
+        token_cache_read = MAX(0, token_cache_read + ?),
+        token_cache_write = MAX(0, token_cache_write + ?)
+    `).run(
+      localDate, projectId, adapterId, model,
+      Math.max(0, tokenInput), Math.max(0, tokenOutput), Math.max(0, tokenCacheRead), Math.max(0, tokenCacheWrite),
+      tokenInput, tokenOutput, tokenCacheRead, tokenCacheWrite,
+    )
   }
 
   private applyTokenUsage(record: HistoryTokenUsageRecord, receivedAt: number): boolean {
@@ -558,11 +644,12 @@ export class HistoryStore {
       ? digest(`${adapterId}:${agentId}:${record.sessionId}`)
       : null
     const eventId = digest(`local-usage:${adapterId}:${sourceEventId}`)
+    const model = safeModelId(record.model)
 
     return this.transaction(() => {
       const existing = this.statement(`
         SELECT event_id, local_date, project_id, token_input, token_output,
-               token_cache_read, token_cache_write, token_quality, occurred_at
+               token_cache_read, token_cache_write, token_quality, occurred_at, token_model
         FROM events WHERE adapter_id = ? AND source_event_id = ?
       `).get(adapterId, sourceEventId)
       if (existing) {
@@ -573,6 +660,7 @@ export class HistoryStore {
         const previousDate = safeText(existing.local_date)
         const previousProjectId = safeText(existing.project_id)
         const previousOccurredAt = asInteger(existing.occurred_at)
+        const previousModel = safeModelId(existing.token_model)
         const previousQuality = isTokenQuality(existing.token_quality)
           ? existing.token_quality
           : 'none'
@@ -585,13 +673,17 @@ export class HistoryStore {
           && previousProjectId === projectId
           && previousOccurredAt === occurredAt
           && previousQuality === record.quality
+          // A rescan of a row imported before model tracking backfills its model.
+          && (previousModel === model || model === '')
         ) return false
+        // Never erase a known model with an unknown one from a partial re-read.
+        const nextModel = model || previousModel
 
         this.statement(`
           UPDATE events
           SET session_id = ?, local_date = ?, project_id = ?, occurred_at = ?, received_at = ?,
               token_input = ?, token_output = ?, token_cache_read = ?, token_cache_write = ?,
-              token_quality = ?
+              token_quality = ?, token_model = ?
           WHERE event_id = ?
         `).run(
           sessionId,
@@ -604,8 +696,14 @@ export class HistoryStore {
           cacheRead,
           cacheWrite,
           record.quality,
+          nextModel,
           existing.event_id,
         )
+        this.updateModelStat(
+          previousDate, previousProjectId, adapterId, previousModel,
+          -previousInput, -previousOutput, -previousCacheRead, -previousCacheWrite,
+        )
+        this.updateModelStat(localDate, projectId, adapterId, nextModel, input, output, cacheRead, cacheWrite)
         this.updateDailyStat(
           previousDate,
           safePet,
@@ -640,8 +738,8 @@ export class HistoryStore {
           event_id, source_event_id, schema_version, type, trust, adapter_id, agent_id,
           session_id, project_id, pet_id, local_date, occurred_at, received_at, state,
           active_delta_ms, completion_kind, token_input, token_output, token_cache_read,
-          token_cache_write, token_quality, payload_json
-        ) VALUES (?, ?, 2, 'agent.token_usage', 'local_log', ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, NULL, ?, ?, ?, ?, ?, '{}')
+          token_cache_write, token_quality, token_model, payload_json
+        ) VALUES (?, ?, 2, 'agent.token_usage', 'local_log', ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, NULL, ?, ?, ?, ?, ?, ?, '{}')
       `).run(
         eventId,
         sourceEventId,
@@ -658,8 +756,10 @@ export class HistoryStore {
         cacheRead,
         cacheWrite,
         record.quality,
+        model,
       ))
       if (inserted === 0) return false
+      this.updateModelStat(localDate, projectId, adapterId, model, input, output, cacheRead, cacheWrite)
       this.updateDailyStat(
         localDate,
         safePet,
@@ -761,6 +861,7 @@ export class HistoryStore {
       'SELECT payload_json FROM quota_snapshots ORDER BY updated_at DESC LIMIT 1',
     ).get()
     const quota = parseQuotaSnapshot(quotaRow?.payload_json)
+    const models = this.modelStats(dates[0]!, today, safeProject)
     return {
       schemaVersion: 1,
       generatedAt: this.now(),
@@ -773,6 +874,8 @@ export class HistoryStore {
       totals,
       previousTotals: { ...previousTotals, localDate: 'previous' },
       agents,
+      models,
+      usageBlocks: this.getUsageBlocks(),
       tokenQuality: totals.tokenQuality,
       // Mirrors the cutoff LocalUsageReader.scanNow() actually applies, so
       // this always describes the window the numbers above really cover.
@@ -782,6 +885,59 @@ export class HistoryStore {
       ),
       quota,
     }
+  }
+
+  /** PK range scan on (local_date, ...), folded per (adapter, model). */
+  private modelStats(fromDate: string, toDate: string, projectId: string | null): HistoryModelStat[] {
+    const rows = this.statement(`
+      SELECT adapter_id, model,
+             SUM(token_input) AS token_input, SUM(token_output) AS token_output,
+             SUM(token_cache_read) AS token_cache_read, SUM(token_cache_write) AS token_cache_write
+      FROM daily_model_stats
+      WHERE local_date BETWEEN ? AND ? ${projectId ? 'AND project_id = ?' : ''}
+      GROUP BY adapter_id, model
+    `).all(...(projectId ? [fromDate, toDate, projectId] : [fromDate, toDate]))
+    return rows
+      .map(row => ({
+        adapterId: safeText(row.adapter_id, 'unknown'),
+        model: safeModelId(row.model),
+        tokenInput: Math.max(0, asInteger(row.token_input)),
+        tokenOutput: Math.max(0, asInteger(row.token_output)),
+        tokenCacheRead: Math.max(0, asInteger(row.token_cache_read)),
+        tokenCacheWrite: Math.max(0, asInteger(row.token_cache_write)),
+      }))
+      .filter(stat => stat.tokenInput + stat.tokenOutput + stat.tokenCacheRead + stat.tokenCacheWrite > 0)
+      .sort((a, b) =>
+        (b.tokenInput + b.tokenOutput) - (a.tokenInput + a.tokenOutput)
+        || a.adapterId.localeCompare(b.adapterId)
+        || a.model.localeCompare(b.model))
+  }
+
+  /**
+   * Latest 5-hour block per agent from local-log rows of the last 24 hours.
+   * Served by the partial index on token-usage occurred_at, so heartbeat rows
+   * are never visited. Account-level: ignores pet and project filters.
+   */
+  getUsageBlocks(): HistoryUsageBlock[] {
+    const now = this.now()
+    const rows = this.statement(`
+      SELECT adapter_id, occurred_at, token_input, token_output, token_cache_read, token_cache_write
+      FROM events
+      WHERE type = 'agent.token_usage' AND occurred_at >= ?
+      ORDER BY occurred_at DESC
+      LIMIT ?
+    `).all(now - USAGE_BLOCK_LOOKBACK_MS, MAX_USAGE_BLOCK_ROWS)
+    const entries: UsageBlockEntry[] = rows.map(row => ({
+      adapterId: safeText(row.adapter_id, 'unknown'),
+      occurredAt: asInteger(row.occurred_at),
+      tokenInput: Math.max(0, asInteger(row.token_input)),
+      tokenOutput: Math.max(0, asInteger(row.token_output)),
+      tokenCacheRead: Math.max(0, asInteger(row.token_cache_read)),
+      tokenCacheWrite: Math.max(0, asInteger(row.token_cache_write)),
+    }))
+    // Newest-first so the row cap drops the oldest rows; latestUsageBlocks re-sorts.
+    // Only blocks that can still be current are useful to the Usage panel.
+    return latestUsageBlocks(entries).filter(block => now - block.lastActivityAt < USAGE_BLOCK_MS)
   }
 
   getExport(petId = DEFAULT_PET_ID, projectId?: string, rangeDays: number = 7, growth?: unknown): HistoryExport {
@@ -883,7 +1039,7 @@ export class HistoryStore {
     this.queuedEvents = []
     if (this.retryHandle) { clearTimeout(this.retryHandle); this.retryHandle = null }
     this.transaction(() => {
-      this.database.exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM daily_stats; DELETE FROM quota_snapshots;')
+      this.database.exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM daily_stats; DELETE FROM daily_model_stats; DELETE FROM quota_snapshots;')
       this.statement(`
         INSERT INTO history_metadata(key, value) VALUES (?, ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
@@ -897,8 +1053,9 @@ export class HistoryStore {
 
   rebuildDailyStats(): void {
     this.transaction(() => {
-      this.database.exec('DELETE FROM daily_stats')
+      this.database.exec('DELETE FROM daily_stats; DELETE FROM daily_model_stats;')
       this.rebuildEventDailyStats()
+      this.rebuildModelStats()
       this.rebuildSessionCompletions()
     })
   }
@@ -1230,6 +1387,67 @@ export class HistoryStore {
         VALUES (7, 'history-partial-success-indexes', ?, 'history-partial-success-indexes')
       `).run(this.now())
     })
+    // ensureModelSchema is idempotent on its own (column/table/index checks), so
+    // a database whose v8 marker was lost, or a half-applied copy, still heals.
+    this.ensureModelSchema()
+    const hasV8 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 8').get())
+    if (!hasV8) this.transaction(() => {
+      // Additive: per-model token totals for local-log usage. Existing rows
+      // keep an empty model ("unknown") until the next scan re-reads their log
+      // line, at which point applyTokenUsage backfills the model in place.
+      this.database.exec('DELETE FROM daily_model_stats')
+      this.rebuildModelStats()
+      this.statement(`
+        INSERT INTO schema_migrations(version, name, applied_at, checksum)
+        VALUES (8, 'history-token-model-breakdown', ?, 'history-token-model-breakdown')
+      `).run(this.now())
+    })
+  }
+
+  private ensureModelSchema(): void {
+    const columns = new Set(
+      this.database.prepare('PRAGMA table_info(events)').all().map(row => String(row.name)),
+    )
+    if (!columns.has('token_model')) {
+      this.database.exec("ALTER TABLE events ADD COLUMN token_model TEXT NOT NULL DEFAULT ''")
+    }
+    this.database.exec(`
+      CREATE TABLE IF NOT EXISTS daily_model_stats (
+        local_date TEXT NOT NULL,
+        project_id TEXT NOT NULL DEFAULT '',
+        adapter_id TEXT NOT NULL,
+        model TEXT NOT NULL DEFAULT '',
+        token_input INTEGER NOT NULL DEFAULT 0,
+        token_output INTEGER NOT NULL DEFAULT 0,
+        token_cache_read INTEGER NOT NULL DEFAULT 0,
+        token_cache_write INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(local_date, project_id, adapter_id, model)
+      );
+      CREATE INDEX IF NOT EXISTS idx_history_events_token_time
+        ON events(occurred_at) WHERE type = 'agent.token_usage';
+    `)
+  }
+
+  /** Set-based rebuild of daily_model_stats from local-usage event rows. */
+  private rebuildModelStats(): void {
+    this.statement(`
+      INSERT INTO daily_model_stats(
+        local_date, project_id, adapter_id, model, token_input, token_output, token_cache_read, token_cache_write
+      )
+      SELECT local_date, project_id, adapter_id, token_model,
+             SUM(MAX(0, COALESCE(token_input, 0))),
+             SUM(MAX(0, COALESCE(token_output, 0))),
+             SUM(MAX(0, COALESCE(token_cache_read, 0))),
+             SUM(MAX(0, COALESCE(token_cache_write, 0)))
+      FROM events
+      WHERE type = 'agent.token_usage' AND pet_id = '${LOCAL_USAGE_PET_ID}'
+      GROUP BY local_date, project_id, adapter_id, token_model
+      ON CONFLICT(local_date, project_id, adapter_id, model) DO UPDATE SET
+        token_input = token_input + excluded.token_input,
+        token_output = token_output + excluded.token_output,
+        token_cache_read = token_cache_read + excluded.token_cache_read,
+        token_cache_write = token_cache_write + excluded.token_cache_write
+    `).run()
   }
 
   private ensureCacheColumns(): void {
