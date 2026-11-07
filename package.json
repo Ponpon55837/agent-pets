@@ -19,6 +19,8 @@
     "test:unit": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/*.test.mts",
     "check:bundle": "node scripts/check-plugin-panel-tokens-bundle.mjs",
     "check:contrast": "node scripts/check-contrast.mjs",
+    "check:design": "node scripts/check-design-tokens.mjs",
+    "check:design:strict": "node scripts/check-design-tokens.mjs --strict",
     "bench": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bench/phase-18.mjs",
     "preview": "vite preview",
     "electron:dev": "vite --config vite.config.mts",
