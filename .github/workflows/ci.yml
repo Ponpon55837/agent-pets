@@ -2,8 +2,11 @@ name: CI
 
 on:
   pull_request:
+    # 純文件變更不需要型別檢查與建置
+    paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
   push:
     branches: [main]
+    paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -16,6 +19,7 @@ jobs:
   check:
     name: check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -33,3 +37,7 @@ jobs:
       - run: pnpm test:unit
 
       - run: pnpm exec vite build
+
+      # 原本只在 release 才檢查；提早在 PR 失敗，避免 release 建置到一半才發現
+      - name: Check plugin panel tokens bundle
+        run: pnpm check:bundle
