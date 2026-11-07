@@ -53,7 +53,8 @@ export const ICON_PATHS: Record<string, string> = {
   plugin: 'M6 2.4v2.4M10 2.4v2.4M4 4.8h8v3.2a4 4 0 0 1-8 0V4.8ZM8 12v2',
   'external-link': 'M9.4 2.6h4v4M13.4 2.6 7.4 8.6M11.6 9.4v3.2a1 1 0 0 1-1 1H3.4a1 1 0 0 1-1-1V5.4a1 1 0 0 1 1-1h3.2',
   // Plugin area: overflow menu, refresh, trust shield, trash, update arrow.
-  more: 'M3.2 8h.01M8 8h.01M12.8 8h.01',
+  // Vertical kebab (⋮) for every overflow menu.
+  more: 'M8 3.2v.01M8 8v.01M8 12.8v.01',
   refresh: 'M13.2 8a5.2 5.2 0 1 1-1.6-3.7M13.2 2.6v2.8H10.4',
   shield: 'M8 1.8 13 3.6v4c0 3-2.2 5.2-5 6.6-2.8-1.4-5-3.6-5-6.6v-4zM5.8 8l1.6 1.6 3-3.2',
   trash: 'M3 4.4h10M6.2 4.4V2.8h3.6v1.6M4.4 4.4l.5 8.8h6.2l.5-8.8M6.8 7v3.8M9.2 7v3.8',

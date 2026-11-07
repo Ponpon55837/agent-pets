@@ -103,6 +103,7 @@ import { t as translate } from '../src/i18n'
 
 import { mainState } from './main/state'
 import { createShutdownCoordinator } from './main/shutdown'
+import { acquireSingleInstanceLock, relaunchApp, sleepSync } from './relaunch'
 import { disposeMainTimers } from './main/dispose-timers'
 import { flushMainLog, logMain, teeConsoleToLog } from './diagnostics/main-log'
 import { acquireRunMarker } from './diagnostics/session-marker'
@@ -252,7 +253,13 @@ protocol.registerSchemesAsPrivileged([
   },
 ])
 
-const hasSingleInstanceLock = app.requestSingleInstanceLock()
+// Fixed pane URL; the renderer never supplies a target.
+const MACOS_LOGIN_ITEMS_SETTINGS_URL = 'x-apple.systempreferences:com.apple.LoginItems-Settings.extension'
+
+const hasSingleInstanceLock = acquireSingleInstanceLock(
+  () => app.requestSingleInstanceLock(),
+  { argv: process.argv, sleep: sleepSync },
+)
 
 if (!hasSingleInstanceLock) {
   app.quit()
@@ -290,7 +297,8 @@ async function showStartupFailureDialog(): Promise<void> {
       cancelId: 1,
     })
     if (response === 0) {
-      app.relaunch()
+      relaunchApp(app)
+      shutdown.runNow()
       app.exit(0)
     } else {
       app.quit()
@@ -531,7 +539,7 @@ async function bootstrapApp(): Promise<void> {
     hidePetWindow,
     showPanelWindow: view => showPanelWindow(view),
     quit: () => app.quit(),
-    relaunch: () => app.relaunch(),
+    relaunch: () => relaunchApp(app),
     exit: code => { shutdown.runNow(); app.exit(code) },
     setPresentationStatus: status => { mainState.presentationStatusProjection = status },
     updatePluginAgentStatus: status => { mainState.pluginAgentStatusController?.update(status) },
@@ -548,6 +556,15 @@ async function bootstrapApp(): Promise<void> {
     currentPowerSaveState,
     petModeState,
     setPetWindowMode,
+    openLoginItemsSettings: async () => {
+      if (process.platform !== 'darwin') return false
+      try {
+        await shell.openExternal(MACOS_LOGIN_ITEMS_SETTINGS_URL)
+        return true
+      } catch {
+        return false
+      }
+    },
   })
 
 

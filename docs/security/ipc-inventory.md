@@ -12,6 +12,7 @@
 | `pet-window-mode-init` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | initializePetWindowMode (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `desktop-preferences-init` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | initializeDesktopPreferences (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `desktop-preferences-set` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | setDesktopPreferences (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `desktop-open-login-items-settings` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | openLoginItemsSettings (invoke) | `tests/ipc-desktop.test.mts` |
 | `power-save-state` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getPowerSaveState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-summary` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | getHistorySummary (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-clear` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | clearHistory (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |

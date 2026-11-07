@@ -6,7 +6,7 @@ const preferences = {
   dndEnabled: false, dndUntil: null, notificationsEnabled: true, permissionBubbleEnabled: true,
   presentationMcpEnabled: true, achievementsEnabled: true, edgeModeEnabled: false, shimejiEnabled: false,
   captureExclusionEnabled: false, fullscreenAutoHideEnabled: false, rightClickHideEnabled: false,
-  soundEnabled: false, launchAtStartup: false, launchAtStartupSupported: true, locale: 'zh-TW',
+  soundEnabled: false, launchAtStartup: false, launchAtStartupSupported: true, launchAtStartupStatus: 'disabled', locale: 'zh-TW',
   visibilityCapabilities: { captureExclusion: { supported: false }, fullscreenAutoHide: { supported: true } },
 } as never
 
@@ -57,4 +57,15 @@ test('plugin submenu sits before Settings and notes omitted commands', () => {
   const sub = menu[index].submenu as Array<{ label?: string; enabled?: boolean }>
   assert.equal(sub[sub.length - 1].enabled, false)
   assert.match(sub[sub.length - 1].label ?? '', /3/)
+})
+
+test('launch at login tray item reflects intent and marks pending approval', () => {
+  const flat = (menu: Array<Record<string, unknown>>): Array<Record<string, unknown>> =>
+    menu.flatMap(item => [item, ...(Array.isArray(item.submenu) ? flat(item.submenu as never) : [])])
+  const find = (overrides: Record<string, unknown>) => flat(build({ preferences: { ...(preferences as object), ...overrides } }) as never)
+    .find(item => typeof item.label === 'string' && item.label.includes('啟動'))
+  const pending = find({ launchAtStartup: true, launchAtStartupStatus: 'requires-approval' })
+  assert.equal(pending?.checked, true)
+  assert.match(String(pending?.label), /（需核准）$/)
+  assert.doesNotMatch(String(find({ launchAtStartup: true, launchAtStartupStatus: 'enabled' })?.label), /需核准/)
 })
