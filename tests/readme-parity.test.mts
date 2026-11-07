@@ -26,3 +26,12 @@ test('READMEs no longer reference removed UI paths or the wrong OpenCode MCP sha
     }
   }
 })
+
+test('READMEs keep parallel sub-headings and name the real release artifacts', () => {
+  assert.equal(headings(en, '###'), headings(zh, '###'))
+  for (const text of [en, zh]) {
+    assert.match(text, /AgentPets-<version>\.exe/)
+    assert.doesNotMatch(text, /Agent Pets\.exe/)
+    assert.doesNotMatch(text, /pnpm 11/)
+  }
+})
