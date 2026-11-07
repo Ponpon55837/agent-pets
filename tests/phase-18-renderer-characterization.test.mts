@@ -117,3 +117,19 @@ test('app recurring work is tied to stale, success and quota activity', () => {
   assert.match(source, /document\.addEventListener\('visibilitychange', onDocumentVisibilityChange\)/)
   assert.match(source, /if \(document\.hidden\) \{\s+stopRecurringTimers\(\)/)
 })
+
+test('settings header, numerics, plugins CTA and server banner keep their UI contracts', () => {
+  const css = read('../src/components/StatusPanel.css')
+  assert.match(css, /\.settings-panel-title\) \{\s*display: flex;/)
+  assert.match(css, /breadcrumb-current\) \{[^}]*text-overflow: ellipsis/)
+  assert.match(read('../src/styles/tokens.css'), /--organic-font-heading: 'Lining Digits'/)
+  assert.match(read('../src/styles/base.css'), /font-family: 'Lining Digits';[\s\S]*unicode-range: U\+0030-0039/)
+  const panel = read('../src/components/PluginPanel.vue')
+  assert.equal((panel.match(/plugins\.enablePlugins/g) ?? []).length, 1)
+  assert.doesNotMatch(read('../src/components/plugin-panel/PluginInstalledList.vue'), /enablePlugins/)
+  const banner = read('../src/components/status-panel/ServerHealthBanner.vue')
+  assert.match(banner, /aria-expanded/)
+  assert.doesNotMatch(banner, /attempt/)
+  const zh = JSON.parse(read('../src/locales/zh-TW.json')) as Record<string, string>
+  assert.doesNotMatch(zh.presentationMcpSection, /[A-Za-z]/)
+})

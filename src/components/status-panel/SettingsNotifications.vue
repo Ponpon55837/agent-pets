@@ -23,7 +23,7 @@ const store = useAgentStore()
         :model-value="store.dndEnabled"
         :label="t('dnd')"
         :state-label="store.dndEnabled ? t('panel.stateOn') : t('panel.stateOff')"
-        icon="moon"
+        icon="bell-off"
         @update:model-value="store.setDndEnabled($event)"
       />
       <ToggleChip

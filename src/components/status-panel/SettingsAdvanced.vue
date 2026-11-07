@@ -39,12 +39,22 @@ function quitApp(): void {
     <Button variant="secondary" size="sm" block @click="exportDiagnostics">{{ t('reliability.diagnostics.export') }}</Button>
     <p v-if="diagnosticsMessage" class="section-copy" role="status">{{ diagnosticsMessage }}</p>
   </Card>
-  <Card :title="t('keepControl')">
+  <Card :title="t('setupWizard')">
+    <p class="section-copy">{{ t('panel.setupWizardHelp') }}</p>
+    <Button variant="secondary" size="sm" block @click="store.openSetupWizard()">{{ t('setupWizard') }}</Button>
+  </Card>
+  <Card class="app-controls" tone="warn" :title="t('keepControl')">
     <p class="section-copy">{{ t('keepControlHelp') }}</p>
     <div class="advanced-actions">
-      <Button variant="primary" size="sm" block @click="store.openSetupWizard()">{{ t('setupWizard') }}</Button>
       <Button variant="secondary" size="sm" block @click="restartApp">{{ t('restartPet') }}</Button>
       <Button variant="danger" size="sm" block @click="quitApp">{{ t('quit') }}</Button>
     </div>
   </Card>
 </template>
+
+<style scoped>
+/* Destructive controls sit last and apart from the configuration cards. */
+.app-controls {
+  margin-top: var(--space-4);
+}
+</style>

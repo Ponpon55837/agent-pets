@@ -3,6 +3,7 @@ import { computed, nextTick, provide, ref, watch } from 'vue'
 import { t } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import ActionMenu from '@/components/ui/ActionMenu.vue'
 import PluginToastStack from '@/components/plugin-panel/PluginToastStack.vue'
 import SegmentedTabs from '@/components/ui/SegmentedTabs.vue'
@@ -34,6 +35,7 @@ const activeTab = ref<PluginTab>('installed')
 const reportPlugin = computed(() => plugins.value.find(plugin => plugin.id === pendingReportPluginId.value) ?? null)
 const enabledCount = computed(() => plugins.value.filter(plugin => plugin.preference.enabled).length)
 const updateCount = computed(() => catalogItems.value.filter(item => item.updateAvailable).length)
+const showTabs = computed(() => enabledGlobally.value || plugins.value.length > 0)
 const unreadCount = computed(() => visibleNotifications.value.filter(record => !record.read).length)
 const developerMode = computed(() => snapshot.value?.preferences.developerMode ?? false)
 const tabs = computed(() => [
@@ -118,21 +120,31 @@ function showTab(tab: PluginTab): void {
       </div>
     </header>
 
-    <Card class="plugin-global" :class="{ off: !enabledGlobally }">
+    <Card v-if="enabledGlobally" class="plugin-global">
       <ToggleRow
         :model-value="enabledGlobally"
         :label="t('pluginGlobalEnabled')"
-        :help="enabledGlobally ? t('pluginGlobalEnabledHelp') : t('plugins.globalOffBanner')"
+        :help="t('pluginGlobalEnabledHelp')"
         :disabled="busy"
         @update:model-value="updateGlobalPreferences({ pluginsEnabled: $event })"
       />
-      <Button v-if="!enabledGlobally" variant="primary" size="sm" :disabled="busy" @click="updateGlobalPreferences({ pluginsEnabled: true })">
-        {{ t('plugins.enablePlugins') }}
-      </Button>
+    </Card>
+    <Card v-else class="plugin-global off">
+      <EmptyState
+        compact
+        icon="plugin"
+        :title="t('plugins.offTitle')"
+        :description="t('plugins.globalOffBanner')"
+      >
+        <Button variant="primary" size="sm" :disabled="busy" @click="updateGlobalPreferences({ pluginsEnabled: true })">
+          {{ t('plugins.enablePlugins') }}
+        </Button>
+      </EmptyState>
     </Card>
 
-    <SegmentedTabs v-model="activeTab" :tabs="tabs" :aria-label="t('plugins.tabsLabel')" id-prefix="plugin" />
+    <SegmentedTabs v-if="showTabs" v-model="activeTab" :tabs="tabs" :aria-label="t('plugins.tabsLabel')" id-prefix="plugin" />
 
+    <template v-if="showTabs">
     <div
       v-show="activeTab === 'installed'"
       id="plugin-panel-installed"
@@ -170,6 +182,7 @@ function showTab(tab: PluginTab): void {
       <PluginAdvanced />
     </div>
 
+    </template>
     </div>
 
     <PluginInstallSheet />
