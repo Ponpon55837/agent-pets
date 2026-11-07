@@ -13,3 +13,12 @@ Violations found by the design stream in files it does not own. Each item names 
 
 ## Tabs (DS-12)
 - `StatusPanel.vue` dashboard tabs (~195) and settings nav (~221) duplicate a hand-written tablist (`onTabKeydown` / `onSettingsKeydown`). Replace with `ui/Tabs.vue` (`v-model`, `:items`, `:aria-label`, `id-prefix`) and wrap the three dashboard views and settings content in `ui/TabPanel.vue`. Settings nav: `orientation="vertical"`, wrapped in a `<div>` or an outer `<nav>` (not `<nav role="tablist">`). Use `variant="underline"` for dashboard tabs and `variant="pill"` for the settings nav so one token-driven active style replaces `.dashboard-tab.active` / `.settings-nav-item.active`.
+
+## Hit areas, z-index, motion tokens (DS-17)
+Replace literals with tokens (`--hit-min`, `--z-*`, `--transition-*`); for visually small controls extend the hit area with an `::after` inset (see `ui/Button.vue`) instead of changing layout.
+- `DesktopPet.css`: controls at ~94 (28px), ~776 (24px, plugin-feed-close), ~1085 (22px).
+- `StatusPanel.css:~1054` (26px control); `ProjectMcpPanel.css:~140` (30px); `PluginPanel.css:9` (32px ok) and `PluginPanel.css:3` `z-index: 10000` -> `var(--z-system)`.
+- 17 `z-index` literals across DesktopPet/StatusPanel/PluginPanel/SetupWizard/ProjectMcp -> `--z-sticky/popover/modal/toast/system`.
+- ~46 `transition:` declarations without `var(--transition-*)` in DesktopPet/StatusPanel/PluginPanel.
+- Card tones: `ui/Card.vue` still supports all five (backward compatible); new code should use neutral/accent/danger and express other meaning with `ui/Badge.vue`.
+- Fonts: Caprasimo/Figtree were never bundled; `--organic-font-heading` now honestly falls back to Georgia and body to the system stack. If a font is bundled later, add `@font-face` + THIRD_PARTY_NOTICES in the same change.

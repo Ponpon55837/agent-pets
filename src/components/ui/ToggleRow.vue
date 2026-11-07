@@ -50,13 +50,13 @@ const model = defineModel<boolean>({ required: true })
 
 .label {
   color: var(--text-primary);
-  font-size: var(--font-body-lg, var(--font-sm));
+  font-size: var(--font-sm);
   font-weight: var(--weight-medium);
 }
 
 .help {
   color: var(--text-muted);
-  font-size: var(--font-body-sm, var(--font-xs));
+  font-size: var(--font-xs);
   line-height: 1.5;
 }
 
