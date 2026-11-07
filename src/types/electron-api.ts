@@ -101,7 +101,8 @@ export interface ElectronAPI {
       setMousePassthrough: (ignore: boolean) => void
       requestPetHide: () => void
       togglePanel: () => void
-      resizePanel: (height: number, width?: number) => void
+      resizePanel: ((size: { height: number; width?: number }) => void) & ((height: number, width?: number) => void)
+      setPanelBlurLock: (lock: { pinned?: boolean; modal?: boolean }) => void
       hidePanel: () => void
       onPanelOpened: (callback: (options: { restore: boolean }) => void) => () => void
       onPanelOpenSettings: (callback: () => void) => () => void

@@ -450,6 +450,10 @@ async function bootstrapApp(): Promise<void> {
     getPetContentHeight: () => mainState.petContentHeight,
     setPetContentHeight: value => { mainState.petContentHeight = value },
     setPanelFullscreenAutoHidden: value => { mainState.windowsFullscreenAutoHiddenPanel = value },
+    setPanelBlurLock: lock => {
+      if (lock.pinned !== undefined) mainState.panelPinned = lock.pinned
+      if (lock.modal !== undefined) mainState.panelModalOpen = lock.modal
+    },
     finiteNumber,
     clamp,
     computePanelBounds,

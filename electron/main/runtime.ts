@@ -102,14 +102,12 @@ import { registerPluginPreferencesIpc } from '../ipc/plugin-preferences'
 import { registerPluginCatalogIpc } from '../ipc/plugin-catalog'
 import { registerPluginInstallIpc } from '../ipc/plugin-install'
 import { mainState, type PluginSkinFallbackInfo } from './state'
+import { PANEL_GAP, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_WIDTH, PANEL_SIZES, PANEL_BLUR_HIDE_DELAY_MS, computePanelPlacement, fitPanelHeight, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
 
 const PERMISSION_ALLOW_HOTKEY = 'CommandOrControl+Shift+Y'
 const PERMISSION_DENY_HOTKEY = 'CommandOrControl+Shift+N'
 
-export const PANEL_WIDTH = 460
-export const PANEL_MIN_WIDTH = 320
-export const PANEL_MAX_WIDTH = 960
-export const PANEL_GAP = 6
+export { PANEL_GAP, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_WIDTH }
 // petWindow's actual bounds include a fixed, unscaled band of transparent
 // space reserved above the visible sprite for the quota tooltip to pop
 // into (see QUOTA_TOOLTIP_HEADROOM_H in agentStore.ts — keep in sync).
@@ -1837,8 +1835,8 @@ export function createPetWindow() {
 // moves or resizes the pet itself.
 export function createPanelWindow() {
   mainState.panelWindow = new BrowserWindow({
-    width: PANEL_WIDTH,
-    height: 560,
+    width: PANEL_SIZES.sessions.width,
+    height: PANEL_SIZES.sessions.height,
     show: false,
     frame: false,
     transparent: true,
@@ -1897,13 +1895,12 @@ export function createPanelWindow() {
   panelLoad.catch(error => console.error('Panel renderer load failed', error))
 
   mainState.panelWindow.on('blur', () => {
-    if (mainState.dialogOpen) return
     // Clicking the pet focuses petWindow just before the click handler's
     // 'panel-toggle' IPC arrives — if we hid on blur here too, the toggle
     // would then see the panel already hidden and reopen it (a flicker,
     // and clicking the pet could never close the panel). Let the toggle
     // handler own that case; blur-hide is only for genuine click-outside.
-    if (mainState.petWindow?.isFocused()) return
+    if (!shouldHidePanelOnBlur(currentPanelBlurState())) return
     schedulePanelBlurHide()
   })
 
@@ -1912,6 +1909,7 @@ export function createPanelWindow() {
     if (mainState.panelBlurHideHandle) clearTimeout(mainState.panelBlurHideHandle)
     mainState.panelBlurHideHandle = null
     mainState.panelWindow = null
+    mainState.panelModalOpen = false
     mainState.windowsFullscreenAutoHiddenPanel = false
     syncWindowsFullscreenTargets()
   })
@@ -1920,44 +1918,24 @@ export function createPanelWindow() {
 }
 
 export function computePanelBounds(height: number, width = PANEL_WIDTH) {
-  const panelWidth = Math.round(clamp(width, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH))
   if (!mainState.petWindow) {
     const { workArea } = screen.getPrimaryDisplay()
-    return { x: workArea.x, y: workArea.y, width: panelWidth, height }
+    const panelWidth = Math.round(clamp(width, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH))
+    return { x: workArea.x, y: workArea.y, width: panelWidth, height: fitPanelHeight(height, workArea.height) }
   }
-
   const petBounds = mainState.petWindow.getBounds()
   // The window's horizontal center still matches the visible sprite's (the
-  // headroom band is only added above, not to the sides), so x needs no
-  // adjustment — only the vertical anchor does.
-  //
-  // Prefer the height the pet renderer measured for its own content: the
-  // sprite is bottom-anchored in the window, and how much of the window it
-  // actually fills depends on pet size AND status-line count, neither of
-  // which the constant below can express. It is only the fallback for the
-  // brief window before the first measurement arrives.
-  const visibleHeight = mainState.petContentHeight !== null
-    ? clamp(mainState.petContentHeight, 40, petBounds.height)
-    : petBounds.height - PET_WINDOW_TOP_HEADROOM
-  const visibleTop = petBounds.y + petBounds.height - visibleHeight
-  const { workArea } = screen.getDisplayMatching(petBounds)
-  const maxX = Math.max(workArea.x, workArea.x + workArea.width - panelWidth)
-  const maxY = Math.max(workArea.y, workArea.y + workArea.height - height)
-  let x = petBounds.x + Math.round(petBounds.width / 2) - Math.round(panelWidth / 2)
-  const aboveY = visibleTop - height - PANEL_GAP
-  const belowY = visibleTop + visibleHeight + PANEL_GAP
-  let y = aboveY
-
-  // Keep the panel touching the pet even near a work-area edge. Prefer above,
-  // but place it below when there is no room instead of clamping it far away.
-  if (aboveY < workArea.y && belowY + height <= workArea.y + workArea.height) {
-    y = belowY
-  }
-
-  x = clamp(x, workArea.x, maxX)
-  y = clamp(y, workArea.y, maxY)
-
-  return { x, y, width: panelWidth, height }
+  // headroom band is only added above, not to the sides). Prefer the height
+  // the pet renderer measured for its own content: it depends on pet size AND
+  // status-line count, which the headroom constant cannot express.
+  return computePanelPlacement({
+    petBounds,
+    petContentHeight: mainState.petContentHeight,
+    petHeadroom: PET_WINDOW_TOP_HEADROOM,
+    workArea: screen.getDisplayMatching(petBounds).workArea,
+    width,
+    height,
+  })
 }
 
 export function setPluginPanelWindowBounds(bounds: ReturnType<typeof computePanelBounds>): void {
@@ -2271,6 +2249,15 @@ export function restoreWindowsHiddenByFullscreen(): void {
   }
 }
 
+function currentPanelBlurState() {
+  return {
+    dialogOpen: mainState.dialogOpen,
+    petFocused: mainState.petWindow?.isFocused() ?? false,
+    pinned: mainState.panelPinned,
+    modalOpen: mainState.panelModalOpen,
+  }
+}
+
 export function schedulePanelBlurHide(): void {
   if (mainState.panelBlurHideHandle) clearTimeout(mainState.panelBlurHideHandle)
   mainState.panelBlurHideHandle = setTimeout(() => {
@@ -2278,13 +2265,15 @@ export function schedulePanelBlurHide(): void {
     if (!mainState.panelWindow || mainState.panelWindow.isDestroyed() || mainState.panelWindow.isFocused() || !mainState.panelWindow.isVisible()) {
       return
     }
+    // A pin / wizard can be engaged during the grace delay.
+    if (mainState.panelPinned || mainState.panelModalOpen) return
     // Give the Win32 detector's event-driven refresh a chance to classify an
     // external fullscreen transition before treating the blur as a manual
     // click-away. This preserves the marker needed to restore an open panel.
     if (process.platform === 'win32' && mainState.windowsFullscreenState.panelDisplayFullscreen) return
     mainState.windowsFullscreenAutoHiddenPanel = false
     mainState.panelWindow.hide()
-  }, 100)
+  }, PANEL_BLUR_HIDE_DELAY_MS)
 }
 
 export function applyWindowsFullscreenAutoHideState(state: WindowsFullscreenState): void {

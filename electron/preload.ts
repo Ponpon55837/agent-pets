@@ -185,8 +185,14 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.send(IPC_CHANNELS.panelToggle)
   },
 
-  resizePanel: (height: number, width?: number) => {
+  // Prefer the object form; the positional (height, width) form is kept for existing callers.
+  resizePanel: (size: { height: number; width?: number } | number, legacyWidth?: number) => {
+    const { height, width } = typeof size === 'number' ? { height: size, width: legacyWidth } : size
     ipcRenderer.send(IPC_CHANNELS.panelResize, { height, ...(width === undefined ? {} : { width }) })
+  },
+
+  setPanelBlurLock: (lock: { pinned?: boolean; modal?: boolean }) => {
+    ipcRenderer.send(IPC_CHANNELS.panelBlurLock, lock)
   },
 
   hidePanel: () => {
