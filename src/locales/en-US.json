@@ -5,7 +5,7 @@
   "dashboardSections": "Dashboard sections",
   "sessions": "Sessions",
   "usage": "Usage",
-  "tokenRemaining": "Token remaining",
+  "tokenRemaining": "Quota",
   "activeSessions": "Active",
   "activeToolFamilies": "{count} tool families",
   "offlineSessions": "Offline",

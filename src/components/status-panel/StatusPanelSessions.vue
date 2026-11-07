@@ -4,7 +4,7 @@ import { locale, t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
 import { SOURCE_FAMILIES, SOURCE_LABELS, STATE_LABELS } from '@/types/agent'
 import type { PluginEventSourceState, PluginEventSourceStatusView } from '@/types/plugin'
-import { roundQuotaPercent } from '@/utils/format'
+import { useQuotaFormat } from '@/composables/useQuotaFormat'
 import {
   countByBucket,
   groupSessions,
@@ -24,6 +24,8 @@ import SessionRow from '@/components/status-panel/SessionRow.vue'
 const props = defineProps<{ nowTick: number; pluginEventSourceStatuses: PluginEventSourceStatusView[] }>()
 const emit = defineEmits<{ managePlugins: [] }>()
 const store = useAgentStore()
+const { quotaPercent, formatReset, quotaTone } = useQuotaFormat(() => props.nowTick)
+const QUOTA_STRIP_TONE = { healthy: 'success', warn: 'warn', critical: 'error' } as const
 const LIVE_STATES = new Set(['thinking', 'tool-running', 'waiting-permission', 'waiting-input'])
 
 const filter = ref<SessionFilter>('all')
@@ -58,7 +60,9 @@ const quotaStripFamilies = computed(() => (
   (['codex', 'claude'] as const).flatMap((id) => {
     const quota = store.quotaByFamily[id]
     if (!quota) return []
-    return [{ id, ...quota, label: id === 'codex' ? 'Codex' : 'Claude' }]
+    // The label comes from the provider payload, so a new provider needs no edit here.
+    const name = store.quotaUsage?.providers.find(provider => provider.id === id)?.name ?? id
+    return [{ id, ...quota, label: name }]
   })
 ))
 
@@ -89,24 +93,6 @@ function pluginEventSourceStateLabel(state: PluginEventSourceState): string {
 
 function formatTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString(locale.value)
-}
-
-function formatReset(timestamp?: string): string {
-  if (!timestamp) return t('resetTimeUnavailable')
-  const reset = new Date(timestamp).getTime()
-  if (!Number.isFinite(reset)) return t('resetTimeUnavailable')
-  const deltaMinutes = Math.max(0, Math.round((reset - props.nowTick) / 60_000))
-  if (deltaMinutes < 1) return t('resetsNow')
-  if (deltaMinutes < 60) return t('resetsInMinutes', { minutes: deltaMinutes })
-  const hours = Math.floor(deltaMinutes / 60)
-  const minutes = deltaMinutes % 60
-  if (hours < 24) return t('resetsInHours', { hours, minutes })
-  const days = Math.floor(hours / 24)
-  return t('resetsInDays', { days, hours: hours % 24 })
-}
-
-function quotaPercent(value: number): string {
-  return `${roundQuotaPercent(value)}%`
 }
 
 </script>
@@ -211,7 +197,7 @@ function quotaPercent(value: number): string {
           <span>{{ family.label }}</span>
           <strong>{{ quotaPercent(family.remainingPercent) }}</strong>
         </div>
-        <ProgressTrack :value="family.remainingPercent" tone="success" size="sm" decorative />
+        <ProgressTrack :value="family.remainingPercent" :tone="QUOTA_STRIP_TONE[quotaTone(family.remainingPercent)]" size="sm" decorative />
         <span class="quota-strip-reset">{{ formatReset(family.resetsAt) }}</span>
       </div>
     </div>

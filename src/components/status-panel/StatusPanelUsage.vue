@@ -165,10 +165,7 @@ onBeforeUnmount(() => {
               <span>{{ toneLabel(quotaTone(quota.remainingPercent), quota.overage) }}</span>
             </div>
             <div class="quota-reset">
-              <span>{{ formatReset(quota.resetsAt) }}</span>
-              <span v-if="formatResetAt(quota.resetsAt)" class="quota-reset-at">
-                {{ formatResetAt(quota.resetsAt) }}
-              </span>
+              <span :title="formatResetAt(quota.resetsAt) || undefined">{{ formatReset(quota.resetsAt) }}</span>
             </div>
           </div>
         </div>

@@ -5,7 +5,7 @@
   "dashboardSections": "控制面板區段",
   "sessions": "工作階段",
   "usage": "用量",
-  "tokenRemaining": "Token 剩餘",
+  "tokenRemaining": "額度",
   "activeSessions": "進行中",
   "activeToolFamilies": "{count} 個工具家族",
   "offlineSessions": "已離線",
