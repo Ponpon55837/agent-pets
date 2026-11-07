@@ -469,7 +469,7 @@ node scripts/e2e-isolated-electron.mjs
 node integrations/install.mjs
 ```
 
-This installs hooks for all detected tools. Hooks are installed to:
+This installs hooks for all supported tools, using the same safeguards as the Setup Wizard. Hooks are installed to:
 
 - `~/.codex/hooks.json` (Codex)
 - `~/.claude/settings.json` (Claude Code CLI & Desktop)
@@ -524,7 +524,7 @@ agent-pets/
 │   ├── sqlite-statements.ts # Shared prepared-statement cache for SQLite stores
 │   └── setup.ts             # Platform-aware paths & setup
 ├── integrations/
-│   ├── install.mjs          # Standalone CLI hook installer
+│   ├── install.mjs          # CLI wrapper around electron/setup.ts
 │   ├── agent-hook.mjs       # Shared hook script (bundled into the app via extraResources)
 │   ├── agent-hook.cmd       # Windows wrapper for agent-hook.mjs
 │   └── presentation-mcp.mjs # Standalone stdio MCP presentation bridge
@@ -556,7 +556,7 @@ agent-pets/
 └── README.md
 ```
 
-The app's own install/uninstall logic (used by the Setup Wizard's buttons) lives in `electron/setup.ts`, in-process — `integrations/install.mjs` is the standalone equivalent for running from a terminal (see [Install Hooks (for development)](#install-hooks-for-development) above); both generate the same hook scripts and plugin content, kept in sync by hand.
+The app's own install/uninstall logic (used by the Setup Wizard's buttons) lives in `electron/setup.ts`, in-process — `integrations/install.mjs` is a thin command-line wrapper that loads that same file (see [Install Hooks (for development)](#install-hooks-for-development) above), so there is a single implementation with the same safeguards (no overwriting unparseable configs, backups, removal of only Agent Pets entries). It needs a repository checkout and Node.js 22.18+. `tests/setup-install.test.mts` exercises it against a temporary HOME.
 
 ---
 

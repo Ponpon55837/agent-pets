@@ -82,6 +82,7 @@ import { registerPermissionIpc } from './ipc/permission'
 import { registerAdapterIpc } from './ipc/adapters'
 import { registerProjectMcpIpc } from './ipc/project-mcp'
 import { registerOnboardingIpc } from './ipc/onboarding'
+import { configureSetupEnvironment } from './setup-environment'
 import { OnboardingStore } from './onboarding-state'
 import { registerProjectPetsIpc } from './ipc/project-pets'
 
@@ -197,6 +198,14 @@ import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MA
 // any later service can never surface Electron's native crash dialog or kill
 // the tray application silently.
 teeConsoleToLog()
+// setup.ts reaches Electron only through this seam so the installers can also run from the CLI and tests.
+configureSetupEnvironment({
+  appData: () => app.getPath('appData'),
+  userData: () => app.getPath('userData'),
+  isPackaged: () => app.isPackaged,
+  resourcesPath: () => process.resourcesPath,
+})
+
 const runMarker = acquireRunMarker(join(app.getPath('userData'), 'logs'))
 const crashGuard = installCrashGuard({
   log: (level, message, detail) => {

@@ -526,7 +526,7 @@ agent-pets/
 │   ├── sqlite-statements.ts # SQLite store 共用的 prepared statement 快取
 │   └── setup.ts             # 跨平台路徑與安裝邏輯
 ├── integrations/
-│   ├── install.mjs          # 獨立的 CLI hook 安裝程式
+│   ├── install.mjs          # electron/setup.ts 的 CLI 包裝
 │   ├── agent-hook.mjs       # 共用的 hook script（透過 extraResources 打包進 app）
 │   ├── agent-hook.cmd       # agent-hook.mjs 的 Windows 包裝腳本
 │   └── presentation-mcp.mjs # 獨立 stdio MCP 展示 bridge
@@ -558,7 +558,7 @@ agent-pets/
 └── README.md
 ```
 
-App 本身的安裝/解除安裝邏輯（Setup Wizard 按鈕在用的那套）在 `electron/setup.ts` 裡、直接在 app 行程內執行；`integrations/install.mjs` 是給終端機執行的獨立對應版本（見上方〈安裝 Hooks（開發用）〉），兩邊產生的 hook script 跟 plugin 內容是一樣的，但需要手動同步維護。
+App 本身的安裝/解除安裝邏輯（Setup Wizard 按鈕在用的那套）在 `electron/setup.ts` 裡、直接在 app 行程內執行；`integrations/install.mjs` 只是載入同一份程式的薄包裝（見上方〈安裝 Hooks（開發用）〉），所以只有一份實作，也有同樣的保護（不覆寫無法解析的設定、先備份、只移除 Agent Pets 自己的項目）。它需要完整的原始碼目錄與 Node.js 22.18 以上；`tests/setup-install.test.mts` 會在暫存 HOME 中測試它。
 
 ---
 
