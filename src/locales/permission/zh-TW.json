@@ -41,5 +41,16 @@
   "permission.trayPermission": "{count} 個權限請求",
   "permission.trayExternal": "{count} 個待回原工具核准",
   "permission.trayInput": "{count} 個等待輸入",
-  "permission.trayJoin": "、"
+  "permission.trayJoin": "、",
+  "permission.trayPending": "{count} 個待處理（{detail}）",
+  "permission.trayDndOn": "持續",
+  "permission.trayDndRemainingMinutes": "剩餘 {minutes} 分",
+  "permission.trayDndRemainingHours": "剩餘約 {hours} 小時",
+  "permission.trayDndOff": "關閉",
+  "permission.trayDnd30m": "30 分鐘",
+  "permission.trayDnd1h": "1 小時",
+  "permission.trayDndTomorrow": "到明天 09:00",
+  "permission.trayDndAlways": "持續",
+  "permission.trayAdvanced": "進階",
+  "permission.trayPluginsOmitted": "還有 {count} 個指令未顯示，請於面板使用"
 }

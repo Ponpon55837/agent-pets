@@ -3,6 +3,7 @@ import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/d
 import type { PetWindowMode } from '../src/types/pet-window'
 import { createAttentionBitmap } from './tray-icon'
 import { buildPluginTrayMenu, type PluginTrayCommandItem } from './plugin-tray'
+import { buildTrayMenuTemplate } from './tray-menu'
 import { locale, t } from '../src/i18n'
 import { EMPTY_ATTENTION, type AttentionSummary } from './attention-tracker'
 
@@ -65,10 +66,6 @@ export class DesktopTrayController {
     if (!this.tray) return
     const preferences = this.actions.getPreferences()
     const visible = this.actions.isPetVisible()
-    const attentionLabel = this.attentionCount > 0
-      ? t('needsAttention', { count: this.attentionCount })
-      : t('noPendingAttention')
-
     if (this.baseIcon) {
       this.tray.setImage(this.attentionCount > 0 && this.attentionIcon
         ? this.attentionIcon
@@ -83,70 +80,6 @@ export class DesktopTrayController {
     // macOS shows the number beside the icon; other platforms rely on the badge dot + tooltip.
     if (process.platform === 'darwin') this.tray.setTitle(this.attentionCount > 0 ? String(this.attentionCount) : '')
 
-    const template: Electron.MenuItemConstructorOptions[] = [
-      {
-        label: visible ? t('hidePets') : t('showPets'),
-        click: () => visible ? this.actions.hidePet() : this.actions.showPet(),
-      },
-      { label: t('openControlPanel'), click: () => this.actions.openPanel() },
-      { label: t('openSettings'), click: () => this.actions.openSettings() },
-      {
-        label: t('miniMode'),
-        type: 'checkbox',
-        checked: this.actions.getPetMode() === 'mini',
-        click: () => this.safeToggleMiniMode(),
-      },
-      {
-        label: t('edgePeekMode'),
-        type: 'checkbox',
-        checked: preferences.edgeModeEnabled,
-        click: item => this.safeUpdatePreferences({ edgeModeEnabled: item.checked }),
-      },
-      { label: attentionLabel, enabled: false },
-      { type: 'separator' },
-      {
-        label: t('dnd'),
-        type: 'checkbox',
-        checked: preferences.dndEnabled,
-        click: item => this.safeUpdatePreferences({ dndEnabled: item.checked }),
-      },
-      {
-        label: t('sound'),
-        type: 'checkbox',
-        checked: preferences.soundEnabled,
-        click: item => this.safeUpdatePreferences({ soundEnabled: item.checked }),
-      },
-      {
-        label: t('notifications'),
-        type: 'checkbox',
-        checked: preferences.notificationsEnabled,
-        click: item => this.safeUpdatePreferences({ notificationsEnabled: item.checked }),
-      },
-      {
-        label: t('permissionBubble'),
-        type: 'checkbox',
-        checked: preferences.permissionBubbleEnabled,
-        click: item => this.safeUpdatePreferences({ permissionBubbleEnabled: item.checked }),
-      },
-      {
-        label: 'Presentation MCP',
-        type: 'checkbox',
-        checked: preferences.presentationMcpEnabled,
-        click: item => this.safeUpdatePreferences({ presentationMcpEnabled: item.checked }),
-      },
-      {
-        label: t('launchAtStartup'),
-        type: 'checkbox',
-        checked: preferences.launchAtStartup,
-        enabled: preferences.launchAtStartupSupported,
-        click: item => this.safeUpdatePreferences({ launchAtStartup: item.checked }),
-      },
-      { type: 'separator' },
-      { label: t('checkUpdates'), enabled: false },
-      ...(this.actions.reloadPet ? [{ label: t('reliability.tray.reloadPet'), click: () => this.actions.reloadPet?.() }] : []),
-      { type: 'separator' },
-      { label: t('quit'), click: () => this.actions.quit() },
-    ]
     const pluginMenu = buildPluginTrayMenu(
       this.actions.getPluginCommands(),
       locale.value,
@@ -154,11 +87,28 @@ export class DesktopTrayController {
       (pluginId, commandId) => this.actions.invokePluginCommand(pluginId, commandId),
     )
     this.actions.onPluginCommandsOmitted?.(pluginMenu.omittedPluginIds)
-    if (pluginMenu.menu) {
-      const quitSeparatorIndex = template.findIndex((item, index) =>
-        item.type === 'separator' && template[index + 1]?.label === t('quit'))
-      if (quitSeparatorIndex >= 0) template.splice(quitSeparatorIndex, 0, pluginMenu.menu)
-    }
+    const template = buildTrayMenuTemplate(
+      {
+        preferences,
+        petVisible: visible,
+        petMode: this.actions.getPetMode(),
+        attention: this.attention,
+        attentionText: summaryText,
+        pluginMenu: pluginMenu.menu,
+        pluginOmittedCount: pluginMenu.omittedCount,
+        now: Date.now(),
+      },
+      {
+        updatePreferences: patch => this.safeUpdatePreferences(patch),
+        showPet: () => this.actions.showPet(),
+        hidePet: () => this.actions.hidePet(),
+        openPanel: () => this.actions.openPanel(),
+        openSettings: () => this.actions.openSettings(),
+        toggleMiniMode: () => this.safeToggleMiniMode(),
+        reloadPet: this.actions.reloadPet ? () => this.actions.reloadPet?.() : undefined,
+        quit: () => this.actions.quit(),
+      },
+    )
     const e2e = (globalThis as typeof globalThis & {
       __agentPetsE2E?: { trayMenuTemplate?: Electron.MenuItemConstructorOptions[] }
     }).__agentPetsE2E

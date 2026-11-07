@@ -41,5 +41,16 @@
   "permission.trayPermission": "{count} permission request(s)",
   "permission.trayExternal": "{count} to approve in the original tool",
   "permission.trayInput": "{count} waiting for input",
-  "permission.trayJoin": ", "
+  "permission.trayJoin": ", ",
+  "permission.trayPending": "{count} need attention ({detail})",
+  "permission.trayDndOn": "on",
+  "permission.trayDndRemainingMinutes": "{minutes} min left",
+  "permission.trayDndRemainingHours": "about {hours} h left",
+  "permission.trayDndOff": "Off",
+  "permission.trayDnd30m": "30 minutes",
+  "permission.trayDnd1h": "1 hour",
+  "permission.trayDndTomorrow": "Until 9:00 tomorrow",
+  "permission.trayDndAlways": "Until turned off",
+  "permission.trayAdvanced": "Advanced",
+  "permission.trayPluginsOmitted": "{count} more command(s) not shown; use the panel"
 }
