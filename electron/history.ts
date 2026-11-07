@@ -56,6 +56,8 @@ const ACHIEVEMENT_RECONCILED_KEY = 'achievement_reconciled_at'
 const MAX_QUOTA_PROVIDERS = 8
 const MAX_QUOTA_WINDOWS = 32
 const MAX_QUEUED_EVENTS = 500
+const PRUNE_BATCH_ROWS = 5000
+const ACTIVE_ROLLUP_STATE = 'active-rollup'
 const MAX_ACTIVE_GAP_MS = 5 * 60 * 1000
 const MAX_ACHIEVEMENT_BACKFILL_EVENTS = 100_000
 const LOCAL_USAGE_CUTOFF_KEY = 'local_usage_cutoff_at'
@@ -287,7 +289,50 @@ export class HistoryStore {
       const activeDeltaMs = previous && isActiveState(previous.lastState) && occurredAt > previous.lastSeenAt
         ? Math.min(occurredAt - previous.lastSeenAt, MAX_ACTIVE_GAP_MS)
         : 0
-      const inserted = changedCount(this.statement(`
+      // Heartbeats (thinking / tool-running with no token usage and no
+      // adapter-supplied identity) carry no fact beyond "the session is still
+      // active". Only their accumulated active time is durable: it is folded into
+      // one rollup row per session-day instead of one events row per heartbeat.
+      // Nothing reads individual heartbeat rows: successAlreadyRecorded and the
+      // achievement backfill only look at state = 'success', and the daily_stats
+      // rebuild only sums active_delta_ms, which the rollup row preserves.
+      const isHeartbeat = isActiveState(state)
+        && usage.quality === 'none'
+        && !SAFE_ID.test(event.eventId ?? '')
+        && sourceEventId === null
+      let inserted: number
+      if (isHeartbeat) {
+        // The old per-row dedupe ignored replays; a heartbeat that is not newer
+        // than the session's last activity can add neither time nor state.
+        if (previous && occurredAt <= previous.lastSeenAt) return false
+        if (activeDeltaMs > 0) {
+          this.statement(`
+            INSERT INTO events(
+              event_id, source_event_id, schema_version, type, trust, adapter_id, agent_id,
+              session_id, project_id, pet_id, local_date, occurred_at, received_at, state,
+              active_delta_ms, completion_kind, token_input, token_output, token_quality, payload_json
+            ) VALUES (?, NULL, 2, 'agent.active_rollup', 'adapter_verified', ?, ?, ?, ?, ?, ?, ?, ?, '${ACTIVE_ROLLUP_STATE}',
+                      ?, NULL, NULL, NULL, 'none', '{}')
+            ON CONFLICT(event_id) DO UPDATE SET
+              active_delta_ms = active_delta_ms + excluded.active_delta_ms,
+              occurred_at = MAX(occurred_at, excluded.occurred_at),
+              received_at = excluded.received_at
+          `).run(
+            digest(`rollup:${sessionPk}:${localDate}:${safePet}`),
+            adapterId,
+            agentId,
+            externalId,
+            projectId,
+            safePet,
+            localDate,
+            occurredAt,
+            safeReceivedAt,
+            activeDeltaMs,
+          )
+        }
+        inserted = 1
+      } else {
+        inserted = changedCount(this.statement(`
         INSERT OR IGNORE INTO events(
           event_id, source_event_id, schema_version, type, trust, adapter_id, agent_id,
           session_id, project_id, pet_id, local_date, occurred_at, received_at, state,
@@ -313,6 +358,7 @@ export class HistoryStore {
         usage.quality,
         JSON.stringify({ state }),
       ))
+      }
       if (inserted === 0) return false
 
       const nextActiveMs = (previous?.activeMs ?? 0) + activeDeltaMs
@@ -750,6 +796,47 @@ export class HistoryStore {
     this.database.close()
   }
 
+  /**
+   * One bounded retention step: deletes at most `limit` expired rows from each of
+   * events and sessions. `more` tells the caller to schedule another step.
+   */
+  pruneBatch(limit = PRUNE_BATCH_ROWS): { events: number, sessions: number, more: boolean } {
+    this.flushQueued()
+    const bounded = Math.max(1, Math.floor(limit))
+    const cutoff = this.now() - this.retentionDays * 24 * 60 * 60 * 1000
+    return this.transaction(() => {
+      const events = changedCount(this.statement(`
+        DELETE FROM events WHERE rowid IN (
+          SELECT rowid FROM events WHERE occurred_at < ? LIMIT ?
+        )
+      `).run(cutoff, bounded))
+      const sessions = changedCount(this.statement(`
+        DELETE FROM sessions WHERE session_pk IN (
+          SELECT session_pk FROM sessions WHERE last_seen_at < ? LIMIT ?
+        )
+      `).run(cutoff, bounded))
+      return { events, sessions, more: events >= bounded || sessions >= bounded }
+    })
+  }
+
+  /** Runtime retention: bounded batches with the event loop yielded in between. */
+  async pruneInBatches(
+    limit = PRUNE_BATCH_ROWS,
+    yieldToEventLoop: () => Promise<void> = () => new Promise(resolve => { setImmediate(resolve) }),
+  ): Promise<{ events: number, sessions: number }> {
+    let events = 0
+    let sessions = 0
+    for (;;) {
+      if (this.closed) break
+      const step = this.pruneBatch(limit)
+      events += step.events
+      sessions += step.sessions
+      if (!step.more) break
+      await yieldToEventLoop()
+    }
+    return { events, sessions }
+  }
+
   private pruneEvents(): number {
     const cutoff = this.now() - this.retentionDays * 24 * 60 * 60 * 1000
     return changedCount(this.statement('DELETE FROM events WHERE occurred_at < ?').run(cutoff))
@@ -1004,6 +1091,7 @@ export class HistoryStore {
           ON events(occurred_at, event_id) WHERE state = 'success';
         DROP INDEX IF EXISTS idx_daily_stats_summary_cover;
         CREATE INDEX IF NOT EXISTS idx_daily_stats_pet_date ON daily_stats(pet_id, local_date);
+        CREATE INDEX IF NOT EXISTS idx_history_sessions_last_seen ON sessions(last_seen_at);
       `)
       this.statement(`
         INSERT INTO schema_migrations(version, name, applied_at, checksum)

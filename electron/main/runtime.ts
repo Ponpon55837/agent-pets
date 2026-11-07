@@ -2745,6 +2745,8 @@ const HISTORY_STORE_RETRY_DELAYS_MS = [30_000, 120_000, 600_000] as const
 const STARTUP_DEFERRED_WORK_MS = 10_000
 let deferredHistoryWorkTimer: ReturnType<typeof setTimeout> | null = null
 let historyStoreRetryTimer: ReturnType<typeof setTimeout> | null = null
+let historyPruneTimer: ReturnType<typeof setInterval> | null = null
+const HISTORY_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000
 let historyStoreRetryAttempt = 0
 
 export function cancelHistoryStoreRetry(): void {
@@ -2785,10 +2787,19 @@ export function createHistoryServices(): void {
       void refreshLocalUsage()
     }, STARTUP_DEFERRED_WORK_MS)
     deferredHistoryWorkTimer.unref?.()
+    // A tray app runs for weeks: expire old events/sessions at runtime too,
+    // in bounded batches that yield between steps.
+    if (historyPruneTimer) clearInterval(historyPruneTimer)
+    historyPruneTimer = setInterval(() => {
+      void mainState.historyStore?.pruneInBatches().catch(error => console.error('History prune failed', error))
+    }, HISTORY_PRUNE_INTERVAL_MS)
+    historyPruneTimer.unref?.()
   } catch (error) {
     // History is an additive HUD feature. A broken history database must not
     // prevent the pet, event receiver, XP, or permission controls from booting.
     console.error('History storage is unavailable', error)
+    if (historyPruneTimer) clearInterval(historyPruneTimer)
+    historyPruneTimer = null
     try { mainState.historyStore?.close() } catch {}
     mainState.historyStore = null
     mainState.localUsageReader = null

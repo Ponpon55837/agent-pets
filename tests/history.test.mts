@@ -480,3 +480,89 @@ test('queueEvent micro-batches into one commit and isolates a failing event', (t
   assert.equal(summary.totals.sessionsCompleted, 1)
   assert.ok(summary.totals.activeMs > 0)
 })
+
+function activeOracle(events: Array<{ state: string, timestamp: number }>): number {
+  // Reference semantics: active time accrues from the previous event only when
+  // that event left the session active, capped at 5 minutes per gap.
+  let total = 0
+  let last: { state: string, timestamp: number } | null = null
+  for (const item of events) {
+    if (last && (last.state === 'thinking' || last.state === 'tool-running') && item.timestamp > last.timestamp) {
+      total += Math.min(item.timestamp - last.timestamp, 5 * 60 * 1000)
+    }
+    last = item
+  }
+  return total
+}
+
+test('heartbeats roll up into one row per session-day with identical active time and rebuild result', (t) => {
+  const start = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => start + 10 * 24 * 3600_000, localDate: ts => new Date(ts).toISOString().slice(0, 10) })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  let seed = 7
+  const rand = () => { seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0; return seed / 2 ** 32 }
+  const sent: Array<{ state: string, timestamp: number }> = []
+  let ts = start
+  const states = ['thinking', 'tool-running', 'thinking', 'tool-running', 'waiting-input', 'idle']
+  for (let i = 0; i < 1500; i += 1) {
+    ts += Math.floor(rand() * 400_000) + 1
+    const state = states[Math.floor(rand() * states.length)]!
+    sent.push({ state, timestamp: ts })
+    assert.equal(store.recordEvent(event({ state: state as never, timestamp: ts, sessionId: 'long' })), true)
+  }
+  const expected = activeOracle(sent)
+  const read = () => store.getSummary('aang-airbender', undefined, 30).totals.activeMs
+  assert.equal(read(), expected)
+  const raw = store.database as unknown as { prepare(sql: string): { get(): Record<string, number>, all(): Array<Record<string, unknown>> } }
+  const heartbeatRows = Number(raw.prepare("SELECT COUNT(*) AS n FROM events WHERE state IN ('thinking','tool-running')").get().n)
+  assert.equal(heartbeatRows, 0, 'no per-heartbeat rows')
+  const rollupRows = Number(raw.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'agent.active_rollup'").get().n)
+  assert.ok(rollupRows >= 1 && rollupRows <= 20, `rollup rows ${rollupRows}`)
+  const sessionMs = Number(raw.prepare('SELECT SUM(active_ms) AS n FROM sessions').get().n)
+  assert.equal(sessionMs, expected)
+  store.rebuildDailyStats()
+  assert.equal(read(), expected, 'daily_stats rebuilt from rollup rows keeps active time')
+})
+
+test('heartbeat replays and stale heartbeats do not change state; tokens keep a real row', (t) => {
+  const start = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => start + 3600_000 })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  assert.equal(store.recordEvent(event({ timestamp: start })), true)
+  assert.equal(store.recordEvent(event({ state: 'tool-running', timestamp: start + 60_000 })), true)
+  assert.equal(store.recordEvent(event({ state: 'tool-running', timestamp: start + 60_000 })), false)
+  assert.equal(store.recordEvent(event({ timestamp: start + 10_000 })), false)
+  assert.equal(store.recordEvent(event({ state: 'success', timestamp: start + 90_000 })), true)
+  assert.equal(store.recordEvent(event({ state: 'thinking', timestamp: start + 30_000 })), false, 'stale heartbeat cannot reopen a finished session')
+  assert.equal(store.getSummary().totals.activeMs, 90_000)
+  assert.equal(store.recordEvent(event({ state: 'thinking', timestamp: start + 120_000, tokenUsage: { input: 5, output: 1, quality: 'estimated' } })), true)
+  const raw = store.database as unknown as { prepare(sql: string): { get(): Record<string, number> } }
+  assert.equal(Number(raw.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'agent.working'").get().n), 1)
+})
+
+test('runtime prune deletes expired events and sessions in bounded batches', async (t) => {
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => now, retentionDays: 30 })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  const old = now - 60 * 24 * 3600_000
+  const raw = store.database as unknown as { exec(sql: string): void, prepare(sql: string): { get(): Record<string, number>, run(...p: unknown[]): unknown } }
+  store.batch(() => {
+    const insertEvent = raw.prepare(`INSERT INTO events(event_id, schema_version, type, trust, adapter_id, agent_id, session_id, project_id, pet_id, local_date, occurred_at, received_at, state, payload_json)
+      VALUES (?, 2, 'agent.working', 'adapter_verified', 'codex', 'codex', 's', '', 'p', '2026-06-01', ?, ?, 'success', '{}')`)
+    const insertSession = raw.prepare(`INSERT INTO sessions(session_pk, adapter_id, agent_id, external_session_id, project_id, pet_id, started_at, last_state, last_seen_at)
+      VALUES (?, 'codex', 'codex', ?, '', 'p', ?, 'idle', ?)`)
+    for (let i = 0; i < 95; i += 1) { insertEvent.run(`old-${i}`, old + i, old + i); insertSession.run(`sold-${i}`, `x${i}`, old, old + i) }
+    for (let i = 0; i < 5; i += 1) { insertEvent.run(`new-${i}`, now - i, now - i); insertSession.run(`snew-${i}`, `y${i}`, now, now - i) }
+  })
+  const first = store.pruneBatch(40)
+  assert.deepEqual([first.events, first.sessions, first.more], [40, 40, true])
+  let yields = 0
+  const rest = await store.pruneInBatches(40, async () => { yields += 1 })
+  assert.deepEqual(rest, { events: 55, sessions: 55 })
+  assert.equal(yields, 1)
+  assert.equal(Number(raw.prepare('SELECT COUNT(*) AS n FROM events').get().n), 5)
+  assert.equal(Number(raw.prepare('SELECT COUNT(*) AS n FROM sessions').get().n), 5)
+})
