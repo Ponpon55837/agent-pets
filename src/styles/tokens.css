@@ -268,6 +268,33 @@
   --font-body: var(--font-ui);
 }
 
+/* ── Pet bubbles ───────────────────────────────────────────────────────
+   One material for every bubble the pet shows (result toast, say, plugin feed,
+   notices). The pet layer is always dark, so there is no light variant. The
+   opaque surface is the fallback for reduced-transparency / high contrast. */
+:root {
+  --pet-bubble-surface: rgba(30, 30, 40, 0.93);
+  --pet-bubble-surface-opaque: #1d1b24;
+  --pet-bubble-border: rgba(255, 255, 255, 0.12);
+  --pet-bubble-sheen: linear-gradient(155deg, rgba(255, 255, 255, 0.1), transparent 54%);
+  --pet-bubble-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --pet-bubble-text: #f2f2f2;
+  --pet-bubble-success-text: #a6f0c0;
+  --pet-bubble-error-text: #ffb3b3;
+  --pet-bubble-warn-border: rgba(232, 198, 91, 0.58);
+  --pet-bubble-warn-text: #fff4c4;
+  --pet-bubble-info-border: rgba(157, 176, 255, 0.56);
+  --pet-bubble-info-text: #e1e6ff;
+  --pet-bubble-info-accent: #aab8ff;
+  --pet-bubble-plugin-border: rgba(112, 189, 158, 0.56);
+  --pet-bubble-plugin-text: #e4fff3;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.34);
+  --pet-drag-shadow: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.35));
+}
+
 /* Panel layer: the status panel and plugin pages render on cream surfaces,
    so status text must use the darker values. */
 .status-panel {

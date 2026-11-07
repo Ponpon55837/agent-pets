@@ -4,6 +4,10 @@ import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
 import { logMain, mainLogger } from '../diagnostics/main-log'
 import { buildDiagnosticsReport, registerDiagnosticsSection } from '../diagnostics/report'
+import { eventPipelineStats } from '../event-stats'
+import { resolveLocalPorts } from './ports'
+import { openWithCorruptionRecovery } from './db-recovery'
+import { LOCAL_USAGE_TICK_MS, shouldRunLocalUsageTick } from './scan-schedule'
 import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
 import { join, resolve } from 'path'
 import { randomUUID } from 'node:crypto'
@@ -20,9 +24,10 @@ import { DesktopPreferencesStore, resolveLoginItemExecutable } from '../desktop-
 import { DesktopNotificationService } from '../desktop-notifications'
 import { DesktopTrayController } from '../desktop-tray'
 import type { PluginTrayCommandItem } from '../plugin-tray'
-import { desktopVisibilityCapabilitiesForPlatform } from '../desktop-visibility'
+import { desktopVisibilityCapabilitiesForPlatform, macVisibleOnFullScreen } from '../desktop-visibility'
 import { PermissionBroker } from '../permission-broker'
-import { appendPermissionAudit } from '../permission-audit'
+import { appendPermissionAudit, clearPermissionAudit, readPermissionAudit } from '../permission-audit'
+import type { PermissionAuditEntry } from '../../src/types/permission'
 import { ProgressionStore } from '../progression'
 import { AchievementStore } from '../achievements'
 import { HistoryStore } from '../history'
@@ -66,7 +71,7 @@ import { createPermissionAdapterServer, PERMISSION_ADAPTER_PORT, PermissionAdapt
 import type { DesktopPreferences } from '../../src/types/desktop'
 import { locale, setLocale, t } from '../../src/i18n'
 import tokensCss from '../../src/styles/tokens.css?raw'
-import type { ProgressionSnapshot } from '../../src/types/progression'
+import type { ProgressionAwardEvent, ProgressionEventResult, ProgressionSnapshot } from '../../src/types/progression'
 import type { AchievementUnlock } from '../../src/types/achievement'
 import type { HistorySummary } from '../../src/types/history'
 import type { PresentationIntent } from '../../src/types/presentation'
@@ -102,10 +107,26 @@ import { registerPluginPreferencesIpc } from '../ipc/plugin-preferences'
 import { registerPluginCatalogIpc } from '../ipc/plugin-catalog'
 import { registerPluginInstallIpc } from '../ipc/plugin-install'
 import { mainState, type PluginSkinFallbackInfo } from './state'
+import { EMPTY_ATTENTION } from '../attention-tracker'
+import { attachHotkeyInfo, PermissionHotkeys } from '../permission-hotkeys'
 import { PANEL_GAP, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_WIDTH, PANEL_SIZES, PANEL_BLUR_HIDE_DELAY_MS, computePanelPlacement, fitPanelHeight, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
 
-const PERMISSION_ALLOW_HOTKEY = 'CommandOrControl+Shift+Y'
-const PERMISSION_DENY_HOTKEY = 'CommandOrControl+Shift+N'
+let permissionHotkeys: PermissionHotkeys | null = null
+
+function getPermissionHotkeys(): PermissionHotkeys {
+  permissionHotkeys ??= new PermissionHotkeys({
+    platform: process.platform,
+    shortcuts: {
+      register: (accelerator, callback) => globalShortcut.register(accelerator, callback),
+      unregister: (accelerator) => globalShortcut.unregister(accelerator),
+      isRegistered: (accelerator) => globalShortcut.isRegistered(accelerator),
+    },
+    decide: (requestId, decision) => {
+      void mainState.permissionBroker?.decide(requestId, decision, 'hotkey')
+    },
+  })
+  return permissionHotkeys
+}
 
 export { PANEL_GAP, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_WIDTH }
 // petWindow's actual bounds include a fixed, unscaled band of transparent
@@ -198,6 +219,13 @@ export function animateBounds(target: { x: number; y: number; width: number; hei
     mainState.resizeAnimHandle = null
   }
 
+  // A hidden window has nothing to animate; jump straight to the end state.
+  if (!mainState.petWindow.isVisible()) {
+    mainState.petWindow.setBounds({ x: Math.round(target.x), y: Math.round(target.y), width: Math.round(target.width), height: Math.round(target.height) })
+    repositionVisiblePanel()
+    return
+  }
+
   const start = mainState.petWindow.getBounds()
   const startTime = Date.now()
 
@@ -223,7 +251,7 @@ export function animateBounds(target: { x: number; y: number; width: number; hei
       clearInterval(mainState.resizeAnimHandle)
       mainState.resizeAnimHandle = null
     }
-  }, 8)
+  }, 16)
 }
 
 export function clamp(value: number, min: number, max: number): number {
@@ -900,16 +928,21 @@ export function initializePluginCatalogAutoCheck(): void {
     },
   })
   void mainState.pluginCatalogAutoCheckSchedule.checkIfDue()
-  setInterval(() => {
+  if (mainState.pluginCatalogAutoCheckTimer) clearInterval(mainState.pluginCatalogAutoCheckTimer)
+  mainState.pluginCatalogAutoCheckTimer = setInterval(() => {
     void mainState.pluginCatalogAutoCheckSchedule?.checkIfDue()
   }, 60 * 60 * 1_000)
+  mainState.pluginCatalogAutoCheckTimer.unref?.()
 }
 
 export async function createPluginServices(): Promise<void> {
   if (mainState.pluginRegistry || mainState.pluginPreferences || mainState.pluginHostWindow) return
   const userDataDirectory = app.getPath('userData')
   mainState.pluginRegistry = new PluginRegistry(userDataDirectory)
-  mainState.pluginDeveloperModeWatcher = new PluginDeveloperModeWatcher(500)
+  mainState.pluginDeveloperModeWatcher = new PluginDeveloperModeWatcher(500, pluginId => {
+    // Surfaces in the plugin's diagnostics in the manager instead of vanishing.
+    mainState.pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
+  })
   mainState.pluginPreferences = new PluginPreferencesStore(userDataDirectory)
   mainState.pluginSecretsStore = new PluginSecretsStore(userDataDirectory, safeStorage)
   mainState.pluginSecretConsentStore = new PluginSecretConsentStore(userDataDirectory)
@@ -1114,6 +1147,7 @@ export async function createPluginServices(): Promise<void> {
     pluginRootForToken: token => mainState.pluginRootsByToken.get(token) ?? null,
     messageGuard: mainState.pluginUiMessageGuard,
     onPluginCrash: (pluginId, consecutiveCrashes, reason) => {
+      logMain('warn', 'plugin-host', `plugin crash reason=${reason} consecutive=${consecutiveCrashes}`, { pluginId })
       mainState.pluginBadgeController?.clearPlugin(pluginId)
       mainState.pluginEventSourceController?.clearPlugin(pluginId)
       if (consecutiveCrashes >= 3) {
@@ -1639,7 +1673,10 @@ export function applyMacFullscreenVisibilityPolicy(): void {
   if (!IS_MAC) return
   const preferences = currentDesktopPreferences()
   if (!preferences.visibilityCapabilities.fullscreenAutoHide.supported) return
-  const visibleOnFullScreen = !preferences.fullscreenAutoHideEnabled
+  const visibleOnFullScreen = macVisibleOnFullScreen(
+    preferences.fullscreenAutoHideEnabled,
+    mainState.permissionAttentionCount > 0,
+  )
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
     if (!window || window.isDestroyed()) continue
     try {
@@ -1654,6 +1691,10 @@ export function applyMacFullscreenVisibilityPolicy(): void {
       console.error('Failed to apply macOS fullscreen visibility policy', error)
     }
   }
+}
+
+export function localPorts() {
+  return resolveLocalPorts(process.env, app.isPackaged)
 }
 
 export function serverHealthTracker(): ServerHealthTracker {
@@ -2162,7 +2203,6 @@ export function showPanelWindow(view: 'sessions' | 'settings' | 'restore' = 'ses
   mainState.panelWindow.show()
   mainState.panelWindow.focus()
   if (wasHidden) revealPanelWindowAfterFirstFrame(mainState.panelWindow)
-  mainState.desktopNotifications?.clearAttention()
 
   const notifyRenderer = () => {
     if (!mainState.panelWindow || mainState.panelWindow.isDestroyed()) return
@@ -2181,6 +2221,7 @@ export function currentDesktopPreferences(): DesktopPreferences {
   if (!mainState.desktopPreferences) {
     return {
       dndEnabled: false,
+      dndUntil: null,
       notificationsEnabled: true,
       permissionBubbleEnabled: true,
       presentationMcpEnabled: true,
@@ -2191,6 +2232,10 @@ export function currentDesktopPreferences(): DesktopPreferences {
       fullscreenAutoHideEnabled: false,
       rightClickHideEnabled: false,
       soundEnabled: false,
+      soundVolume: 60,
+      soundOnPermission: true,
+      soundOnError: true,
+      soundOnSuccess: true,
       launchAtStartup: false,
       launchAtStartupSupported: false,
       locale: 'zh-TW',
@@ -2366,12 +2411,31 @@ export function createWindowsFullscreenServices(): void {
   }
 }
 
+let dndExpiryTimer: ReturnType<typeof setTimeout> | null = null
+
+// A timed Do Not Disturb ends by itself; when it does, summarise what was
+// silenced so the user is not left wondering what they missed.
+function scheduleDndExpiry(preferences: DesktopPreferences): void {
+  if (dndExpiryTimer) clearTimeout(dndExpiryTimer)
+  dndExpiryTimer = null
+  if (!preferences.dndEnabled || preferences.dndUntil === null) return
+  const delay = Math.min(Math.max(0, preferences.dndUntil - Date.now()) + 50, 2_147_483_647)
+  dndExpiryTimer = setTimeout(() => {
+    dndExpiryTimer = null
+    const missed = mainState.desktopNotifications?.takeDndMissedCount() ?? 0
+    updateDesktopPreferences({ dndEnabled: false, dndUntil: null })
+    if (missed > 0) mainState.desktopNotifications?.showDndSummary(missed)
+  }, delay)
+  dndExpiryTimer.unref?.()
+}
+
 export function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   if (!mainState.desktopPreferences) throw new Error('Desktop preferences are not ready')
   const previousPreferences = mainState.desktopPreferences.get()
   const achievementsWereEnabled = previousPreferences.achievementsEnabled
   const preferences = mainState.desktopPreferences.update(patch)
   if (previousPreferences.dndEnabled !== preferences.dndEnabled) mainState.pluginFeedController?.onVisibilityChanged()
+  scheduleDndExpiry(preferences)
   setLocale(preferences.locale)
   if (!preferences.edgeModeEnabled && mainState.petWindowMode === 'edge') applyNormalPetBounds()
   applyPetCaptureProtection()
@@ -2392,54 +2456,41 @@ export function updateDesktopPreferences(patch: unknown): DesktopPreferences {
 
 export function unregisterPermissionHotkeys(): void {
   if (!app.isReady()) return
-  for (const accelerator of [PERMISSION_ALLOW_HOTKEY, PERMISSION_DENY_HOTKEY]) {
-    if (globalShortcut.isRegistered(accelerator)) globalShortcut.unregister(accelerator)
-  }
+  permissionHotkeys?.clear()
 }
 
 export function syncTrayAttention(): void {
-  mainState.desktopTray?.setAttentionCount(mainState.notificationAttentionCount + mainState.permissionAttentionCount)
+  mainState.desktopTray?.setAttention(mainState.desktopNotifications?.getAttention() ?? EMPTY_ATTENTION)
 }
 
 export function broadcastPermissionRequests(): void {
-  const requests = mainState.permissionBroker?.listRequests() ?? []
-  if (requests.length > 0 && mainState.petWindowMode !== 'normal') {
+  const listed = mainState.permissionBroker?.listRequests() ?? []
+  if (listed.length > 0 && mainState.petWindowMode !== 'normal') {
     applyNormalPetBounds()
   }
-  mainState.permissionAttentionCount = requests.length
-  syncTrayAttention()
+  const hadPermissionRequests = mainState.permissionAttentionCount > 0
+  mainState.permissionAttentionCount = listed.length
+  if (hadPermissionRequests !== listed.length > 0) applyMacFullscreenVisibilityPolicy()
+  if (mainState.desktopNotifications) mainState.desktopNotifications.setPermissionRequests(listed)
+  else syncTrayAttention()
+
+  const top = listed[0]
+  const hotkeyInfo = app.isReady()
+    ? getPermissionHotkeys().sync(
+      top,
+      Boolean(
+        currentDesktopPreferences().permissionBubbleEnabled
+        && mainState.petWindow
+        && !mainState.petWindow.isDestroyed()
+        && mainState.petWindow.isVisible(),
+      ),
+    )
+    : null
+  const requests = attachHotkeyInfo(listed, hotkeyInfo)
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
     if (window && !window.isDestroyed()) {
       window.webContents.send(IPC_CHANNELS.permissionRequestsUpdated, requests)
     }
-  }
-
-  unregisterPermissionHotkeys()
-  const top = requests[0]
-  const permissionBubbleEnabled = currentDesktopPreferences().permissionBubbleEnabled
-  if (
-    !permissionBubbleEnabled
-    || !top
-    || top.status !== 'pending'
-    || !top.hotkeyEligible
-    || !mainState.petWindow
-    || mainState.petWindow.isDestroyed()
-    || !mainState.petWindow.isVisible()
-  ) return
-
-  try {
-    if (top.allowedDecisions.includes('allow_once')) {
-      globalShortcut.register(PERMISSION_ALLOW_HOTKEY, () => {
-        void mainState.permissionBroker?.decide(top.requestId, 'allow_once', 'hotkey')
-      })
-    }
-    if (top.allowedDecisions.includes('deny')) {
-      globalShortcut.register(PERMISSION_DENY_HOTKEY, () => {
-        void mainState.permissionBroker?.decide(top.requestId, 'deny', 'hotkey')
-      })
-    }
-  } catch {
-    unregisterPermissionHotkeys()
   }
 }
 
@@ -2453,9 +2504,32 @@ export function broadcastProgression(snapshot?: ProgressionSnapshot): void {
   }
 }
 
+// Tells the pet and panel windows that XP was actually granted (the awards are
+// already deduplicated by the ledger, so a replayed event produces none). The
+// renderer derives toasts and level-up celebrations from this, never XP itself.
+export function broadcastProgressionAwards(result: ProgressionEventResult): void {
+  if (result.awards.length === 0) return
+  const payload: ProgressionAwardEvent = {
+    petId: result.snapshot.petId,
+    awards: result.awards.map(award => ({ ruleId: award.ruleId, amount: award.amount })),
+    at: Date.now(),
+    levelBefore: result.levelBefore,
+    levelAfter: result.snapshot.level,
+    stageBefore: result.stageBefore,
+    stageAfter: result.snapshot.evolutionStage,
+  }
+  for (const window of [mainState.petWindow, mainState.panelWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send(IPC_CHANNELS.progressionAwarded, payload)
+    }
+  }
+}
+
 export function broadcastAchievements(petId?: string): void {
+  const targetPet = petId ?? mainState.progressionStore?.getActivePetId() ?? 'aang-airbender'
   const snapshot = mainState.achievementStore?.getSnapshot(
-    petId ?? mainState.progressionStore?.getActivePetId() ?? 'aang-airbender',
+    targetPet,
+    mainState.progressionStore?.getSnapshot(targetPet),
   )
   if (!snapshot) return
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
@@ -2474,9 +2548,9 @@ export function broadcastAchievementUnlock(unlock: AchievementUnlock): void {
   broadcastAchievements()
 }
 
-export function currentHistorySummary(projectId?: string): HistorySummary | null {
+export function currentHistorySummary(projectId?: string, rangeDays = 7): HistorySummary | null {
   if (!mainState.historyStore) return null
-  const summary = mainState.historyStore.getSummary(mainState.progressionStore?.getActivePetId() ?? 'aang-airbender', projectId)
+  const summary = mainState.historyStore.getSummary(mainState.progressionStore?.getActivePetId() ?? 'aang-airbender', projectId, rangeDays)
   const scan = mainState.localUsageReader?.getDiagnostics()
   return scan
     ? {
@@ -2552,8 +2626,8 @@ export function createPresentationServices(presentationToken: string): void {
     token: presentationToken,
     controller: mainState.presentationController,
   })
-  const presentationHealth = serverHealthTracker().register('presentation', PRESENTATION_MCP_PORT)
-  const presentationHandle = listenOnLocalPort(server, PRESENTATION_MCP_PORT, {
+  const presentationHealth = serverHealthTracker().register('presentation', localPorts().presentation)
+  const presentationHandle = listenOnLocalPort(server, localPorts().presentation, {
     label: 'Presentation MCP',
     onStatus: presentationHealth.onStatus,
     onPersistentFailure: presentationHealth.onPersistentFailure,
@@ -2622,26 +2696,66 @@ export function scheduleAchievementStoreRetry(): void {
   }, delay)
 }
 
+const HISTORY_STORE_RETRY_DELAYS_MS = [30_000, 120_000, 600_000] as const
+const STARTUP_DEFERRED_WORK_MS = 10_000
+let deferredHistoryWorkTimer: ReturnType<typeof setTimeout> | null = null
+let historyStoreRetryTimer: ReturnType<typeof setTimeout> | null = null
+let historyStoreRetryAttempt = 0
+
+export function cancelHistoryStoreRetry(): void {
+  if (deferredHistoryWorkTimer) clearTimeout(deferredHistoryWorkTimer)
+  deferredHistoryWorkTimer = null
+  if (historyStoreRetryTimer) clearTimeout(historyStoreRetryTimer)
+  historyStoreRetryTimer = null
+}
+
 export function createHistoryServices(): void {
   if (mainState.historyStore) return
   try {
-    mainState.historyStore = new HistoryStore(join(app.getPath('userData'), 'history.sqlite'))
+    const databasePath = join(app.getPath('userData'), 'history.sqlite')
+    mainState.historyStore = openWithCorruptionRecovery(
+      databasePath,
+      () => new HistoryStore(databasePath),
+      { log: (message, detail) => console.error(message, detail) },
+    )
+    if (!mainState.historyStore) throw new Error('History database could not be opened')
+    historyStoreRetryAttempt = 0
     mainState.localUsageReader = new LocalUsageReader({
       homeDir: app.getPath('home'),
       history: mainState.historyStore,
       projectRouting: mainState.projectRoutingStore,
     })
+    let scanTick = 0
     mainState.localUsageScanTimer = setInterval(() => {
+      scanTick += 1
+      if (!shouldRunLocalUsageTick(scanTick, powerMonitor.isOnBatteryPower())) return
       void refreshLocalUsage()
-    }, 60_000)
-    reconcileAchievementsFromHistory()
-    void refreshLocalUsage()
+    }, LOCAL_USAGE_TICK_MS)
+    mainState.localUsageScanTimer.unref?.()
+    // Heavy first-run work waits until the pet has been on screen for a while.
+    if (deferredHistoryWorkTimer) clearTimeout(deferredHistoryWorkTimer)
+    deferredHistoryWorkTimer = setTimeout(() => {
+      deferredHistoryWorkTimer = null
+      reconcileAchievementsFromHistory()
+      void refreshLocalUsage()
+    }, STARTUP_DEFERRED_WORK_MS)
+    deferredHistoryWorkTimer.unref?.()
   } catch (error) {
     // History is an additive HUD feature. A broken history database must not
     // prevent the pet, event receiver, XP, or permission controls from booting.
     console.error('History storage is unavailable', error)
+    try { mainState.historyStore?.close() } catch {}
     mainState.historyStore = null
     mainState.localUsageReader = null
+    const delay = HISTORY_STORE_RETRY_DELAYS_MS[historyStoreRetryAttempt]
+    if (delay !== undefined && !historyStoreRetryTimer && !mainState.isQuitting) {
+      historyStoreRetryAttempt += 1
+      historyStoreRetryTimer = setTimeout(() => {
+        historyStoreRetryTimer = null
+        createHistoryServices()
+      }, delay)
+      historyStoreRetryTimer.unref?.()
+    }
   }
 }
 
@@ -2652,10 +2766,15 @@ export function reconcileAchievementsFromHistory(): void {
     || !currentDesktopPreferences().achievementsEnabled
   ) return
   try {
+    // Incremental: only sessions since the last reconcile (minus one day of
+    // overlap for late-arriving events) instead of the whole history.
+    const startedAt = Date.now()
+    const previous = mainState.historyStore.getAchievementReconciledAt()
     const unlocks = mainState.achievementStore.reconcileCompletedSessions(
-      mainState.historyStore.getAchievementCompletedSessions(),
+      mainState.historyStore.getAchievementCompletedSessions(previous > 0 ? previous - 24 * 60 * 60 * 1000 : 0),
       petId => mainState.progressionStore?.getSnapshot(petId),
     )
+    mainState.historyStore.setAchievementReconciledAt(startedAt)
     unlocks.forEach(broadcastAchievementUnlock)
   } catch (error) {
     console.error('Achievement history reconciliation failed', error)
@@ -2689,6 +2808,28 @@ export function cancelPermissionRequests(
   }
 }
 
+function permissionAuditPath(): string {
+  return join(app.getPath('userData'), 'permission-audit.jsonl')
+}
+
+export function listPermissionAuditEntries(limit: number): PermissionAuditEntry[] {
+  return readPermissionAudit(permissionAuditPath(), limit)
+    .filter(record => typeof record.action === 'string' && record.risk)
+    .map(record => ({
+      resolvedAt: record.resolvedAt,
+      agentId: record.agentId,
+      action: record.action as string,
+      risk: record.risk as PermissionAuditEntry['risk'],
+      status: record.status,
+      ...(record.decidedBy ? { decidedBy: record.decidedBy } : {}),
+      terminalReason: record.terminalReason,
+    }))
+}
+
+export function clearPermissionAuditLog(): void {
+  clearPermissionAudit(permissionAuditPath())
+}
+
 export function createPermissionServices(permissionToken: string): void {
   if (mainState.permissionBroker || mainState.permissionRelay || mainState.permissionAdapterServer) return
 
@@ -2697,7 +2838,7 @@ export function createPermissionServices(permissionToken: string): void {
     onChanged: schedulePermissionUiSync,
     onAudit: record => {
       try {
-        appendPermissionAudit(join(app.getPath('userData'), 'permission-audit.json'), record)
+        appendPermissionAudit(permissionAuditPath(), record)
       } catch (error) {
         console.error('Failed to persist permission audit record', error)
       }
@@ -2706,8 +2847,8 @@ export function createPermissionServices(permissionToken: string): void {
   broker.registerAdapter(relay.createPort('opencode-cli'))
   broker.registerAdapter(relay.createPort('opencode-desktop'))
   const server = createPermissionAdapterServer({ token: permissionToken, broker, relay })
-  const permissionHealth = serverHealthTracker().register('permission', PERMISSION_ADAPTER_PORT)
-  const permissionHandle = listenOnLocalPort(server, PERMISSION_ADAPTER_PORT, {
+  const permissionHealth = serverHealthTracker().register('permission', localPorts().permission)
+  const permissionHandle = listenOnLocalPort(server, localPorts().permission, {
     label: 'Permission adapter',
     onStatus: permissionHealth.onStatus,
     onPersistentFailure: permissionHealth.onPersistentFailure,
@@ -2760,11 +2901,10 @@ export function createDesktopServices(): void {
     getPreferences: currentDesktopPreferences,
     isAppFocused: () => [mainState.petWindow, mainState.panelWindow].some(window => window?.isFocused()),
     onNotificationClick: () => showPanelWindow('sessions'),
-    onAttentionChanged: count => {
-      mainState.notificationAttentionCount = count
-      syncTrayAttention()
-    },
+    onAttentionChanged: () => syncTrayAttention(),
   })
+
+  scheduleDndExpiry(currentDesktopPreferences())
 
   mainState.desktopTray = new DesktopTrayController(
     join(__dirname, '..', 'build', 'icon.png'),
@@ -2951,6 +3091,9 @@ export function registerRuntimeDiagnostics(startupResults: () => unknown, crashS
   registerDiagnosticsSection('localServers', () => serverHealthTracker().snapshot().servers.map(server => ({
     id: server.id, port: server.port, state: server.state, attempt: server.attempt, code: server.code ?? null,
   })))
+  registerDiagnosticsSection('pluginHost', () => mainState.pluginHostWindow?.diagnostics() ?? null)
+  registerDiagnosticsSection('rendererErrors', () => ({ count: mainState.rendererErrorCount }))
+  registerDiagnosticsSection('eventPipeline', () => ({ ...eventPipelineStats }))
   registerDiagnosticsSection('stores', () => ({
     history: mainState.historyStore ? 'ready' : 'unavailable',
     achievements: mainState.achievementStore ? 'ready' : 'unavailable',

@@ -16,6 +16,7 @@ import {
   type HistoryTokenUsageRecord,
   type HistoryTokenQuality,
 } from '../src/types/history.ts'
+import { dateOffset, localDateKey } from '../src/utils/local-date.ts'
 import { StatementCache } from './sqlite-statements.ts'
 import { isValidPetId } from '../src/utils/pet-id.ts'
 
@@ -48,12 +49,15 @@ const MAX_RETENTION_DAYS = 3650
 const MAX_TEXT_LENGTH = 128
 const MAX_SESSION_ID_LENGTH = 256
 const MAX_TOKEN_COUNT = 1_000_000_000_000
-const MAX_QUOTA_SNAPSHOTS = 100
+const MAX_QUOTA_SNAPSHOTS = 500
+const QUOTA_SNAPSHOT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+const ACHIEVEMENT_RECONCILED_KEY = 'achievement_reconciled_at'
 const MAX_QUOTA_PROVIDERS = 8
 const MAX_QUOTA_WINDOWS = 32
 const MAX_ACTIVE_GAP_MS = 5 * 60 * 1000
 const MAX_ACHIEVEMENT_BACKFILL_EVENTS = 100_000
 const LOCAL_USAGE_CUTOFF_KEY = 'local_usage_cutoff_at'
+const HISTORY_RANGES: readonly number[] = [7, 30, 90]
 const ACTIVE_STATES = new Set<AgentState>(['thinking', 'tool-running'])
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,256}$/
 const PROJECT_ID = /^[a-f0-9]{32}$/
@@ -93,20 +97,6 @@ function historySessionHash(adapterId: string, agentId: string, sessionId: strin
 
 function historySessionPk(adapterId: string, agentId: string, sessionId: string, projectId: string): string {
   return `${adapterId}:${agentId}:${historySessionHash(adapterId, agentId, sessionId, projectId)}`
-}
-
-function localDateKey(timestamp: number): string {
-  const date = new Date(timestamp)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function dateOffset(key: string, offset: number): string {
-  const date = new Date(`${key}T12:00:00`)
-  date.setDate(date.getDate() + offset)
-  return localDateKey(date.getTime())
 }
 
 function changedCount(result: { changes: number | bigint }): number {
@@ -547,11 +537,20 @@ export class HistoryStore {
   recordQuotaSnapshot(value: unknown): boolean {
     const snapshot = normalizeQuotaSnapshot(value)
     if (!snapshot) return false
-    const snapshotId = digest(`${snapshot.updatedAt}:${JSON.stringify(snapshot.providers)}`)
+    // Identity is the readings alone: polling every two minutes must not write
+    // (or broadcast historyUpdated) when nothing about the quota changed.
+    const providersJson = JSON.stringify(snapshot.providers)
+    const latest = parseQuotaSnapshot(this.statement(
+      'SELECT payload_json FROM quota_snapshots ORDER BY updated_at DESC LIMIT 1',
+    ).get()?.payload_json)
+    if (latest && JSON.stringify(latest.providers) === providersJson) return false
+    const snapshotId = digest(`${snapshot.updatedAt}:${providersJson}`)
     this.statement(`
       INSERT OR REPLACE INTO quota_snapshots(snapshot_id, updated_at, payload_json)
       VALUES (?, ?, ?)
     `).run(snapshotId, snapshot.updatedAt, JSON.stringify(snapshot))
+    const oldest = new Date(this.now() - QUOTA_SNAPSHOT_RETENTION_MS).toISOString()
+    this.statement('DELETE FROM quota_snapshots WHERE updated_at < ?').run(oldest)
     this.statement(`
       DELETE FROM quota_snapshots
       WHERE snapshot_id NOT IN (
@@ -561,70 +560,59 @@ export class HistoryStore {
     return true
   }
 
-  getSummary(petId = DEFAULT_PET_ID, projectId?: string): HistorySummary {
+  getSummary(petId = DEFAULT_PET_ID, projectId?: string, rangeDays: number = 7): HistorySummary {
     const safePet = safePetId(petId)
     const safeProject = typeof projectId === 'string' && PROJECT_ID.test(projectId) ? projectId : null
+    const span = HISTORY_RANGES.includes(rangeDays) ? rangeDays : 7
     const today = this.localDate(this.now())
-    const dates = Array.from({ length: 7 }, (_, index) => dateOffset(today, index - 6))
-    const placeholders = dates.map(() => '?').join(', ')
+    const dates = Array.from({ length: span }, (_, index) => dateOffset(today, index - (span - 1)))
+    const previousDates = Array.from({ length: span }, (_, index) => dateOffset(today, index - (2 * span - 1)))
     // Local token-usage rows are always recorded under the shared
     // LOCAL_USAGE_PET_ID bucket (see recordTokenUsage), never under the
     // routed pet, so a project filter must still include that bucket -
     // scoped to the same project - or token totals would silently read
     // zero every time a project is selected.
     const projectClause = safeProject ? 'AND project_id = ?' : ''
-    const summaryParams = safeProject
-      ? [safePet, LOCAL_USAGE_PET_ID, safeProject, ...dates]
-      : [safePet, LOCAL_USAGE_PET_ID, ...dates]
+    // One range scan over the previous + current window; the covering index
+    // (pet_id, local_date, ...) serves it, and everything else is folded in JS.
     const rows = this.statement(`
-      SELECT local_date, sessions_completed, sessions_failed, active_ms,
+      SELECT local_date, adapter_id, sessions_completed, sessions_failed, active_ms,
              token_input, token_output, token_cache_read, token_cache_write, token_quality
       FROM daily_stats
-      WHERE (pet_id = ? OR pet_id = ?) ${projectClause} AND local_date IN (${placeholders})
-    `).all(...summaryParams)
+      WHERE pet_id IN (?, ?) ${projectClause} AND local_date BETWEEN ? AND ?
+    `).all(
+      ...(safeProject ? [safePet, LOCAL_USAGE_PET_ID, safeProject] : [safePet, LOCAL_USAGE_PET_ID]),
+      previousDates[0],
+      today,
+    )
     // A day can have multiple aggregate rows (one per project and adapter).
-    // Fold them before building the seven-day projection; keeping only the
-    // last row would silently drop sessions and token usage from the HUD.
+    // Fold them before building the projection; keeping only the last row
+    // would silently drop sessions and token usage from the HUD.
+    const currentDates = new Set(dates)
+    const previousSet = new Set(previousDates)
     const byDate = new Map<string, HistoryDailyStat>()
+    const byAgent = new Map<string, HistoryDailyStat>()
+    let previousTotals = emptyDaily('previous')
     for (const row of rows) {
       const date = String(row.local_date)
-      const current = byDate.get(date) ?? emptyDaily(date)
-      byDate.set(date, addDaily(current, dailyStat(date, row)))
+      const stat = dailyStat(date, row)
+      if (previousSet.has(date)) {
+        previousTotals = addDaily(previousTotals, stat)
+        continue
+      }
+      if (!currentDates.has(date)) continue
+      byDate.set(date, addDaily(byDate.get(date) ?? emptyDaily(date), stat))
+      const adapterId = safeText(row.adapter_id, 'unknown')
+      byAgent.set(adapterId, addDaily(byAgent.get(adapterId) ?? emptyDaily(adapterId), stat))
     }
-    const days = dates.map(localDate => {
-      return byDate.get(localDate) ?? emptyDaily(localDate)
-    })
+    const days = dates.map(localDate => byDate.get(localDate) ?? emptyDaily(localDate))
     const totals = days.reduce((sum, day) => addDaily(sum, day), emptyDaily('total'))
-    const agentParams = safeProject
-      ? [safePet, LOCAL_USAGE_PET_ID, safeProject, ...dates]
-      : [safePet, LOCAL_USAGE_PET_ID, ...dates]
-    const agents = this.statement(`
-      SELECT adapter_id,
-             SUM(sessions_completed) AS sessions_completed,
-             SUM(sessions_failed) AS sessions_failed,
-             SUM(active_ms) AS active_ms,
-             SUM(token_input) AS token_input,
-             SUM(token_output) AS token_output,
-             SUM(token_cache_read) AS token_cache_read,
-             SUM(token_cache_write) AS token_cache_write,
-             MAX(CASE token_quality WHEN 'exact' THEN 2 WHEN 'estimated' THEN 1 ELSE 0 END) AS token_quality_rank
-      FROM daily_stats
-      WHERE (pet_id = ? OR pet_id = ?) ${projectClause} AND local_date IN (${placeholders})
-      GROUP BY adapter_id
-      ORDER BY (token_input + token_output) DESC, active_ms DESC, adapter_id ASC
-    `).all(...agentParams).map(row => ({
-      adapterId: safeText(row.adapter_id, 'unknown'),
-      sessionsCompleted: Math.max(0, asInteger(row.sessions_completed)),
-      sessionsFailed: Math.max(0, asInteger(row.sessions_failed)),
-      activeMs: Math.max(0, asInteger(row.active_ms)),
-      tokenInput: Math.max(0, asInteger(row.token_input)),
-      tokenOutput: Math.max(0, asInteger(row.token_output)),
-      tokenCacheRead: Math.max(0, asInteger(row.token_cache_read)),
-      tokenCacheWrite: Math.max(0, asInteger(row.token_cache_write)),
-      tokenQuality: asInteger(row.token_quality_rank) >= 2
-        ? 'exact'
-        : asInteger(row.token_quality_rank) >= 1 ? 'estimated' : 'none',
-    } satisfies HistoryAgentStat))
+    const agents: HistoryAgentStat[] = [...byAgent.entries()]
+      .map(([adapterId, { localDate: _ignored, ...agent }]) => ({ adapterId, ...agent }))
+      .sort((a, b) =>
+        (b.tokenInput + b.tokenOutput) - (a.tokenInput + a.tokenOutput)
+        || b.activeMs - a.activeMs
+        || a.adapterId.localeCompare(b.adapterId))
     const quotaRow = this.statement(
       'SELECT payload_json FROM quota_snapshots ORDER BY updated_at DESC LIMIT 1',
     ).get()
@@ -635,8 +623,11 @@ export class HistoryStore {
       petId: safePet,
       ...(safeProject ? { projectId: safeProject } : {}),
       retentionDays: this.retentionDays,
+      rangeDays: span,
+      localDate: today,
       days,
       totals,
+      previousTotals: { ...previousTotals, localDate: 'previous' },
       agents,
       tokenQuality: totals.tokenQuality,
       // Mirrors the cutoff LocalUsageReader.scanNow() actually applies, so
@@ -649,22 +640,49 @@ export class HistoryStore {
     }
   }
 
-  getExport(petId = DEFAULT_PET_ID, projectId?: string): HistoryExport {
+  getExport(petId = DEFAULT_PET_ID, projectId?: string, rangeDays: number = 7, growth?: unknown): HistoryExport {
+    const exportedAt = this.now()
     return {
       schemaVersion: 1,
-      exportedAt: this.now(),
-      summary: this.getSummary(petId, projectId),
+      exportedAt,
+      summary: this.getSummary(petId, projectId, rangeDays),
+      meta: {
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown',
+        generatedAtLocal: `${this.localDate(exportedAt)} ${new Date(exportedAt).toTimeString().slice(0, 8)}`,
+        tokenBasis: 'tokenInput = fresh input only; tokenCacheRead/tokenCacheWrite are prompt-cache tokens counted separately; tokenOutput = output',
+        dayDefinition: 'A day is the local calendar date (in the time zone above) of the event time',
+      },
+      ...(growth === undefined ? {} : { growth }),
     }
   }
 
-  getAchievementCompletedSessions(): AchievementCompletedSessionFact[] {
+  /** When achievements were last reconciled from history (0 = never). */
+  getAchievementReconciledAt(): number {
+    const value = Number(this.statement('SELECT value FROM history_metadata WHERE key = ?').get(ACHIEVEMENT_RECONCILED_KEY)?.value)
+    return Number.isFinite(value) && value > 0 ? value : 0
+  }
+
+  setAchievementReconciledAt(timestamp: number): void {
+    this.statement(`
+      INSERT INTO history_metadata(key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(ACHIEVEMENT_RECONCILED_KEY, String(Math.max(0, Math.floor(timestamp))))
+  }
+
+  /**
+   * Completed-session facts, optionally only those at/after `sinceMs`. A later
+   * reconcile passes the previous marker so start-up no longer re-reads and
+   * re-hashes the whole history; the achievement store de-duplicates by
+   * session key, so overlap with already-recorded sessions is harmless.
+   */
+  getAchievementCompletedSessions(sinceMs = 0): AchievementCompletedSessionFact[] {
     const rows = this.statement(`
       SELECT event_id, adapter_id, agent_id, session_id, project_id, pet_id, occurred_at, state
       FROM events
-      WHERE state = 'success' AND session_id IS NOT NULL
+      WHERE state = 'success' AND session_id IS NOT NULL AND occurred_at >= ?
       ORDER BY occurred_at ASC, event_id ASC
       LIMIT ?
-    `).all(MAX_ACHIEVEMENT_BACKFILL_EVENTS)
+    `).all(Math.max(0, Math.floor(sinceMs)), MAX_ACHIEVEMENT_BACKFILL_EVENTS)
     const successfulSessions = new Set<string>()
     const completed: AchievementCompletedSessionFact[] = []
     for (const row of rows) {
@@ -1141,7 +1159,10 @@ function normalizeQuotaSnapshot(value: unknown): HistoryQuotaSnapshot | null {
     const name = safeText(provider.name)
     if (!id || !name || !Array.isArray(provider.windows)) continue
     const windows: HistoryQuotaWindow[] = []
-    for (const entry of provider.windows.slice(0, MAX_QUOTA_WINDOWS)) {
+    // Windows kept after a failed refresh are stale readings; never persist
+    // them as if they were measured at this snapshot's time.
+    const retained = provider.stale === true ? [] : provider.windows
+    for (const entry of retained.slice(0, MAX_QUOTA_WINDOWS)) {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
       const window = entry as Record<string, unknown>
       const windowId = safeText(window.id)

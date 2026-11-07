@@ -120,6 +120,82 @@ test('project routing snapshots XP to the routed pet and keeps route changes sep
   })
 })
 
+test('a success event reports each award plus the level boundary it crossed', () => {
+  withStore(store => {
+    const result = store.handleEvent(event('success', 1_700_000_000_000))
+    assert.deepEqual(result.awards.map(award => award.ruleId).sort(), [
+      'v1.first-completion-of-day',
+      'v1.session-completed',
+    ])
+    assert.equal(result.levelBefore, 1)
+    assert.equal(result.stageBefore, 'egg')
+    // Replaying the same event grants nothing: awards are idempotent.
+    assert.deepEqual(store.handleEvent(event('success', 1_700_000_000_000)).awards, [])
+  })
+})
+
+test('insights expose today XP, the claimed daily bonus, recent ledger and a pace estimate', () => {
+  const day = 24 * 60 * 60 * 1000
+  const base = 1_700_000_000_000
+  const directory = mkdtempSync(join(tmpdir(), 'agent-pets-progression-insights-'))
+  let now = base
+  const store = new ProgressionStore(join(directory, 'progression.sqlite'), { now: () => now })
+  try {
+    assert.equal(store.getInsights().firstCompletionClaimed, false)
+    assert.equal(store.getInsights().averageDailyXp, null)
+    for (let index = 0; index < 3; index += 1) {
+      now = base + index * day
+      store.handleEvent(event('success', now, `s-${index}`))
+    }
+    const insights = store.getInsights()
+    assert.equal(insights.firstCompletionClaimed, true)
+    assert.ok(insights.todayXp >= 30)
+    assert.ok(insights.recent.length >= 2 && insights.recent[0].occurredAt >= insights.recent[1].occurredAt)
+    assert.ok(insights.averageDailyXp !== null && insights.averageDailyXp > 0)
+    assert.equal(store.getRecentLedger('aang-airbender', 1).length, 1)
+  } finally {
+    store.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('a late event for an earlier day pays XP but never resets the streak', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'agent-pets-progression-late-'))
+  const day = 24 * 60 * 60 * 1000
+  const base = Date.UTC(2026, 2, 10, 12)
+  const store = new ProgressionStore(join(directory, 'progression.sqlite'), { now: () => base + 3 * day })
+  try {
+    store.handleEvent(event('success', base, 'd1'))
+    store.handleEvent(event('success', base + day, 'd2'))
+    const head = store.handleEvent(event('success', base + 2 * day, 'd3')).snapshot
+    assert.equal(head.currentStreak, 3)
+    const late = store.handleEvent(event('success', base - 5 * day, 'late'))
+    assert.ok(late.awards.length > 0)
+    assert.equal(late.snapshot.currentStreak, 3)
+    assert.equal(late.snapshot.lastActiveLocalDate, head.lastActiveLocalDate)
+  } finally {
+    store.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('streak continues across a DST change when days are identified by local date', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'agent-pets-progression-dst-'))
+  const dates = ['2026-03-07', '2026-03-08', '2026-03-09']
+  const store = new ProgressionStore(join(directory, 'progression.sqlite'), {
+    now: () => 0,
+    localDate: timestamp => dates[timestamp] ?? '2026-03-09',
+  })
+  try {
+    let last = store.getSnapshot()
+    for (let index = 0; index < dates.length; index += 1) last = store.handleEvent(event('success', index, `dst-${index}`)).snapshot
+    assert.equal(last.currentStreak, 3)
+  } finally {
+    store.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test('integration test events from the Setup Wizard never award XP', () => {
   withStore((store) => {
     const before = store.getSnapshot('default')

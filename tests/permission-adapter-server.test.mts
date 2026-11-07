@@ -188,3 +188,20 @@ test('title and patterns both reach the broker view, redacted and bounded', asyn
     assert.equal(view.truncatedChars, 280)
   })
 })
+
+test('create budget is per plugin instance, not shared across the whole host', async () => {
+  await withServer(async ({ post }) => {
+    for (let index = 0; index < 60; index += 1) {
+      const response = await post('/v1/permission/request', permission({
+        permissionId: `per-${index}`, sessionId: `ses-${index}`,
+      }))
+      assert.equal(response.status, 201)
+    }
+    const limited = await post('/v1/permission/request', permission({ permissionId: 'per-over', sessionId: 'ses-over' }))
+    assert.equal(limited.status, 429)
+    const other = await post('/v1/permission/request', permission({
+      instanceId: 'plugin-2', permissionId: 'per-other', sessionId: 'ses-other',
+    }))
+    assert.equal(other.status, 201)
+  })
+})

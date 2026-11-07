@@ -2,10 +2,12 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import DesktopPet from '@/components/DesktopPet.vue'
+import GrowthCelebration from '@/components/growth/GrowthCelebration.vue'
 import StatusPanel from '@/components/StatusPanel.vue'
 import SetupWizard from '@/components/SetupWizard.vue'
 import ProjectMcpPanel from '@/components/ProjectMcpPanel.vue'
-import { playCue, type SoundCue } from '@/utils/sound'
+import { playCue, setSoundVolume, type SoundCue } from '@/utils/sound'
+import { shouldPlayCue } from '@/utils/sound-policy'
 import type { DesktopPreferences } from '@/types/desktop'
 import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
 import { setLocale as applyLocale } from '@/i18n'
@@ -47,6 +49,7 @@ let cleanupPanelOpenSettings: (() => void) | null = null
 let cleanupDesktopPreferences: (() => void) | null = null
 let cleanupPetWindowMode: (() => void) | null = null
 let cleanupProgression: (() => void) | null = null
+let cleanupProgressionAwarded: (() => void) | null = null
 let cleanupAchievements: (() => void) | null = null
 let cleanupAchievementUnlock: (() => void) | null = null
 let cleanupQuotaUpdated: (() => void) | null = null
@@ -262,15 +265,33 @@ function handleStorage(e: StorageEvent) {
   }
 }
 
+function soundGate() {
+  return {
+    soundEnabled: store.soundEnabled,
+    dndEnabled: store.dndEnabled,
+    soundOnPermission: store.soundOnPermission,
+    soundOnError: store.soundOnError,
+    soundOnSuccess: store.soundOnSuccess,
+    petVisible: document.visibilityState === 'visible',
+  }
+}
+
+watch(() => store.soundVolume, setSoundVolume, { immediate: true })
+
+// A broker request can arrive without a status event (relay timing), so the
+// permission cue also follows new requests; playCue throttles the overlap.
+watch(() => store.permissionRequests.map(request => request.requestId).join(','), (ids, previous) => {
+  if (isPanelWindow || !store.desktopPreferencesReady || !ids) return
+  const known = new Set((previous ?? '').split(','))
+  if (ids.split(',').some(id => !known.has(id))) {
+    playCueIfAllowed('waiting-permission')
+  }
+})
+
 // Both windows' stores process every event identically, so only the pet
 // window actually plays audio — otherwise it'd sound twice.
 function playCueIfAllowed(cue: SoundCue): void {
-  if (
-    !isPanelWindow
-    && store.desktopPreferencesReady
-    && store.soundEnabled
-    && !store.dndEnabled
-  ) {
+  if (!isPanelWindow && store.desktopPreferencesReady && shouldPlayCue(cue, soundGate())) {
     playCue(cue)
   }
 }
@@ -350,6 +371,11 @@ onMounted(() => {
   if (electronAPI?.onProgressionUpdated) {
     cleanupProgression = electronAPI.onProgressionUpdated((snapshot: unknown) => {
       store.setProgressionSnapshot(snapshot)
+    })
+  }
+  if (electronAPI?.onProgressionAwarded) {
+    cleanupProgressionAwarded = electronAPI.onProgressionAwarded((event: unknown) => {
+      store.handleProgressionAwarded(event)
     })
   }
   if (electronAPI?.onAchievementsUpdated) {
@@ -459,6 +485,7 @@ onUnmounted(() => {
   cleanupDesktopPreferences?.()
   cleanupPetWindowMode?.()
   cleanupProgression?.()
+  cleanupProgressionAwarded?.()
   cleanupAchievements?.()
   cleanupAchievementUnlock?.()
   cleanupQuotaUpdated?.()
@@ -489,7 +516,10 @@ onUnmounted(() => {
         <ProjectMcpPanel v-if="store.showProjectMcpPanel" @close="store.closeProjectMcpPanel()" />
       </Transition>
     </template>
-    <DesktopPet v-else />
+    <template v-else>
+      <DesktopPet />
+      <GrowthCelebration />
+    </template>
   </div>
 </template>
 
@@ -519,12 +549,12 @@ onUnmounted(() => {
   min-height: 28px;
   border: 1px solid transparent;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--scrollbar-thumb);
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.34);
+  background: var(--scrollbar-thumb-hover);
   background-clip: padding-box;
 }
 

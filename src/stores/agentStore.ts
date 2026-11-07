@@ -49,6 +49,14 @@ import { SUCCESS_DISPLAY_MS } from '@/utils/pet-motion-plan'
 import { readPetFeedbackDefaults } from '@/utils/pet-defaults'
 import { SESSION_REMOVE_MS, sessionLifecycleAction } from '@/utils/session-lifecycle'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
+import {
+  levelUpFromAward,
+  normalizeProgressionAwardEvent,
+  RECENT_AWARD_LIMIT,
+  recentAwardsFromEvent,
+  type LevelUpEvent,
+  type RecentAward,
+} from '@/utils/progression-events'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
 import {
   INITIAL_PANEL_ROUTE,
@@ -118,6 +126,8 @@ const PRESENTATION_MAX_QUEUE = 8
 const PRESENTATION_HIGH_PRIORITY = STATE_PRIORITY['waiting-input']
 
 type QuotaUsage = Awaited<ReturnType<NonNullable<Window['electronAPI']>['getQuotaUsage']>>
+type QuotaProviderErrorKind = NonNullable<QuotaUsage['providers'][number]['errorKind']>
+const QUOTA_ERROR_KINDS = new Set<string>(['not-signed-in', 'expired', 'timeout', 'rate-limited', 'unavailable'])
 
 function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
@@ -161,6 +171,11 @@ function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
       ...(typeof provider.plan === 'string' ? { plan: provider.plan.slice(0, MAX_QUOTA_TEXT_LENGTH) } : {}),
       windows,
       ...(typeof provider.error === 'string' ? { error: provider.error.slice(0, 240) } : {}),
+      ...(QUOTA_ERROR_KINDS.has(provider.errorKind as string) ? { errorKind: provider.errorKind as QuotaProviderErrorKind } : {}),
+      ...(typeof provider.fetchedAt === 'string' && Number.isFinite(Date.parse(provider.fetchedAt))
+        ? { fetchedAt: new Date(provider.fetchedAt).toISOString() }
+        : {}),
+      ...(provider.stale === true ? { stale: true } : {}),
     })
   }
   return { updatedAt: new Date(raw.updatedAt).toISOString(), providers }
@@ -250,6 +265,11 @@ export const useAgentStore = defineStore('agent', () => {
   const quotaUsage = shallowRef<QuotaUsage | null>(null)
   const quotaLoading = ref(false)
   const quotaError = ref('')
+  // Seconds a forced refresh must wait (cooldown answer from the main
+  // process), or null. Lets the UI say "wait N s" instead of silently no-op.
+  const quotaThrottleSec = ref<number | null>(null)
+  // When the last refresh request completed (ms), for "next auto refresh".
+  const quotaCheckedAt = ref(0)
   // Bumped whenever a Codex/Claude session reaches a terminal state, i.e.
   // right after quota was actually spent. App.vue watches this and schedules
   // one settled refresh, so the meter tracks real usage instead of only the
@@ -362,6 +382,10 @@ export const useAgentStore = defineStore('agent', () => {
   // Off by default so the app doesn't surprise anyone with sudden audio;
   // opt-in via the Settings toggle.
   const soundEnabled = ref(localStorage.getItem('agent-pet-sound') === '1')
+  const soundVolume = ref(60)
+  const soundOnPermission = ref(true)
+  const soundOnError = ref(true)
+  const soundOnSuccess = ref(true)
 
   // Off by default — showing one pet per active tool family is a bigger
   // visual/layout change than the other additions, so it stays opt-in
@@ -388,6 +412,12 @@ export const useAgentStore = defineStore('agent', () => {
   const progression = shallowRef<ProgressionSnapshot | null>(null)
   const achievements = shallowRef<AchievementSnapshot | null>(null)
   const achievementUnlock = ref<AchievementUnlock | null>(null)
+  // XP the main process actually granted (newest first), and the last
+  // level-up/evolution. Both come only from main's award notifications, so a
+  // cold load or a replayed event can never look like a fresh celebration.
+  const recentAwards = shallowRef<RecentAward[]>([])
+  const levelUpEvent = shallowRef<LevelUpEvent | null>(null)
+  let awardSequence = 0
   const presentationQueue = ref<PresentationIntent[]>([])
   const presentationActive = ref<PresentationIntent | null>(null)
   const presentationReaction = ref<{
@@ -466,6 +496,23 @@ export const useAgentStore = defineStore('agent', () => {
     localStorage.setItem('agent-pet-mood', String(MOOD_BASELINE))
     localStorage.setItem('agent-pet-mood-date', todayKey())
     localStorage.setItem('agent-pet-mood-version', MOOD_SYSTEM_VERSION)
+  }
+
+  // Petting the pet lifts its mood a little, capped per day so it cannot be farmed.
+  const PAT_DAILY_LIMIT = 5
+
+  function patPet(): boolean {
+    let count = 0
+    try {
+      const [day, saved] = (localStorage.getItem('agent-pet-pat') ?? '').split(':')
+      if (day === todayKey()) count = Number(saved) || 0
+    } catch {}
+    if (count >= PAT_DAILY_LIMIT) return false
+    try {
+      localStorage.setItem('agent-pet-pat', `${todayKey()}:${count + 1}`)
+    } catch {}
+    adjustMood(1)
+    return true
   }
 
   function setMoodVisualsEnabled(enabled: boolean) {
@@ -829,6 +876,10 @@ export const useAgentStore = defineStore('agent', () => {
     updateDesktopPreferences({ soundEnabled: enabled })
   }
 
+  function setSoundOption(patch: Pick<DesktopPreferencesPatch, 'soundVolume' | 'soundOnPermission' | 'soundOnError' | 'soundOnSuccess'>) {
+    updateDesktopPreferences(patch)
+  }
+
   // --- 桌面偏好設定（同步自 Electron 主行程） -------------------------------
 
   function applyDesktopPreferences(preferences: DesktopPreferences) {
@@ -845,6 +896,10 @@ export const useAgentStore = defineStore('agent', () => {
     rightClickHideEnabled.value = preferences.rightClickHideEnabled
     desktopVisibilityCapabilities.value = preferences.visibilityCapabilities
     soundEnabled.value = preferences.soundEnabled
+    soundVolume.value = preferences.soundVolume
+    soundOnPermission.value = preferences.soundOnPermission
+    soundOnError.value = preferences.soundOnError
+    soundOnSuccess.value = preferences.soundOnSuccess
     launchAtStartup.value = preferences.launchAtStartup
     launchAtStartupSupported.value = preferences.launchAtStartupSupported
     desktopPreferencesReady.value = true
@@ -1010,6 +1065,17 @@ export const useAgentStore = defineStore('agent', () => {
     return true
   }
 
+  function handleProgressionAwarded(value: unknown): boolean {
+    const event = normalizeProgressionAwardEvent(value)
+    if (!event) return false
+    const fresh = recentAwardsFromEvent(event, awardSequence)
+    awardSequence += fresh.length
+    recentAwards.value = [...fresh, ...recentAwards.value].slice(0, RECENT_AWARD_LIMIT)
+    const levelUp = levelUpFromAward(event, `${event.petId}:${event.levelAfter}:${event.at}`)
+    if (levelUp) levelUpEvent.value = levelUp
+    return true
+  }
+
   function setAchievementsSnapshot(value: unknown): boolean {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false
     const raw = value as Partial<AchievementSnapshot>
@@ -1039,6 +1105,13 @@ export const useAgentStore = defineStore('agent', () => {
         || typeof item.unlocked !== 'boolean'
         || (item.unlockedAt !== undefined && (!Number.isSafeInteger(item.unlockedAt) || item.unlockedAt < 0))
         || (item.tokenQuality !== 'none' && item.tokenQuality !== 'estimated' && item.tokenQuality !== 'exact')
+        || item.category !== definition.category
+        || typeof item.hidden !== 'boolean'
+        || !item.progress
+        || !Number.isSafeInteger(item.progress.current)
+        || !Number.isSafeInteger(item.progress.target)
+        || item.progress.current < 0
+        || item.progress.target <= 0
       ) return null
       seen.add(definition.id)
       return {
@@ -1050,6 +1123,9 @@ export const useAgentStore = defineStore('agent', () => {
         unlocked: item.unlocked,
         ...(item.unlockedAt === undefined ? {} : { unlockedAt: item.unlockedAt }),
         tokenQuality: item.tokenQuality,
+        category: definition.category,
+        hidden: item.hidden,
+        progress: { current: Math.min(item.progress.current, item.progress.target), target: item.progress.target },
       }
     })
     if (normalized.some(item => item === null)) return false
@@ -1282,6 +1358,12 @@ export const useAgentStore = defineStore('agent', () => {
       return event.state
     }
 
+    if (event.state !== 'waiting-permission' && dismissedPermissionNotices.value.has(key)) {
+      const next = new Set(dismissedPermissionNotices.value)
+      next.delete(key)
+      dismissedPermissionNotices.value = next
+    }
+
     if (event.state === 'waiting-permission' && prevState !== 'waiting-permission') {
       return 'waiting-permission'
     }
@@ -1411,12 +1493,16 @@ export const useAgentStore = defineStore('agent', () => {
     if (!force && quotaUsage.value && now - quotaRequestedAt < QUOTA_REFRESH_MS) return quotaUsage.value
     quotaLoading.value = true
     quotaError.value = ''
+    quotaThrottleSec.value = null
     quotaRequestedAt = now
     try {
       const usage = await window.electronAPI.getQuotaUsage(force)
+      const throttled = (usage as { throttled?: { retryInSec?: unknown } } | null)?.throttled?.retryInSec
+      if (typeof throttled === 'number' && Number.isFinite(throttled)) quotaThrottleSec.value = Math.max(1, Math.round(throttled))
       if (!setQuotaUsage(usage)) {
         quotaError.value = 'Quota service returned invalid data.'
       }
+      quotaCheckedAt.value = Date.now()
       return quotaUsage.value
     } catch (error) {
       quotaError.value = translateBackendError(error instanceof Error ? error.message : t('quotaLoadFailed'))
@@ -1541,15 +1627,50 @@ export const useAgentStore = defineStore('agent', () => {
     return s.toolName
   })
 
+  // Codex / Claude can only *report* a permission wait; the answer has to be
+  // given in the original tool. Every such session is listed (not just the
+  // highest-priority one) so the user can see how many agents are blocked.
+  const dismissedPermissionNotices = shallowRef<ReadonlySet<string>>(new Set())
+
+  const permissionNoticeItems = computed(() => (
+    sessionList.value
+      .filter(session => (
+        session.state === 'waiting-permission'
+        && session.permissionNotice?.responseMode === 'external_only'
+        && !dismissedPermissionNotices.value.has(session.key)
+      ))
+      .map(session => ({
+        key: session.key,
+        source: SOURCE_FAMILIES.find(family => family.sources.includes(session.source))?.label
+          ?? SOURCE_LABELS[session.source] ?? session.source,
+        project: session.project ?? '',
+        desktop: session.source.endsWith('-desktop'),
+      }))
+  ))
+
   const permissionNotice = computed(() => {
-    const session = highestPrioritySession.value
-    if (session?.state !== 'waiting-permission') return null
-    if (session.permissionNotice?.responseMode !== 'external_only') return null
+    const items = permissionNoticeItems.value
+    const first = items[0]
+    if (!first) return null
+    const multiple = items.length > 1
     return {
-      title: t('permissionNeeded'),
-      detail: t('returnToTerminal'),
+      title: multiple
+        ? t('permission.noticeTitleMulti', { count: items.length })
+        : t('permission.noticeTitle', { source: first.source, project: first.project || t('projectUnknown') }),
+      detail: multiple
+        ? t('permission.noticeExternalOnly')
+        : first.desktop
+          ? t('permission.noticeWhereApp', { source: first.source })
+          : t('returnToTerminal'),
+      items,
     }
   })
+
+  function dismissPermissionNotice(): void {
+    const next = new Set(dismissedPermissionNotices.value)
+    for (const item of permissionNoticeItems.value) next.add(item.key)
+    dismissedPermissionNotices.value = next
+  }
 
   function moodLabel(value: number): PresentationMood {
     if (value >= 70) return 'happy'
@@ -1946,6 +2067,8 @@ export const useAgentStore = defineStore('agent', () => {
     quotaUsage,
     quotaLoading,
     quotaError,
+    quotaThrottleSec,
+    quotaCheckedAt,
     quotaByFamily,
     quotaStaleSignal,
     hasQuotaCapableSessions,
@@ -1970,6 +2093,11 @@ export const useAgentStore = defineStore('agent', () => {
     mood,
     moodVisualsEnabled,
     soundEnabled,
+    soundVolume,
+    soundOnPermission,
+    soundOnError,
+    soundOnSuccess,
+    setSoundOption,
     dndEnabled,
     notificationsEnabled,
     permissionBubbleEnabled,
@@ -2005,6 +2133,7 @@ export const useAgentStore = defineStore('agent', () => {
     activePetId,
     activityText,
     permissionNotice,
+    dismissPermissionNotice,
     presentationSay,
     presentationReaction,
     handlePresentationIntent,
@@ -2021,6 +2150,9 @@ export const useAgentStore = defineStore('agent', () => {
     progression,
     achievements,
     achievementUnlock,
+    recentAwards,
+    levelUpEvent,
+    handleProgressionAwarded,
     setProgressionSnapshot,
     setAchievementsSnapshot,
     handleAchievementUnlocked,
@@ -2079,6 +2211,7 @@ export const useAgentStore = defineStore('agent', () => {
     getPetForFamily,
     resetMood,
     setMoodVisualsEnabled,
+    patPet,
     resizePetWindow,
     loadPets,
     refreshProjectPets,

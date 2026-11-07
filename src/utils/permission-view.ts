@@ -76,3 +76,43 @@ export function classifyDecideResponse(
   if (status === 'cancelled' || status === 'allowed' || status === 'denied') return { ok: false, kind: 'cancelled' }
   return { ok: false, kind: response.error === 'conflict' ? 'conflict' : 'error' }
 }
+
+/** Buttons stay inert this long after a request appears, so a click aimed at the previous one cannot land on it. */
+export const PERMISSION_CLICK_GUARD_MS = 300
+
+export function isPermissionClickArmed(shownAt: number, now: number): boolean {
+  return now - shownAt >= PERMISSION_CLICK_GUARD_MS
+}
+
+export interface PermissionQueueGroup {
+  /** First request of the group; its requestId is the group's identity. */
+  first: PermissionRequestView
+  requestIds: string[]
+  count: number
+}
+
+/**
+ * Folds consecutive requests of the same session asking for the same action
+ * with the same content. Each request keeps its own id: folding only changes
+ * how the list is drawn, never what a decision applies to.
+ */
+export function groupPermissionRequests(requests: ReadonlyArray<PermissionRequestView>): PermissionQueueGroup[] {
+  const groups: PermissionQueueGroup[] = []
+  for (const request of requests) {
+    const last = groups[groups.length - 1]
+    if (
+      last
+      && last.first.agentId === request.agentId
+      && last.first.sessionId === request.sessionId
+      && last.first.action === request.action
+      && last.first.description === request.description
+      && last.first.details.join('\n') === request.details.join('\n')
+    ) {
+      last.requestIds.push(request.requestId)
+      last.count += 1
+    } else {
+      groups.push({ first: request, requestIds: [request.requestId], count: 1 })
+    }
+  }
+  return groups
+}

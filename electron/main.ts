@@ -1,5 +1,5 @@
 
-import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol, powerMonitor, Notification } from 'electron'
+import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol, powerMonitor, Notification, shell, Menu } from 'electron'
 
 import { join } from 'path'
 
@@ -94,16 +94,20 @@ import { registerPetsIpc } from './ipc/pets'
 import { registerReliabilityIpc } from './ipc/reliability'
 
 import { registerPetMotionIpc } from './ipc/pet-motion'
+import { registerPetContextMenuIpc } from './ipc/pet-context-menu'
+import { t as translate } from '../src/i18n'
 
 
 
 
 import { mainState } from './main/state'
+import { createShutdownCoordinator } from './main/shutdown'
+import { disposeMainTimers } from './main/dispose-timers'
 import { flushMainLog, logMain, teeConsoleToLog } from './diagnostics/main-log'
 import { acquireRunMarker } from './diagnostics/session-marker'
 import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
 import { setPluginPanelWindowBounds } from './main/runtime'
-import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleEdgeRedock, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt } from './main/runtime'
+import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, cancelHistoryStoreRetry, localPorts, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode } from './main/runtime'
 
 
 
@@ -263,7 +267,17 @@ const startupLog = (level: 'error' | 'warn', message: string, detail?: unknown) 
   console.error(message, ...(detail === undefined ? [] : [detail]))
   logMain(level, 'startup', message)
 }
-const startupStep = (name: string, fn: () => void | Promise<void>) => runStartupStep(name, fn, startupLog, startupResults)
+const startupTimings: Array<{ name: string; startMs: number; durationMs: number }> = []
+const startupStep = async (name: string, fn: () => void | Promise<void>) => {
+  const startMs = performance.now()
+  try {
+    return await runStartupStep(name, fn, startupLog, startupResults)
+  } finally {
+    const durationMs = performance.now() - startMs
+    performance.mark(`agent-pets:startup:${name}`)
+    startupTimings.push({ name, startMs: Math.round(startMs), durationMs: Math.round(durationMs * 10) / 10 })
+  }
+}
 
 async function showStartupFailureDialog(): Promise<void> {
   try {
@@ -287,7 +301,7 @@ async function showStartupFailureDialog(): Promise<void> {
 async function bootstrapApp(): Promise<void> {
   if (!hasSingleInstanceLock) return
 
-  registerRuntimeDiagnostics(() => startupResults.map(result => ({ name: result.name, ok: result.ok })), () => crashGuard.stats(), runMarker.previousRunUnclean)
+  registerRuntimeDiagnostics(() => startupResults.map(result => ({ name: result.name, ok: result.ok, ...startupTimings.find(timing => timing.name === result.name) })), () => crashGuard.stats(), runMarker.previousRunUnclean)
   if (runMarker.previousRunUnclean) {
     logMain('warn', 'startup', 'previous run did not exit cleanly')
     try {
@@ -310,7 +324,6 @@ async function bootstrapApp(): Promise<void> {
     )
   })
   await startupStep('project-routing', createProjectRoutingServices)
-  await startupStep('plugins', createPluginServices)
   let permissionToken = ''
   let presentationToken = ''
   await startupStep('tokens', () => {
@@ -320,13 +333,17 @@ async function bootstrapApp(): Promise<void> {
   await startupStep('protocol', configureSecureProtocol)
   await startupStep('windows-fullscreen', createWindowsFullscreenServices)
   await startupStep('desktop', createDesktopServices)
+  // The pet becomes visible before plugins, history or achievements spin up,
+  // so a slow plugin directory or disk never delays the first paint.
   await startupStep('pet-window', createPetWindow)
   await startupStep('panel-window', createPanelWindow)
+  await startupStep('plugins', createPluginServices)
   await startupStep('fullscreen-targets', () => {
     syncWindowsFullscreenTargets()
     mainState.windowsFullscreenDetector?.refresh()
   })
   await startupStep('power-monitor', () => {
+    powerMonitor.on('resume', () => mainState.pluginHostWindow?.handleSystemResume())
     powerMonitor.on('on-battery', broadcastPowerSaveState)
     powerMonitor.on('on-ac', broadcastPowerSaveState)
     broadcastPowerSaveState()
@@ -365,7 +382,10 @@ async function bootstrapApp(): Promise<void> {
       let progressionResult: ReturnType<ProgressionStore['handleEvent']> | undefined
       try {
         progressionResult = mainState.progressionStore?.handleEvent(event, event.routedPetId)
-        if (progressionResult) broadcastProgression(progressionResult.snapshot)
+        if (progressionResult) {
+          broadcastProgression(progressionResult.snapshot)
+          broadcastProgressionAwards(progressionResult)
+        }
       } catch (error) {
         console.error('Progression event handling failed', error)
       }
@@ -398,14 +418,20 @@ async function bootstrapApp(): Promise<void> {
     },
     normalizeIngressEvent,
     (() => {
-      const health = serverHealthTracker().register('event', 17373)
-      return { onStatus: health.onStatus, onPersistentFailure: health.onPersistentFailure, onHandle: health.attach }
+      const health = serverHealthTracker().register('event', localPorts().event)
+      return { port: localPorts().event, onStatus: health.onStatus, onPersistentFailure: health.onPersistentFailure, onHandle: health.attach }
     })(),
   )
   })
 
   registerReliabilityIpc({
     ipcMain,
+    isTrustedIpcSender,
+    reportRendererError: report => {
+      mainState.rendererErrorCount += 1
+      logMain('error', `renderer:${report.window}`, `${report.kind}: ${report.message}`, report.stack)
+    },
+    reloadRenderers: reloadPetRenderers,
     assertTrustedIpcSender,
     getPanelWindow: () => mainState.panelWindow,
     getServerHealth: () => serverHealthTracker().snapshot(),
@@ -447,6 +473,31 @@ async function bootstrapApp(): Promise<void> {
     smoothWalk: true,
   })
 
+  registerPetContextMenuIpc({
+    ipcMain,
+    getPetWindow: () => mainState.petWindow,
+    isTrustedIpcSender,
+    actions: {
+      isDndEnabled: () => currentDesktopPreferences().dndEnabled,
+      setDnd: enabled => { updateDesktopPreferences({ dndEnabled: enabled }) },
+      getPetMode: () => mainState.petWindowMode,
+      toggleMiniMode,
+      openPanel: () => showPanelWindow('restore'),
+      openSettings: () => showPanelWindow('settings'),
+      hidePet: hidePetWindow,
+      quit: () => app.quit(),
+    },
+    labels: () => ({
+      dnd: translate('dnd'),
+      miniMode: translate('miniMode'),
+      openPanel: translate('openControlPanel'),
+      openSettings: translate('openSettings'),
+      hidePet: translate('hidePets'),
+      quit: translate('quit'),
+    }),
+    popup: (template, window) => { Menu.buildFromTemplate(template).popup({ window }) },
+  })
+
   registerWindowControlsIpc({
     ipcMain,
     isTrustedIpcSender,
@@ -483,7 +534,7 @@ async function bootstrapApp(): Promise<void> {
     showPanelWindow: view => showPanelWindow(view),
     quit: () => app.quit(),
     relaunch: () => app.relaunch(),
-    exit: code => app.exit(code),
+    exit: code => { shutdown.runNow(); app.exit(code) },
     setPresentationStatus: status => { mainState.presentationStatusProjection = status },
     updatePluginAgentStatus: status => { mainState.pluginAgentStatusController?.update(status) },
   })
@@ -516,7 +567,10 @@ async function bootstrapApp(): Promise<void> {
     ipcMain,
     assertTrustedIpcSender,
     getPetWindow: () => mainState.petWindow,
+    getPanelWindow: () => mainState.panelWindow,
     getPermissionBroker: () => mainState.permissionBroker,
+    listAudit: limit => listPermissionAuditEntries(limit),
+    clearAudit: () => clearPermissionAuditLog(),
   })
 
   registerAdapterIpc({
@@ -550,6 +604,13 @@ async function bootstrapApp(): Promise<void> {
       ? dialog.showSaveDialog(window, options)
       : dialog.showSaveDialog(options),
     writeJsonAtomic,
+    writeTextFile: (filePath, text) => fs.writeFileSync(filePath, text, { encoding: 'utf8', mode: 0o600 }),
+    revealPath: filePath => shell.showItemInFolder(filePath),
+    growthExport: petId => ({
+      progression: mainState.progressionStore?.getSnapshot(petId) ?? null,
+      achievements: (mainState.achievementStore?.getSnapshot(petId, mainState.progressionStore?.getSnapshot(petId))
+        .achievements ?? []).filter(item => item.unlocked).map(item => ({ id: item.id, unlockedAt: item.unlockedAt ?? null })),
+    }),
     activePetId: () => mainState.progressionStore?.getActivePetId() ?? null,
   })
 
@@ -675,7 +736,7 @@ app.whenReady().then(bootstrapApp).catch(async error => {
   await showStartupFailureDialog()
 })
 
-app.on('before-quit', () => {
+function teardownMainServices(): void {
   mainState.isQuitting = true
   runMarker.clear()
   flushMainLog()
@@ -703,6 +764,9 @@ app.on('before-quit', () => {
   mainState.panelBlurHideHandle = null
   mainState.windowsFullscreenAutoHiddenPet = false
   mainState.windowsFullscreenAutoHiddenPanel = false
+  cancelHistoryStoreRetry()
+  if (mainState.pluginCatalogAutoCheckTimer) clearInterval(mainState.pluginCatalogAutoCheckTimer)
+  mainState.pluginCatalogAutoCheckTimer = null
   if (mainState.localUsageScanTimer) clearInterval(mainState.localUsageScanTimer)
   mainState.localUsageScanTimer = null
   mainState.localUsageReader = null
@@ -719,6 +783,23 @@ app.on('before-quit', () => {
   mainState.historyStore = null
   mainState.projectRoutingStore?.close()
   mainState.projectRoutingStore = null
+  disposeMainTimers(mainState)
+}
+
+const shutdown = createShutdownCoordinator({
+  // Debounced position writes must land before the stores close or the app exits.
+  flush: () => {
+    if (mainState.persistBoundsHandle || mainState.shimejiPersistHandle) persistCurrentPetWindowState()
+  },
+  pendingWork: () => mainState.localUsageScanPromise,
+  teardown: teardownMainServices,
+  quit: () => app.quit(),
+  log: (message, error) => console.error(message, error),
+})
+
+app.on('before-quit', event => {
+  mainState.isQuitting = true
+  shutdown.onBeforeQuit(event)
 })
 
 app.on('will-quit', () => {
@@ -726,15 +807,18 @@ app.on('will-quit', () => {
   mainState.permissionRelay?.shutdown()
   mainState.permissionRelay = null
   mainState.permissionBroker = null
+  mainState.permissionAdapterServer?.closeAllConnections?.()
   mainState.permissionAdapterServer?.close()
   mainState.permissionAdapterServer = null
   mainState.desktopNotifications?.destroy()
   mainState.desktopNotifications = null
   mainState.desktopTray?.destroy()
   mainState.desktopTray = null
+  mainState.presentationMcpServer?.closeAllConnections?.()
   mainState.presentationMcpServer?.close()
   mainState.presentationMcpServer = null
   mainState.presentationController = null
+  mainState.eventServer?.closeAllConnections?.()
   mainState.eventServer?.close()
   mainState.eventServer = null
 })
