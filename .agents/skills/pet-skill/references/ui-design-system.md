@@ -12,6 +12,13 @@ If the colour/size you need does not have a token yet, add one to `tokens.css` (
 
 The floor for any user-facing text is `--font-xs` (11px). CJK glyphs lose stroke definition below that on both Windows and macOS; do not add a smaller size to "make it fit" — that is a symptom of the container being too small, not a font-size problem (see the panel-sizing note below).
 
+## Token layers (DS-01)
+
+- **Palette** — `--organic-*` (panel cream/sage palette) and the dark base tokens (`--surface-*`, `--accent`, `--state-*`). Spacing and type steps are on the 4px grid / 5-step scale (no fractional values).
+- **Semantic** — `--color-bg/surface/surface-2/text/text-2/text-3/accent/accent-text/on-accent/border/border-strong/scrim` alias the organic palette. New panel-layer CSS uses these, not `--organic-*`.
+- **Pet layer** (DesktopPet, bubbles) uses the dark base tokens; **panel layer** (StatusPanel, SetupWizard, ProjectMcp, dialogs) uses the semantic aliases. `.status-panel` re-points the base tokens at the organic palette; do not add new component-level overrides of global tokens.
+- Compatibility aliases (`--accent-primary`, `--status-error`, `--text-danger/-success/-warning`, `--surface-secondary`, `--font-2xs`) exist only so legacy references resolve; use the canonical names in new code. Do not delete tokens: `tokens.css` is also served to plugin panels.
+
 ## Rule: reuse the primitive before writing a new element
 
 `src/components/ui/` holds the app's only implementations of these UI patterns. Import them; do not hand-roll a competing version.

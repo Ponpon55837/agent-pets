@@ -116,7 +116,15 @@
   --transition-base: 0.2s ease;
   --transition-slow: 0.35s ease;
 
-  /* ── Organic panel theme ──────────────────────────────────────────────
+  /* ── Organic panel theme (palette layer) ──────────────────────────────
+     --organic-* is the PALETTE of the panel layer. Spacing and type steps
+     below sit on the same 4px grid / 5-step scale as the base tokens (no
+     fractional values). New component CSS should reference the semantic
+     --color-* aliases defined at the end of this block, not --organic-*
+     directly, so a theme swap only has to re-point one layer.
+     Layers: pet layer (DesktopPet, bubbles) = base tokens (dark);
+             panel layer (StatusPanel, SetupWizard, ProjectMcp, dialogs) =
+             --organic-* palette via the --color-* semantic aliases.
      The desktop pet keeps the original dark presentation layer. The panel
      and its modal surfaces opt into this warm, opaque theme locally so a
      bright wallpaper can never reduce text contrast behind the controls. */
@@ -172,27 +180,72 @@
   --organic-quota-warning: #e3b64f;
   --organic-quota-error: #d64a3a;
   --organic-quota-sage: #8fa073;
+  /* Status text on cream surfaces (checked >= 4.5:1 by check-contrast). */
+  --organic-danger-text: #a62f1e;
+  --organic-success-text: #3f5a1c;
+  --organic-warn-text: #7a5200;
   --organic-font-heading: 'Caprasimo', Georgia, serif;
   --organic-font-body: 'Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
-  --organic-space-1: 4.4px;
-  --organic-space-2: 8.8px;
-  --organic-space-3: 13.2px;
-  --organic-space-4: 17.6px;
-  --organic-space-5: 26.4px;
-  --organic-space-6: 35.2px;
+  --organic-space-1: 4px;
+  --organic-space-2: 8px;
+  --organic-space-3: 12px;
+  --organic-space-4: 16px;
+  --organic-space-5: 24px;
+  --organic-space-6: 32px;
   --organic-radius-sm: 8px;
   --organic-radius-md: 16px;
   --organic-radius-lg: 28px;
-  --organic-font-label: 11.5px;
-  --organic-font-body-sm: 12.5px;
-  --organic-font-body-md: 13.5px;
-  --organic-font-body-lg: 14.5px;
-  --organic-font-heading-sm: 16px;
-  --organic-font-heading-md: 17px;
-  --organic-font-panel-title: 19px;
+  --organic-font-label: 12px;
+  --organic-font-body-sm: 12px;
+  --organic-font-body-md: 13px;
+  --organic-font-body-lg: 15px;
+  --organic-font-heading-sm: 15px;
+  --organic-font-heading-md: 18px;
+  --organic-font-panel-title: 18px;
   --organic-font-display-sm: 22px;
-  --organic-font-display-md: 26px;
+  --organic-font-display-md: 22px;
+
+  /* ── Semantic layer (panel) ───────────────────────────────────────────
+     The names new panel-layer CSS should use. Each is an alias of the
+     palette above so a theme only re-points these. */
+  --color-bg: var(--organic-bg);
+  --color-surface: var(--organic-surface);
+  --color-surface-2: var(--organic-surface-2);
+  --color-text: var(--organic-text);
+  --color-text-2: var(--organic-text-secondary);
+  --color-text-3: var(--organic-text-muted);
+  --color-accent: var(--organic-accent);
+  --color-accent-text: var(--organic-accent-text);
+  --color-on-accent: var(--organic-accent-contrast);
+  --color-border: var(--organic-border-soft);
+  --color-border-strong: var(--organic-border);
+  --color-scrim: var(--organic-scrim);
+
+  /* ── Compatibility aliases ────────────────────────────────────────────
+     Names that components referenced before they were defined (they
+     silently resolved to nothing). Defined once here so those references
+     work; prefer the canonical name in new code. */
+  --accent-primary: var(--accent);
+  --status-error: var(--state-error);
+  /* Status text colours. Dark pet layer uses the bright state hues; the
+     panel layer (see the .status-panel scope below) swaps in darker values
+     that keep >= 4.5:1 on the cream surfaces. */
+  --text-danger: var(--state-error-soft);
+  --text-success: var(--state-success);
+  --text-warning: var(--state-warn-bright);
+  --surface-secondary: var(--surface-raised-hover);
+  --font-2xs: var(--font-xs); /* floor is 11px; there is no smaller step */
+  --font-heading: var(--font-ui);
+  --font-body: var(--font-ui);
+}
+
+/* Panel layer: the status panel and plugin pages render on cream surfaces,
+   so status text must use the darker values. */
+.status-panel {
+  --text-danger: var(--organic-danger-text);
+  --text-success: var(--organic-success-text);
+  --text-warning: var(--organic-warn-text);
 }
 
 /* Honour the OS "reduce motion" setting in one place rather than auditing
