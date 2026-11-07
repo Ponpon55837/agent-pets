@@ -23,12 +23,13 @@ test('status panel preserves dashboard and settings navigation contracts', () =>
     '../src/components/status-panel/StatusPanelHistory.vue',
     '../src/components/status-panel/SettingsPage.vue',
     '../src/composables/useRovingTabs.ts',
+    '../src/components/ui/SegmentedControl.vue',
     '../src/utils/settingsRegistry.ts',
   ].map(read).join('\n')
   for (const id of ['sessions', 'usage', 'history', 'language', 'appearance', 'desktop', 'plugins', 'pets', 'growth', 'advanced', 'general', 'integrations']) {
     assert.ok(source.includes(`'${id}'`), `missing tab id ${id}`)
   }
-  assert.match(source, /role="tablist"/)
+  assert.match(source, /'tablist'/)
   assert.match(source, /role="tabpanel"/)
   assert.match(source, /ArrowRight/)
   assert.match(source, /localStorage\.getItem\(SETTINGS_GROUP_STORAGE_KEY\)/)

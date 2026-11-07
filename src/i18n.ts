@@ -62,6 +62,16 @@ function readPersistedLocale(): AppLocale {
 
 export const locale = ref<AppLocale>(readPersistedLocale())
 
+// Keep <html lang> in step with the UI language so screen readers pick the
+// right voice and the browser picks CJK-appropriate fonts.
+const HTML_LANG: Record<AppLocale, string> = { 'zh-TW': 'zh-TW', 'en-US': 'en' }
+
+function syncDocumentLang(value: AppLocale): void {
+  if (typeof document !== 'undefined') document.documentElement.lang = HTML_LANG[value]
+}
+
+syncDocumentLang(locale.value)
+
 export function getLocale(): AppLocale {
   return locale.value
 }
@@ -69,6 +79,7 @@ export function getLocale(): AppLocale {
 export function setLocale(value: unknown): AppLocale {
   const next = isAppLocale(value) ? value : DEFAULT_LOCALE
   locale.value = next
+  syncDocumentLang(next)
   try {
     if (typeof localStorage !== 'undefined') localStorage.setItem('agent-pet-locale', next)
   } catch {}
@@ -84,13 +95,26 @@ export function tForLocale(targetLocale: AppLocale, key: TranslationKey, params:
   return template.replace(/\{(\w+)\}/g, (_match, name: string) => String(params[name] ?? `{${name}}`))
 }
 
+// Plural-aware lookup. Define `<key>.one` / `<key>.other` (and others the
+// language needs) in the catalog; en-US picks by Intl.PluralRules, zh-TW only
+// needs `.other`. Falls back to `.other`, then to the bare key. `{count}` is
+// filled automatically.
+export function tPlural(key: string, count: number, params: TranslationParams = {}): string {
+  const loc = locale.value
+  const category = new Intl.PluralRules(loc).select(count)
+  const table: Record<string, string> = loc === 'en-US' ? englishMessages : messages
+  const template = table[`${key}.${category}`] ?? table[`${key}.other`] ?? table[key]
+  if (template === undefined) return key
+  return template.replace(/\{(\w+)\}/g, (_m, name: string) => String(name === 'count' ? count : (params[name] ?? `{${name}}`)))
+}
+
 export function translateBackendError(value: unknown): string {
   const raw = typeof value === 'string'
     ? value
     : value instanceof Error
       ? value.message
       : ''
-  if (!raw) return '操作失敗'
+  if (!raw) return t('design.operationFailed')
   if (locale.value === 'en-US') return raw
 
   const exact: Record<string, string> = zhTWErrors

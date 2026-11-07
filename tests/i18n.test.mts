@@ -13,7 +13,7 @@ test('Traditional Chinese translations cover core settings and interpolation', (
 test('technical status and tool terms remain canonical where requested', () => {
   setLocale('zh-TW')
   assert.equal(t('miniMode'), 'Mini 模式')
-  assert.equal(t('permissionBubbleHelp'), '顯示 Allow once / Deny 請求；隱藏後請求仍會保留待處理。')
+  assert.equal(t('permissionBubbleHelp'), '顯示「允許一次／拒絕」請求；隱藏後請求仍會保留待處理。')
   assert.equal(t('adapterNote').includes('Generic HTTP'), true)
 })
 

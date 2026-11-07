@@ -2,7 +2,9 @@
 // The settings pages carried 22 copies of the same ten-line block: a <label>
 // wrapping a title, a help line, and a three-element switch. This collapses
 // each of them to a single tag.
-withDefaults(defineProps<{
+import { useId } from 'vue'
+
+const props = withDefaults(defineProps<{
   label: string
   help?: string
   disabled?: boolean
@@ -11,16 +13,23 @@ withDefaults(defineProps<{
 })
 
 const model = defineModel<boolean>({ required: true })
+const helpId = `toggle-${useId()}-help`
 </script>
 
 <template>
   <label class="toggle-row" :class="{ disabled }">
     <span class="copy">
       <span class="label">{{ label }}</span>
-      <span v-if="help" class="help">{{ help }}</span>
+      <span v-if="help" :id="helpId" class="help">{{ help }}</span>
     </span>
     <span class="switch">
-      <input v-model="model" type="checkbox" :disabled="disabled" />
+      <input
+        v-model="model"
+        type="checkbox"
+        role="switch"
+        :disabled="disabled"
+        :aria-describedby="props.help ? helpId : undefined"
+      />
       <span class="track"><span class="thumb" /></span>
     </span>
   </label>
@@ -50,13 +59,13 @@ const model = defineModel<boolean>({ required: true })
 
 .label {
   color: var(--text-primary);
-  font-size: var(--font-body-lg, var(--font-sm));
+  font-size: var(--font-sm);
   font-weight: var(--weight-medium);
 }
 
 .help {
   color: var(--text-muted);
-  font-size: var(--font-body-sm, var(--font-xs));
+  font-size: var(--font-xs);
   line-height: 1.5;
 }
 
