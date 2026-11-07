@@ -433,6 +433,7 @@ async function bootstrapApp(): Promise<void> {
     scheduleShimejiPositionPersist,
     repositionVisiblePanel,
     scheduleEdgeRedock,
+    smoothWalk: true,
   })
 
   registerWindowControlsIpc({

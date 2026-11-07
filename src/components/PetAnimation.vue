@@ -14,6 +14,8 @@ const props = defineProps<{
   freeze?: boolean
   /** Keeps animating but at a few frames per second (mini mode). */
   lowFps?: boolean
+  /** -1 mirrors the sprite (walking left). */
+  facing?: -1 | 1
 }>()
 
 // Keep low mood close to the pet's original colors; most of the visible
@@ -631,7 +633,7 @@ onUnmounted(() => {
 <template>
   <div
     class="pet-visual"
-    :class="[`mood-energy-${moodEnergyTier}`, { 'multi-pet-energy': store.isMultiPet }]"
+    :class="[`mood-energy-${moodEnergyTier}`, { 'multi-pet-energy': store.isMultiPet, 'facing-left': props.facing === -1 }]"
     :style="[{ width: canvasW + 'px', height: canvasH + 'px' }, moodAuraStyle]"
     :data-mood="moodValue"
     :data-mood-energy="moodEnergyTier"

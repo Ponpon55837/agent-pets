@@ -37,15 +37,26 @@ export interface PetMotionIpcDependencies {
   repositionVisiblePanel?(): void
   /** Optional: re-dock to the edge once the cursor stays away after a hover expand. */
   scheduleEdgeRedock?(): void
+  /** Glide walk steps over a short tween instead of jumping. */
+  smoothWalk?: boolean
 }
+
+const WALK_TWEEN_MS = 700
 
 const DRAG_POLL_MS = 16
 const PANEL_FOLLOW_MS = 60
 
 export function registerPetMotionIpc(deps: PetMotionIpcDependencies): void {
+  let walkTween: ReturnType<typeof setInterval> | null = null
+  const stopWalkTween = () => {
+    if (walkTween) deps.clearInterval(walkTween)
+    walkTween = null
+  }
+
   deps.ipcMain.on(IPC_CHANNELS.petDragStart, event => {
     const petWindow = deps.getPetWindow()
     if (!petWindow || !deps.isTrustedIpcSender(event, petWindow)) return
+    stopWalkTween()
     deps.clearEdgeDwell()
     deps.clearShimejiPersist()
     if (deps.getPetWindowMode() !== 'normal') deps.applyNormalPetBounds()
@@ -142,8 +153,29 @@ export function registerPetMotionIpc(deps: PetMotionIpcDependencies): void {
     const targetDisplay = deps.displayForBounds(target)
     if (targetDisplay.id !== display.id) return
     if (target.x === current.x && target.y === current.y) return
-    petWindow.setPosition(target.x, target.y)
-    deps.setNormalPetBounds(target)
-    deps.scheduleShimejiPositionPersist()
+    stopWalkTween()
+    if (!deps.smoothWalk) {
+      petWindow.setPosition(target.x, target.y)
+      deps.setNormalPetBounds(target)
+      deps.scheduleShimejiPositionPersist()
+      return
+    }
+    // Glide so the walk cycle in the sprite matches actual movement.
+    const startedAt = Date.now()
+    const fromX = current.x
+    walkTween = deps.setInterval(() => {
+      const progress = Math.min(1, (Date.now() - startedAt) / WALK_TWEEN_MS)
+      const x = Math.round(fromX + (target.x - fromX) * progress)
+      if (deps.getDragPollHandle() || petWindow.isDestroyed()) {
+        stopWalkTween()
+        return
+      }
+      petWindow.setBounds({ x, y: target.y, width: target.width, height: target.height })
+      if (progress >= 1) {
+        stopWalkTween()
+        deps.setNormalPetBounds(target)
+        deps.scheduleShimejiPositionPersist()
+      }
+    }, 16)
   })
 }

@@ -9,6 +9,7 @@ import {
   canRunAutonomousBehavior,
   ShimejiScheduler,
   SHIMEJI_IDLE_DELAY_MS,
+  SHIMEJI_IDLE_DELAY_MIN_MS,
   type PetAutonomousBehavior,
   type ShimejiContext,
 } from '@/types/pet'
@@ -36,6 +37,8 @@ let pluginBadgeRevision = 0
 // --- Shimeji 行為排程 -------------------------------------------------------
 
 const shimejiBehavior = ref<PetAutonomousBehavior>('idle')
+const shimejiFacing = ref<-1 | 1>(1)
+const pointerOverPet = ref(false)
 const shimejiScheduler = new ShimejiScheduler()
 const shimejiReducedMotion = ref(false)
 const shimejiPowerSave = ref(false)
@@ -93,6 +96,12 @@ function shimejiContext(random?: number): ShimejiContext {
   }
 }
 
+// The cursor arriving wakes a sleeping pet and holds it in place.
+function onPetPointerEnter(): void {
+  pointerOverPet.value = true
+  if (shimejiScheduler.isSleeping) restartShimeji()
+}
+
 function stopShimejiTimer(): void {
   if (shimejiTimer) clearTimeout(shimejiTimer)
   shimejiTimer = null
@@ -104,12 +113,30 @@ function scheduleShimeji(delayMs: number = SHIMEJI_IDLE_DELAY_MS): void {
   shimejiTimer = setTimeout(runShimejiTick, Math.max(1_500, delayMs))
 }
 
+// Would the next step run into the edge of the current display? Then the pet
+// turns around instead of marching on the spot against the wall.
+function walkDeltaAwayFromWall(deltaX: number): number {
+  const margin = 4
+  const left = (window.screen as Screen & { availLeft?: number }).availLeft ?? 0
+  const right = left + window.screen.availWidth
+  const nextLeft = window.screenX + deltaX
+  const nextRight = window.screenX + window.outerWidth + deltaX
+  return nextLeft < left + margin || nextRight > right - margin ? -deltaX : deltaX
+}
+
 function runShimejiTick(): void {
   shimejiTimer = null
+  // A pet under the cursor stays put rather than walking away from it.
+  if (pointerOverPet.value) {
+    scheduleShimeji(SHIMEJI_IDLE_DELAY_MIN_MS)
+    return
+  }
   const tick = shimejiScheduler.next(shimejiContext(Math.random()))
   shimejiBehavior.value = tick.behavior
   if (tick.walkDeltaX !== undefined && tick.behavior === 'walk') {
-    window.electronAPI?.shimejiWalkStep(tick.walkDeltaX)
+    const deltaX = walkDeltaAwayFromWall(tick.walkDeltaX)
+    shimejiFacing.value = deltaX < 0 ? -1 : 1
+    window.electronAPI?.shimejiWalkStep(deltaX)
   }
   scheduleShimeji(tick.delayMs)
 }
@@ -667,6 +694,8 @@ watch(() => store.achievementUnlock, (unlock) => {
       class="pet-click-area"
       :class="{ dragging: dragLift }"
       @mousedown="onMouseDown"
+      @mouseenter="onPetPointerEnter"
+      @mouseleave="pointerOverPet = false"
       @mousemove="onPetMouseMove"
       @click="onClick"
       @contextmenu.prevent="onPetContextMenu"
@@ -696,6 +725,7 @@ watch(() => store.achievementUnlock, (unlock) => {
             autonomous-behavior="idle"
             :freeze="petAnimationFrozen"
           :low-fps="petLowFps"
+          :facing="shimejiFacing"
           />
         </span>
         <span class="edge-peek-grip" aria-hidden="true" />
@@ -900,6 +930,7 @@ watch(() => store.achievementUnlock, (unlock) => {
               :autonomous-behavior="shimejiBehavior"
               :freeze="petAnimationFrozen"
           :low-fps="petLowFps"
+          :facing="shimejiFacing"
             />
             <div
               class="status-line multi-pet-status-line"
@@ -974,6 +1005,7 @@ watch(() => store.achievementUnlock, (unlock) => {
           :autonomous-behavior="shimejiBehavior"
           :freeze="petAnimationFrozen"
           :low-fps="petLowFps"
+          :facing="shimejiFacing"
         />
         <TransitionGroup tag="div" name="status-line" class="status-lines">
           <div

@@ -5,6 +5,11 @@
   pointer-events: none;
 }
 
+.pet-visual.facing-left canvas {
+  /* The individual `scale` property composes with the animations' transform. */
+  scale: -1 1;
+}
+
 .pet-aura-canvas {
   position: absolute;
   inset: 0;
