@@ -38,6 +38,7 @@ import {
   type ToastTone,
 } from '@/utils/pet-toast'
 import type { SoundCue } from '@/utils/sound'
+import { SUCCESS_DISPLAY_MS } from '@/utils/pet-motion-plan'
 import { readPetFeedbackDefaults } from '@/utils/pet-defaults'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
@@ -55,7 +56,6 @@ export interface PetEntry {
   pluginSkin?: PluginSkinPetSource
 }
 
-const SUCCESS_DISPLAY_MS = 4_000
 const SESSION_STALE_MS = 15 * 60_000
 const MAX_SESSION_COUNT = 200
 const ACHIEVEMENT_DEFINITION_BY_ID = new Map(ACHIEVEMENT_DEFINITIONS.map(entry => [entry.id, entry]))

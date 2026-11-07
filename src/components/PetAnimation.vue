@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import type { AgentState } from '@/types/agent'
 import type { PetAutonomousBehavior, PetBehaviorManifest } from '@/types/pet'
 import { useAgentStore } from '@/stores/agentStore'
+import { frameDelayMultiplier, isSignificantTransition, motionPlanFor } from '@/utils/pet-motion-plan'
 
 const props = defineProps<{
   state: AgentState
@@ -223,7 +224,7 @@ function stopUrgencyTimer() {
   }
 }
 
-const urgencyLevel = computed(() => {
+const urgencyLevel = computed<0 | 1 | 2>(() => {
   if (!isWaiting.value || !props.since) return 0
   const elapsedSec = Math.max(0, urgencyTick.value - props.since) / 1000
   if (elapsedSec >= 30) return 2
@@ -232,88 +233,30 @@ const urgencyLevel = computed(() => {
 })
 
 function motionPlanForState(): MotionPlan {
-  const canUseAutonomousMotion = props.state === 'idle' || props.state === 'offline'
-  if (canUseAutonomousMotion && (props.autonomousBehavior === 'walk' || props.autonomousBehavior === 'sleep')) {
-    return {
-      steps: [{ motion: behaviorMotion(props.autonomousBehavior), loops: Number.POSITIVE_INFINITY }],
-      repeat: false,
-    }
-  }
-
-  // Stagger long-idle gestures between pets while keeping the sequence stable
-  // for a given pet instead of choosing a new random delay every cycle.
-  const idleLoops = 10 + [...props.petId].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 5
-
-  switch (props.state) {
-    case 'idle':
-      return {
-        steps: [
-          { motion: motions.idle, loops: idleLoops },
-          { motion: motions.waving, loops: 1 },
-        ],
-        repeat: true,
-      }
-    case 'thinking':
-      return {
-        steps: [
-          { motion: motions.review, loops: 8 },
-          { motion: motions.running, loops: 12 },
-        ],
-        repeat: true,
-      }
-    case 'tool-running':
-      return {
-        steps: [
-          { motion: motions.running, loops: 12 },
-          { motion: motions.review, loops: 8 },
-        ],
-        repeat: true,
-      }
-    case 'waiting-permission':
-    case 'waiting-input':
-      if (urgencyLevel.value === 0) {
-        return {
-          steps: [{ motion: motions.waiting, loops: Number.POSITIVE_INFINITY }],
-          repeat: false,
-        }
-      }
-      return {
-        steps: [
-          { motion: motions.waiting, loops: 12 },
-          { motion: motions.waving, loops: urgencyLevel.value === 2 ? 8 : 6 },
-        ],
-        repeat: true,
-      }
-    case 'success':
-      return {
-        steps: [
-          { motion: motions.jumping, loops: 1 },
-          { motion: motions.waving, loops: 1 },
-          { motion: motions.idle, loops: Number.POSITIVE_INFINITY },
-        ],
-        repeat: false,
-      }
-    case 'error':
-      return {
-        steps: [{ motion: motions.failed, loops: 1 }],
-        repeat: false,
-      }
-    case 'offline':
-    default:
-      return {
-        steps: [{ motion: motions.idle, loops: Number.POSITIVE_INFINITY }],
-        repeat: false,
-      }
+  const planned = motionPlanFor({
+    state: props.state,
+    urgency: urgencyLevel.value,
+    behavior: props.autonomousBehavior,
+    petId: props.petId,
+  })
+  return {
+    steps: planned.steps.map(step => ({
+      motion: step.motion === 'walk' || step.motion === 'sleep'
+        ? behaviorMotion(step.motion)
+        : motions[step.motion],
+      loops: step.loops,
+    })),
+    repeat: planned.repeat,
   }
 }
 
 function frameDelay(): number {
-  let multiplier = 1
-  if (props.state === 'offline' && props.autonomousBehavior !== 'walk' && props.autonomousBehavior !== 'sleep') multiplier = 2.4
-  else if (props.state === 'idle') multiplier = 1.25
-  else if (urgencyLevel.value === 2) multiplier = 0.6
-  else if (urgencyLevel.value === 1) multiplier = 0.78
-
+  const multiplier = frameDelayMultiplier({
+    state: props.state,
+    urgency: urgencyLevel.value,
+    // After the fall plays out the pet idles slowly instead of freezing.
+    sulking: props.state === 'error' && activeMotion.name === 'idle',
+  })
   return Math.max(80, Math.round(activeMotion.frameDurations[currentFrame] * multiplier))
 }
 
@@ -485,6 +428,34 @@ function draw() {
   }
 }
 
+// Brief cross-fade: the last drawn frame is copied to a ghost canvas that
+// fades out over the new state's first frame, so rows no longer hard-cut.
+const ghostRef = ref<HTMLCanvasElement | null>(null)
+const ghostFading = ref(false)
+let ghostTimer: ReturnType<typeof setTimeout> | null = null
+const GHOST_FADE_MS = 150
+
+function startGhostFade(): void {
+  const source = canvasRef.value
+  const ghost = ghostRef.value
+  if (!source || !ghost || isPaused.value || prefersReducedMotion()) return
+  const ctx = ghost.getContext('2d')
+  if (!ctx) return
+  ctx.clearRect(0, 0, CELL_W, CELL_H)
+  ctx.drawImage(source, 0, 0)
+  ghostFading.value = false
+  requestAnimationFrame(() => {
+    ghostFading.value = true
+    if (ghostTimer) clearTimeout(ghostTimer)
+    ghostTimer = setTimeout(() => { ghostFading.value = false }, GHOST_FADE_MS)
+  })
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
 function startAnimation() {
   if (animationFrameId !== null) cancelAnimationFrame(animationFrameId)
   animationFrameId = null
@@ -574,8 +545,9 @@ watch(() => store.petsLoaded, () => {
 })
 
 watch(() => props.state, (newState, oldState) => {
+  startGhostFade()
   startAnimation()
-  if (!isPaused.value && oldState !== undefined && newState !== oldState) {
+  if (!isPaused.value && isSignificantTransition(oldState, newState)) {
     playReaction()
   }
   if (newState === 'idle' && !isPaused.value) {
@@ -647,6 +619,7 @@ onUnmounted(() => {
   if (cursorLookTimer !== null) {
     clearTimeout(cursorLookTimer)
   }
+  if (ghostTimer !== null) clearTimeout(ghostTimer)
   stopFidgetTimer()
   stopUrgencyTimer()
 })
@@ -675,6 +648,16 @@ onUnmounted(() => {
       :height="CELL_H"
       :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
       class="pet-aura-canvas pet-aura-inner"
+      aria-hidden="true"
+    />
+
+    <canvas
+      ref="ghostRef"
+      :width="CELL_W"
+      :height="CELL_H"
+      :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
+      class="pet-ghost-canvas"
+      :class="{ fading: ghostFading }"
       aria-hidden="true"
     />
 

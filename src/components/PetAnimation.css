@@ -48,6 +48,27 @@
   transform-origin: 50% 100%;
 }
 
+/* Last frame of the previous state, faded out over the new one so row
+   changes cross-dissolve instead of hard-cutting. Never hit-tested. */
+.pet-ghost-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: block;
+  image-rendering: pixelated;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pet-ghost-canvas.fading {
+  animation: pet-ghost-fade 150ms ease-out forwards;
+}
+
+@keyframes pet-ghost-fade {
+  from { opacity: 0.85; }
+  to { opacity: 0; }
+}
+
 .pet-canvas.pet-offline-ambient {
   animation: pet-offline-breathe 3.8s ease-in-out infinite;
 }
@@ -183,6 +204,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .pet-ghost-canvas.fading {
+    animation: none;
+  }
+
   .pet-aura-canvas {
     animation: none;
   }
