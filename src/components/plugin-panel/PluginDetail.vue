@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { t } from '@/i18n'
+import { locale, t } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Card from '@/components/ui/Card.vue'
@@ -18,13 +18,22 @@ import { usePluginController } from '@/composables/plugin/context'
 import type { PluginDetailSection } from '@/composables/usePluginPanelController'
 
 const {
-  pluginBusy, enabledGlobally, detailPlugin: plugin, detailSection, petOptions, invokingCommandId,
+  liveBadges, eventSourceStatuses, diagnostics, pluginBusy, enabledGlobally, detailPlugin: plugin, detailSection, petOptions, invokingCommandId,
   pluginName, pluginIconUrl, hidePluginIcon, displayFingerprint, pluginStatusLabel, pluginStatusTone,
   pendingLeave, confirmDiscardSettings, closePluginDetail, openPluginPanelView, updatePluginPreference, requestRemove, requestReport,
   commandTitle, invokePluginCommand,
 } = usePluginController()
 
 const root = ref<HTMLElement | null>(null)
+const trayCount = computed(() => plugin.value?.manifest?.contributes.tray?.commands.length ?? 0)
+const trayOverflow = computed(() => diagnostics.value.some(entry => entry.code === 'too_many_enabled' && entry.method === 'plugin.tray'))
+const badge = computed(() => liveBadges.value.find(item => item.pluginId === plugin.value?.id))
+const skinCount = computed(() => plugin.value?.manifest?.contributes.skins?.length ?? 0)
+const eventSource = computed(() => {
+  const names = plugin.value?.manifest?.name
+  return names ? eventSourceStatuses.value.find(item => item.pluginName['zh-TW'] === names['zh-TW'] && item.pluginName['en-US'] === names['en-US']) : undefined
+})
+const hasPresence = computed(() => trayCount.value > 0 || Boolean(plugin.value?.manifest?.contributes.badge) || skinCount.value > 0 || Boolean(plugin.value?.manifest?.contributes.eventSource))
 const name = computed(() => (plugin.value ? pluginName(plugin.value) : ''))
 const tone = computed(() => (plugin.value ? pluginStatusTone(plugin.value) : 'neutral'))
 const commands = computed(() => plugin.value?.manifest?.contributes.commands ?? [])
@@ -167,6 +176,14 @@ watch(plugin, async (value, previous) => {
             </Select>
             <small class="pet-target-help">{{ t('plugins.targetPetHelp') }}</small>
           </div>
+        </Card>
+        <Card v-if="hasPresence" :title="t('plugins.presenceHeading')">
+          <ul class="presence">
+            <li v-if="trayCount">{{ t('plugins.presenceTray', { count: trayCount }) }}<template v-if="trayOverflow"> · {{ t('plugins.presenceTrayOverflow') }}</template></li>
+            <li v-if="plugin.manifest?.contributes.badge">{{ badge ? t('plugins.presenceBadge', { text: badge.text }) : t('plugins.presenceBadgeNone') }}</li>
+            <li v-if="skinCount">{{ t('plugins.presenceSkins', { count: skinCount }) }}</li>
+            <li v-if="plugin.manifest?.contributes.eventSource">{{ eventSource ? t('plugins.presenceEventSource', { name: eventSource.displayName[locale] }) : t('plugins.presenceEventSourceNone') }}</li>
+          </ul>
         </Card>
         <Card :title="t('pluginManifestHostsHeading')">
           <PluginHostTable :plugin="plugin" />
@@ -311,6 +328,17 @@ watch(plugin, async (value, previous) => {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+.presence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  line-height: 1.5;
 }
 
 .pet-target {

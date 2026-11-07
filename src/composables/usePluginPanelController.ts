@@ -9,7 +9,9 @@ import {
 } from '@/utils/plugin-panel-view'
 import { resolvePluginIconUrl } from '@/utils/plugin-icon'
 import type {
+  PluginBadgeView,
   PluginBrokerDiagnostic,
+  PluginEventSourceStatusView,
   PluginBrokerLogEntry,
   PluginInstallPlan,
   PluginGlobalPreferencesPatch,
@@ -63,6 +65,10 @@ export function usePluginPanelController(props: { requestedPluginId?: string; re
 
 const snapshot = ref<PluginPanelSnapshot | null>(null)
 const notifications = ref<PluginNotificationRecord[]>([])
+const liveBadges = ref<PluginBadgeView[]>([])
+const eventSourceStatuses = ref<PluginEventSourceStatusView[]>([])
+let removeBadgesListener: (() => void) | null = null
+let removeEventSourceListener: (() => void) | null = null
 const hiddenNotificationIds = ref(new Set<string>())
 const visibleNotifications = computed(() => notifications.value.filter(record => !hiddenNotificationIds.value.has(record.item.id)))
 const logs = ref<PluginBrokerLogEntry[]>([])
@@ -1312,6 +1318,10 @@ onMounted(() => {
   })
   void loadPetOptions()
   window.addEventListener('keydown', onPluginPanelViewKeydown, true)
+  void window.electronAPI?.getPluginBadges?.().then(badges => { liveBadges.value = badges }).catch(() => {})
+  removeBadgesListener = window.electronAPI?.onPluginBadgesChanged?.(badges => { liveBadges.value = badges }) ?? null
+  void window.electronAPI?.getPluginEventSourceStatuses?.().then(statuses => { eventSourceStatuses.value = statuses }).catch(() => {})
+  removeEventSourceListener = window.electronAPI?.onPluginEventSourceChanged?.(statuses => { eventSourceStatuses.value = statuses }) ?? null
   removePanelClosedListener = window.electronAPI?.onPluginPanelViewClosed(handlePluginPanelViewClosed) ?? null
   removeNotificationsListener = window.electronAPI?.onPluginNotificationsChanged(() => {
     void refreshNotifications()
@@ -1321,6 +1331,8 @@ onMounted(() => {
 onUnmounted(() => {
   void commitPendingClear()
   notifier.dispose()
+  removeBadgesListener?.()
+  removeEventSourceListener?.()
   window.removeEventListener('keydown', onPluginPanelViewKeydown, true)
   removeNotificationsListener?.()
   removePanelClosedListener?.()
@@ -1335,6 +1347,8 @@ onUnmounted(() => {
     snapshot,
     notifications,
     visibleNotifications,
+    liveBadges,
+    eventSourceStatuses,
     markAllNotificationsRead,
     logs,
     diagnostics,

@@ -7,6 +7,7 @@ import Icon from '@/components/ui/Icon.vue'
 import Spinner from '@/components/ui/Spinner.vue'
 import ActionMenu from '@/components/ui/ActionMenu.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
+import { pluginCapabilities } from '@/utils/plugin-capabilities'
 import { usePluginController } from '@/composables/plugin/context'
 import type { PluginPanelPlugin } from '@/types/plugin'
 
@@ -22,6 +23,7 @@ const tone = computed(() => pluginStatusTone(props.plugin))
 const hasSettings = computed(() => Boolean(props.plugin.manifest?.contributes.settings))
 const catalogItem = computed(() => catalogItemFor(props.plugin.id))
 const localOnly = computed(() => catalogCheckComplete.value && !catalogItem.value)
+const capabilities = computed(() => pluginCapabilities(props.plugin.manifest))
 const hasPanel = computed(() => Boolean(props.plugin.manifest?.contributes.panelView))
 const needsAttention = computed(() => tone.value === 'warn')
 const menuItems = computed(() => [
@@ -54,6 +56,9 @@ function onMenu(id: string): void {
         {{ pluginStatusLabel(plugin) }}
       </Chip>
     </div>
+    <ul v-if="capabilities.length" class="card-capabilities" :aria-label="t('plugins.provides')">
+      <li v-for="capability in capabilities" :key="capability"><Chip>{{ t(`plugins.cap.${capability}`) }}</Chip></li>
+    </ul>
     <p v-if="catalogItem" class="card-description">{{ catalogItem.plugin.description[locale] }}</p>
     <div v-if="localOnly || catalogItem?.updateAvailable" class="card-update">
       <Chip v-if="localOnly" tone="neutral" icon="info">{{ t('plugins.localInstall') }}</Chip>
@@ -169,6 +174,15 @@ function onMenu(id: string): void {
   font-size: var(--font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.card-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .card-description {
