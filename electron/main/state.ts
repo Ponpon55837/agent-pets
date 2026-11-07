@@ -39,6 +39,9 @@ import type { WindowBounds } from '../pet-window-mode'
 import type { WindowsFullscreenDetector, WindowsFullscreenState } from '../windows-fullscreen-detector'
 import type { PluginAgentStatusController } from '../plugin-agent-status.ts'
 
+import type { ServerHealthTracker } from './server-health'
+import { SessionSnapshotStore } from './session-snapshot'
+
 export interface PluginSkinFallbackInfo {
   pluginId: string
   pluginName: { 'zh-TW': string; 'en-US': string }
@@ -125,6 +128,8 @@ export const mainState = {
   edgeDwellHandle: null as ReturnType<typeof setTimeout> | null,
   edgeDwellCandidate: null as { displayId: number; edge: PetEdge } | null,
   isQuitting: false,
+  serverHealth: null as ServerHealthTracker | null,
+  sessionSnapshot: new SessionSnapshotStore() as SessionSnapshotStore,
   notificationAttentionCount: 0,
   permissionAttentionCount: 0,
   pendingIntegrationTests: new Map<string, () => void>(),

@@ -1,6 +1,10 @@
 import { IPC_CHANNELS } from '../ipc/channels'
-import { app, BrowserWindow, WebContentsView, screen, ipcMain, dialog, net, session, protocol, globalShortcut, powerMonitor, shell, safeStorage } from 'electron'
+import { app, BrowserWindow, WebContentsView, screen, ipcMain, dialog, net, session, protocol, globalShortcut, powerMonitor, shell, safeStorage, Notification } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
+import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
+import { logMain, mainLogger } from '../diagnostics/main-log'
+import { buildDiagnosticsReport, registerDiagnosticsSection } from '../diagnostics/report'
+import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
 import { join, resolve } from 'path'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
@@ -993,6 +997,7 @@ export async function createPluginServices(): Promise<void> {
   })
   mainState.pluginBroker = new PluginBroker({
     userDataDirectory,
+    onLog: (pluginId, entry) => logMain(entry.level === 'info' ? 'info' : entry.level === 'warn' ? 'warn' : 'error', `plugin:${pluginId}`, entry.message),
     getContext: pluginId => {
       const context = mainState.pluginRuntimeContexts.get(pluginId)
       return context ? { ...context, dndEnabled: currentDesktopPreferences().dndEnabled } : null
@@ -1612,6 +1617,76 @@ export function applyMacFullscreenVisibilityPolicy(): void {
   }
 }
 
+export function serverHealthTracker(): ServerHealthTracker {
+  if (!mainState.serverHealth) {
+    mainState.serverHealth = createServerHealthTracker({
+      onChange: snapshot => {
+        for (const window of [mainState.petWindow, mainState.panelWindow]) {
+          if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.serverHealthChanged, snapshot)
+        }
+      },
+      onPersistentFailure: health => {
+        try {
+          if (!Notification.isSupported()) return
+          new Notification({
+            title: t('reliability.server.offlineTitle'),
+            body: t(health.code === 'EADDRINUSE' ? 'reliability.server.portBusyBody' : 'reliability.server.failedBody', { port: health.port }),
+          }).show()
+        } catch {}
+      },
+    })
+  }
+  return mainState.serverHealth
+}
+
+const rendererRecoveries = new Map<'pet' | 'panel', RendererRecovery>()
+
+// Re-pushes main-owned state after a renderer crash/reload. Initial load
+// broadcasts only run once, so a recovered renderer would otherwise sit with
+// stale defaults (power-save, window mode, badges, progression, permissions).
+function resyncRendererState(): void {
+  broadcastPetWindowMode()
+  broadcastPowerSaveState()
+  broadcastPluginBadges()
+  broadcastPluginFeedUnreadCount()
+  broadcastProgression()
+  broadcastAchievements()
+  broadcastHistoryUpdated()
+  schedulePermissionUiSync()
+  try { broadcastDesktopPreferences(currentDesktopPreferences()) } catch {}
+}
+
+function attachWindowRecovery(label: 'pet' | 'panel', window: BrowserWindow): void {
+  rendererRecoveries.get(label)?.dispose()
+  const contents = window.webContents
+  const recovery = attachRendererRecovery(contents, {
+    label,
+    reload: () => { if (!contents.isDestroyed()) contents.reload() },
+    log: (level, message) => (level === 'error' ? console.error(message) : console.warn(message)),
+    onRecovered: resyncRendererState,
+    onGaveUp: () => {
+      try {
+        if (!Notification.isSupported()) return
+        new Notification({
+          title: t('reliability.renderer.gaveUpTitle'),
+          body: t('reliability.renderer.gaveUpBody'),
+        }).show()
+      } catch {}
+    },
+  })
+  rendererRecoveries.set(label, recovery)
+  window.once('closed', () => {
+    recovery.dispose()
+    if (rendererRecoveries.get(label) === recovery) rendererRecoveries.delete(label)
+  })
+}
+
+/** Tray / error-boundary rescue: reloads pet and panel renderers, rebuilding a window that is gone. */
+export function reloadPetRenderers(): void {
+  if (!ensureDesktopWindows()) return
+  for (const recovery of rendererRecoveries.values()) recovery.manualReload()
+}
+
 export function createPetWindow() {
   const primaryWorkArea = screen.getPrimaryDisplay().workArea
   const rawScale = parseFloat(process.env.PET_SCALE || '1')
@@ -1707,11 +1782,11 @@ export function createPetWindow() {
   applyPetCaptureProtection()
   applyMacFullscreenVisibilityPolicy()
 
-  if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) {
-    mainState.petWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
-  } else {
-    mainState.petWindow.loadURL('agent-pets://app/index.html')
-  }
+  attachWindowRecovery('pet', mainState.petWindow)
+  const petLoad = process.env.VITE_DEV_SERVER_URL && !app.isPackaged
+    ? mainState.petWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
+    : mainState.petWindow.loadURL('agent-pets://app/index.html')
+  petLoad.catch(error => console.error('Pet renderer load failed', error))
 
   mainState.petWindow.webContents.once('did-finish-load', () => {
     broadcastPetWindowMode()
@@ -1815,11 +1890,11 @@ export function createPanelWindow() {
 
   applyMacFullscreenVisibilityPolicy()
 
-  if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) {
-    mainState.panelWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#panel`)
-  } else {
-    mainState.panelWindow.loadURL('agent-pets://app/index.html#panel')
-  }
+  attachWindowRecovery('panel', mainState.panelWindow)
+  const panelLoad = process.env.VITE_DEV_SERVER_URL && !app.isPackaged
+    ? mainState.panelWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#panel`)
+    : mainState.panelWindow.loadURL('agent-pets://app/index.html#panel')
+  panelLoad.catch(error => console.error('Panel renderer load failed', error))
 
   mainState.panelWindow.on('blur', () => {
     if (mainState.dialogOpen) return
@@ -2032,6 +2107,15 @@ function revealPanelWindowAfterFirstFrame(panelWindow: BrowserWindow): void {
 // 其他 view 是明確導向，會先關閉暫停中的插件畫面再切換。
 export function showPanelWindow(view: 'sessions' | 'settings' | 'restore' = 'sessions', pluginViewPluginId?: string): void {
   if (!ensureDesktopWindows() || !mainState.panelWindow) return
+  if (rendererRecoveries.get('panel')?.state().gaveUp) {
+    // The panel renderer is dead and out of retries; show a fresh window
+    // rather than a broken one.
+    const broken = mainState.panelWindow
+    mainState.panelWindow = null
+    try { broken.destroy() } catch {}
+    createPanelWindow()
+    if (!mainState.panelWindow) return
+  }
   const restore = view === 'restore'
   if (!restore) mainState.pluginPanelViewController?.close(mainState.panelWindow.isVisible() ? 'closed' : 'hidden')
   if (mainState.panelBlurHideHandle) clearTimeout(mainState.panelBlurHideHandle)
@@ -2419,12 +2503,16 @@ export function createPresentationServices(presentationToken: string): void {
     token: presentationToken,
     controller: mainState.presentationController,
   })
-  listenOnLocalPort(server, PRESENTATION_MCP_PORT, {
+  const presentationHealth = serverHealthTracker().register('presentation', PRESENTATION_MCP_PORT)
+  const presentationHandle = listenOnLocalPort(server, PRESENTATION_MCP_PORT, {
     label: 'Presentation MCP',
+    onStatus: presentationHealth.onStatus,
+    onPersistentFailure: presentationHealth.onPersistentFailure,
     onListening: () => {
       if (!app.isPackaged) console.log(`Presentation MCP control listening on http://127.0.0.1:${PRESENTATION_MCP_PORT}`)
     },
   })
+  presentationHealth.attach(presentationHandle)
   mainState.presentationMcpServer = server
 }
 
@@ -2471,9 +2559,7 @@ export function createAchievementServices(): void {
 }
 
 export function logAchievementDiagnostic(label: string, error: unknown, extra?: unknown): void {
-  const line = `${new Date().toISOString()} [${label}] ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`
-    + `${extra !== undefined ? ` extra=${JSON.stringify(extra)}` : ''}\n`
-  void fs.promises.appendFile(join(app.getPath('userData'), 'achievements-init-error.log'), line).catch(() => {})
+  logMain('error', 'achievements', `[${label}] attempt=${mainState.achievementStoreRetryAttempt}`, { error, extra })
 }
 
 export function scheduleAchievementStoreRetry(): void {
@@ -2571,13 +2657,17 @@ export function createPermissionServices(permissionToken: string): void {
   broker.registerAdapter(relay.createPort('opencode-cli'))
   broker.registerAdapter(relay.createPort('opencode-desktop'))
   const server = createPermissionAdapterServer({ token: permissionToken, broker, relay })
-  listenOnLocalPort(server, PERMISSION_ADAPTER_PORT, {
+  const permissionHealth = serverHealthTracker().register('permission', PERMISSION_ADAPTER_PORT)
+  const permissionHandle = listenOnLocalPort(server, PERMISSION_ADAPTER_PORT, {
     label: 'Permission adapter',
+    onStatus: permissionHealth.onStatus,
+    onPersistentFailure: permissionHealth.onPersistentFailure,
     onListening: () => {
       if (!app.isPackaged) console.log(`Permission adapter listening on http://127.0.0.1:${PERMISSION_ADAPTER_PORT}`)
     },
   })
 
+  permissionHealth.attach(permissionHandle)
   mainState.permissionRelay = relay
   mainState.permissionBroker = broker
   mainState.permissionAdapterServer = server
@@ -2652,6 +2742,7 @@ export function createDesktopServices(): void {
         }
       },
       toggleMiniMode,
+      reloadPet: reloadPetRenderers,
       quit: () => app.quit(),
     },
   )
@@ -2775,4 +2866,48 @@ export async function normalizeIngressEvent(input: unknown, receivedAt?: number)
     console.error('Project routing failed; preserving unbound event behavior', error)
     return normalized
   }
+}
+
+export async function exportDiagnostics(): Promise<{ ok: boolean; canceled?: boolean }> {
+  const recentLogLines = mainLogger().readRecent(300)
+  const report = buildDiagnosticsReport({
+    app: {
+      version: app.getVersion(),
+      electron: process.versions.electron ?? '',
+      chrome: process.versions.chrome ?? '',
+      node: process.versions.node ?? '',
+      platform: process.platform,
+      arch: process.arch,
+      packaged: app.isPackaged,
+      locale: locale.value,
+    },
+    recentLogLines,
+    generatedAt: Date.now(),
+  })
+  const parent = mainState.panelWindow && !mainState.panelWindow.isDestroyed() ? mainState.panelWindow : undefined
+  const options = {
+    defaultPath: join(app.getPath('documents'), `agent-pets-diagnostics-${new Date().toISOString().slice(0, 10)}.json`),
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  }
+  const result = parent ? await dialog.showSaveDialog(parent, options) : await dialog.showSaveDialog(options)
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+  await fs.promises.writeFile(result.filePath, report, { encoding: 'utf8', mode: 0o600 })
+  return { ok: true }
+}
+
+export function registerRuntimeDiagnostics(startupResults: () => unknown, crashStats: () => unknown, previousRunUnclean: boolean): void {
+  registerDiagnosticsSection('startup', startupResults)
+  registerDiagnosticsSection('crashGuard', crashStats)
+  registerDiagnosticsSection('previousRunUnclean', () => previousRunUnclean)
+  registerDiagnosticsSection('localServers', () => serverHealthTracker().snapshot().servers.map(server => ({
+    id: server.id, port: server.port, state: server.state, attempt: server.attempt, code: server.code ?? null,
+  })))
+  registerDiagnosticsSection('stores', () => ({
+    history: mainState.historyStore ? 'ready' : 'unavailable',
+    achievements: mainState.achievementStore ? 'ready' : 'unavailable',
+    achievementInitRetries: mainState.achievementStoreRetryAttempt,
+    progression: mainState.progressionStore ? 'ready' : 'unavailable',
+    plugins: mainState.pluginRegistry ? 'ready' : 'unavailable',
+    sessionsTracked: mainState.sessionSnapshot.list().length,
+  }))
 }
