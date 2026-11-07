@@ -34,6 +34,9 @@ import {
   applyPreferencePatch, createSerialQueue, mergePreferencesResult, rollbackPreferencePatch,
   type PluginPreferencePatch,
 } from '@/composables/plugin/plugin-state-sync'
+import {
+  defaultSettingsDraft, isSettingsDirty, validateSettings, type SettingErrorCode,
+} from '@/utils/plugin-settings-form'
 import { usePluginNotify } from '@/composables/plugin/usePluginNotify'
 export interface PermissionEntryView {
   unit: string
@@ -66,6 +69,10 @@ const pluginSettings = ref<PluginPanelSettingsSnapshot | null>(null)
 const settingsDraft = ref<Record<string, PluginSettingScalar>>({})
 const secretDrafts = ref<Record<string, string>>({})
 const selectedPluginId = ref('')
+const settingsErrors = ref<Record<string, SettingErrorCode>>({})
+// 有未儲存變更時要離開詳情頁，先暫存要執行的動作，等使用者在對話框確認放棄。
+const pendingLeave = ref<(() => void) | null>(null)
+const pendingSecretRemoveKey = ref('')
 const detailPluginId = ref('')
 const detailSection = ref<PluginDetailSection>('overview')
 const panelViewPluginId = ref('')
@@ -123,6 +130,10 @@ let panelViewWindowSizeBeforeMaximize: { width: number; height: number } | null 
 
 const plugins = computed(() => snapshot.value?.plugins ?? [])
 const selectedPlugin = computed(() => plugins.value.find(plugin => plugin.id === selectedPluginId.value) ?? null)
+const settingsProperties = computed(() => selectedPlugin.value?.manifest?.contributes.settings?.properties ?? {})
+const settingsDirty = computed(() => isSettingsDirty(
+  settingsProperties.value, pluginSettings.value?.values ?? {}, settingsDraft.value, secretDrafts.value,
+))
 const detailPlugin = computed(() => plugins.value.find(plugin => plugin.id === detailPluginId.value) ?? null)
 const panelViewPlugin = computed(() => plugins.value.find(plugin => plugin.id === panelViewPluginId.value) ?? null)
 const enabledGlobally = computed(() => snapshot.value?.preferences.pluginsEnabled ?? false)
@@ -355,15 +366,42 @@ function handlePluginPanelViewClosed(event: PluginPanelViewClosedEvent): void {
 }
 
 // 詳情頁是目前插件唯一的來源；診斷、設定、指令都跟著它走，不再由別處的下拉決定。
+function guardUnsavedSettings(action: () => void): void {
+  if (settingsDirty.value) pendingLeave.value = action
+  else action()
+}
+
 function openPluginDetail(pluginId: string, section: PluginDetailSection = 'overview'): void {
   if (!plugins.value.some(plugin => plugin.id === pluginId)) return
-  detailSection.value = section
-  detailPluginId.value = pluginId
-  selectedPluginId.value = pluginId
+  const open = () => {
+    detailSection.value = section
+    detailPluginId.value = pluginId
+    selectedPluginId.value = pluginId
+  }
+  if (pluginId !== selectedPluginId.value) guardUnsavedSettings(open)
+  else open()
 }
 
 function closePluginDetail(): void {
-  detailPluginId.value = ''
+  guardUnsavedSettings(() => { detailPluginId.value = '' })
+}
+
+function confirmDiscardSettings(): void {
+  const action = pendingLeave.value
+  pendingLeave.value = null
+  resetSettingsDraft()
+  action?.()
+}
+
+function resetSettingsDraft(): void {
+  settingsDraft.value = { ...(pluginSettings.value?.values ?? {}) }
+  secretDrafts.value = Object.fromEntries(Object.keys(pluginSettings.value?.secrets ?? {}).map(key => [key, '']))
+  settingsErrors.value = {}
+}
+
+function resetSettingsToDefaults(): void {
+  settingsDraft.value = defaultSettingsDraft(settingsProperties.value)
+  settingsErrors.value = {}
 }
 
 function pluginStatusLabel(plugin: PluginPanelPlugin): string {
@@ -519,6 +557,7 @@ async function refreshPluginSettings(pluginId = selectedPluginId.value): Promise
   pluginSettings.value = null
   settingsDraft.value = {}
   secretDrafts.value = {}
+  settingsErrors.value = {}
   const plugin = plugins.value.find(item => item.id === pluginId)
   if (!plugin?.manifest?.contributes.settings) return
   try {
@@ -571,15 +610,21 @@ function settingValue(key: string, definition: { default?: PluginSettingScalar }
   return String(value)
 }
 
-function updateSetting(key: string, type: string, raw: string | boolean): void {
+function updateSetting(key: string, type: string, raw: string | boolean | number): void {
   const value = type === 'boolean' ? Boolean(raw) : type === 'number' ? Number(raw) : String(raw)
   settingsDraft.value = { ...settingsDraft.value, [key]: value as PluginSettingScalar }
+  if (settingsErrors.value[key]) {
+    const { [key]: _removed, ...rest } = settingsErrors.value
+    settingsErrors.value = rest
+  }
 }
 
 async function savePluginSettings(): Promise<void> {
   const pluginId = selectedPluginId.value
   const scope = `plugin:${pluginId}`
   if (!pluginId || isBusy(scope)) return
+  settingsErrors.value = validateSettings(settingsProperties.value, settingsDraft.value)
+  if (Object.keys(settingsErrors.value).length > 0) return
   setBusy(scope, true)
   try {
     const result = await window.electronAPI?.setPluginSettings(pluginId, settingsDraft.value)
@@ -627,6 +672,29 @@ async function savePluginSecret(key: string): Promise<void> {
     if (pluginSettings.value) pluginSettings.value.secrets[key] = result.value.configured
     secretDrafts.value = { ...secretDrafts.value, [key]: '' }
     setStatus(result.value.configured ? t('pluginSecretSaved') : t('pluginSettingsSaved'))
+  } catch {
+    setError('plugin_action_failed')
+  } finally {
+    setBusy(scope, false)
+  }
+}
+
+// 移除密鑰是獨立動作（不是「儲存空值」），先由對話框確認再清除。
+async function removePluginSecret(key: string): Promise<void> {
+  const pluginId = selectedPluginId.value
+  const scope = `plugin:${pluginId}`
+  pendingSecretRemoveKey.value = ''
+  if (!pluginId || isBusy(scope)) return
+  setBusy(scope, true)
+  try {
+    const result = await window.electronAPI?.setPluginSecret(pluginId, key, '')
+    if (!result?.ok) {
+      setError(result && !result.ok ? result.error : 'plugin_service_unavailable')
+      return
+    }
+    if (pluginSettings.value) pluginSettings.value.secrets[key] = result.value.configured
+    secretDrafts.value = { ...secretDrafts.value, [key]: '' }
+    setStatus(t('plugins.secretRemoved'))
   } catch {
     setError('plugin_action_failed')
   } finally {
@@ -1236,6 +1304,14 @@ onUnmounted(() => {
     settingsDraft,
     secretDrafts,
     selectedPluginId,
+    settingsErrors,
+    settingsDirty,
+    pendingLeave,
+    pendingSecretRemoveKey,
+    confirmDiscardSettings,
+    resetSettingsDraft,
+    resetSettingsToDefaults,
+    removePluginSecret,
     detailPluginId,
     detailSection,
     detailPlugin,

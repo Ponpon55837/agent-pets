@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { t } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Card from '@/components/ui/Card.vue'
 import Chip from '@/components/ui/Chip.vue'
 import Icon from '@/components/ui/Icon.vue'
@@ -19,7 +20,7 @@ import type { PluginDetailSection } from '@/composables/usePluginPanelController
 const {
   pluginBusy, enabledGlobally, detailPlugin: plugin, detailSection, petOptions, invokingCommandId,
   pluginName, pluginIconUrl, hidePluginIcon, displayFingerprint, pluginStatusLabel, pluginStatusTone,
-  closePluginDetail, openPluginPanelView, updatePluginPreference, requestRemove, reportPluginIssue,
+  pendingLeave, confirmDiscardSettings, closePluginDetail, openPluginPanelView, updatePluginPreference, requestRemove, reportPluginIssue,
   commandTitle, invokePluginCommand,
 } = usePluginController()
 
@@ -195,6 +196,16 @@ watch(plugin, async (value, previous) => {
         <PluginDiagnostics />
       </Card>
     </div>
+    <ConfirmDialog
+      :open="pendingLeave !== null"
+      :title="t('plugins.discardTitle')"
+      :message="t('plugins.discardHelp')"
+      :confirm-label="t('plugins.discardConfirm')"
+      :cancel-label="t('plugins.keepEditing')"
+      tone="danger"
+      @confirm="confirmDiscardSettings"
+      @cancel="pendingLeave = null"
+    />
   </section>
 </template>
 
