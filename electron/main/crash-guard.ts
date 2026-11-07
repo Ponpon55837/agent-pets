@@ -15,12 +15,54 @@ export interface CrashGuardProcess {
   off?(event: string, listener: (...args: never[]) => void): unknown
 }
 
+export interface CrashEscalationPolicy {
+  /** Sliding window in which occurrences are counted. */
+  windowMs: number
+  /** This many distinct errors inside the window escalate. */
+  distinctThreshold: number
+  /** The same error this many times inside the window escalates. */
+  repeatThreshold: number
+}
+
+export const DEFAULT_CRASH_ESCALATION: CrashEscalationPolicy = {
+  windowMs: 120_000,
+  distinctThreshold: 5,
+  repeatThreshold: 20,
+}
+
+export interface CrashOccurrence {
+  signature: string
+  at: number
+}
+
+/**
+ * Pure escalation policy: given the recorded occurrences (including the newest),
+ * decide whether the process is crashing repeatedly enough to ask the user to restart.
+ */
+export function shouldEscalateCrashes(
+  occurrences: readonly CrashOccurrence[],
+  now: number,
+  policy: CrashEscalationPolicy = DEFAULT_CRASH_ESCALATION,
+): boolean {
+  const counts = new Map<string, number>()
+  for (const occurrence of occurrences) {
+    if (now - occurrence.at > policy.windowMs) continue
+    counts.set(occurrence.signature, (counts.get(occurrence.signature) ?? 0) + 1)
+  }
+  if (counts.size >= policy.distinctThreshold) return true
+  for (const count of counts.values()) if (count >= policy.repeatThreshold) return true
+  return false
+}
+
 export interface CrashGuardOptions {
   proc?: CrashGuardProcess
   /** Sink for log lines. Callers are expected to redact before persisting. */
   log: (level: CrashLevel, message: string, detail?: unknown) => void
   /** Called at most once per `toastIntervalMs` so users are told, never spammed. */
   onUserVisibleError?: (record: CrashRecord) => void
+  /** Called at most once per run when uncaught errors keep repeating (see shouldEscalateCrashes). */
+  onEscalate?: (record: CrashRecord) => void
+  escalation?: CrashEscalationPolicy
   now?: () => number
   toastIntervalMs?: number
   /** Maximum distinct log writes per window; a crash loop must not fill the disk. */
@@ -37,6 +79,7 @@ const DEFAULT_TOAST_INTERVAL_MS = 60_000
 const DEFAULT_MAX_LOGS = 20
 const DEFAULT_WINDOW_MS = 60_000
 const MAX_TRACKED_SIGNATURES = 200
+const MAX_TRACKED_OCCURRENCES = 500
 
 function describe(value: unknown): { message: string; stack?: string } {
   if (value instanceof Error) return { message: value.message, stack: value.stack }
@@ -66,6 +109,9 @@ export function installCrashGuard(options: CrashGuardOptions): CrashGuard {
   let lastToastAt = Number.NEGATIVE_INFINITY
   let total = 0
   let suppressed = 0
+  let escalated = false
+  let occurrences: CrashOccurrence[] = []
+  const escalation = options.escalation ?? DEFAULT_CRASH_ESCALATION
 
   const handle = (kind: string, value: unknown): void => {
     total += 1
@@ -78,6 +124,16 @@ export function installCrashGuard(options: CrashGuardOptions): CrashGuard {
     signatures.set(signature, count)
 
     const current = now()
+    occurrences.push({ signature, at: current })
+    occurrences = occurrences.filter(item => current - item.at <= escalation.windowMs).slice(-MAX_TRACKED_OCCURRENCES)
+    if (!escalated && shouldEscalateCrashes(occurrences, current, escalation)) {
+      escalated = true
+      try {
+        options.onEscalate?.({ kind, message, stack, count })
+      } catch {
+        // The escalation prompt must never re-enter the handler.
+      }
+    }
     if (current - windowStartedAt >= windowMs) {
       windowStartedAt = current
       logsInWindow = 0

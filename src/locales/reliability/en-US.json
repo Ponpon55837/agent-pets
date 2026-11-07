@@ -38,5 +38,9 @@
   "reliability.launch.openSettings": "Open Login Items settings",
   "reliability.launch.notInApplications": "Move Agent Pets to the Applications folder first, then turn this on. macOS will not register a login item for an app run from a disk image or Downloads.",
   "reliability.launch.error": "Could not change launch at login. Try again later or check System Settings.",
-  "reliability.launch.trayPending": " (approval needed)"
+  "reliability.launch.trayPending": " (approval needed)",
+  "reliability.crash.escalateTitle": "Agent Pets keeps hitting errors",
+  "reliability.crash.escalateMessage": "Unexpected errors keep occurring in the background. Restarting Agent Pets is recommended; you can also keep running.",
+  "reliability.crash.escalateRestart": "Restart",
+  "reliability.crash.escalateContinue": "Keep running"
 }

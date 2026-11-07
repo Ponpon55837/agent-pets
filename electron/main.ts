@@ -223,6 +223,7 @@ const crashGuard = installCrashGuard({
       new Notification({ title: t('reliability.crash.toastTitle'), body: t('reliability.crash.toastBody') }).show()
     } catch {}
   },
+  onEscalate: () => { void showCrashEscalationDialog() },
 })
 installChildProcessGoneLogger(app, (_level, message) => console.error(message))
 export const mainCrashGuardStats = () => crashGuard.stats()
@@ -287,6 +288,26 @@ const startupStep = async (name: string, fn: () => void | Promise<void>) => {
     performance.mark(`agent-pets:startup:${name}`)
     startupTimings.push({ name, startMs: Math.round(startMs), durationMs: Math.round(durationMs * 10) / 10 })
   }
+}
+
+// Repeated uncaught errors: offer a restart once per run. Never relaunches on its own.
+async function showCrashEscalationDialog(): Promise<void> {
+  try {
+    if (!app.isReady()) return
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: t('reliability.crash.escalateTitle'),
+      message: t('reliability.crash.escalateMessage'),
+      buttons: [t('reliability.crash.escalateRestart'), t('reliability.crash.escalateContinue')],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (response === 0) {
+      relaunchApp(app)
+      shutdown.runNow()
+      app.exit(0)
+    }
+  } catch {}
 }
 
 async function showStartupFailureDialog(): Promise<void> {
