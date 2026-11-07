@@ -72,14 +72,29 @@ const panelPetSubtitle = computed(() => {
   return `${t('historyLevel', { level: store.progression.level })} · ${t(evolutionLabels[store.progression.evolutionStage])} · ${t('dayStreak', { days: store.progression.currentStreak })}`
 })
 
+// The shared clock only needs to be precise while the permission card shows
+// its running seconds; Usage reset labels are minute-granular. Sessions have
+// their own per-label clock (useNow), so idle panels barely wake the renderer.
+const TICK_FAST_MS = 1000
+const TICK_SLOW_MS = 30_000
+const tickInterval = computed(() => store.permissionRequest ? TICK_FAST_MS : TICK_SLOW_MS)
+let tickTimerMs = 0
+
 function syncTickTimer(): void {
   if (document.hidden) {
     if (tickTimer) clearInterval(tickTimer)
     tickTimer = null
+    tickTimerMs = 0
     return
   }
-  if (!tickTimer) tickTimer = setInterval(() => { nowTick.value = Date.now() }, 1000)
+  if (tickTimer && tickTimerMs === tickInterval.value) return
+  if (tickTimer) clearInterval(tickTimer)
+  nowTick.value = Date.now()
+  tickTimerMs = tickInterval.value
+  tickTimer = setInterval(() => { nowTick.value = Date.now() }, tickTimerMs)
 }
+
+watch(tickInterval, syncTickTimer)
 
 // Esc steps back one level: wizard / MCP, then settings, then hide the panel.
 // Anything that already handled the key (ConfirmDialog, inputs) wins.
