@@ -109,12 +109,12 @@
 
 Agent 要求權限時，寵物上會出現液態玻璃氣泡，面板內也會顯示同一張卡片。卡片會顯示發出請求的工具與專案、將執行的內容（已遮蔽，可展開與複製）與倒數計時。請求會在短暫的 TTL（最長 5 分鐘）後逾時，並通知 Agent 已取消。
 
-- **風險** — 只有唯讀工具（`read`、`glob`、`grep`、`list`）屬於低風險；OpenCode 的其他所有工具，包含未知與 MCP 包裝的工具，一律視為高風險。Claude Code 的 `Write`／`Edit`／`MultiEdit`／`NotebookEdit` 為中風險，`Bash`、`WebFetch`、`WebSearch` 為高風險，MCP 與其他工具為未知。網路類工具會標示會連到網路。
+- **風險** — 只有唯讀工具（`read`、`glob`、`grep`、`list`）屬於低風險；OpenCode 的其他所有工具，包含未知與 MCP 包裝的工具，一律視為高風險。Claude Code 的 `Write`／`Edit`／`MultiEdit`／`NotebookEdit` 只有在檔案位於專案資料夾內（解析符號連結後也是），且不在 `.git`、`.claude`、`.husky`、`.vscode`、`.idea`、`.devcontainer`、`node_modules/.bin` 之下，也不是 `.zshrc`、`.envrc`、`.npmrc` 這類 shell 啟動檔或工具設定檔時才是中風險，並顯示相對於專案的路徑；其他編輯、`Bash`、`WebFetch`、`WebSearch` 為高風險，MCP 與其他工具為未知。網路類工具會標示會連到網路。高風險或未知且內容被截斷的請求，在這裡只能拒絕，要允許請回到 Agent 本身。
 - **遮蔽** — API 金鑰與權杖、`Authorization` 值、`password=` 這類參數、URL 內的帳密與私鑰都會變成 `[redacted]`，家目錄則改寫成 `~`。
 - **快捷鍵** — 只有在最上層請求符合條件（低或中風險）時才註冊全域快捷鍵：macOS 為 **Cmd+Shift+Y** 允許一次、**Cmd+Shift+N** 拒絕；Windows 為 **Ctrl+Shift+Y**、**Ctrl+Shift+N**。若按鍵被其他 App 占用，氣泡會說明，按鈕仍可使用。氣泡本身：**N** 或 **Esc** 拒絕；低風險按 **Y** 即允許一次，其他風險需按住 **Y** 0.6 秒。
 - **佇列** — 多個待處理請求會以可展開的清單顯示；**全部拒絕**需要再按一次確認。
 - 對無法在此回覆的 Agent（Codex，以及未開啟下列選項時的 Claude Code），氣泡只是提醒，請回到該工具處理。只提供「允許一次」與「拒絕」，刻意不提供永久核准。
-- **Claude Code**（預設關閉）— 在**設定 → 桌面 → 權限請求**開啟**從寵物回覆 Claude Code 權限**。之後 Claude Code 的 `PermissionRequest` hook 會在**等待秒數**內（預設 90 秒，可設 15–120 秒）等你回覆，終端機裡 Claude Code 自己的權限對話框同時保留，先回覆的一方生效，寵物卡片也會提示可在終端機回覆。在終端機回覆後，工具執行完或該回合結束時泡泡就會撤下。寵物沒開、選項關閉、等待逾時或發生任何錯誤時，hook 不輸出任何內容，Claude Code 照原本流程進行（非互動的 `-p` 執行則照常拒絕）。你自己的 deny 規則仍優先於寵物的允許。拒絕時 Claude 只會收到固定文字 `Denied in Agent Pets.`。若其他工具也註冊了 `PermissionRequest` hook，會與我們並行執行，以哪一方的回覆為準由 Claude Code 決定。
+- **Claude Code**（預設關閉）— 在**設定 → 桌面 → 權限請求**開啟**從寵物回覆 Claude Code 權限**。之後 Claude Code 的 `PermissionRequest` hook 會在**等待秒數**內（預設 90 秒，可設 15–120 秒）等你回覆，終端機裡 Claude Code 自己的權限對話框同時保留，先回覆的一方生效，寵物卡片也會提示可在終端機回覆。一次點擊只回覆一個工具呼叫：若另一個工具呼叫正在等待完全相同的請求（例如兩個 subagent 執行同一個指令），第二個只能在終端機回覆。泡泡會在該工具執行完、Claude 開始下一個工具呼叫或權限詢問、回合結束或送出新提示，或等待逾時時撤下。由於終端機可能先回覆，權限紀錄會把 Claude Code 的決定標示為「終端機可能已先回覆」。寵物沒開、選項關閉、等待逾時或發生任何錯誤時，hook 不輸出任何內容，Claude Code 照原本流程進行（非互動的 `-p` 執行則照常拒絕）。你自己的 deny 規則仍優先於寵物的允許。拒絕時 Claude 只會收到固定文字 `Denied in Agent Pets. (已在 Agent Pets 拒絕)`。若其他工具也註冊了 `PermissionRequest` hook，會與我們並行執行，以哪一方的回覆為準由 Claude Code 決定。
 - **權限氣泡**可在設定中關閉；關閉後待處理請求仍由 broker 保管並顯示在系統匣標記上。**設定 → 桌面**也會列出最近的決定紀錄（只含時間、工具、來源與結果）。
 
 ## 插件
