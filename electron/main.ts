@@ -96,6 +96,8 @@ import { registerPetMotionIpc } from './ipc/pet-motion'
 
 
 import { mainState } from './main/state'
+import { createShutdownCoordinator } from './main/shutdown'
+import { disposeMainTimers } from './main/dispose-timers'
 import { flushMainLog, logMain, teeConsoleToLog } from './diagnostics/main-log'
 import { acquireRunMarker } from './diagnostics/session-marker'
 import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
@@ -488,7 +490,7 @@ async function bootstrapApp(): Promise<void> {
     showPanelWindow: view => showPanelWindow(view),
     quit: () => app.quit(),
     relaunch: () => app.relaunch(),
-    exit: code => app.exit(code),
+    exit: code => { shutdown.runNow(); app.exit(code) },
     setPresentationStatus: status => { mainState.presentationStatusProjection = status },
     updatePluginAgentStatus: status => { mainState.pluginAgentStatusController?.update(status) },
   })
@@ -671,7 +673,7 @@ app.whenReady().then(bootstrapApp).catch(async error => {
   await showStartupFailureDialog()
 })
 
-app.on('before-quit', () => {
+function teardownMainServices(): void {
   mainState.isQuitting = true
   runMarker.clear()
   flushMainLog()
@@ -718,6 +720,23 @@ app.on('before-quit', () => {
   mainState.historyStore = null
   mainState.projectRoutingStore?.close()
   mainState.projectRoutingStore = null
+  disposeMainTimers(mainState)
+}
+
+const shutdown = createShutdownCoordinator({
+  // Debounced position writes must land before the stores close or the app exits.
+  flush: () => {
+    if (mainState.persistBoundsHandle || mainState.shimejiPersistHandle) persistCurrentPetWindowState()
+  },
+  pendingWork: () => mainState.localUsageScanPromise,
+  teardown: teardownMainServices,
+  quit: () => app.quit(),
+  log: (message, error) => console.error(message, error),
+})
+
+app.on('before-quit', event => {
+  mainState.isQuitting = true
+  shutdown.onBeforeQuit(event)
 })
 
 app.on('will-quit', () => {
@@ -725,15 +744,18 @@ app.on('will-quit', () => {
   mainState.permissionRelay?.shutdown()
   mainState.permissionRelay = null
   mainState.permissionBroker = null
+  mainState.permissionAdapterServer?.closeAllConnections?.()
   mainState.permissionAdapterServer?.close()
   mainState.permissionAdapterServer = null
   mainState.desktopNotifications?.destroy()
   mainState.desktopNotifications = null
   mainState.desktopTray?.destroy()
   mainState.desktopTray = null
+  mainState.presentationMcpServer?.closeAllConnections?.()
   mainState.presentationMcpServer?.close()
   mainState.presentationMcpServer = null
   mainState.presentationController = null
+  mainState.eventServer?.closeAllConnections?.()
   mainState.eventServer?.close()
   mainState.eventServer = null
 })
