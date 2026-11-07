@@ -338,20 +338,92 @@ test('local-only mode excludes untracked files and warns about tracked ones', ()
   } finally { cleanup(projectPath) }
 })
 
-test('git helpers: worktree .git file, index parsing and exclude edits', () => {
+test('git helpers: in-project gitdir file, index parsing and exclude edits', () => {
   const base = createProject()
   try {
-    const real = path.join(base, 'repo.git')
-    fs.mkdirSync(path.join(real, 'info'), { recursive: true })
     const project = path.join(base, 'wt')
-    fs.mkdirSync(project)
+    const real = path.join(project, 'meta.git')
+    fs.mkdirSync(path.join(real, 'info'), { recursive: true })
     fs.writeFileSync(path.join(project, '.git'), `gitdir: ${real}\n`)
     const location = findGitLocation(project)
-    assert.equal(location?.gitDir, real)
+    assert.equal(location?.gitDir, fs.realpathSync(real))
+    assert.equal(location?.outside, undefined)
     assert.equal(readTrackedPaths(location!), null)
     assert.deepEqual(addLocalExcludes(location!, ['a.json']), ['a.json'])
     assert.deepEqual(addLocalExcludes(location!, ['a.json']), [])
     assert.equal(findGitLocation(base), null)
+  } finally { cleanup(base) }
+})
+
+test('git helpers never follow gitdir or commondir outside the picked folder', () => {
+  const base = createProject()
+  try {
+    const outside = path.join(base, 'elsewhere')
+    fs.mkdirSync(path.join(outside, 'info'), { recursive: true })
+    // gitdir outside
+    const project = path.join(base, 'p1')
+    fs.mkdirSync(project)
+    fs.writeFileSync(path.join(project, '.git'), `gitdir: ${outside}\n`)
+    const location = findGitLocation(project)
+    assert.equal(location?.outside, true)
+    assert.equal(readTrackedPaths(location!), null)
+    assert.throws(() => addLocalExcludes(location!, ['a.json']), /outside/)
+    assert.equal(fs.existsSync(path.join(outside, 'info', 'exclude')), false)
+    // relative traversal
+    const project2 = path.join(base, 'p2')
+    fs.mkdirSync(project2)
+    fs.writeFileSync(path.join(project2, '.git'), 'gitdir: ../elsewhere\n')
+    assert.equal(findGitLocation(project2)?.outside, true)
+    // in-project gitdir whose commondir escapes
+    const project3 = path.join(base, 'p3')
+    fs.mkdirSync(path.join(project3, 'g'), { recursive: true })
+    fs.writeFileSync(path.join(project3, 'g', 'commondir'), `${outside}\n`)
+    fs.writeFileSync(path.join(project3, '.git'), 'gitdir: g\n')
+    const escaped = findGitLocation(project3)
+    assert.equal(escaped?.outside, true)
+    assert.throws(() => addLocalExcludes(escaped!, ['a.json']), /outside/)
+    assert.equal(fs.existsSync(path.join(outside, 'info', 'exclude')), false)
+    // symlinked gitdir pointing outside
+    const project4 = path.join(base, 'p4')
+    fs.mkdirSync(project4)
+    fs.symlinkSync(outside, path.join(project4, 'link.git'))
+    fs.writeFileSync(path.join(project4, '.git'), 'gitdir: link.git\n')
+    assert.equal(findGitLocation(project4)?.outside, true)
+  } finally { cleanup(base) }
+})
+
+test('git helpers refuse a symlinked info directory or exclude file', () => {
+  const base = createProject()
+  try {
+    const outside = path.join(base, 'elsewhere')
+    fs.mkdirSync(outside)
+    const project = path.join(base, 'p')
+    fs.mkdirSync(path.join(project, '.git'), { recursive: true })
+    fs.symlinkSync(outside, path.join(project, '.git', 'info'))
+    const location = findGitLocation(project)!
+    assert.throws(() => addLocalExcludes(location, ['a.json']), /unsafe/)
+    assert.equal(fs.readdirSync(outside).length, 0)
+    fs.rmSync(path.join(project, '.git', 'info'))
+    fs.mkdirSync(path.join(project, '.git', 'info'))
+    fs.writeFileSync(path.join(outside, 'x'), '')
+    fs.symlinkSync(path.join(outside, 'x'), path.join(project, '.git', 'info', 'exclude'))
+    assert.throws(() => addLocalExcludes(location, ['a.json']), /unsafe/)
+    assert.equal(fs.readFileSync(path.join(outside, 'x'), 'utf8'), '')
+  } finally { cleanup(base) }
+})
+
+test('local-only mode skips and reports a .git pointer outside the project', () => {
+  const base = createProject()
+  try {
+    const outside = path.join(base, 'elsewhere')
+    fs.mkdirSync(path.join(outside, 'info'), { recursive: true })
+    const projectPath = path.join(base, 'proj')
+    fs.mkdirSync(projectPath)
+    fs.writeFileSync(path.join(projectPath, '.git'), `gitdir: ${outside}\n`)
+    const summary = install2(projectPath, options(projectPath), { localOnly: true })
+    assert.match(summary.warnings?.[0] ?? '', /outside the project/)
+    assert.equal(summary.excluded, undefined)
+    assert.equal(fs.existsSync(path.join(outside, 'info', 'exclude')), false)
   } finally { cleanup(base) }
 })
 

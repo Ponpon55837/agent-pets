@@ -702,7 +702,9 @@ export function installProjectMcp(
 
   if (selection?.localOnly) {
     const location = findGitLocation(canonicalPath)
-    if (location) {
+    if (location?.outside) {
+      summary.warnings = ['.git points outside the project folder; skipped editing its info/exclude.']
+    } else if (location) {
       const tracked = readTrackedPaths(location)
       const relativePaths = results
         .filter(result => result.status === 'installed' || result.status === 'already_configured')
