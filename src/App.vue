@@ -104,6 +104,12 @@ function onDocumentVisibilityChange(): void {
   syncRecurringTimers()
 }
 
+// getImageData is a synchronous GPU->CPU readback. A cursor resting on (or
+// creeping across) the pet asks the same backing-store pixel repeatedly, and the
+// sprite only changes a few times per second, so remember the verdict briefly.
+const HIT_CACHE_TTL_MS = 100
+let hitCache: { canvas: HTMLCanvasElement, x: number, y: number, at: number, hit: boolean } | null = null
+
 function isOpaqueCanvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number): boolean {
   const rect = canvas.getBoundingClientRect()
   if (rect.width <= 0 || rect.height <= 0) return false
@@ -112,6 +118,16 @@ function isOpaqueCanvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY
   const y = Math.floor((clientY - rect.top) * canvas.height / rect.height)
   if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return false
 
+  const now = performance.now()
+  if (hitCache && hitCache.canvas === canvas && hitCache.x === x && hitCache.y === y && now - hitCache.at < HIT_CACHE_TTL_MS) {
+    return hitCache.hit
+  }
+  const hit = sampleOpaqueNeighbourhood(canvas, rect, x, y)
+  hitCache = { canvas, x, y, at: now, hit }
+  return hit
+}
+
+function sampleOpaqueNeighbourhood(canvas: HTMLCanvasElement, rect: DOMRect, x: number, y: number): boolean {
   try {
     // Sample a small neighbourhood rather than one pixel so gaps between legs
     // and arms do not make the pet impossible to grab.
@@ -145,6 +161,7 @@ let lastPointer: { x: number; y: number } | null = null
 let lastPointerAt = 0
 let passthroughSentAt = 0
 let reevaluateFrame: number | null = null
+let pointerFrame: number | null = null
 let layoutObserver: ResizeObserver | null = null
 let layoutMutationObserver: MutationObserver | null = null
 const POINTER_FRESH_MS = 4_000
@@ -168,7 +185,13 @@ function evaluatePointer(clientX: number, clientY: number): void {
 function handlePetMouseMove(event: MouseEvent) {
   lastPointer = { x: event.clientX, y: event.clientY }
   lastPointerAt = performance.now()
-  evaluatePointer(event.clientX, event.clientY)
+  // At most one hit-test per frame: mousemove can fire at 60-125 Hz, but only
+  // the newest position matters.
+  if (pointerFrame !== null) return
+  pointerFrame = requestAnimationFrame(() => {
+    pointerFrame = null
+    if (lastPointer) evaluatePointer(lastPointer.x, lastPointer.y)
+  })
 }
 
 // Edge handle: expand only when the cursor lingers, so sweeping past on the way
@@ -222,6 +245,8 @@ function stopLayoutWatch(): void {
   layoutMutationObserver = null
   if (reevaluateFrame !== null) cancelAnimationFrame(reevaluateFrame)
   reevaluateFrame = null
+  if (pointerFrame !== null) cancelAnimationFrame(pointerFrame)
+  pointerFrame = null
 }
 
 // Pet and panel are separate windows/renderer processes, each with its own
@@ -424,13 +449,24 @@ watch(() => store.petScale, (v) => {
 // The main process keeps the MCP status projection sanitized and authoritative
 // for DND/enabled state. Only the pet renderer publishes it; the panel never
 // becomes a second source of truth.
-watch(
-  () => store.getPresentationStatus(),
-  (snapshot) => {
-    if (!isPanelWindow) window.electronAPI?.publishPresentationStatus(snapshot)
-  },
-  { deep: true, immediate: true },
-)
+// The getter builds a fresh object per heartbeat, so compare a compact content
+// signature (<= 16 pets) and only cross the IPC boundary when it really changed.
+// The panel window never publishes, so it does not even track the getter.
+if (!isPanelWindow) {
+  let lastPresentationKey = ''
+  watch(
+    () => {
+      const snapshot = store.getPresentationStatus()
+      return { snapshot, key: JSON.stringify(snapshot) }
+    },
+    ({ snapshot, key }) => {
+      if (key === lastPresentationKey) return
+      lastPresentationKey = key
+      window.electronAPI?.publishPresentationStatus(snapshot)
+    },
+    { immediate: true },
+  )
+}
 
 // The compact meter only needs quota while a Codex/Claude family is active.
 // The main-process cache coalesces requests from the pet and panel renderer,

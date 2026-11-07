@@ -79,6 +79,8 @@ export interface LocalUsageScanDiagnostics extends LocalUsageScanResult {
 // Yield to the event loop every this many file-system entries so a scan over
 // thousands of session logs never blocks the main process for long.
 const YIELD_EVERY = 25
+const PARSE_SLICE_BYTES = 1024 * 1024
+const IMPORT_BATCH_RECORDS = 500
 const yieldToEventLoop = (): Promise<void> => new Promise(resolve => setImmediate(resolve))
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -304,11 +306,63 @@ interface UsageFile {
   mtimeMs: number
 }
 
-async function filesUnder(root: string, maxFiles: number, minMtimeMs: number): Promise<UsageFile[]> {
+interface DirectoryListing {
+  mtimeMs: number
+  ino: number
+  cachedAt: number
+  entries: Array<{ name: string, kind: 'file' | 'directory' | 'other' }>
+}
+
+/** Survives between scans so an idle tree costs one lstat per entry, not three syscalls. */
+export interface UsageScanCache {
+  /** Directory listings keyed by path, valid while the directory's own mtime is unchanged. */
+  directories: Map<string, DirectoryListing>
+  /** Files whose containment in the root was verified once: (dev, ino) -> real path. */
+  verifiedFiles: Map<string, { dev: number, ino: number, realPath: string }>
+}
+
+export function createUsageScanCache(): UsageScanCache {
+  return { directories: new Map(), verifiedFiles: new Map() }
+}
+
+const LISTING_MAX_AGE_MS = 10 * 60_000
+// A directory modified this recently might still gain entries within the same
+// timestamp tick, so its listing is re-read next time instead of cached.
+const LISTING_SETTLE_MS = 2_000
+const MAX_CACHED_DIRECTORIES = 4096
+const MAX_VERIFIED_FILES = 8192
+
+/**
+ * Codex stores sessions as YYYY/MM/DD. A date directory whose whole range ends
+ * before the cutoff cannot hold importable records, so the walk never enters it:
+ * cost is O(retained days) instead of O(files).
+ */
+export function isExpiredDateDirectory(parts: readonly string[], cutoffMs: number): boolean {
+  const [year, month, day] = parts
+  if (year === undefined || !/^\d{4}$/.test(year)) return false
+  const y = Number(year)
+  if (month === undefined) return Date.UTC(y + 1, 0, 1) <= cutoffMs - DAY_MS
+  if (!/^\d{2}$/.test(month)) return false
+  const m = Number(month) - 1
+  if (day === undefined) return Date.UTC(y, m + 1, 1) <= cutoffMs - DAY_MS
+  if (!/^\d{2}$/.test(day)) return false
+  // One day of slack for local-time vs UTC directory naming.
+  return Date.UTC(y, m, Number(day) + 1) <= cutoffMs - DAY_MS
+}
+
+async function filesUnder(
+  root: string,
+  maxFiles: number,
+  minMtimeMs: number,
+  cache: UsageScanCache = createUsageScanCache(),
+  pruneDates = false,
+  nowMs = Date.now(),
+): Promise<UsageFile[]> {
   const files: UsageFile[] = []
   let realRoot: string
+  let rootStat
   try {
-    const rootStat = await lstat(root)
+    rootStat = await lstat(root)
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return files
     realRoot = await realpath(root)
   } catch {
@@ -321,16 +375,45 @@ async function filesUnder(root: string, maxFiles: number, minMtimeMs: number): P
   }
 
   let visited = 0
-  const visit = async (directory: string, depth: number): Promise<void> => {
+  const visit = async (directory: string, directoryStat: { mtimeMs: number, ino: number }, depth: number, parts: string[]): Promise<void> => {
     if (files.length >= maxFiles || depth > MAX_WALK_DEPTH) return
-    let entries: Dirent[]
-    try {
-      entries = await readdir(directory, { withFileTypes: true })
-    } catch {
-      return
+    let listing = cache.directories.get(directory)
+    if (
+      !listing || listing.mtimeMs !== directoryStat.mtimeMs || listing.ino !== directoryStat.ino
+      || nowMs - listing.cachedAt > LISTING_MAX_AGE_MS
+    ) {
+      let dirents: Dirent[]
+      try {
+        dirents = await readdir(directory, { withFileTypes: true })
+      } catch {
+        cache.directories.delete(directory)
+        return
+      }
+      listing = {
+        mtimeMs: directoryStat.mtimeMs,
+        ino: directoryStat.ino,
+        cachedAt: nowMs,
+        entries: dirents.map(entry => ({
+          name: entry.name,
+          kind: entry.isSymbolicLink() ? 'other' : entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other',
+        })),
+      }
+      if (nowMs - directoryStat.mtimeMs > LISTING_SETTLE_MS) {
+        cache.directories.delete(directory)
+        cache.directories.set(directory, listing)
+        while (cache.directories.size > MAX_CACHED_DIRECTORIES) {
+          const oldest = cache.directories.keys().next().value
+          if (oldest === undefined) break
+          cache.directories.delete(oldest)
+        }
+      } else {
+        cache.directories.delete(directory)
+      }
     }
-    for (const entry of entries) {
+    for (const entry of listing.entries) {
       if (files.length >= maxFiles) return
+      if (entry.kind === 'other') continue
+      if (entry.kind === 'directory' && pruneDates && isExpiredDateDirectory([...parts, entry.name], minMtimeMs)) continue
       visited += 1
       if (visited % YIELD_EVERY === 0) await yieldToEventLoop()
       const candidate = join(directory, entry.name)
@@ -338,18 +421,35 @@ async function filesUnder(root: string, maxFiles: number, minMtimeMs: number): P
       try { stat = await lstat(candidate) } catch { continue }
       if (stat.isSymbolicLink()) continue
       if (stat.isFile() && stat.mtimeMs < minMtimeMs) continue
-      let realCandidate: string
-      try { realCandidate = await realpath(candidate) } catch { continue }
-      if (!isWithinRoot(realCandidate)) continue
       if (stat.isDirectory()) {
-        await visit(candidate, depth + 1)
+        let realCandidate: string
+        try { realCandidate = await realpath(candidate) } catch { continue }
+        if (!isWithinRoot(realCandidate)) continue
+        await visit(candidate, stat, depth + 1, [...parts, entry.name])
       } else if (stat.isFile() && extname(entry.name).toLowerCase() === '.jsonl') {
+        // Containment is verified once per (path, dev, ino); an unchanged file
+        // identity is trusted afterwards, so the steady state skips realpath.
+        const known = cache.verifiedFiles.get(candidate)
+        let realCandidate: string
+        if (known && known.dev === stat.dev && known.ino === stat.ino) {
+          realCandidate = known.realPath
+        } else {
+          try { realCandidate = await realpath(candidate) } catch { continue }
+          if (!isWithinRoot(realCandidate)) continue
+          cache.verifiedFiles.delete(candidate)
+          cache.verifiedFiles.set(candidate, { dev: stat.dev, ino: stat.ino, realPath: realCandidate })
+          while (cache.verifiedFiles.size > MAX_VERIFIED_FILES) {
+            const oldest = cache.verifiedFiles.keys().next().value
+            if (oldest === undefined) break
+            cache.verifiedFiles.delete(oldest)
+          }
+        }
         files.push({ path: realCandidate, dev: stat.dev, ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs })
       }
     }
   }
 
-  await visit(realRoot, 0)
+  await visit(realRoot, rootStat, 0, [])
   return files
 }
 
@@ -565,6 +665,7 @@ export class LocalUsageReader {
   private readonly maxLineBytes: number
   private readonly projectRouting: ProjectPathResolver | null
   private readonly fileCache = new Map<string, LocalUsageFileCacheEntry>()
+  private readonly scanCaches = new Map<string, UsageScanCache>()
   private activeScan: Promise<LocalUsageScanResult> | null = null
   private diagnostics: LocalUsageScanDiagnostics | null = null
 
@@ -611,7 +712,7 @@ export class LocalUsageReader {
       if (remainingFiles <= 0) break
       // Files not modified since the cutoff cannot hold importable records,
       // so they are never stat-resolved, opened, or read.
-      const files = await filesUnder(root.directory, remainingFiles, cutoff)
+      const files = await filesUnder(root.directory, remainingFiles, cutoff, this.scanCaches.get(root.directory) ?? this.newScanCache(root.directory), root.provider === 'codex', this.now())
       remainingFiles -= files.length
       for (const { path: filePath, ...stat } of files) {
         await yieldToEventLoop()
@@ -649,18 +750,33 @@ export class LocalUsageReader {
         remainingBytes -= content.length
         result.filesScanned += 1
         const fileKey = digest(`${root.provider}:${filePath}`)
-        const records = parseIncrementalLocalUsageChunk(
-          root.provider,
-          fileKey,
-          content,
-          readStart,
-          stat.mtimeMs,
-          this.maxLineBytes,
-          parserState,
-        )
-        result.recordsParsed += records.length
-        // 同一檔案的所有紀錄合併成單一 SQLite 交易寫入。
-        result.recordsImported += this.history.batch(() => this.importRecords(records, cutoff))
+        // Parse and import in ~1 MB slices with a yield between them, so a 16 MB
+        // first-time import never blocks the main thread for more than one slice.
+        const records = new Map<string, ParsedUsage>()
+        let sliceStart = 0
+        let sliceSize = PARSE_SLICE_BYTES
+        while (sliceStart < content.length) {
+          const sliceEnd = Math.min(content.length, sliceStart + sliceSize)
+          const parsed = parseIncrementalLocalUsageChunk(
+            root.provider,
+            fileKey,
+            content.subarray(sliceStart, sliceEnd),
+            readStart + sliceStart,
+            stat.mtimeMs,
+            this.maxLineBytes,
+            parserState,
+          )
+          for (const record of parsed) records.set(record.dedupeKey, record)
+          const consumed = parserState.readOffset - readStart
+          if (sliceEnd >= content.length) break
+          // A slice with no complete line makes no progress: widen it.
+          sliceSize = consumed > sliceStart ? PARSE_SLICE_BYTES : sliceSize * 2
+          sliceStart = Math.max(sliceStart, consumed)
+          await yieldToEventLoop()
+        }
+        const unique = [...records.values()]
+        result.recordsParsed += unique.length
+        result.recordsImported += await this.importRecords(unique, cutoff)
         this.rememberFile(cacheKey, { ...stat, ...parserState, readEnd: readStart + content.length })
       }
     }
@@ -668,20 +784,37 @@ export class LocalUsageReader {
     return result
   }
 
-  private importRecords(records: ParsedUsage[], cutoff: number): number {
+  private async importRecords(records: ParsedUsage[], cutoff: number): Promise<number> {
+    const fresh = records.filter(record => record.occurredAt > cutoff)
+    // Resolve each distinct cwd once (positive and negative results). A deleted
+    // worktree used to cost one synchronous lstat per record; now it costs one.
+    // trackSeen (not a read-only resolve) so a project whose only evidence is
+    // this log file still gets a project-list row. It gets the newest usage time.
+    const latestByCwd = new Map<string, number>()
+    for (const record of fresh) {
+      if (!record.cwd) continue
+      latestByCwd.set(record.cwd, Math.max(latestByCwd.get(record.cwd) ?? 0, record.occurredAt))
+    }
+    const projectByCwd = new Map<string, string | undefined>()
+    for (const [cwd, seenAt] of latestByCwd) {
+      projectByCwd.set(cwd, this.projectRouting?.trackSeen(cwd, seenAt)?.projectId)
+    }
     let imported = 0
-    for (const record of records) {
-      if (record.occurredAt <= cutoff) continue
-      // trackSeen (not a read-only resolve) so a project whose only
-      // evidence is this log file still gets a row in the project list -
-      // otherwise its token totals would be correctly computed but
-      // permanently unreachable from the History project filter.
-      const projectId = record.cwd
-        ? this.projectRouting?.trackSeen(record.cwd, record.occurredAt)?.projectId
-        : undefined
-      if (this.history.recordTokenUsage({ ...record, projectId })) imported += 1
+    for (let offset = 0; offset < fresh.length; offset += IMPORT_BATCH_RECORDS) {
+      const batch = fresh.slice(offset, offset + IMPORT_BATCH_RECORDS).map(record => ({
+        ...record,
+        projectId: record.cwd ? projectByCwd.get(record.cwd) : undefined,
+      }))
+      imported += this.history.recordTokenUsageBatch(batch)
+      if (offset + IMPORT_BATCH_RECORDS < fresh.length) await yieldToEventLoop()
     }
     return imported
+  }
+
+  private newScanCache(directory: string): UsageScanCache {
+    const cache = createUsageScanCache()
+    this.scanCaches.set(directory, cache)
+    return cache
   }
 
   private rememberFile(key: string, entry: LocalUsageFileCacheEntry): void {

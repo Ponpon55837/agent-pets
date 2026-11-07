@@ -17,6 +17,7 @@ import {
   type HistoryTokenQuality,
 } from '../src/types/history.ts'
 import { dateOffset, localDateKey } from '../src/utils/local-date.ts'
+import { applyWalPragmas, type SqlitePragmaState } from './sqlite-pragmas.ts'
 import { StatementCache } from './sqlite-statements.ts'
 import { isValidPetId } from '../src/utils/pet-id.ts'
 
@@ -54,8 +55,11 @@ const QUOTA_SNAPSHOT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 const ACHIEVEMENT_RECONCILED_KEY = 'achievement_reconciled_at'
 const MAX_QUOTA_PROVIDERS = 8
 const MAX_QUOTA_WINDOWS = 32
+const MAX_QUEUED_EVENTS = 500
+const PRUNE_BATCH_ROWS = 5000
+const ACTIVE_ROLLUP_STATE = 'active-rollup'
 const MAX_ACTIVE_GAP_MS = 5 * 60 * 1000
-const MAX_ACHIEVEMENT_BACKFILL_EVENTS = 100_000
+const COMPLETED_SESSION_PAGE_ROWS = 5000
 const LOCAL_USAGE_CUTOFF_KEY = 'local_usage_cutoff_at'
 const HISTORY_RANGES: readonly number[] = [7, 30, 90]
 const ACTIVE_STATES = new Set<AgentState>(['thinking', 'tool-running'])
@@ -144,6 +148,19 @@ function tokenUsage(event: AgentStatusEvent): {
   }
 }
 
+interface DailyBatchEntry {
+  localDate: string
+  petId: string
+  projectId: string
+  adapterId: string
+  activeMs: number
+  tokenInput: number
+  tokenOutput: number
+  tokenCacheRead: number
+  tokenCacheWrite: number
+  tokenQuality: HistoryTokenQuality
+}
+
 interface SessionRow {
   sessionPk: string
   adapterId: string
@@ -194,7 +211,11 @@ export class HistoryStore {
   private readonly localDate: (timestamp: number) => string
   private readonly retentionDays: number
   private readonly statements: StatementCache<SqliteStatement>
+  private pragmas: SqlitePragmaState = { journalMode: '', synchronous: -1 }
   private transactionDepth = 0
+  private dailyBatch: Map<string, DailyBatchEntry> | null = null
+  private queuedEvents: Array<{ event: AgentStatusEvent, petId: string, receivedAt: number, onRecorded?: () => void }> = []
+  private flushHandle: ReturnType<typeof setImmediate> | null = null
   private closed = false
 
   constructor(filePath: string, options: HistoryStoreOptions = {}) {
@@ -214,6 +235,10 @@ export class HistoryStore {
       this.database.close()
       throw error
     }
+  }
+
+  getPragmaState(): SqlitePragmaState {
+    return this.pragmas
   }
 
   getRetentionDays(): number {
@@ -278,7 +303,50 @@ export class HistoryStore {
       const activeDeltaMs = previous && isActiveState(previous.lastState) && occurredAt > previous.lastSeenAt
         ? Math.min(occurredAt - previous.lastSeenAt, MAX_ACTIVE_GAP_MS)
         : 0
-      const inserted = changedCount(this.statement(`
+      // Heartbeats (thinking / tool-running with no token usage and no
+      // adapter-supplied identity) carry no fact beyond "the session is still
+      // active". Only their accumulated active time is durable: it is folded into
+      // one rollup row per session-day instead of one events row per heartbeat.
+      // Nothing reads individual heartbeat rows: successAlreadyRecorded and the
+      // achievement backfill only look at state = 'success', and the daily_stats
+      // rebuild only sums active_delta_ms, which the rollup row preserves.
+      const isHeartbeat = isActiveState(state)
+        && usage.quality === 'none'
+        && !SAFE_ID.test(event.eventId ?? '')
+        && sourceEventId === null
+      let inserted: number
+      if (isHeartbeat) {
+        // The old per-row dedupe ignored replays; a heartbeat that is not newer
+        // than the session's last activity can add neither time nor state.
+        if (previous && occurredAt <= previous.lastSeenAt) return false
+        if (activeDeltaMs > 0) {
+          this.statement(`
+            INSERT INTO events(
+              event_id, source_event_id, schema_version, type, trust, adapter_id, agent_id,
+              session_id, project_id, pet_id, local_date, occurred_at, received_at, state,
+              active_delta_ms, completion_kind, token_input, token_output, token_quality, payload_json
+            ) VALUES (?, NULL, 2, 'agent.active_rollup', 'adapter_verified', ?, ?, ?, ?, ?, ?, ?, ?, '${ACTIVE_ROLLUP_STATE}',
+                      ?, NULL, NULL, NULL, 'none', '{}')
+            ON CONFLICT(event_id) DO UPDATE SET
+              active_delta_ms = active_delta_ms + excluded.active_delta_ms,
+              occurred_at = MAX(occurred_at, excluded.occurred_at),
+              received_at = excluded.received_at
+          `).run(
+            digest(`rollup:${sessionPk}:${localDate}:${safePet}`),
+            adapterId,
+            agentId,
+            externalId,
+            projectId,
+            safePet,
+            localDate,
+            occurredAt,
+            safeReceivedAt,
+            activeDeltaMs,
+          )
+        }
+        inserted = 1
+      } else {
+        inserted = changedCount(this.statement(`
         INSERT OR IGNORE INTO events(
           event_id, source_event_id, schema_version, type, trust, adapter_id, agent_id,
           session_id, project_id, pet_id, local_date, occurred_at, received_at, state,
@@ -304,6 +372,7 @@ export class HistoryStore {
         usage.quality,
         JSON.stringify({ state }),
       ))
+      }
       if (inserted === 0) return false
 
       const nextActiveMs = (previous?.activeMs ?? 0) + activeDeltaMs
@@ -392,6 +461,46 @@ export class HistoryStore {
     // Keep them in a global bucket so switching pets cannot make token totals
     // appear to drop to zero. The parameter remains for API compatibility.
     void petId
+    return this.applyTokenUsage(record, receivedAt)
+  }
+
+  /**
+   * Imports many local-log records in one transaction. Event rows keep their
+   * per-record dedupe, but the daily_stats deltas are summed in memory and
+   * written once per (date, pet, project, adapter) key at the end, so N records
+   * cost O(N) event statements plus O(keys) aggregate statements.
+   */
+  recordTokenUsageBatch(records: readonly HistoryTokenUsageRecord[], receivedAt = this.now()): number {
+    if (records.length === 0) return 0
+    return this.transaction(() => {
+      const nested = this.dailyBatch !== null
+      if (!nested) this.dailyBatch = new Map()
+      let imported = 0
+      try {
+        for (const record of records) {
+          if (this.applyTokenUsage(record, receivedAt)) imported += 1
+        }
+        if (!nested) this.flushDailyBatch()
+      } finally {
+        if (!nested) this.dailyBatch = null
+      }
+      return imported
+    })
+  }
+
+  private flushDailyBatch(): void {
+    const batch = this.dailyBatch
+    this.dailyBatch = null
+    if (!batch) return
+    for (const entry of batch.values()) {
+      this.updateDailyStat(
+        entry.localDate, entry.petId, entry.projectId, entry.adapterId, null, entry.activeMs,
+        entry.tokenInput, entry.tokenOutput, entry.tokenQuality, entry.tokenCacheRead, entry.tokenCacheWrite,
+      )
+    }
+  }
+
+  private applyTokenUsage(record: HistoryTokenUsageRecord, receivedAt: number): boolean {
     const safePet = LOCAL_USAGE_PET_ID
     const adapterId = SAFE_ID.test(record.adapterId) ? record.adapterId : ''
     const agentId = safeText(record.agentId, 'unknown')
@@ -561,6 +670,7 @@ export class HistoryStore {
   }
 
   getSummary(petId = DEFAULT_PET_ID, projectId?: string, rangeDays: number = 7): HistorySummary {
+    this.flushQueued()
     const safePet = safePetId(petId)
     const safeProject = typeof projectId === 'string' && PROJECT_ID.test(projectId) ? projectId : null
     const span = HISTORY_RANGES.includes(rangeDays) ? rangeDays : 7
@@ -676,39 +786,67 @@ export class HistoryStore {
    * session key, so overlap with already-recorded sessions is harmless.
    */
   getAchievementCompletedSessions(sinceMs = 0): AchievementCompletedSessionFact[] {
-    const rows = this.statement(`
-      SELECT event_id, adapter_id, agent_id, session_id, project_id, pet_id, occurred_at, state
-      FROM events
-      WHERE state = 'success' AND session_id IS NOT NULL AND occurred_at >= ?
-      ORDER BY occurred_at ASC, event_id ASC
-      LIMIT ?
-    `).all(Math.max(0, Math.floor(sinceMs)), MAX_ACHIEVEMENT_BACKFILL_EVENTS)
-    const successfulSessions = new Set<string>()
+    this.flushQueued()
     const completed: AchievementCompletedSessionFact[] = []
-    for (const row of rows) {
-      const adapterId = safeText(row.adapter_id)
-      const source = safeText(row.agent_id)
-      const sessionId = safeText(row.session_id)
-      const projectId = safeText(row.project_id)
-      if (!adapterId || !source || !sessionId) continue
-      const petId = safePetId(typeof row.pet_id === 'string' ? row.pet_id : undefined)
-      const achievementProjectId = PROJECT_ID.test(projectId) ? projectId : 'unbound'
-      const identity = digest(`${petId}:${source}:${sessionId}:${achievementProjectId}`)
-      if (successfulSessions.has(identity)) continue
-      successfulSessions.add(identity)
-      completed.push({
-        petId,
-        source,
-        sessionId,
-        ...(achievementProjectId !== 'unbound' ? { projectId: achievementProjectId } : {}),
-        adapterId,
-        completedAt: Math.max(0, asInteger(row.occurred_at)),
-      })
-    }
+    this.forEachCompletedSession(sinceMs, fact => { completed.push(fact) })
     return completed
   }
 
+  /**
+   * Streams first-success facts per session identity using keyset pages over the
+   * partial (occurred_at, event_id) success index: bounded memory per page and no
+   * silent truncation for very large histories.
+   */
+  private forEachCompletedSession(sinceMs: number, visit: (fact: AchievementCompletedSessionFact) => void): void {
+    const seen = new Set<string>()
+    const since = Math.max(0, Math.floor(sinceMs))
+    let afterAt = -1
+    let afterId = ''
+    for (;;) {
+      const rows = afterAt < 0
+        ? this.statement(`
+            SELECT event_id, adapter_id, agent_id, session_id, project_id, pet_id, occurred_at
+            FROM events
+            WHERE state = 'success' AND session_id IS NOT NULL AND occurred_at >= ?
+            ORDER BY occurred_at ASC, event_id ASC
+            LIMIT ?
+          `).all(since, COMPLETED_SESSION_PAGE_ROWS)
+        : this.statement(`
+            SELECT event_id, adapter_id, agent_id, session_id, project_id, pet_id, occurred_at
+            FROM events
+            WHERE state = 'success' AND session_id IS NOT NULL AND (occurred_at, event_id) > (?, ?)
+            ORDER BY occurred_at ASC, event_id ASC
+            LIMIT ?
+          `).all(afterAt, afterId, COMPLETED_SESSION_PAGE_ROWS)
+      for (const row of rows) {
+        const adapterId = safeText(row.adapter_id)
+        const source = safeText(row.agent_id)
+        const sessionId = safeText(row.session_id)
+        const projectId = safeText(row.project_id)
+        if (!adapterId || !source || !sessionId) continue
+        const petId = safePetId(typeof row.pet_id === 'string' ? row.pet_id : undefined)
+        const achievementProjectId = PROJECT_ID.test(projectId) ? projectId : 'unbound'
+        const identity = digest(`${petId}:${source}:${sessionId}:${achievementProjectId}`)
+        if (seen.has(identity)) continue
+        seen.add(identity)
+        visit({
+          petId,
+          source,
+          sessionId,
+          ...(achievementProjectId !== 'unbound' ? { projectId: achievementProjectId } : {}),
+          adapterId,
+          completedAt: Math.max(0, asInteger(row.occurred_at)),
+        })
+      }
+      if (rows.length < COMPLETED_SESSION_PAGE_ROWS) return
+      const last = rows[rows.length - 1]!
+      afterAt = asInteger(last.occurred_at)
+      afterId = String(last.event_id)
+    }
+  }
+
   clear(): void {
+    this.queuedEvents = []
     this.transaction(() => {
       this.database.exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM daily_stats; DELETE FROM quota_snapshots;')
       this.statement(`
@@ -738,9 +876,51 @@ export class HistoryStore {
 
   close(): void {
     if (this.closed) return
+    this.flushQueued()
     this.closed = true
     this.statements.clear()
     this.database.close()
+  }
+
+  /**
+   * One bounded retention step: deletes at most `limit` expired rows from each of
+   * events and sessions. `more` tells the caller to schedule another step.
+   */
+  pruneBatch(limit = PRUNE_BATCH_ROWS): { events: number, sessions: number, more: boolean } {
+    this.flushQueued()
+    const bounded = Math.max(1, Math.floor(limit))
+    const cutoff = this.now() - this.retentionDays * 24 * 60 * 60 * 1000
+    return this.transaction(() => {
+      const events = changedCount(this.statement(`
+        DELETE FROM events WHERE rowid IN (
+          SELECT rowid FROM events WHERE occurred_at < ? LIMIT ?
+        )
+      `).run(cutoff, bounded))
+      const sessions = changedCount(this.statement(`
+        DELETE FROM sessions WHERE session_pk IN (
+          SELECT session_pk FROM sessions WHERE last_seen_at < ? LIMIT ?
+        )
+      `).run(cutoff, bounded))
+      return { events, sessions, more: events >= bounded || sessions >= bounded }
+    })
+  }
+
+  /** Runtime retention: bounded batches with the event loop yielded in between. */
+  async pruneInBatches(
+    limit = PRUNE_BATCH_ROWS,
+    yieldToEventLoop: () => Promise<void> = () => new Promise(resolve => { setImmediate(resolve) }),
+  ): Promise<{ events: number, sessions: number }> {
+    let events = 0
+    let sessions = 0
+    for (;;) {
+      if (this.closed) break
+      const step = this.pruneBatch(limit)
+      events += step.events
+      sessions += step.sessions
+      if (!step.more) break
+      await yieldToEventLoop()
+    }
+    return { events, sessions }
   }
 
   private pruneEvents(): number {
@@ -761,47 +941,74 @@ export class HistoryStore {
     tokenCacheRead = 0,
     tokenCacheWrite = 0,
   ): void {
-    const existing = this.statement(`
-      SELECT sessions_completed, sessions_failed, active_ms, token_input, token_output,
-             token_cache_read, token_cache_write, token_quality
-      FROM daily_stats WHERE local_date = ? AND pet_id = ? AND project_id = ? AND adapter_id = ?
-    `).get(localDate, petId, projectId, adapterId)
-    const currentQuality = isTokenQuality(existing?.token_quality) ? existing!.token_quality as HistoryTokenQuality : 'none'
+    const completed = completionKind === 'success' ? 1 : 0
+    const failed = completionKind === 'error' ? 1 : 0
+    // A heartbeat that adds nothing must not rewrite the row (and its indexes).
+    if (
+      completed === 0 && failed === 0 && activeMs === 0 && tokenInput === 0 && tokenOutput === 0
+      && tokenCacheRead === 0 && tokenCacheWrite === 0 && tokenQuality === 'none'
+    ) return
+    if (this.dailyBatch && completed === 0 && failed === 0) {
+      const key = `${localDate}\u0000${petId}\u0000${projectId}\u0000${adapterId}`
+      const entry = this.dailyBatch.get(key) ?? {
+        localDate, petId, projectId, adapterId, activeMs: 0, tokenInput: 0, tokenOutput: 0,
+        tokenCacheRead: 0, tokenCacheWrite: 0, tokenQuality: 'none' as HistoryTokenQuality,
+      }
+      entry.activeMs += activeMs
+      entry.tokenInput += tokenInput
+      entry.tokenOutput += tokenOutput
+      entry.tokenCacheRead += tokenCacheRead
+      entry.tokenCacheWrite += tokenCacheWrite
+      entry.tokenQuality = mergeTokenQuality(entry.tokenQuality, tokenQuality)
+      this.dailyBatch.set(key, entry)
+      return
+    }
+    // One additive upsert instead of SELECT + UPSERT. The insert branch clamps
+    // negative corrections to 0 and the update branch applies the raw delta
+    // with the same MAX(0, ...) floor the read-modify-write version used.
     this.statement(`
       INSERT INTO daily_stats(
         local_date, pet_id, project_id, adapter_id, sessions_completed, sessions_failed,
         active_ms, token_input, token_output, token_cache_read, token_cache_write, token_quality
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(local_date, pet_id, project_id, adapter_id) DO UPDATE SET
-        sessions_completed = excluded.sessions_completed,
-        sessions_failed = excluded.sessions_failed,
-        active_ms = excluded.active_ms,
-        token_input = excluded.token_input,
-        token_output = excluded.token_output,
-        token_cache_read = excluded.token_cache_read,
-        token_cache_write = excluded.token_cache_write,
-        token_quality = excluded.token_quality
+        sessions_completed = MAX(0, sessions_completed + ?),
+        sessions_failed = MAX(0, sessions_failed + ?),
+        active_ms = MAX(0, active_ms + ?),
+        token_input = MAX(0, token_input + ?),
+        token_output = MAX(0, token_output + ?),
+        token_cache_read = MAX(0, token_cache_read + ?),
+        token_cache_write = MAX(0, token_cache_write + ?),
+        token_quality = CASE
+          WHEN token_quality = 'exact' OR excluded.token_quality = 'exact' THEN 'exact'
+          WHEN token_quality = 'estimated' OR excluded.token_quality = 'estimated' THEN 'estimated'
+          ELSE 'none' END
     `).run(
       localDate,
       petId,
       projectId,
       adapterId,
-      Math.max(0, asInteger(existing?.sessions_completed) + (completionKind === 'success' ? 1 : 0)),
-      Math.max(0, asInteger(existing?.sessions_failed) + (completionKind === 'error' ? 1 : 0)),
-      Math.max(0, asInteger(existing?.active_ms) + activeMs),
-      Math.max(0, asInteger(existing?.token_input) + tokenInput),
-      Math.max(0, asInteger(existing?.token_output) + tokenOutput),
-      Math.max(0, asInteger(existing?.token_cache_read) + tokenCacheRead),
-      Math.max(0, asInteger(existing?.token_cache_write) + tokenCacheWrite),
-      mergeTokenQuality(currentQuality, tokenQuality),
+      completed,
+      failed,
+      Math.max(0, activeMs),
+      Math.max(0, tokenInput),
+      Math.max(0, tokenOutput),
+      Math.max(0, tokenCacheRead),
+      Math.max(0, tokenCacheWrite),
+      tokenQuality,
+      completed,
+      failed,
+      activeMs,
+      tokenInput,
+      tokenOutput,
+      tokenCacheRead,
+      tokenCacheWrite,
     )
   }
 
   private migrate(): void {
+    this.pragmas = applyWalPragmas(this.database)
     this.database.exec(`
-      PRAGMA foreign_keys = ON;
-      PRAGMA busy_timeout = 5000;
-      PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
@@ -916,8 +1123,10 @@ export class HistoryStore {
     const hasV4 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 4').get())
     if (!hasV4) this.transaction(() => {
       this.database.exec(`
-        CREATE INDEX IF NOT EXISTS idx_history_events_completion_identity
-          ON events(agent_id, session_id, project_id, pet_id, state);
+        CREATE INDEX IF NOT EXISTS idx_history_events_success_identity
+          ON events(agent_id, session_id, project_id, pet_id) WHERE state = 'success';
+        CREATE INDEX IF NOT EXISTS idx_history_events_success_time
+          ON events(occurred_at, event_id) WHERE state = 'success';
       `)
       this.repairSuccessfulSessionOutcomes()
       this.database.exec(`
@@ -954,12 +1163,8 @@ export class HistoryStore {
         UPDATE events SET token_quality = 'estimated'
           WHERE type = 'agent.token_usage' AND token_quality = 'exact';
         DROP INDEX IF EXISTS idx_daily_stats_summary_cover;
-        CREATE INDEX IF NOT EXISTS idx_daily_stats_summary_cover
-          ON daily_stats(
-            pet_id, local_date, project_id, adapter_id,
-            sessions_completed, sessions_failed, active_ms, token_input, token_output,
-            token_cache_read, token_cache_write, token_quality
-          );
+        CREATE INDEX IF NOT EXISTS idx_history_events_success_time
+          ON events(occurred_at, event_id) WHERE state = 'success';
         DELETE FROM daily_stats;
       `)
       this.rebuildEventDailyStats()
@@ -967,6 +1172,27 @@ export class HistoryStore {
       this.statement(`
         INSERT INTO schema_migrations(version, name, applied_at, checksum)
         VALUES (6, 'history-token-cache-split', ?, 'history-token-cache-split')
+      `).run(this.now())
+    })
+    const hasV7 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 7').get())
+    if (!hasV7) this.transaction(() => {
+      // Write-amplification fix: success lookups use partial indexes, so the
+      // thousands of heartbeat rows per session never maintain them, and the
+      // daily_stats covering index (rewritten on every active_ms change) is
+      // replaced by a narrow (pet_id, local_date) index.
+      this.database.exec(`
+        DROP INDEX IF EXISTS idx_history_events_completion_identity;
+        CREATE INDEX IF NOT EXISTS idx_history_events_success_identity
+          ON events(agent_id, session_id, project_id, pet_id) WHERE state = 'success';
+        CREATE INDEX IF NOT EXISTS idx_history_events_success_time
+          ON events(occurred_at, event_id) WHERE state = 'success';
+        DROP INDEX IF EXISTS idx_daily_stats_summary_cover;
+        CREATE INDEX IF NOT EXISTS idx_daily_stats_pet_date ON daily_stats(pet_id, local_date);
+        CREATE INDEX IF NOT EXISTS idx_history_sessions_last_seen ON sessions(last_seen_at);
+      `)
+      this.statement(`
+        INSERT INTO schema_migrations(version, name, applied_at, checksum)
+        VALUES (7, 'history-partial-success-indexes', ?, 'history-partial-success-indexes')
       `).run(this.now())
     })
   }
@@ -984,28 +1210,42 @@ export class HistoryStore {
     }
   }
 
+  /**
+   * Rebuilds the event-derived daily_stats columns with one set-based statement:
+   * SQLite folds the events (O(E) scan, no per-row JS round trip, no E-sized
+   * array in memory) and only the aggregated rows are written. Sums commute, so
+   * no ORDER BY is needed. ON CONFLICT keeps it additive if two raw keys
+   * normalise to the same dimension tuple.
+   */
   private rebuildEventDailyStats(): void {
-    const rows = this.statement(`
-      SELECT local_date, pet_id, project_id, adapter_id,
-             active_delta_ms, token_input, token_output, token_cache_read, token_cache_write,
-             token_quality
-      FROM events ORDER BY occurred_at ASC, event_id ASC
-    `).all()
-    for (const row of rows) {
-      this.updateDailyStat(
-        safeText(row.local_date),
-        safePetId(typeof row.pet_id === 'string' ? row.pet_id : undefined),
-        safeText(row.project_id),
-        safeText(row.adapter_id, 'unknown'),
-        null,
-        Math.max(0, asInteger(row.active_delta_ms)),
-        Math.max(0, asInteger(row.token_input)),
-        Math.max(0, asInteger(row.token_output)),
-        isTokenQuality(row.token_quality) ? row.token_quality : 'none',
-        Math.max(0, asInteger(row.token_cache_read)),
-        Math.max(0, asInteger(row.token_cache_write)),
+    this.statement(`
+      INSERT INTO daily_stats(
+        local_date, pet_id, project_id, adapter_id, sessions_completed, sessions_failed,
+        active_ms, token_input, token_output, token_cache_read, token_cache_write, token_quality
       )
-    }
+      SELECT local_date, pet_id, project_id, COALESCE(NULLIF(adapter_id, ''), 'unknown'), 0, 0,
+             SUM(MAX(0, active_delta_ms)),
+             SUM(MAX(0, COALESCE(token_input, 0))),
+             SUM(MAX(0, COALESCE(token_output, 0))),
+             SUM(MAX(0, COALESCE(token_cache_read, 0))),
+             SUM(MAX(0, COALESCE(token_cache_write, 0))),
+             CASE WHEN SUM(token_quality = 'exact') > 0 THEN 'exact'
+                  WHEN SUM(token_quality = 'estimated') > 0 THEN 'estimated'
+                  ELSE 'none' END
+      FROM events
+      WHERE 1
+      GROUP BY local_date, pet_id, project_id, COALESCE(NULLIF(adapter_id, ''), 'unknown')
+      ON CONFLICT(local_date, pet_id, project_id, adapter_id) DO UPDATE SET
+        active_ms = active_ms + excluded.active_ms,
+        token_input = token_input + excluded.token_input,
+        token_output = token_output + excluded.token_output,
+        token_cache_read = token_cache_read + excluded.token_cache_read,
+        token_cache_write = token_cache_write + excluded.token_cache_write,
+        token_quality = CASE
+          WHEN token_quality = 'exact' OR excluded.token_quality = 'exact' THEN 'exact'
+          WHEN token_quality = 'estimated' OR excluded.token_quality = 'estimated' THEN 'estimated'
+          ELSE 'none' END
+    `).run()
   }
 
   private repairSuccessfulSessionOutcomes(): void {
@@ -1040,38 +1280,46 @@ export class HistoryStore {
   }
 
   private rebuildSessionCompletions(): void {
-    for (const fact of this.getAchievementCompletedSessions()) {
-      this.updateDailyStat(
-        this.localDate(fact.completedAt),
-        fact.petId,
-        fact.projectId ?? '',
-        fact.adapterId,
-        'success',
-        0,
-        0,
-        0,
-        'none',
-      )
+    // Count first, write once per (date, pet, project, adapter) key.
+    const counts = new Map<string, { localDate: string, petId: string, projectId: string, adapterId: string, completed: number, failed: number }>()
+    const add = (localDate: string, petId: string, projectId: string, adapterId: string, kind: 'success' | 'error'): void => {
+      const key = `${localDate}\u0000${petId}\u0000${projectId}\u0000${adapterId}`
+      let entry = counts.get(key)
+      if (!entry) {
+        entry = { localDate, petId, projectId, adapterId, completed: 0, failed: 0 }
+        counts.set(key, entry)
+      }
+      if (kind === 'success') entry.completed += 1
+      else entry.failed += 1
     }
+    this.forEachCompletedSession(0, fact => {
+      add(this.localDate(fact.completedAt), fact.petId, fact.projectId ?? '', fact.adapterId, 'success')
+    })
     const rows = this.statement(`
-      SELECT pet_id, project_id, adapter_id, ended_at, terminal_state
+      SELECT pet_id, project_id, adapter_id, ended_at
       FROM sessions
       WHERE ended_at IS NOT NULL AND terminal_state = 'error'
-      ORDER BY ended_at ASC, session_pk ASC
     `).all()
     for (const row of rows) {
-      const endedAt = Math.max(0, asInteger(row.ended_at))
-      this.updateDailyStat(
-        this.localDate(endedAt),
+      add(
+        this.localDate(Math.max(0, asInteger(row.ended_at))),
         safePetId(typeof row.pet_id === 'string' ? row.pet_id : undefined),
         safeText(row.project_id),
         safeText(row.adapter_id, 'unknown'),
-        row.terminal_state === 'success' || row.terminal_state === 'error' ? row.terminal_state : null,
-        0,
-        0,
-        0,
-        'none',
+        'error',
       )
+    }
+    const upsert = this.statement(`
+      INSERT INTO daily_stats(
+        local_date, pet_id, project_id, adapter_id, sessions_completed, sessions_failed,
+        active_ms, token_input, token_output, token_cache_read, token_cache_write, token_quality
+      ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 'none')
+      ON CONFLICT(local_date, pet_id, project_id, adapter_id) DO UPDATE SET
+        sessions_completed = sessions_completed + excluded.sessions_completed,
+        sessions_failed = sessions_failed + excluded.sessions_failed
+    `)
+    for (const entry of counts.values()) {
+      upsert.run(entry.localDate, entry.petId, entry.projectId, entry.adapterId, entry.completed, entry.failed)
     }
   }
 
@@ -1079,6 +1327,71 @@ export class HistoryStore {
   // 紀錄各自 BEGIN/COMMIT 造成的 WAL fsync 開銷。
   batch<T>(work: () => T): T {
     return this.transaction(work)
+  }
+
+  /**
+   * Runs `work` inside a SAVEPOINT so one failing item cannot poison the rest of
+   * an enclosing batch transaction. Outside a transaction it behaves like one.
+   */
+  private isolated<T>(work: () => T): T {
+    if (this.transactionDepth === 0) return this.transaction(work)
+    const name = `sp_${this.transactionDepth}`
+    this.database.exec(`SAVEPOINT ${name}`)
+    this.transactionDepth += 1
+    try {
+      const result = work()
+      this.database.exec(`RELEASE ${name}`)
+      return result
+    } catch (error) {
+      try { this.database.exec(`ROLLBACK TO ${name}; RELEASE ${name}`) } catch {}
+      throw error
+    } finally {
+      this.transactionDepth -= 1
+    }
+  }
+
+  /**
+   * Micro-batched write path for the hook-event hot path: events that arrive in
+   * the same turn of the event loop share one transaction (one commit) instead
+   * of one commit each. `onRecorded` runs once per flush if anything was new.
+   */
+  queueEvent(event: AgentStatusEvent, petId = DEFAULT_PET_ID, onRecorded?: () => void): void {
+    if (this.closed) return
+    this.queuedEvents.push({ event, petId, receivedAt: this.now(), onRecorded })
+    if (this.queuedEvents.length >= MAX_QUEUED_EVENTS) { this.flushQueued(); return }
+    if (this.flushHandle) return
+    this.flushHandle = setImmediate(() => { this.flushHandle = null; this.flushQueued() })
+  }
+
+  /** Writes every queued event in one transaction. Returns how many were new. */
+  flushQueued(): number {
+    if (this.flushHandle) { clearImmediate(this.flushHandle); this.flushHandle = null }
+    if (this.queuedEvents.length === 0 || this.closed) return 0
+    const queued = this.queuedEvents
+    this.queuedEvents = []
+    const callbacks = new Set<() => void>()
+    let recorded = 0
+    try {
+      this.transaction(() => {
+        for (const item of queued) {
+          try {
+            if (this.isolated(() => this.recordEvent(item.event, item.petId, item.receivedAt))) {
+              recorded += 1
+              if (item.onRecorded) callbacks.add(item.onRecorded)
+            }
+          } catch (error) {
+            console.error('History event handling failed', error)
+          }
+        }
+      })
+    } catch (error) {
+      console.error('History batch commit failed', error)
+      return 0
+    }
+    for (const callback of callbacks) {
+      try { callback() } catch {}
+    }
+    return recorded
   }
 
   private statement(sql: string): SqliteStatement {

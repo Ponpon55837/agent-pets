@@ -1223,8 +1223,10 @@ async function clearNotifications(pluginId?: string): Promise<void> {
 }
 
 async function markAllNotificationsRead(pluginId?: string): Promise<void> {
-  const unread = visibleNotifications.value.filter(record => !record.read && (!pluginId || record.item.pluginId === pluginId))
-  await Promise.all(unread.map(record => window.electronAPI?.markPluginNotificationRead(record.item.id)))
+  // One IPC (and one change broadcast) for the whole set instead of one per record.
+  const hasUnread = visibleNotifications.value.some(record => !record.read && (!pluginId || record.item.pluginId === pluginId))
+  if (!hasUnread) return
+  await window.electronAPI?.markAllPluginNotificationsRead(pluginId)
   await refreshNotifications()
 }
 

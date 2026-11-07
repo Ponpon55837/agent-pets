@@ -248,3 +248,59 @@ watch(() => store.getPresentationStatus(), s => {
 3. **H5** 在下一個會再升 schema 的版本前處理，改成 SQL 聚合；因為遷移是一次性，風險最高的是寫錯聚合，需補一個「新舊結果一致」的測試（以現有 `rebuildEventDailyStats` 當 oracle）。
 4. M1、M2 其次；M3–M5 視實測的事件迴圈延遲（`pnpm bench:lag` 擴充為包含 progression 與廣播）再決定。
 5. 驗證方式：擴充 `scripts/bench/event-loop-lag.mjs`，餵入 5,000 筆 events、一個 10 萬列 `token_usage` 的成就資料庫與一個 5 萬行 JSONL，對照修改前後的 p99／max 延遲。
+
+---
+
+## 修正狀態
+
+分支 `ws/fix-perf`，一個 commit 對應一個項目。量測環境為開發機（同時有其他工作線在跑，數值有雜訊，只看量級與方向）。
+
+### 量測結果
+
+| 指標 | 修正前 | 修正後 | 方法 |
+| --- | --- | --- | --- |
+| `pnpm bench:lag`（500 事件／10 秒，僅 `HistoryStore.recordEvent`）p99 | 13.09 ms | 7.08 ms | `pnpm bench:lag` |
+| 同上 max 事件迴圈延遲 | 58.75 ms | 12.12 ms | 同上（mean 5.75 → 5.39，受 5 ms 取樣解析度限制） |
+| v6 遷移／rebuild：50,000 events | 3,593 ms | 604 ms | `tests/history.test.mts` 〈v6 migration is set-based〉，同一份合成資料，舊程式與新程式輸出的 daily_stats 都與測試內的舊邏輯 oracle 一致 |
+| 熱路徑 SQLite commit／事件 | 2 次獨立 `BEGIN IMMEDIATE`，WAL 預設 `synchronous=FULL` | history 同 tick 合併為 1 個交易；三個 DB 皆 `synchronous=NORMAL` | `getPragmaState()` 測試 |
+| heartbeat 的 `events` 列 | 每個 heartbeat 1 列 | 每 session‧天 1 列 rollup | `tests/history.test.mts`（1,500 筆隨機事件，active time 與 oracle 完全一致） |
+| 成就 `readContext` | 5 次無索引全表掃描 | 1 次 `pet_counters` 主鍵讀取 | `tests/achievements.test.mts`（300 筆隨機事件，計數器與全量重算一致） |
+
+### 各項狀態
+
+| ID | 狀態 | 做了什麼 |
+| --- | --- | --- |
+| PERF-01 (H1) | 完成 | progression 只在快照內容變動時廣播；`historyUpdated` 以 `createLatestValueCoalescer` 合併為 ≤1 次／秒；隱藏或已銷毀視窗不送，`show` 時補送一次；History 檢視重抓加 500 ms trailing debounce |
+| PERF-02 (H2) | 完成（schema 變更：history v7） | WAL 確認後 `synchronous=NORMAL`；`ensurePet` 以 `Set` 快取；`daily_stats` 單語句 `INSERT … ON CONFLICT DO UPDATE`，無新增量的 heartbeat 直接跳過；`events` 完成識別索引改為 `WHERE state='success'` 部分索引；`daily_stats` covering index 換成 `(pet_id, local_date)`；`HistoryStore.queueEvent` 同 tick 微批次（每事件 SAVEPOINT 隔離）。progression 與 history 是不同 DB 檔案，且 progression 必須同步回傳快照，所以不能併成單一交易 |
+| PERF-03 (H3) | 完成 | 逐一檢查讀取者：`successAlreadyRecorded`、成就回補只看 `state='success'`；`daily_stats` 重建只加總 `active_delta_ms`，沒有任何讀取者需要單筆 heartbeat 列。heartbeat 改為 rollup 列；6 小時一次、每批 5,000 列、批間讓出事件迴圈的 `events`／`sessions` prune；`sessions(last_seen_at)` 索引。語意差異：不比 session 最後活動更新的 heartbeat 現在直接忽略（原本靠 event id 去重，且亂序 heartbeat 可以覆寫 `last_state`） |
+| PERF-04 (H4) | 完成（schema 變更：achievements v2） | `token_usage`／`completed_sessions` 的 `pet_id` 索引；`pet_counters` 增量計數，reconcile 時對受影響的 pet 全量重算；`readContext` O(1)；重複 success 事件直接 `return []`。未做：`token_usage` 明細保留期限——去重依賴明細列，裁剪會讓舊事件重放後重複計數 |
+| PERF-05 (H5) | 完成 | `rebuildEventDailyStats` 單一 `INSERT … SELECT … GROUP BY`；完成度改 keyset 分頁並在記憶體彙總後每個 key 寫一次，順便移除 10 萬筆的靜默截斷（L8）；v6 不再建立馬上被 v7 刪掉的 covering index。未做：把遷移移到背景（UI 沒有「整理中」狀態，且已降到亞秒級） |
+| PERF-06 | 部分完成 | 見下表 |
+
+PERF-06 細項：
+
+| 項目 | 狀態 | 說明 |
+| --- | --- | --- |
+| M1 presentation status | 完成 | 以內容簽章去重，去掉 `deep: true`，面板視窗不建立 watcher |
+| M2 本機用量匯入 | 完成 | 解析以 1 MB 為單位、匯入以 500 筆為單位，片段間 `setImmediate` 讓出；`recordTokenUsageBatch` 在記憶體加總 daily 增量，每個 key 只寫一次；每次匯入每個 cwd 只 `trackSeen` 一次（含已刪除工作區的負向結果） |
+| M3 全樹掃描 | 完成 | 目錄清單依目錄自身 mtime 快取（剛修改的目錄不快取、10 分鐘過期）；已驗證檔案以 (dev, ino) 快取 realpath；Codex `YYYY/MM/DD` 過期日期目錄直接剪枝。穩態每個項目 1 次 `lstat`，不再 `readdir`／`realpath`。未做 `fs.watch`（跨平台行為無法在不啟動 App 的前提下驗證） |
+| M4 面板視窗 | 部分 | 不做「首次開啟才建立」：約 110 處 `mainState.panelWindow` 存取、IPC sender 驗證與外掛面板 view 掛載都依賴它，且首次開啟會看到空白等待載入，無法在不啟動 App 的條件下驗證。改為把 `panel-window` 步驟移到啟動序列最後（`ensureDesktopWindows()` 本來就會按需建立），不再與寵物首次繪製和各服務初始化搶 CPU |
+| M5 mousemove | 完成（遮罩部分未做） | rAF 合併，每幀最多評估一次；同一像素的命中結果快取 100 ms。預先產生 alpha 命中遮罩需要改 `PetAnimation` 的繪製流程（`pet` 工作線所有），未做 |
+| L2 coalescer 溢出 | 完成 | 溢出由 O(maxPending) 改為攤銷 O(1)；2,000 組隨機洪水與舊實作逐一比對（輸出與被丟棄項目完全相同） |
+| L3 全部標示已讀 | 完成 | 新增單一 IPC `plugin-notifications-read-all`（Cross-stream：plugins 工作線的 `plugin-feed.ts`、`ipc/plugin-feed.ts`、`usePluginPanelController.ts`），N 個 invoke → 1 個，主行程只廣播一次 |
+| L5 Intl | 完成 | `RelativeTimeFormat` 依 locale 快取 |
+| L6 小表 | 完成 | `xp_session_activity` 90 天未活動即刪（progression v3 索引；XP 由帳本唯一鍵保證不重複發放）；`ProjectRoutingStore.lastTrackedAt` 上限 1,000；`sessions` 隨 H3 prune |
+| L1、L4、L7、L9 | 未做 | 估計影響很小（見原文），且 L1 位於 `agentStore.ts`、L7 位於 `PetAnimation.vue`、L9 位於權限稽核，分屬其他工作線 |
+
+### 測試
+
+- `tests/progression-broadcast-gate.test.mts`：廣播去重、隱藏視窗略過與 show 補同步、history-updated 合併。
+- `tests/history.test.mts`：PRAGMA 與部分索引（含查詢計畫）、daily upsert、微批次與 SAVEPOINT 隔離、heartbeat rollup 與 oracle 一致、重放與亂序 heartbeat、分批 prune、50k 事件遷移等價與時間上限。
+- `tests/progression.test.mts`：`ensurePet` 快取不再寫入、heartbeat 重用快照與重新讀取一致且 XP 冪等、過期 activity prune 不影響 XP。
+- `tests/achievements.test.mts`：計數器與全量重算一致、v1→v2 遷移回填與索引。
+- `tests/local-usage.test.mts`：>2 MB 檔案分片後總量相同、每 cwd 一次查詢與讓出次數、`recordTokenUsageBatch` 與逐筆寫入結果相同、目錄快取仍能看到新檔與追加內容、過期 Codex 日期目錄剪枝。
+- `tests/broadcast-coalescer.test.mts`、`tests/plugin-feed.test.mts`、`tests/ipc-plugin-feed.test.mts`：O(1) 溢出等價、`markAllRead`。
+
+### schema 變更（minor）
+
+history v7（索引）、achievements v2（`pet_counters` 與索引）、progression v3（索引）。皆為向前遷移並各有測試；`events` 新增 `type='agent.active_rollup'` 的列（舊版本程式讀取時等同一般 event 列，不影響）。

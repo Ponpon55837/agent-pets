@@ -1,6 +1,6 @@
 # IPC 安全清單
 
-由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 99 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
+由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 100 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
 
 | 頻道 | 類型 | 允許的寄件者 | 輸入驗證概況 | Preload API | 對應測試 |
 | --- | --- | --- | --- | --- | --- |
@@ -48,6 +48,7 @@
 | `plugin-feed-complete` | `handle` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | 型別；無效輸入回安全預設或錯誤 | completePluginFeed (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-notifications-list` | `handle` | 設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | listPluginNotifications (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-notifications-read` | `handle` | 設定面板 main frame | isPluginPanelNotificationId；無效輸入回安全預設或錯誤 | markPluginNotificationRead (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `plugin-notifications-read-all` | `handle` | 設定面板 main frame | isPluginPanelPluginId；無效輸入回安全預設或錯誤 | markAllPluginNotificationsRead (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-notifications-clear` | `handle` | 設定面板 main frame | isPluginPanelPluginId；無效輸入回安全預設或錯誤 | clearPluginNotifications (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-skin-fallback-notify` | `handle` | 受信任寵物或設定面板 main frame | 長度／數量上限；isPluginSkinPetId；無效輸入回安全預設或錯誤 | notifyPluginSkinFallback (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-feed-open-link` | `handle` | 受信任寵物或設定面板 main frame | 型別；isPluginLinkHostAllowed；無效輸入回安全預設或錯誤 | openPluginFeedLink (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |

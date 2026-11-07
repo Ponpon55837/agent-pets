@@ -109,7 +109,7 @@ import { flushMainLog, logMain, teeConsoleToLog } from './diagnostics/main-log'
 import { acquireRunMarker } from './diagnostics/session-marker'
 import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
 import { setPluginPanelWindowBounds } from './main/runtime'
-import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, cancelHistoryStoreRetry, localPorts, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode } from './main/runtime'
+import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, broadcastProgressionIfChanged, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, cancelHistoryStoreRetry, localPorts, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode } from './main/runtime'
 
 
 
@@ -345,7 +345,6 @@ async function bootstrapApp(): Promise<void> {
   // The pet becomes visible before plugins, history or achievements spin up,
   // so a slow plugin directory or disk never delays the first paint.
   await startupStep('pet-window', createPetWindow)
-  await startupStep('panel-window', createPanelWindow)
   await startupStep('plugins', createPluginServices)
   await startupStep('fullscreen-targets', () => {
     syncWindowsFullscreenTargets()
@@ -392,7 +391,7 @@ async function bootstrapApp(): Promise<void> {
       try {
         progressionResult = mainState.progressionStore?.handleEvent(event, event.routedPetId)
         if (progressionResult) {
-          broadcastProgression(progressionResult.snapshot)
+          broadcastProgressionIfChanged(progressionResult.snapshot)
           broadcastProgressionAwards(progressionResult)
         }
       } catch (error) {
@@ -418,9 +417,8 @@ async function bootstrapApp(): Promise<void> {
       }
       try {
         const routedPetId = event.routedPetId ?? mainState.progressionStore?.getActivePetId() ?? 'aang-airbender'
-        if (mainState.historyStore?.recordEvent(event, routedPetId)) {
-          broadcastHistoryUpdated()
-        }
+        // Same-turn events share one SQLite commit; the broadcast is coalesced too.
+        mainState.historyStore?.queueEvent(event, routedPetId, broadcastHistoryUpdated)
       } catch (error) {
         console.error('History event handling failed', error)
       }
@@ -738,6 +736,12 @@ async function bootstrapApp(): Promise<void> {
     }
   })
 
+  // The hidden panel is a second Chromium renderer running the whole Vue app.
+  // Creating it last keeps it from competing with the pet's first paint and the
+  // service steps above; ensureDesktopWindows() creates it on demand if the user
+  // opens it earlier. Every panelWindow consumer already tolerates null.
+  await startupStep('panel-window', createPanelWindow)
+  syncWindowsFullscreenTargets()
   if (startupResults.some(result => !result.ok)) {
     // Services start independently, so a partial failure still leaves a usable
     // app. Only offer retry/quit when nothing visible could be created.

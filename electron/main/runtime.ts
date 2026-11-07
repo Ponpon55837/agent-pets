@@ -97,6 +97,7 @@ import { createWindowsFullscreenDetector, nativeWindowHandleToPointer, type Wind
 
 import { registerPluginFeedIpc } from '../ipc/plugin-feed'
 import { createLatestValueCoalescer } from '../ipc/broadcast-coalescer.ts'
+import { createProgressionChangeGate, createVisibleSender } from '../ipc/progression-broadcast-gate.ts'
 
 import { type IntegrationTestSource } from '../ipc/integrations'
 
@@ -1893,6 +1894,7 @@ export function createPetWindow() {
     schedulePermissionUiSync()
   })
 
+  attachBroadcastResync(mainState.petWindow)
   mainState.petWindow.on('closed', () => {
     mainState.petWindow = null
     mainState.windowsFullscreenAutoHiddenPet = false
@@ -1991,6 +1993,7 @@ export function createPanelWindow() {
     schedulePanelBlurHide()
   })
 
+  attachBroadcastResync(mainState.panelWindow)
   mainState.panelWindow.on('closed', () => {
     mainState.pluginPanelViewController?.close()
     if (mainState.panelBlurHideHandle) clearTimeout(mainState.panelBlurHideHandle)
@@ -2500,14 +2503,41 @@ export function broadcastPermissionRequests(): void {
   }
 }
 
+const progressionGate = createProgressionChangeGate()
+const progressionSender = createVisibleSender<BrowserWindow>()
+const historySender = createVisibleSender<BrowserWindow>()
+
+function sendProgressionTo(window: BrowserWindow): void {
+  const snapshot = mainState.progressionStore?.getSnapshot()
+  if (snapshot) window.webContents.send(IPC_CHANNELS.progressionUpdated, snapshot)
+}
+
+function sendHistoryUpdatedTo(window: BrowserWindow): void {
+  window.webContents.send(IPC_CHANNELS.historyUpdated)
+}
+
+// Hidden windows skip progression/history pushes; on show they get exactly one
+// resync so a stale pet or panel never stays behind.
+function attachBroadcastResync(window: BrowserWindow): void {
+  window.on('show', () => {
+    progressionSender.resync(window, sendProgressionTo)
+    historySender.resync(window, sendHistoryUpdatedTo)
+  })
+}
+
 export function broadcastProgression(snapshot?: ProgressionSnapshot): void {
   const next = snapshot ?? mainState.progressionStore?.getSnapshot()
   if (!next) return
+  progressionGate.record(next)
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send(IPC_CHANNELS.progressionUpdated, next)
-    }
+    progressionSender.send(window, w => w.webContents.send(IPC_CHANNELS.progressionUpdated, next))
   }
+}
+
+/** Event hot path: heartbeats leave the snapshot unchanged, so send nothing. */
+export function broadcastProgressionIfChanged(snapshot: ProgressionSnapshot): void {
+  if (!progressionGate.shouldBroadcast(snapshot)) return
+  broadcastProgression(snapshot)
 }
 
 // Tells the pet and panel windows that XP was actually granted (the awards are
@@ -2593,10 +2623,21 @@ export async function refreshLocalUsage(): Promise<void> {
   return mainState.localUsageScanPromise
 }
 
-export function broadcastHistoryUpdated(): void {
+function flushHistoryUpdated(): void {
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
-    if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.historyUpdated)
+    historySender.send(window, sendHistoryUpdatedTo)
   }
+}
+
+const HISTORY_UPDATED_COALESCE_MS = 1000
+const queueHistoryUpdated = createLatestValueCoalescer<void>(
+  flushHistoryUpdated,
+  callback => { setTimeout(callback, HISTORY_UPDATED_COALESCE_MS).unref?.() },
+)
+
+/** At most one historyUpdated per ~1s regardless of event rate. */
+export function broadcastHistoryUpdated(): void {
+  queueHistoryUpdated()
 }
 
 export function broadcastPresentationIntent(intent: PresentationIntent): void {
@@ -2706,6 +2747,8 @@ const HISTORY_STORE_RETRY_DELAYS_MS = [30_000, 120_000, 600_000] as const
 const STARTUP_DEFERRED_WORK_MS = 10_000
 let deferredHistoryWorkTimer: ReturnType<typeof setTimeout> | null = null
 let historyStoreRetryTimer: ReturnType<typeof setTimeout> | null = null
+let historyPruneTimer: ReturnType<typeof setInterval> | null = null
+const HISTORY_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000
 let historyStoreRetryAttempt = 0
 
 export function cancelHistoryStoreRetry(): void {
@@ -2761,10 +2804,20 @@ export function createHistoryServices(): void {
       void refreshLocalUsage()
     }, STARTUP_DEFERRED_WORK_MS)
     deferredHistoryWorkTimer.unref?.()
+    // A tray app runs for weeks: expire old events/sessions at runtime too,
+    // in bounded batches that yield between steps.
+    if (historyPruneTimer) clearInterval(historyPruneTimer)
+    historyPruneTimer = setInterval(() => {
+      void mainState.historyStore?.pruneInBatches().catch(error => console.error('History prune failed', error))
+      try { mainState.progressionStore?.pruneStaleActivity() } catch (error) { console.error('XP activity prune failed', error) }
+    }, HISTORY_PRUNE_INTERVAL_MS)
+    historyPruneTimer.unref?.()
   } catch (error) {
     // History is an additive HUD feature. A broken history database must not
     // prevent the pet, event receiver, XP, or permission controls from booting.
     console.error('History storage is unavailable', error)
+    if (historyPruneTimer) clearInterval(historyPruneTimer)
+    historyPruneTimer = null
     try { mainState.historyStore?.close() } catch {}
     mainState.historyStore = null
     mainState.localUsageReader = null

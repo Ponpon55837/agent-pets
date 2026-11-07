@@ -192,7 +192,7 @@ test('history counts each terminal session once across distinct completion event
   assert.equal(store.getAchievementCompletedSessions().length, 2)
 })
 
-test('daily summary covering index preserves 1,000 seeded query results', (t) => {
+test('daily summary pet/date index preserves 1,000 seeded query results', (t) => {
   const now = Date.UTC(2026, 9, 26, 12)
   const database = databasePath()
   const store = new HistoryStore(database.filePath, {
@@ -250,19 +250,15 @@ test('daily summary covering index preserves 1,000 seeded query results', (t) =>
     })
   }
 
-  store.database.exec('DROP INDEX idx_daily_stats_summary_cover')
+  store.database.exec('DROP INDEX idx_daily_stats_pet_date')
   const withoutIndex = runCases()
   store.database.exec(`
-    CREATE INDEX idx_daily_stats_summary_cover
-      ON daily_stats(
-        pet_id, local_date, project_id, adapter_id,
-        sessions_completed, sessions_failed, active_ms, token_input, token_output, token_quality
-      )
+    CREATE INDEX idx_daily_stats_pet_date ON daily_stats(pet_id, local_date)
   `)
   const withIndex = runCases()
   assert.deepEqual(withIndex, withoutIndex)
   const plan = store.database.prepare(`EXPLAIN QUERY PLAN ${querySql}`).all('aang-airbender', 'local-usage', ...dates)
-  assert.ok(plan.some(row => String(row.detail).includes('idx_daily_stats_summary_cover')))
+  assert.ok(plan.some(row => String(row.detail).includes('idx_daily_stats_pet_date')))
 })
 
 test('history v4 migration repairs inflated completion aggregates from unique sessions', (t) => {
@@ -391,7 +387,7 @@ test('summary supports 30 and 90 day ranges with a previous-period comparison', 
   const plan = (store as unknown as { database: { prepare(sql: string): { all(...p: unknown[]): Array<{ detail: string }> } } })
     .database.prepare('EXPLAIN QUERY PLAN SELECT local_date FROM daily_stats WHERE pet_id IN (?, ?) AND local_date BETWEEN ? AND ?')
     .all('a', 'b', '2026-01-01', '2026-02-01').map(row => row.detail).join(' ')
-  assert.match(plan, /idx_daily_stats_summary_cover|sqlite_autoindex_daily_stats/)
+  assert.match(plan, /idx_daily_stats_pet_date|sqlite_autoindex_daily_stats/)
 })
 
 test('unchanged quota readings are not rewritten, changed ones are, and old snapshots expire', (t) => {
@@ -426,4 +422,264 @@ test('achievement completed-session facts can be read incrementally', (t) => {
   store.setAchievementReconciledAt(now - day)
   assert.equal(store.getAchievementReconciledAt(), now - day)
   assert.deepEqual(store.getAchievementCompletedSessions(store.getAchievementReconciledAt()).map(f => f.sessionId), ['new'])
+})
+
+test('history database runs WAL with synchronous=NORMAL and partial success indexes (v7)', (t) => {
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath)
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  assert.deepEqual(store.getPragmaState(), { journalMode: 'wal', synchronous: 1 })
+  const raw = store.database as unknown as { prepare(sql: string): { all(...p: unknown[]): Array<Record<string, unknown>> } }
+  const indexes = raw.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('events', 'daily_stats')").all()
+  const names = indexes.map(row => String(row.name))
+  assert.ok(names.includes('idx_history_events_success_identity'))
+  assert.ok(!names.includes('idx_history_events_completion_identity'))
+  assert.ok(!names.includes('idx_daily_stats_summary_cover'))
+  const success = indexes.find(row => row.name === 'idx_history_events_success_identity')
+  assert.match(String(success?.sql), /WHERE state = 'success'/)
+  const plan = raw.prepare(`EXPLAIN QUERY PLAN SELECT event_id FROM events
+    WHERE agent_id = ? AND session_id = ? AND project_id = ? AND pet_id = ? AND state = 'success' LIMIT 1`)
+    .all('a', 'b', '', 'p').map(row => row.detail).join(' ')
+  assert.match(plan, /idx_history_events_success_identity/)
+})
+
+test('single-statement daily upsert accumulates, floors at zero and merges quality', (t) => {
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath)
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  const priv = store as unknown as { updateDailyStat(...a: unknown[]): void, database: { prepare(sql: string): { get(...p: unknown[]): Record<string, unknown> } } }
+  priv.updateDailyStat('2026-01-01', 'p', '', 'codex', 'success', 1000, 10, 5, 'estimated', 2, 3)
+  priv.updateDailyStat('2026-01-01', 'p', '', 'codex', 'error', 500, 1, 1, 'exact', 0, 0)
+  priv.updateDailyStat('2026-01-01', 'p', '', 'codex', null, 0, -100, -1, 'none', -1, -50)
+  const row = priv.database.prepare('SELECT * FROM daily_stats WHERE pet_id = ?').get('p')
+  assert.equal(row.sessions_completed, 1)
+  assert.equal(row.sessions_failed, 1)
+  assert.equal(row.active_ms, 1500)
+  assert.equal(row.token_input, 0)
+  assert.equal(row.token_output, 5)
+  assert.equal(row.token_cache_read, 1)
+  assert.equal(row.token_cache_write, 0)
+  assert.equal(row.token_quality, 'exact')
+})
+
+test('queueEvent micro-batches into one commit and isolates a failing event', (t) => {
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => 2_000_000 })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  let recorded = 0
+  const base = { source: 'codex', sessionId: 's1', project: 'p', projectId: 'a'.repeat(32) } as const
+  const onRecorded = () => { recorded += 1 }
+  for (let i = 0; i < 50; i += 1) {
+    store.queueEvent({ ...base, state: 'tool-running', timestamp: 1_000_000 + i * 1000 } as never, 'aang-airbender', onRecorded)
+  }
+  store.queueEvent({ ...base, state: 'success', timestamp: 1_100_000, sessionId: '' } as never, 'aang-airbender')
+  store.queueEvent({ ...base, state: 'success', timestamp: 1_100_000 } as never, 'aang-airbender', onRecorded)
+  assert.equal(store.flushQueued(), 51)
+  assert.equal(recorded, 1)
+  const summary = store.getSummary('aang-airbender', undefined, 7)
+  assert.equal(summary.totals.sessionsCompleted, 1)
+  assert.ok(summary.totals.activeMs > 0)
+})
+
+function activeOracle(events: Array<{ state: string, timestamp: number }>): number {
+  // Reference semantics: active time accrues from the previous event only when
+  // that event left the session active, capped at 5 minutes per gap.
+  let total = 0
+  let last: { state: string, timestamp: number } | null = null
+  for (const item of events) {
+    if (last && (last.state === 'thinking' || last.state === 'tool-running') && item.timestamp > last.timestamp) {
+      total += Math.min(item.timestamp - last.timestamp, 5 * 60 * 1000)
+    }
+    last = item
+  }
+  return total
+}
+
+test('heartbeats roll up into one row per session-day with identical active time and rebuild result', (t) => {
+  const start = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => start + 10 * 24 * 3600_000, localDate: ts => new Date(ts).toISOString().slice(0, 10) })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  let seed = 7
+  const rand = () => { seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0; return seed / 2 ** 32 }
+  const sent: Array<{ state: string, timestamp: number }> = []
+  let ts = start
+  const states = ['thinking', 'tool-running', 'thinking', 'tool-running', 'waiting-input', 'idle']
+  for (let i = 0; i < 1500; i += 1) {
+    ts += Math.floor(rand() * 400_000) + 1
+    const state = states[Math.floor(rand() * states.length)]!
+    sent.push({ state, timestamp: ts })
+    assert.equal(store.recordEvent(event({ state: state as never, timestamp: ts, sessionId: 'long' })), true)
+  }
+  const expected = activeOracle(sent)
+  const read = () => store.getSummary('aang-airbender', undefined, 30).totals.activeMs
+  assert.equal(read(), expected)
+  const raw = store.database as unknown as { prepare(sql: string): { get(): Record<string, number>, all(): Array<Record<string, unknown>> } }
+  const heartbeatRows = Number(raw.prepare("SELECT COUNT(*) AS n FROM events WHERE state IN ('thinking','tool-running')").get().n)
+  assert.equal(heartbeatRows, 0, 'no per-heartbeat rows')
+  const rollupRows = Number(raw.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'agent.active_rollup'").get().n)
+  assert.ok(rollupRows >= 1 && rollupRows <= 20, `rollup rows ${rollupRows}`)
+  const sessionMs = Number(raw.prepare('SELECT SUM(active_ms) AS n FROM sessions').get().n)
+  assert.equal(sessionMs, expected)
+  store.rebuildDailyStats()
+  assert.equal(read(), expected, 'daily_stats rebuilt from rollup rows keeps active time')
+})
+
+test('heartbeat replays and stale heartbeats do not change state; tokens keep a real row', (t) => {
+  const start = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => start + 3600_000 })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  assert.equal(store.recordEvent(event({ timestamp: start })), true)
+  assert.equal(store.recordEvent(event({ state: 'tool-running', timestamp: start + 60_000 })), true)
+  assert.equal(store.recordEvent(event({ state: 'tool-running', timestamp: start + 60_000 })), false)
+  assert.equal(store.recordEvent(event({ timestamp: start + 10_000 })), false)
+  assert.equal(store.recordEvent(event({ state: 'success', timestamp: start + 90_000 })), true)
+  assert.equal(store.recordEvent(event({ state: 'thinking', timestamp: start + 30_000 })), false, 'stale heartbeat cannot reopen a finished session')
+  assert.equal(store.getSummary().totals.activeMs, 90_000)
+  assert.equal(store.recordEvent(event({ state: 'thinking', timestamp: start + 120_000, tokenUsage: { input: 5, output: 1, quality: 'estimated' } })), true)
+  const raw = store.database as unknown as { prepare(sql: string): { get(): Record<string, number> } }
+  assert.equal(Number(raw.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'agent.working'").get().n), 1)
+})
+
+test('runtime prune deletes expired events and sessions in bounded batches', async (t) => {
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => now, retentionDays: 30 })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  const old = now - 60 * 24 * 3600_000
+  const raw = store.database as unknown as { exec(sql: string): void, prepare(sql: string): { get(): Record<string, number>, run(...p: unknown[]): unknown } }
+  store.batch(() => {
+    const insertEvent = raw.prepare(`INSERT INTO events(event_id, schema_version, type, trust, adapter_id, agent_id, session_id, project_id, pet_id, local_date, occurred_at, received_at, state, payload_json)
+      VALUES (?, 2, 'agent.working', 'adapter_verified', 'codex', 'codex', 's', '', 'p', '2026-06-01', ?, ?, 'success', '{}')`)
+    const insertSession = raw.prepare(`INSERT INTO sessions(session_pk, adapter_id, agent_id, external_session_id, project_id, pet_id, started_at, last_state, last_seen_at)
+      VALUES (?, 'codex', 'codex', ?, '', 'p', ?, 'idle', ?)`)
+    for (let i = 0; i < 95; i += 1) { insertEvent.run(`old-${i}`, old + i, old + i); insertSession.run(`sold-${i}`, `x${i}`, old, old + i) }
+    for (let i = 0; i < 5; i += 1) { insertEvent.run(`new-${i}`, now - i, now - i); insertSession.run(`snew-${i}`, `y${i}`, now, now - i) }
+  })
+  const first = store.pruneBatch(40)
+  assert.deepEqual([first.events, first.sessions, first.more], [40, 40, true])
+  let yields = 0
+  const rest = await store.pruneInBatches(40, async () => { yields += 1 })
+  assert.deepEqual(rest, { events: 55, sessions: 55 })
+  assert.equal(yields, 1)
+  assert.equal(Number(raw.prepare('SELECT COUNT(*) AS n FROM events').get().n), 5)
+  assert.equal(Number(raw.prepare('SELECT COUNT(*) AS n FROM sessions').get().n), 5)
+})
+
+test('v6 migration is set-based: 50k events rebuild identically to the legacy row-by-row logic within a time bound', (t) => {
+  const now = Date.UTC(2026, 9, 26, 12)
+  const localDate = (timestamp: number): string => new Date(timestamp).toISOString().slice(0, 10)
+  const database = databasePath()
+  const first = new HistoryStore(database.filePath, { now: () => now, localDate })
+  first.close()
+
+  const moduleRequire = createRequire(import.meta.url)
+  const { DatabaseSync } = moduleRequire('node:sqlite') as {
+    DatabaseSync: new (filePath: string) => {
+      exec(sql: string): void
+      close(): void
+      prepare(sql: string): { all(...p: unknown[]): Array<Record<string, unknown>>, run(...p: unknown[]): unknown }
+    }
+  }
+  const raw = new DatabaseSync(database.filePath)
+  const EVENTS = 50_000
+  const pets = ['aang-airbender', 'wolf', 'local-usage']
+  const adapters = ['claude-code', 'codex', 'generic-http']
+  const projects = ['', 'a'.repeat(32), 'b'.repeat(32), 'c'.repeat(32)]
+  let seed = 4242
+  const rand = () => { seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0; return seed / 2 ** 32 }
+  raw.exec('BEGIN')
+  const insertEvent = raw.prepare(`
+    INSERT INTO events(event_id, schema_version, type, trust, adapter_id, agent_id, session_id, project_id, pet_id,
+      local_date, occurred_at, received_at, state, active_delta_ms, token_input, token_output, token_cache_read,
+      token_cache_write, token_quality, payload_json)
+    VALUES (?, 2, 'x', 'adapter_verified', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}')
+  `)
+  const insertSession = raw.prepare(`
+    INSERT INTO sessions(session_pk, adapter_id, agent_id, external_session_id, project_id, pet_id, started_at, ended_at,
+      terminal_state, last_state, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'error', ?)
+  `)
+  for (let i = 0; i < EVENTS; i += 1) {
+    const at = now - Math.floor(rand() * 60 * 24 * 3600_000)
+    const kind = rand()
+    const quality = rand() < 0.3 ? 'exact' : rand() < 0.5 ? 'estimated' : 'none'
+    const tokens = quality === 'none' ? [null, null, 0, 0] : [Math.floor(rand() * 5000), Math.floor(rand() * 900), Math.floor(rand() * 400), Math.floor(rand() * 90)]
+    insertEvent.run(
+      `ev-${i}`, adapters[i % 3], 'agent', `sess-${Math.floor(rand() * 4000)}`, projects[i % 4], pets[Math.floor(rand() * 3)],
+      localDate(at), at, at, kind < 0.04 ? 'success' : 'thinking', kind < 0.5 ? Math.floor(rand() * 300_000) : 0,
+      ...tokens, quality,
+    )
+    if (i % 25 === 0) {
+      insertSession.run(`err-${i}`, adapters[i % 3], 'agent', `e${i}`, projects[i % 4], pets[i % 3], at, at, 'error', at)
+    }
+  }
+  raw.exec('COMMIT')
+  raw.exec(`
+    DELETE FROM schema_migrations WHERE version IN (6, 7);
+    DELETE FROM daily_stats;
+  `)
+
+  // Oracle: the legacy migration, reimplemented over the raw rows (read AFTER the
+  // v6 exact->estimated downgrade is applied, exactly as the old order did).
+  const expected = new Map<string, Record<string, number | string>>()
+  const bump = (key: string, base: Record<string, number | string>, patch: (row: Record<string, number | string>) => void): void => {
+    const row = expected.get(key) ?? { ...base, sessions_completed: 0, sessions_failed: 0, active_ms: 0, token_input: 0, token_output: 0, token_cache_read: 0, token_cache_write: 0, token_quality: 'none' }
+    patch(row)
+    expected.set(key, row)
+  }
+  const merge = (a: string, b: string): string => a === 'exact' || b === 'exact' ? 'exact' : a === 'estimated' || b === 'estimated' ? 'estimated' : 'none'
+
+  const started = Date.now()
+  const migrated = new HistoryStore(database.filePath, { now: () => now, localDate })
+  const elapsedMs = Date.now() - started
+  t.after(() => { migrated.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  t.diagnostic(`v6 rebuild of ${EVENTS} events: ${elapsedMs} ms`)
+  assert.ok(elapsedMs < 10_000, `v6/v7 migration of ${EVENTS} events took ${elapsedMs} ms`)
+
+  const events = raw.prepare('SELECT * FROM events ORDER BY occurred_at ASC, event_id ASC').all()
+  for (const row of events) {
+    const key = [row.local_date, row.pet_id, row.project_id, row.adapter_id].join('|')
+    bump(key, { local_date: row.local_date as string, pet_id: row.pet_id as string, project_id: row.project_id as string, adapter_id: row.adapter_id as string }, agg => {
+      agg.active_ms = Number(agg.active_ms) + Number(row.active_delta_ms)
+      agg.token_input = Number(agg.token_input) + Number(row.token_input ?? 0)
+      agg.token_output = Number(agg.token_output) + Number(row.token_output ?? 0)
+      agg.token_cache_read = Number(agg.token_cache_read) + Number(row.token_cache_read ?? 0)
+      agg.token_cache_write = Number(agg.token_cache_write) + Number(row.token_cache_write ?? 0)
+      agg.token_quality = merge(String(agg.token_quality), String(row.token_quality))
+    })
+  }
+  const seen = new Set<string>()
+  for (const row of events) {
+    if (row.state !== 'success') continue
+    const projectId = /^[a-f0-9]{32}$/.test(String(row.project_id)) ? String(row.project_id) : 'unbound'
+    const identity = `${row.pet_id}:${row.agent_id}:${row.session_id}:${projectId}`
+    if (seen.has(identity)) continue
+    seen.add(identity)
+    const key = [localDate(Number(row.occurred_at)), row.pet_id, projectId === 'unbound' ? '' : projectId, row.adapter_id].join('|')
+    bump(key, { local_date: localDate(Number(row.occurred_at)), pet_id: row.pet_id as string, project_id: projectId === 'unbound' ? '' : projectId, adapter_id: row.adapter_id as string }, agg => { agg.sessions_completed = Number(agg.sessions_completed) + 1 })
+  }
+  for (const row of raw.prepare("SELECT * FROM sessions WHERE terminal_state = 'error' AND ended_at IS NOT NULL").all()) {
+    const date = localDate(Number(row.ended_at))
+    const key = [date, row.pet_id, row.project_id, row.adapter_id].join('|')
+    bump(key, { local_date: date, pet_id: row.pet_id as string, project_id: row.project_id as string, adapter_id: row.adapter_id as string }, agg => { agg.sessions_failed = Number(agg.sessions_failed) + 1 })
+  }
+
+  const actual = new Map<string, Record<string, unknown>>()
+  for (const row of raw.prepare('SELECT * FROM daily_stats').all()) {
+    actual.set([row.local_date, row.pet_id, row.project_id, row.adapter_id].join('|'), row)
+  }
+  const shape = (row: Record<string, unknown>): unknown[] => [
+    row.sessions_completed, row.sessions_failed, row.active_ms, row.token_input, row.token_output,
+    row.token_cache_read, row.token_cache_write, row.token_quality,
+  ]
+  // Heartbeat-only zero rows are not materialised by the new writer; compare non-empty rows.
+  const nonEmpty = (rows: Map<string, Record<string, unknown>>): Array<[string, unknown[]]> => [...rows.entries()]
+    .map(([key, row]) => [key, shape(row)] as [string, unknown[]])
+    .filter(([, values]) => values.some(value => value !== 0 && value !== 'none'))
+    .sort((a, b) => a[0].localeCompare(b[0]))
+  // v6 downgrades exact local-log rows; the synthetic rows are not 'agent.token_usage', so they are unchanged.
+  assert.deepEqual(nonEmpty(actual), nonEmpty(expected as Map<string, Record<string, unknown>>))
+  assert.ok(actual.size > 50, 'synthetic data produced a meaningful aggregate')
+  raw.close()
 })

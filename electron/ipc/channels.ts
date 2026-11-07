@@ -69,6 +69,7 @@ export const IPC_CHANNELS = {
   pluginNotificationsClear: 'plugin-notifications-clear',
   pluginNotificationsList: 'plugin-notifications-list',
   pluginNotificationsRead: 'plugin-notifications-read',
+  pluginNotificationsReadAll: 'plugin-notifications-read-all',
   pluginPanelApi: 'plugin-panel-api',
   pluginPanelSnapshot: 'plugin-panel-snapshot',
   pluginPanelUiMessage: 'plugin-panel-ui-message',
