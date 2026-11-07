@@ -41,3 +41,9 @@ Tokens added: `--font-2xl` (22px), `--font-floor` (11px), `--leading-tight/norma
 `Icon.vue` now has `close`, `sparkle`, `wrench`, `alert`, `plugin`, `external-link`, `check`, `info`, `search` (paths in `ui/icons.ts`; `size` prop already takes any px size). `check-design-tokens --verbose` lists remaining `glyph-icon` hits. Known sites:
 - `DesktopPet.vue`: `x` close (~781, use `Button icon-only` + `<Icon name="close">` with >= 32px hit area), sparkle (~702), wrench emoji (~730), `!` notice icon (~690 -> `alert`).
 - `PluginPanel.vue` (~44, ~230): diamond placeholder -> `<Icon name="plugin">`.
+
+## ARIA (DS-15)
+Done in ui/: `ToggleRow` is `role="switch"` and links `help` via `aria-describedby`; `ProgressTrack` takes `valueText`; `Input`/`TextField` link errors with `aria-describedby` + `aria-invalid`; `Button` has `aria-busy`; `Toast` uses `role="alert"` for danger.
+- `DesktopPet.vue` permission `alertdialog`: add `aria-describedby="permission-request-description"`; merge the 4 `aria-live` bubbles so only one announces at a time.
+- `SettingsPets.vue:175`: error container `role="alert"` (success/progress stay `role="status"`); rename input needs a label (`ui/Input` or `TextField`).
+- Quota/usage bars: pass `valueText` ("72%, resets in 2h") to `ProgressTrack`; loading regions get `aria-busy="true"` with `ui/Skeleton`.
