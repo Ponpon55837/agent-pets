@@ -4,6 +4,7 @@ import type { PetWindowMode } from '../src/types/pet-window'
 import { createAttentionBitmap } from './tray-icon'
 import { buildPluginTrayMenu, type PluginTrayCommandItem } from './plugin-tray'
 import { locale, t } from '../src/i18n'
+import { EMPTY_ATTENTION, type AttentionSummary } from './attention-tracker'
 
 interface DesktopTrayActions {
   getPreferences: () => DesktopPreferences
@@ -28,7 +29,8 @@ export class DesktopTrayController {
   private tray: Tray | null = null
   private baseIcon: NativeImage | null = null
   private attentionIcon: NativeImage | null = null
-  private attentionCount = 0
+  private attention: AttentionSummary = EMPTY_ATTENTION
+  private get attentionCount(): number { return this.attention.total }
 
   constructor(iconPath: string, actions: DesktopTrayActions) {
     this.iconPath = iconPath
@@ -47,11 +49,15 @@ export class DesktopTrayController {
         { width: size, height: size, scaleFactor: 1 },
       )
       if (this.attentionIcon.isEmpty()) this.attentionIcon = null
-    } catch {
+    } catch (error) {
+      // Without the badge icon the count still reaches the user through the
+      // tooltip (and the menu-bar title on macOS), so say why it is missing.
+      console.warn('Tray attention icon could not be created', error instanceof Error ? error.message : error)
       this.attentionIcon = null
     }
     this.tray = new Tray(this.baseIcon)
-    this.tray.on('click', () => this.actions.showPet())
+    // Same as the first menu item: toggle, instead of only ever showing.
+    this.tray.on('click', () => (this.actions.isPetVisible() ? this.actions.hidePet() : this.actions.showPet()))
     this.rebuild()
   }
 
@@ -71,8 +77,11 @@ export class DesktopTrayController {
 
     const tooltipParts = [t('appName')]
     if (preferences.dndEnabled) tooltipParts.push(t('dnd'))
-    if (this.attentionCount > 0) tooltipParts.push(t('pendingCount', { count: this.attentionCount }))
+    const summaryText = this.attentionSummaryText()
+    if (summaryText) tooltipParts.push(summaryText)
     this.tray.setToolTip(tooltipParts.join(' · '))
+    // macOS shows the number beside the icon; other platforms rely on the badge dot + tooltip.
+    if (process.platform === 'darwin') this.tray.setTitle(this.attentionCount > 0 ? String(this.attentionCount) : '')
 
     const template: Electron.MenuItemConstructorOptions[] = [
       {
@@ -157,9 +166,28 @@ export class DesktopTrayController {
     this.tray.setContextMenu(Menu.buildFromTemplate(template))
   }
 
-  setAttentionCount(count: number): void {
-    this.attentionCount = Math.max(0, Math.floor(count))
+  setAttention(summary: AttentionSummary): void {
+    const clean: AttentionSummary = {
+      permission: Math.max(0, Math.floor(summary.permission)),
+      external: Math.max(0, Math.floor(summary.external)),
+      input: Math.max(0, Math.floor(summary.input)),
+      total: 0,
+    }
+    clean.total = clean.permission + clean.external + clean.input
+    const unchanged = clean.permission === this.attention.permission
+      && clean.external === this.attention.external
+      && clean.input === this.attention.input
+    if (unchanged) return
+    this.attention = clean
     this.rebuild()
+  }
+
+  private attentionSummaryText(): string {
+    const parts: string[] = []
+    if (this.attention.permission > 0) parts.push(t('permission.trayPermission', { count: this.attention.permission }))
+    if (this.attention.external > 0) parts.push(t('permission.trayExternal', { count: this.attention.external }))
+    if (this.attention.input > 0) parts.push(t('permission.trayInput', { count: this.attention.input }))
+    return parts.join(t('permission.trayJoin'))
   }
 
   private safeUpdatePreferences(patch: DesktopPreferencesPatch): void {

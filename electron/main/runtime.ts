@@ -102,6 +102,7 @@ import { registerPluginPreferencesIpc } from '../ipc/plugin-preferences'
 import { registerPluginCatalogIpc } from '../ipc/plugin-catalog'
 import { registerPluginInstallIpc } from '../ipc/plugin-install'
 import { mainState, type PluginSkinFallbackInfo } from './state'
+import { EMPTY_ATTENTION } from '../attention-tracker'
 import { attachHotkeyInfo, PermissionHotkeys } from '../permission-hotkeys'
 import { PANEL_GAP, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_WIDTH, PANEL_SIZES, PANEL_BLUR_HIDE_DELAY_MS, computePanelPlacement, fitPanelHeight, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
 
@@ -2136,7 +2137,6 @@ export function showPanelWindow(view: 'sessions' | 'settings' | 'restore' = 'ses
   mainState.panelWindow.show()
   mainState.panelWindow.focus()
   if (wasHidden) revealPanelWindowAfterFirstFrame(mainState.panelWindow)
-  mainState.desktopNotifications?.clearAttention()
 
   const notifyRenderer = () => {
     if (!mainState.panelWindow || mainState.panelWindow.isDestroyed()) return
@@ -2390,7 +2390,7 @@ export function unregisterPermissionHotkeys(): void {
 }
 
 export function syncTrayAttention(): void {
-  mainState.desktopTray?.setAttentionCount(mainState.notificationAttentionCount + mainState.permissionAttentionCount)
+  mainState.desktopTray?.setAttention(mainState.desktopNotifications?.getAttention() ?? EMPTY_ATTENTION)
 }
 
 export function broadcastPermissionRequests(): void {
@@ -2399,7 +2399,8 @@ export function broadcastPermissionRequests(): void {
     applyNormalPetBounds()
   }
   mainState.permissionAttentionCount = listed.length
-  syncTrayAttention()
+  if (mainState.desktopNotifications) mainState.desktopNotifications.setPermissionRequests(listed)
+  else syncTrayAttention()
 
   const top = listed[0]
   const hotkeyInfo = app.isReady()
@@ -2738,10 +2739,7 @@ export function createDesktopServices(): void {
     getPreferences: currentDesktopPreferences,
     isAppFocused: () => [mainState.petWindow, mainState.panelWindow].some(window => window?.isFocused()),
     onNotificationClick: () => showPanelWindow('sessions'),
-    onAttentionChanged: count => {
-      mainState.notificationAttentionCount = count
-      syncTrayAttention()
-    },
+    onAttentionChanged: () => syncTrayAttention(),
   })
 
   scheduleDndExpiry(currentDesktopPreferences())

@@ -37,5 +37,9 @@
   "permission.denyAllConfirm": "Press again to deny all {count}",
   "permission.notifyAggregateFailed": "{count} tasks ended ({failed} failed)",
   "permission.dndEndedTitle": "Do Not Disturb has ended",
-  "permission.dndEndedBody": "{count} notifications were silenced while it was on"
+  "permission.dndEndedBody": "{count} notifications were silenced while it was on",
+  "permission.trayPermission": "{count} permission request(s)",
+  "permission.trayExternal": "{count} to approve in the original tool",
+  "permission.trayInput": "{count} waiting for input",
+  "permission.trayJoin": ", "
 }

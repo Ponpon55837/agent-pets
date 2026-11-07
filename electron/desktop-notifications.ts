@@ -3,6 +3,7 @@ import type { DesktopPreferences } from '../src/types/desktop'
 import type { AchievementUnlock } from '../src/types/achievement'
 import type { AgentStatusEvent } from './event-server'
 import { t } from '../src/i18n.ts'
+import { AttentionTracker, type AttentionRequestLike, type AttentionSummary } from './attention-tracker'
 import { readBoundedJson, writeJsonAtomic } from './desktop-preferences'
 import {
   aggregateTerminalNotifications,
@@ -33,7 +34,7 @@ interface DesktopNotificationServiceOptions {
   getPreferences: () => DesktopPreferences
   isAppFocused: () => boolean
   onNotificationClick: () => void
-  onAttentionChanged: (count: number) => void
+  onAttentionChanged: (summary: AttentionSummary) => void
   batchWindowMs?: number
 }
 
@@ -46,7 +47,8 @@ export class DesktopNotificationService {
   private readonly terminalQueue = new Map<string, NotificationCandidate>()
   private readonly batchWindowMs: number
   private batchTimer: ReturnType<typeof setTimeout> | null = null
-  private attentionCount = 0
+  private readonly attention = new AttentionTracker()
+  private lastAttentionKey = ''
   // Newest notification per key: a repeat for the same session replaces the old
   // one instead of stacking in the notification centre.
   private readonly shown = new Map<string, Notification>()
@@ -60,6 +62,9 @@ export class DesktopNotificationService {
   }
 
   handleEvent(event: AgentStatusEvent): void {
+    // Attention is state-based and independent of whether a notification is
+    // shown, so DND / cooldown / focus never change what the tray reports.
+    if (this.attention.observeEvent(event)) this.emitAttention()
     const candidate = classifyNotification(event)
     if (!candidate) return
 
@@ -67,9 +72,6 @@ export class DesktopNotificationService {
       this.log(candidate.kind, 'suppressed-cooldown')
       return
     }
-
-    this.attentionCount += 1
-    this.options.onAttentionChanged(this.attentionCount)
 
     if (candidate.terminal) {
       this.terminalQueue.set(candidate.key, candidate)
@@ -111,10 +113,22 @@ export class DesktopNotificationService {
     this.deliver(t('permission.dndEndedTitle'), t('permission.dndEndedBody', { count: missed }), 'summary', 1)
   }
 
-  clearAttention(): void {
-    if (this.attentionCount === 0) return
-    this.attentionCount = 0
-    this.options.onAttentionChanged(0)
+  /** Active broker requests; removes the double count with their status events. */
+  setPermissionRequests(requests: ReadonlyArray<AttentionRequestLike>): void {
+    this.attention.setRequests(requests)
+    this.emitAttention()
+  }
+
+  getAttention(): AttentionSummary {
+    return this.attention.summary()
+  }
+
+  private emitAttention(): void {
+    const summary = this.attention.summary()
+    const key = `${summary.permission}/${summary.external}/${summary.input}`
+    if (key === this.lastAttentionKey) return
+    this.lastAttentionKey = key
+    this.options.onAttentionChanged(summary)
   }
 
   destroy(): void {
@@ -173,7 +187,6 @@ export class DesktopNotificationService {
       if (this.shown.size > 200) this.shown.delete(this.shown.keys().next().value as string)
       notification.on('click', () => {
         this.log(kind, 'clicked', count)
-        this.clearAttention()
         this.options.onNotificationClick()
       })
       notification.show()
