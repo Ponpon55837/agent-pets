@@ -34,10 +34,10 @@ To remove integrations, use **Remove** on a tool's card in the wizard (only that
 |-------|-----|---------|------------|-------|-------------|
 | OpenCode | yes | yes | respond | — | estimated |
 | Codex | yes | partial | observe | provider | exact |
-| Claude Code | yes | yes | observe | provider | exact |
+| Claude Code | yes | yes | observe (respond when enabled) | provider | exact |
 
-- **respond** — the permission request can be allowed once or denied from the pet bubble. Only OpenCode supports this.
-- **observe** — the pet shows Waiting Permission, but you approve inside the tool itself (Codex and Claude Code only report that they are waiting; there is no way to send a decision back).
+- **respond** — the permission request can be allowed once or denied from the pet bubble. OpenCode always; Claude Code after you turn on **Answer Claude Code permissions from the pet** (see [Permission bubble](#permission-bubble)).
+- **observe** — the pet shows Waiting Permission, but you approve inside the tool itself (Codex only reports that it is waiting; there is no way to send a decision back).
 - Codex does not report a "waiting for input" state. Codex Desktop shares `~/.codex` with the CLI and has no separate install API, so it works only if that build runs the same hooks; verify with **Wait for real event**.
 - **Token usage: exact** means per-message counts read from the agent's own local session logs (`~/.codex/sessions`, `~/.claude/projects`). **estimated** means the number comes from the event the agent sent, as OpenCode and Generic HTTP integrations do; Codex and Claude Code usage on live events is not counted, so local logs stay the single source.
 - A **Generic HTTP** adapter is available to local integrations through the authenticated `/v1/events` endpoint (see [Event server](#event-server)). It is observe-only.
@@ -97,7 +97,7 @@ Open from the panel header or the pet menu. Settings are in five groups, with **
 |-------|----------|
 | General | Language (Traditional Chinese / English), **Theme** (Panel: match system / light / dark; Pet: dark by default, light, or follow the panel — set separately, e.g. a dark system with a light pet), pet size, reset panel size, bounce & shake, status bubble, ambient motion, working hint |
 | Pets | Pet library and imports, multiple pets, project pets, Growth (mood, XP, achievements) |
-| Desktop | Notifications, Do Not Disturb, sound; Mini mode, Edge peek, Shimeji, capture exclusion, fullscreen auto-hide, right-click hide, permission bubble, Presentation MCP, launch at startup (packaged builds), permission log |
+| Desktop | Notifications, Do Not Disturb, sound; Mini mode, Edge peek, Shimeji, capture exclusion, fullscreen auto-hide, right-click hide, permission bubble, answering Claude Code permissions, Presentation MCP, launch at startup (packaged builds), permission log |
 | Advanced | Setup Wizard, project MCP, diagnostics, restart, quit |
 | Plugins | Install, enable, permissions, updates and plugin notifications (day-to-day use is in the dashboard plugin tabs) |
 
@@ -109,11 +109,12 @@ Open from the panel header or the pet menu. Settings are in five groups, with **
 
 When an agent asks for permission, a Liquid Glass bubble appears on the pet and the same card shows in the panel. It shows the requesting tool and project, what will run (redacted, expandable, copyable) and a countdown. Requests time out after a short TTL (at most 5 minutes) and the agent is told it was cancelled.
 
-- **Risk** — only read-only tools (`read`, `glob`, `grep`, `list`) are low risk; every other tool, including unknown and MCP-wrapped ones, is high risk. Network tools are flagged "connects to the network".
+- **Risk** — only read-only tools (`read`, `glob`, `grep`, `list`) are low risk; every other OpenCode tool, including unknown and MCP-wrapped ones, is high risk. For Claude Code, `Write` / `Edit` / `MultiEdit` / `NotebookEdit` are medium, `Bash`, `WebFetch` and `WebSearch` are high, and MCP or other tools are unknown. Network tools are flagged "connects to the network".
 - **Redaction** — API keys and tokens, `Authorization` values, `password=` style arguments, URL credentials and private keys become `[redacted]`, and your home directory becomes `~`.
-- **Hotkeys** — global shortcuts exist only while the top request is eligible (not high risk): **Cmd+Shift+Y** allow once / **Cmd+Shift+N** deny on macOS, **Ctrl+Shift+Y** / **Ctrl+Shift+N** on Windows. If another app owns the key, the bubble says so and the buttons still work. In the bubble itself: **N** or **Esc** denies; **Y** allows once for low risk, and must be held for 0.6 s for other risk levels.
+- **Hotkeys** — global shortcuts exist only while the top request is eligible (low or medium risk): **Cmd+Shift+Y** allow once / **Cmd+Shift+N** deny on macOS, **Ctrl+Shift+Y** / **Ctrl+Shift+N** on Windows. If another app owns the key, the bubble says so and the buttons still work. In the bubble itself: **N** or **Esc** denies; **Y** allows once for low risk, and must be held for 0.6 s for other risk levels.
 - **Queue** — several pending requests show as a list you can expand; **Deny all** needs a second press to confirm.
-- For agents that cannot be answered here (Codex, Claude Code) the bubble is a reminder that tells you to go back to the tool. Only `allow once` and `deny` exist; permanent approval is intentionally unavailable.
+- For agents that cannot be answered here (Codex, and Claude Code while the option below is off) the bubble is a reminder that tells you to go back to the tool. Only `allow once` and `deny` exist; permanent approval is intentionally unavailable.
+- **Claude Code** (off by default) — turn on **Settings → Desktop → Permission requests → Answer Claude Code permissions from the pet**. Claude Code's `PermissionRequest` hook then waits for your answer for up to the **Wait time** (default 90 s, 15–120 s) while Claude Code's own prompt stays open in the terminal; whichever answers first wins, and the pet card says you can also answer there. Answering in the terminal takes the bubble down after the tool runs or the turn ends. If the pet is not running, the option is off, the wait runs out or anything fails, the hook prints nothing and Claude Code continues as if Agent Pets were not installed (non-interactive `-p` runs then deny as usual). Your own deny rules still win over an allow from the pet. A deny tells Claude only the fixed text `Denied in Agent Pets.`. Other tools that also register a `PermissionRequest` hook run alongside ours; Claude Code decides whose answer counts.
 - **Permission Bubble** can be switched off in Settings; pending requests then stay with the broker and the Tray badge. **Settings → Desktop** also shows a bounded log of recent decisions (time, tool, source, result only).
 
 ## Plugins

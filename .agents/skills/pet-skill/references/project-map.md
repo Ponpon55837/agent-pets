@@ -59,7 +59,7 @@
 - Status events feed the Pinia store through the typed preload listener.
 - Click-through combines renderer hit testing and Electron mouse passthrough.
 - Three Agent families are supported through hooks: Codex, Claude Code, and OpenCode.
-- OpenCode is currently the only respond-capable permission Adapter. Generic `/v1/events` remains observe-only; Codex and Claude show external-only waiting state until a verified response channel exists.
+- OpenCode is always respond-capable. Claude Code is respond-capable only while the main-process preference `claudePermissionRespondEnabled` is on: its `PermissionRequest` hook (`integrations/agent-hook.mjs`) creates a request on the permission port (17374, permission token), polls for the decision and prints Claude's decision JSON; any failure prints nothing so Claude Code falls back to its own prompt. The hook opt-in file `~/.desktop-pet/claude-permission-respond` only enables the hook side; the adapter server still refuses Claude requests (503) while the preference is off. Generic `/v1/events` remains observe-only; Codex shows external-only waiting state until a verified response channel exists.
 - All `/v1/events` payloads pass through the Agent Adapter registry before Event Core normalization. Built-in source families receive `adapterId` metadata; an explicit `adapterId: generic-http` remains observe-only and cannot elevate permission capabilities. Setup Wizard health/capability cards are runtime-driven rather than a hardcoded agent list.
 
 ## Extension guides
