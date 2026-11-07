@@ -701,17 +701,20 @@ function onPetContextMenu(e: MouseEvent): void {
 // --- Presentation 與成就回饋動畫 ---------------------------------------------
 
 watch(() => store.presentationReaction, (reaction) => {
-  if (!reaction || !store.reactionsActive) return
+  // An explicit MCP request is always shown: with motion effects off the pet
+  // still gets its icon mark, just without the movement.
+  if (!reaction) return
+  const kind = reaction.reaction
   if (isMultiPet.value) {
     if (reaction.petId) {
-      multiPetAnimationForPet(reaction.petId)?.playReaction()
+      multiPetAnimationForPet(reaction.petId)?.playReaction(kind)
     } else {
-      multiPetAnimations().forEach(anim => anim.playReaction())
+      multiPetAnimations().forEach(anim => anim.playReaction(kind))
     }
     return
   }
   if (!reaction.petId || reaction.petId === store.activePetId) {
-    petAnimRef.value?.playReaction()
+    petAnimRef.value?.playReaction(kind)
   }
 }, { deep: true })
 

@@ -2,6 +2,8 @@
 import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import type { AgentState } from '@/types/agent'
 import type { PetAutonomousBehavior, PetBehaviorManifest } from '@/types/pet'
+import type { PresentationReaction } from '@/types/presentation'
+import Icon from '@/components/ui/Icon.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { getCachedSprite, getCachedTint, loadPetSprite, setCachedTint } from '@/composables/usePetSpriteCache'
 import { frameDelayMultiplier, isSignificantTransition, motionPlanFor } from '@/utils/pet-motion-plan'
@@ -142,14 +144,37 @@ const activeMotionRow = ref(0)
 // state animation via a CSS class rather than extra spritesheet frames, so
 // it works for every pet regardless of how many rows its sheet has.
 const isReacting = ref(false)
+const reactionKind = ref<PresentationReaction | null>(null)
 let reactionTimer: ReturnType<typeof setTimeout> | null = null
-function playReaction() {
+// Each presentation reaction has its own motion (CSS class) and a short icon
+// mark that floats up; the mark still shows when motion effects are off.
+const REACTION_MARKS: Record<PresentationReaction, string> = {
+  happy: 'sparkle',
+  curious: 'question',
+  thinking: 'dots',
+  surprised: 'exclaim',
+  encouraging: 'heart',
+}
+const REACTION_DURATION_MS: Record<PresentationReaction, number> = {
+  happy: 560, curious: 760, thinking: 900, surprised: 420, encouraging: 700,
+}
+const reactionMark = ref<{ id: number; icon: string } | null>(null)
+let reactionMarkTimer: ReturnType<typeof setTimeout> | null = null
+let reactionMarkId = 0
+
+function playReaction(kind?: PresentationReaction) {
   isReacting.value = false
+  reactionKind.value = kind ?? null
   requestAnimationFrame(() => {
     isReacting.value = true
     if (reactionTimer) clearTimeout(reactionTimer)
-    reactionTimer = setTimeout(() => { isReacting.value = false }, 260)
+    reactionTimer = setTimeout(() => { isReacting.value = false }, kind ? REACTION_DURATION_MS[kind] : 260)
   })
+  if (kind) {
+    reactionMark.value = { id: ++reactionMarkId, icon: REACTION_MARKS[kind] }
+    if (reactionMarkTimer) clearTimeout(reactionMarkTimer)
+    reactionMarkTimer = setTimeout(() => { reactionMark.value = null }, 1400)
+  }
 }
 
 // Achievement unlocks use a separate visual hook so a new rule can reward the
@@ -655,6 +680,7 @@ onUnmounted(() => {
   if (cursorLookTimer !== null) {
     clearTimeout(cursorLookTimer)
   }
+  if (reactionMarkTimer !== null) clearTimeout(reactionMarkTimer)
   if (ghostTimer !== null) clearTimeout(ghostTimer)
   stopFidgetTimer()
   stopUrgencyTimer()
@@ -708,7 +734,8 @@ onUnmounted(() => {
       :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
       class="pet-canvas"
       :class="{
-        'pet-reacting': store.reactionsActive && isReacting,
+        'pet-reacting': store.reactionsActive && isReacting && !reactionKind,
+        [`pet-react-${reactionKind}`]: store.reactionsActive && isReacting && !!reactionKind,
         'pet-fidgeting': store.ambientActive && isFidgeting && !isReacting && urgencyLevel === 0,
         'pet-urgent-1': store.reactionsActive && !isReacting && urgencyLevel === 1,
         'pet-urgent-2': store.reactionsActive && !isReacting && urgencyLevel === 2,
@@ -725,6 +752,16 @@ onUnmounted(() => {
         'pet-frozen': props.freeze,
       }"
     />
+    <Transition name="pet-mark">
+      <span
+        v-if="reactionMark"
+        :key="reactionMark.id"
+        class="pet-reaction-mark"
+        aria-hidden="true"
+      >
+        <Icon :name="reactionMark.icon" :size="16" />
+      </span>
+    </Transition>
   </div>
 </template>
 
