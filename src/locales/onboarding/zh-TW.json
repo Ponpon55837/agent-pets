@@ -137,5 +137,7 @@
   "onboarding.mcpRecovered": "專案清單檔案無法讀取，已另存備份並重新開始；請用「選擇專案資料夾」重新加入專案。",
   "onboarding.mcpCode.stale_paths": "這是 Agent Pets 寫入的設定，但路徑已過期（App 搬移或 Node 升級）。按「更新路徑」即可修復。",
   "onboarding.mcpCode.updated": "已更新為目前的路徑",
-  "onboarding.check.runtime.warn": "此執行環境沒有提供設定功能。"
+  "onboarding.check.runtime.warn": "此執行環境沒有提供設定功能。",
+  "onboarding.mcpChooseFolder": "選擇專案資料夾",
+  "onboarding.mcpConcepts": "hook 讓寵物知道工具的狀態（全域，不用選專案）。專案寵物讓每個專案有自己的寵物。這裡的 MCP 設定則讓專案裡的 AI 工具能讓寵物說話與做表情。"
 }

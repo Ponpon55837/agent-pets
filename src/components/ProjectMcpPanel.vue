@@ -168,6 +168,15 @@ const NEXT_STEP_KEYS: Record<ProjectMcpClientId, { hint: TranslationKey, command
   opencode: { hint: 'onboarding.mcpNext.opencode', command: 'opencode mcp list' },
 }
 
+// Two projects can share a folder name; show the parent folder only when needed.
+function displayName(project: ProjectMcpProjectRecord): string {
+  const duplicates = projects.value.filter(item => item.projectName === project.projectName).length > 1
+  if (!duplicates) return project.projectName
+  const parts = project.projectPath.split(/[\\/]/).filter(Boolean)
+  const parent = parts.length >= 2 ? parts[parts.length - 2] : ''
+  return parent ? `${project.projectName} (${parent})` : project.projectName
+}
+
 const repairingClient = ref('')
 
 // Re-points a stale Agent Pets entry (App moved, Node upgraded) at the current paths. Customized
@@ -325,10 +334,12 @@ onMounted(() => {
         </Button>
       </div>
 
+      <p class="mcp-review-help">{{ t('onboarding.mcpConcepts') }}</p>
+
       <div class="mcp-toolbar">
         <Button v-if="phase === 'list'" variant="primary" :disabled="settingUp" @click="chooseProject">
           <Icon name="plus" :size="17" />
-          {{ settingUp ? t('installing') : t('chooseProjectPet') }}
+          {{ settingUp ? t('installing') : t('onboarding.mcpChooseFolder') }}
         </Button>
         <Button variant="secondary" :disabled="loadingProjects" @click="refreshProjects">
           {{ loadingProjects ? t('checking') : t('refresh') }}
@@ -446,7 +457,7 @@ onMounted(() => {
           role="listitem"
         >
           <div class="mcp-project-heading">
-            <div class="mcp-project-name">{{ project.projectName }}</div>
+            <div class="mcp-project-name" :title="project.projectPath">{{ displayName(project) }}</div>
             <span class="mcp-project-status" :class="`status-${projectStatusTone(project.status)}`">
               {{ projectStatusLabel(project.status) }}
             </span>

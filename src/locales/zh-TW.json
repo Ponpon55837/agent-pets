@@ -265,7 +265,7 @@
   "receiverVerifiedAt": "Receiver 已於 {time} 驗證",
   "aboutAdapters": "關於 Adapter 與即時測試",
   "adapterNote": "能力與健康狀態來自執行中的 Adapter registry，而不是寫死的工具清單。Test 會驗證此 Agent Pets 執行個體能接收、標準化並顯示本機即時事件，但不會自行啟動 coding tool。Generic HTTP 一律為 observe-only，無法回應 Permission。",
-  "healthReady": "已就緒",
+  "healthReady": "已整合",
   "healthNeedsInstall": "需要安裝",
   "healthDegraded": "需要修復",
   "healthError": "錯誤",

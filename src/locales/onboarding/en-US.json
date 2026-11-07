@@ -137,5 +137,7 @@
   "onboarding.mcpRecovered": "The project list file was unreadable; it was set aside as a backup and the list restarted. Add your projects again with Choose project folder.",
   "onboarding.mcpCode.stale_paths": "Agent Pets wrote this entry but its paths are outdated (App moved or Node upgraded). Press Update paths to repair it.",
   "onboarding.mcpCode.updated": "Updated to the current paths",
-  "onboarding.check.runtime.warn": "Setup operations are unavailable in this runtime."
+  "onboarding.check.runtime.warn": "Setup operations are unavailable in this runtime.",
+  "onboarding.mcpChooseFolder": "Choose project folder",
+  "onboarding.mcpConcepts": "Hooks tell the pet what your tools are doing (global, no project needed). Project pets give each project its own pet. The MCP setup here lets an AI tool in a project make the pet speak and react."
 }

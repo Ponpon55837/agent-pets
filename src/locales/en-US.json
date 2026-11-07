@@ -265,7 +265,7 @@
   "receiverVerifiedAt": "Receiver verified at {time}",
   "aboutAdapters": "About adapters and live tests",
   "adapterNote": "Capabilities and health come from the running Adapter registry, not a hardcoded tool list. Test verifies that this Agent Pets instance can receive, normalize, and display a local live event; it does not launch a coding tool. Generic HTTP is always observe-only and cannot answer Permission.",
-  "healthReady": "Ready",
+  "healthReady": "Integrated",
   "healthNeedsInstall": "Needs installation",
   "healthDegraded": "Needs repair",
   "healthError": "Error",
