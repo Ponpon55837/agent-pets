@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import test from 'node:test'
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
@@ -44,23 +44,30 @@ test('status panel preserves dashboard and settings navigation contracts', () =>
 })
 
 test('plugin panel preserves install, settings, diagnostics and notification actions', () => {
-  const source = read('../src/components/PluginPanel.vue')
+  const dir = '../src/components/plugin-panel/'
+  const source = [
+    '../src/components/PluginPanel.vue',
+    '../src/components/plugin-panel/PluginToastStack.vue',
+    '../src/components/ui/Toast.vue',
+    ...readdirSync(new URL(dir, import.meta.url)).filter(name => name.endsWith('.vue')).map(name => `${dir}${name}`),
+  ].map(read).join('\n')
   for (const key of [
-    'pluginInstalledHeading', 'pluginCatalogHeading', 'pluginSettingsHeading',
+    'pluginInstalledHeading', 'pluginCatalogHeading', 'plugins.sectionSettings',
     'pluginDiagnosticsHeading', 'pluginNotificationsHeading', 'pluginCommandsHeading',
   ]) assert.ok(source.includes(key), `missing visible section ${key}`)
   for (const action of [
     'openPluginPanel' + 'View', 'invokePlugin' + 'Command', 'savePluginSettings',
     'markNotificationRead', 'requestRemove', 'confirmInstall',
   ]) assert.ok(source.includes(action), `missing action ${action}`)
-  assert.match(source, /role="alert"/)
-  assert.match(source, /aria-live="polite"/)
+  assert.match(source, /role="alert"|'alert'/)
+  assert.match(source, /'status'/)
 })
 
 test('renderer panel and extracted component files stay below the 500-line target', () => {
   const components = [
     '../src/components/PluginPanel.vue',
     '../src/components/plugin-panel/PluginPanelDialogs.vue',
+
     '../src/components/StatusPanel.vue',
     '../src/components/status-panel/StatusPanelHistory.vue',
     '../src/components/status-panel/StatusPanelSessions.vue',
@@ -75,7 +82,9 @@ test('renderer panel and extracted component files stay below the 500-line targe
     '../src/components/status-panel/SettingsPage.vue',
     '../src/components/status-panel/SettingsNotifications.vue',
   ]
-  for (const path of components) {
+  const panelParts = readdirSync(new URL('../src/components/plugin-panel/', import.meta.url))
+    .filter(name => name.endsWith('.vue')).map(name => `../src/components/plugin-panel/${name}`)
+  for (const path of [...components, ...panelParts]) {
     assert.ok(read(path).split('\n').length < 500, `${path} exceeds the component line target`)
   }
 })

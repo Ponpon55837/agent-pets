@@ -51,8 +51,15 @@ export function clampPluginPanelSize(size: PluginPanelSize, workArea: PluginPane
 /** Keeps one session's manual window size scoped to its plugin page. */
 export class PluginPanelWindowSizer {
   private readonly manualSizes = new Map<string, PluginPanelSize>()
+  private onChange: ((sizes: ReadonlyMap<string, PluginPanelSize>) => void) | null = null
   private baseSize: PluginPanelSize | null = null
   private activeId: string | null = null
+
+  /** 載入先前保存的尺寸（已驗證）；之後每次手動調整都會通知 listener 持久化。 */
+  restore(sizes: ReadonlyMap<string, PluginPanelSize>, onChange: (sizes: ReadonlyMap<string, PluginPanelSize>) => void): void {
+    for (const [pluginId, size] of sizes) this.manualSizes.set(pluginId, { ...size })
+    this.onChange = onChange
+  }
 
   activePluginId(): string | null {
     return this.activeId
@@ -72,7 +79,10 @@ export class PluginPanelWindowSizer {
 
   recordManualSize(pluginId: string, size: PluginPanelSize, workArea: PluginPanelWorkArea): boolean {
     if (this.activeId !== pluginId || !finite(size.width) || !finite(size.height)) return false
-    this.manualSizes.set(pluginId, clampPluginPanelSize(size, workArea))
+    const clamped = clampPluginPanelSize(size, workArea)
+    const previous = this.manualSizes.get(pluginId)
+    this.manualSizes.set(pluginId, clamped)
+    if (!previous || previous.width !== clamped.width || previous.height !== clamped.height) this.onChange?.(this.manualSizes)
     return true
   }
 

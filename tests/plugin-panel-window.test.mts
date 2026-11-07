@@ -81,3 +81,24 @@ test('plugin panel insets come from the renderer viewport and lay out against th
   assert.equal(layoutPluginPanelView(insets, { width: 20, height: 720 }), null)
   assert.equal(layoutPluginPanelView(insets, { width: 460, height: 80 }), null)
 })
+
+test('manual panel sizes persist through the versioned store format and ignore corrupt entries', async () => {
+  const { parsePluginPanelSizes, serializePluginPanelSizes } = await import('../electron/plugin-panel-sizes.ts')
+  const sizer = new PluginPanelWindowSizer()
+  const saved: Array<Map<string, { width: number; height: number }>> = []
+  sizer.restore(new Map([['sample-plugin', { width: 700, height: 500 }]]), sizes => saved.push(new Map(sizes)))
+  assert.deepEqual(sizer.begin('sample-plugin', { width: 460, height: 720 }, undefined, { width: 1200, height: 900 }), { width: 700, height: 500 })
+  assert.equal(sizer.recordManualSize('sample-plugin', { width: 700, height: 500 }, { width: 1200, height: 900 }), true)
+  assert.equal(saved.length, 0)
+  sizer.recordManualSize('sample-plugin', { width: 640, height: 480 }, { width: 1200, height: 900 })
+  assert.equal(saved.length, 1)
+  const roundTrip = parsePluginPanelSizes(JSON.parse(JSON.stringify(serializePluginPanelSizes(saved[0]))))
+  assert.deepEqual(roundTrip.get('sample-plugin'), { width: 640, height: 480 })
+  const hostile = parsePluginPanelSizes({
+    version: 1,
+    sizes: { 'sample-plugin': { width: 640, height: 480 }, _host: { width: 600, height: 600 }, 'bad id': { width: 600, height: 600 }, 'tiny-one': { width: 5, height: 5 }, 'nan-one': { width: Number.NaN, height: 300 } },
+  })
+  assert.deepEqual([...hostile.keys()], ['sample-plugin'])
+  assert.equal(parsePluginPanelSizes({ version: 2, sizes: {} }).size, 0)
+  assert.equal(parsePluginPanelSizes('nope').size, 0)
+})

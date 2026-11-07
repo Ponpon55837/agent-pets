@@ -15,7 +15,7 @@ import {
   type SettingsSectionId,
 } from '@/utils/settingsRegistry'
 
-const props = defineProps<{ requestedPluginId: string }>()
+const props = defineProps<{ requestedPluginId: string; requestedPluginNonce?: number }>()
 const group = defineModel<SettingsGroupId>('group', { required: true })
 const store = useAgentStore()
 
@@ -49,7 +49,7 @@ const groupOptions = computed<SegmentedOption[]>(() => SETTINGS_GROUPS.map(item 
 const activeGroup = computed(() => SETTINGS_GROUPS.find(item => item.id === group.value) ?? SETTINGS_GROUPS[0])
 
 function sectionProps(id: SettingsSectionId): Record<string, unknown> {
-  return id === 'plugins' ? { requestedPluginId: props.requestedPluginId } : {}
+  return id === 'plugins' ? { requestedPluginId: props.requestedPluginId, requestNonce: props.requestedPluginNonce ?? 0 } : {}
 }
 
 function updateScrollHints(): void {
@@ -119,7 +119,7 @@ watch(group, (_next, previous) => {
   })
 }, { flush: 'pre' })
 
-watch(() => props.requestedPluginId, id => {
+watch(() => [props.requestedPluginId, props.requestedPluginNonce] as const, ([id]) => {
   if (id) void openResult('plugins')
 })
 

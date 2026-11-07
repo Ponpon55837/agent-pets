@@ -31,12 +31,12 @@ test('panel close events map to localized status error codes', () => {
 })
 
 test('plugin panel maximize control exposes its state and translations', () => {
-  const source = readFileSync(new URL('../src/components/PluginPanel.vue', import.meta.url), 'utf8')
-  const styles = readFileSync(new URL('../src/components/PluginPanel.css', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/components/plugin-panel/PluginPanelFrame.vue', import.meta.url), 'utf8')
+  const styles = readFileSync(new URL('../src/components/plugin-panel/PluginPanelFrame.css', import.meta.url), 'utf8')
   assert.match(source, /class="plugin-panel-view-control"/)
   assert.match(source, /:aria-pressed="panelViewMaximized"/)
-  assert.match(source, /t\(panelViewMaximized \? 'pluginPanelRestore' : 'pluginPanelMaximize'\)/)
-  assert.match(styles, /plugin-panel-view-control\.btn\.icon-only\) \{[^}]*width: 32px; height: 32px;/)
+  assert.match(source, /t\(panelViewMaximized\.value \? 'pluginPanelRestore' : 'pluginPanelMaximize'\)/)
+  assert.match(styles, /plugin-panel-view-control\.btn\.icon-only\) \{[^}]*width: 32px;\s*height: 32px;/)
   assert.match(styles, /plugin-panel-view-control\.btn\.icon-only:focus-visible/)
   assert.match(styles, /prefers-reduced-motion/)
   const maximizeRule = styles.match(/\.plugin-panel-view-frame\.is-maximized\s*\{([^}]*)\}/)?.[1]

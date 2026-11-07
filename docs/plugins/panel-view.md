@@ -18,7 +18,7 @@ Put the panel page and its assets under one directory in the plugin package. The
 }
 ```
 
-`preferredSize` is optional. Width is clamped to 320–960 px and height to 240–800 px. The host also clamps the window to the current display work area. A size manually chosen for this plugin page takes priority; leaving the page restores the panel's previous size. The plugin cannot move or resize its window directly.
+`preferredSize` is optional. Width is clamped to 320–960 px and height to 240–800 px. The host also clamps the window to the current display work area. A size the user manually chose for this plugin page takes priority and is remembered across restarts (per plugin, re-clamped to the current display); leaving the page restores the panel's previous size. The panel header also lets the user reload, jump to the plugin's permissions and settings, or toggle maximize (double-click the header; Esc restores). The plugin cannot move or resize its window directly.
 
 The host draws the panel border, plugin icon and name, the “Plugin content” marker, and the close button outside the plugin view. Keep page controls inside your own content area. A page can draw arbitrary content inside that area, so users should use the host-drawn identity and controls when deciding whether a prompt is genuine.
 

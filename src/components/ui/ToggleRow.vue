@@ -7,6 +7,7 @@ import { useId } from 'vue'
 const props = withDefaults(defineProps<{
   label: string
   help?: string
+  ariaLabel?: string
   disabled?: boolean
 }>(), {
   disabled: false,
@@ -27,6 +28,7 @@ const helpId = `toggle-${useId()}-help`
         v-model="model"
         type="checkbox"
         role="switch"
+        :aria-label="ariaLabel"
         :disabled="disabled"
         :aria-describedby="props.help ? helpId : undefined"
       />
