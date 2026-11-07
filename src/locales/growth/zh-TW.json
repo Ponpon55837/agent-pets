@@ -1,1 +1,4 @@
-{}
+{
+  "growth.cacheNote": "另有快取 {value}（不計入）",
+  "growth.tokenBasisTip": "Token 為「新輸入＋輸出」。提示快取（讀取與寫入）另外列出，不計入總量，避免重複計算整段上下文。"
+}

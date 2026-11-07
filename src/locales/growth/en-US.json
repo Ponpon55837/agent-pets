@@ -1,1 +1,4 @@
-{}
+{
+  "growth.cacheNote": "Plus {value} cached (not counted)",
+  "growth.tokenBasisTip": "Tokens are fresh input plus output. Prompt-cache reads and writes are listed separately and not counted, so repeated context is not counted again."
+}

@@ -95,17 +95,21 @@ test('imports exact Codex and Claude local log usage and deduplicates Claude str
   assert.equal(scan.recordsImported, 3)
 
   const summary = store.getSummary()
-  assert.equal(summary.totals.tokenInput, 227)
+  // Fresh input excludes prompt-cache tokens, which are reported separately.
+  assert.equal(summary.totals.tokenInput, 220)
+  assert.equal(summary.totals.tokenCacheRead, 5)
+  assert.equal(summary.totals.tokenCacheWrite, 2)
   assert.equal(summary.totals.tokenOutput, 50)
   assert.equal(summary.tokenQuality, 'exact')
   const claude = summary.agents.find(agent => agent.adapterId === 'claude-code')!
-  assert.equal(claude.tokenInput, 77)
+  assert.equal(claude.tokenInput, 70)
+  assert.equal(claude.tokenCacheRead, 5)
   assert.equal(claude.tokenOutput, 15)
   const codex = summary.agents.find(agent => agent.adapterId === 'codex')!
   assert.equal(codex.tokenInput, 150)
   assert.equal(codex.tokenOutput, 35)
   const otherPetSummary = store.getSummary('another-pet')
-  assert.equal(otherPetSummary.totals.tokenInput, 227)
+  assert.equal(otherPetSummary.totals.tokenInput, 220)
   assert.equal(otherPetSummary.totals.tokenOutput, 50)
   assert.equal(JSON.stringify(store.getExport()).includes('secret prompt'), false)
 })
@@ -460,4 +464,34 @@ test('a file larger than maxFileBytes is consumed in chunks instead of being ski
   assert.equal(store.getSummary().totals.tokenInput, 10)
   const diagnostics = reader.getDiagnostics()
   assert.ok(diagnostics && diagnostics.durationMs >= 0 && diagnostics.finishedAt > 0)
+})
+
+test('cache-heavy Claude and Codex logs keep cache tokens out of the headline input total', async t => {
+  const fixture = setup()
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const store = new HistoryStore(fixture.database, { now: () => now, localDate: () => '2026-08-13' })
+  t.after(() => { store.close(); fixture.cleanup() })
+
+  writeJsonl(path.join(fixture.home, '.claude', 'projects', 'p', 's.jsonl'), [{
+    type: 'assistant',
+    timestamp: new Date(now).toISOString(),
+    session_id: 's',
+    message: { id: 'm1', usage: { input_tokens: 10, cache_read_input_tokens: 900_000, cache_creation_input_tokens: 40, output_tokens: 20 } },
+  }])
+  const codex = (input: number, cached: number, output: number) => ({
+    type: 'event_msg',
+    timestamp: new Date(now).toISOString(),
+    payload: { type: 'token_count', info: {
+      last_token_usage: { input_tokens: input },
+      total_token_usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output },
+    } },
+  })
+  writeJsonl(path.join(fixture.home, '.codex', 'sessions', 'c.jsonl'), [codex(1000, 800, 50), codex(1500, 1200, 80)])
+
+  await new LocalUsageReader({ homeDir: fixture.home, history: store, now: () => now }).scan()
+  const totals = store.getSummary().totals
+  assert.equal(totals.tokenInput, 10 + 300)
+  assert.equal(totals.tokenCacheRead, 900_000 + 1200)
+  assert.equal(totals.tokenCacheWrite, 40)
+  assert.equal(totals.tokenOutput, 20 + 80)
 })

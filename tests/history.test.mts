@@ -297,3 +297,46 @@ test('history v4 migration repairs inflated completion aggregates from unique se
   assert.equal(repaired.getSummary().totals.tokenInput, 10)
   assert.equal(repaired.getSummary().totals.tokenOutput, 5)
 })
+
+test('history v6 migration adds cache columns and downgrades legacy exact local-log rows to estimated', (t) => {
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const first = new HistoryStore(database.filePath, { now: () => now, localDate: () => '2026-08-13' })
+  assert.equal(first.recordTokenUsage({
+    adapterId: 'claude-code', agentId: 'claude', sourceEventId: 'legacy-1', occurredAt: now,
+    input: 900, output: 10, quality: 'exact',
+  }), true)
+  first.close()
+
+  const moduleRequire = createRequire(import.meta.url)
+  const { DatabaseSync } = moduleRequire('node:sqlite') as {
+    DatabaseSync: new (filePath: string) => { exec(sql: string): void; close(): void }
+  }
+  // Rebuild a v5-shaped database: no cache columns, no v6 record.
+  const raw = new DatabaseSync(database.filePath)
+  raw.exec(`
+    DROP INDEX IF EXISTS idx_daily_stats_summary_cover;
+    ALTER TABLE events DROP COLUMN token_cache_read;
+    ALTER TABLE events DROP COLUMN token_cache_write;
+    ALTER TABLE daily_stats DROP COLUMN token_cache_read;
+    ALTER TABLE daily_stats DROP COLUMN token_cache_write;
+    DELETE FROM schema_migrations WHERE version = 6;
+  `)
+  raw.close()
+
+  const migrated = new HistoryStore(database.filePath, { now: () => now, localDate: () => '2026-08-13' })
+  t.after(() => { migrated.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  const summary = migrated.getSummary()
+  assert.equal(summary.totals.tokenInput, 900)
+  assert.equal(summary.totals.tokenCacheRead, 0)
+  assert.equal(summary.tokenQuality, 'estimated')
+  // A later scan with the cache split replaces the legacy row in place.
+  assert.equal(migrated.recordTokenUsage({
+    adapterId: 'claude-code', agentId: 'claude', sourceEventId: 'legacy-1', occurredAt: now,
+    input: 40, output: 10, cacheRead: 860, quality: 'exact',
+  }), true)
+  const repaired = migrated.getSummary()
+  assert.equal(repaired.totals.tokenInput, 40)
+  assert.equal(repaired.totals.tokenCacheRead, 860)
+  assert.equal(repaired.tokenQuality, 'exact')
+})

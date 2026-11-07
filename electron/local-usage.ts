@@ -20,7 +20,9 @@ export interface ParsedUsage extends HistoryTokenUsageRecord {
 }
 
 interface TokenCounters {
+  /** Provider-reported input including any cached portion (Codex semantics). */
   input: number
+  cached: number
   output: number
 }
 
@@ -159,15 +161,19 @@ function claudeUsage(
   lineNumber: number,
   fallbackAt: number,
 ): ParsedUsage | null {
-  const input = tokenSum(usage, ['input_tokens', 'cache_read_input_tokens'])
+  // Fresh input only. Cache reads are re-sent context (often >90% of a long
+  // session) and cache writes are reported separately, so neither is folded
+  // into "input" or the headline token total would be wildly inflated.
+  const input = token(usage.input_tokens)
+  const cacheRead = token(usage.cache_read_input_tokens)
   const topLevelCacheCreation = token(usage.cache_creation_input_tokens)
   const cacheCreation = asObject(usage.cache_creation)
   const cacheCreationNested = cacheCreation
     ? tokenSum(cacheCreation, ['ephemeral_5m_input_tokens', 'ephemeral_1h_input_tokens'])
     : 0
   const output = outputCount(usage)
-  const totalInput = Math.min(MAX_TOKEN_COUNT, input + (cacheCreationNested || topLevelCacheCreation))
-  if (totalInput === 0 && output === 0) return null
+  const cacheWrite = Math.min(MAX_TOKEN_COUNT, cacheCreationNested || topLevelCacheCreation)
+  if (input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0) return null
 
   const sessionId = text(record.session_id) ?? text(record.sessionId) ?? fileKey
   const messageId = text(message.id)
@@ -182,8 +188,10 @@ function claudeUsage(
     sessionId,
     sourceEventId: usageId('claude-code', stableKey),
     occurredAt,
-    input: totalInput,
+    input,
     output,
+    cacheRead,
+    cacheWrite,
     quality: 'exact',
     dedupeKey: stableKey,
     cwd: text(record.cwd),
@@ -217,6 +225,7 @@ function codexUsage(
   if (!totalUsage) return null
   const currentTotal: TokenCounters = {
     input: token(totalUsage.input_tokens),
+    cached: token(totalUsage.cached_input_tokens),
     output: outputCount(totalUsage),
   }
   // A drop below the previous cumulative total means context compaction or a
@@ -226,9 +235,16 @@ function codexUsage(
   // for this event and simply rebase the baseline to the new total, rather
   // than (as before) treating the entire post-reset value as fresh spend,
   // which could spike the displayed total far past what Codex actually used.
-  const input = previousTotal ? Math.max(0, currentTotal.input - previousTotal.input) : currentTotal.input
+  const rawInput = previousTotal ? Math.max(0, currentTotal.input - previousTotal.input) : currentTotal.input
+  // Codex reports cached_input_tokens as a subset of input_tokens: split it
+  // out so fresh input excludes cache reads (Codex exposes no cache writes).
+  const cacheRead = Math.min(
+    rawInput,
+    previousTotal ? Math.max(0, currentTotal.cached - previousTotal.cached) : currentTotal.cached,
+  )
+  const input = rawInput - cacheRead
   const output = previousTotal ? Math.max(0, currentTotal.output - previousTotal.output) : currentTotal.output
-  if (input === 0 && output === 0) return { record: null, cumulative: currentTotal }
+  if (input === 0 && output === 0 && cacheRead === 0) return { record: null, cumulative: currentTotal }
 
   const sessionId = text(record.session_id)
     ?? text(record.sessionId)
@@ -246,6 +262,8 @@ function codexUsage(
       occurredAt,
       input,
       output,
+      cacheRead,
+      cacheWrite: 0,
       quality: 'exact',
       dedupeKey: stableKey,
       cwd: fileCwd,

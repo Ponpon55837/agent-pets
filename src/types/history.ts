@@ -8,8 +8,13 @@ export interface HistoryTokenUsageRecord {
   sessionId?: string
   sourceEventId: string
   occurredAt: number
+  /** Fresh (non-cached) input tokens. */
   input?: number
   output?: number
+  /** Prompt-cache tokens read; kept apart so they never inflate fresh input. */
+  cacheRead?: number
+  /** Prompt-cache tokens written (cache creation). */
+  cacheWrite?: number
   quality: Exclude<HistoryTokenQuality, 'none'>
   /** Canonical project fingerprint from ProjectRoutingStore; never a raw path. */
   projectId?: string
@@ -22,6 +27,9 @@ export interface HistoryDailyStat {
   activeMs: number
   tokenInput: number
   tokenOutput: number
+  /** Cached prompt tokens read; 0 for rows imported before the split existed. */
+  tokenCacheRead: number
+  tokenCacheWrite: number
   tokenQuality: HistoryTokenQuality
 }
 
@@ -32,6 +40,9 @@ export interface HistoryAgentStat {
   activeMs: number
   tokenInput: number
   tokenOutput: number
+  /** Cached prompt tokens read; 0 for rows imported before the split existed. */
+  tokenCacheRead: number
+  tokenCacheWrite: number
   tokenQuality: HistoryTokenQuality
 }
 
