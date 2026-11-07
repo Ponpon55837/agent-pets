@@ -34,5 +34,8 @@
   "panel.detailLastSeen": "Last seen",
   "panel.detailSessionId": "Session ID",
   "panel.removeSession": "Remove session",
-  "panel.managePlugins": "Manage plugins"
+  "panel.managePlugins": "Manage plugins",
+  "panel.noSessionsHint": "Start an agent session in your terminal or desktop app and it will show up here.",
+  "panel.projectPetsEmptyHint": "Use \"Add project\" to pick a project folder and give it its own pet.",
+  "panel.loading": "Loading..."
 }

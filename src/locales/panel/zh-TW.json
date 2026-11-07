@@ -34,5 +34,8 @@
   "panel.detailLastSeen": "最後活動",
   "panel.detailSessionId": "工作階段 ID",
   "panel.removeSession": "移除工作階段",
-  "panel.managePlugins": "管理插件"
+  "panel.managePlugins": "管理插件",
+  "panel.noSessionsHint": "在終端機或桌面版 Agent 開始工作後，工作階段會顯示在這裡。",
+  "panel.projectPetsEmptyHint": "按「加入專案」選擇專案資料夾，就能為它指定專屬寵物。",
+  "panel.loading": "載入中…"
 }

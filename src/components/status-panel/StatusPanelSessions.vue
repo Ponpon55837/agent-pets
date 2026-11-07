@@ -14,6 +14,7 @@ import {
 } from '@/utils/session-view'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import Icon from '@/components/ui/Icon.vue'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
@@ -132,12 +133,15 @@ function quotaPercent(value: number): string {
     </div>
 
     <div class="session-scroll">
-      <div v-if="activeSessionList.length === 0 && offlineSessionList.length === 0 && pluginEventSourceStatuses.length === 0" class="panel-empty">
-        {{ t('noActiveSessions') }}
-      </div>
+      <EmptyState
+        v-if="activeSessionList.length === 0 && offlineSessionList.length === 0 && pluginEventSourceStatuses.length === 0"
+        icon="desktop"
+        :title="t('noActiveSessions')"
+        :description="t('panel.noSessionsHint')"
+      />
 
       <template v-else>
-        <div v-if="noMatches" class="panel-empty" role="status">{{ t('panel.noMatchingSessions') }}</div>
+        <EmptyState v-if="noMatches" :title="t('panel.noMatchingSessions')" />
 
         <section v-for="group in visibleGroups" :key="group.id" class="session-group">
           <div class="session-group-heading">

@@ -6,6 +6,7 @@ import { SOURCE_FAMILIES } from '@/types/agent'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import Icon from '@/components/ui/Icon.vue'
 import Select from '@/components/ui/Select.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
@@ -173,7 +174,7 @@ function projectPetStatusLabel(status: 'unbound' | 'bound' | 'missing-pet'): str
         <Button variant="secondary" size="sm" :disabled="store.projectPetsLoading" @click="store.addProjectPet()">{{ store.projectPetsLoading ? t('checking') : t('addProjectPet') }}</Button>
       </div>
       <div v-if="store.projectPetsError" class="import-error" role="status">{{ store.projectPetsError }}</div>
-      <div v-if="store.projectPetsLoading && store.projectPets.length === 0" class="project-pet-empty">{{ t('checking') }}</div>
+      <EmptyState v-if="store.projectPetsLoading && store.projectPets.length === 0" kind="loading" :title="t('panel.loading')" />
       <div v-else-if="store.projectPets.length > 0" class="project-pet-list">
         <div v-for="project in store.projectPets" :key="project.projectId" class="project-pet-row">
           <span class="field-copy">
@@ -192,7 +193,7 @@ function projectPetStatusLabel(status: 'unbound' | 'bound' | 'missing-pet'): str
           </span>
         </div>
       </div>
-      <div v-else class="project-pet-empty">{{ t('projectPetsNoProjects') }}</div>
+      <EmptyState v-else icon="pets" :title="t('projectPetsNoProjects')" :description="t('panel.projectPetsEmptyHint')" />
     </template>
   </Card>
 
