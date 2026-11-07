@@ -3,19 +3,26 @@ import test from 'node:test'
 import {
   clampPluginPanelSize,
   layoutPluginPanelView,
-  matchesProgrammaticPluginPanelSize,
   pluginPanelViewInsets,
   PluginPanelWindowSizer,
+  shouldRecordUserPanelSize,
   validatePluginPanelViewBounds,
 } from '../electron/plugin-panel-window.ts'
 
-test('programmatic panel sizes tolerate fractional-DPI rounding without accepting manual resizes', () => {
-  const expected = { width: 640, height: 541 }
-  assert.equal(matchesProgrammaticPluginPanelSize(expected, { width: 640, height: 541 }), true)
-  assert.equal(matchesProgrammaticPluginPanelSize(expected, { width: 640, height: 542 }), true)
-  assert.equal(matchesProgrammaticPluginPanelSize(expected, { width: 639, height: 540 }), true)
-  assert.equal(matchesProgrammaticPluginPanelSize(expected, { width: 640, height: 543 }), false)
-  assert.equal(matchesProgrammaticPluginPanelSize(expected, { width: 642, height: 541 }), false)
+test('wizard minimum is never persisted as the user size', () => {
+  const base = { visible: true, supportsWillResize: true, lastUserResizeAt: 0, programmaticUntil: 0 }
+  // Several resize events from one setBounds (or a min-size clamp): no will-resize, so none is recorded.
+  const now = 10_000
+  for (const offset of [0, 5, 40, 300]) {
+    assert.equal(shouldRecordUserPanelSize({ ...base, now: now + offset, programmaticUntil: now + 500 }), false)
+  }
+  // A real drag emits will-resize shortly before each resize.
+  assert.equal(shouldRecordUserPanelSize({ ...base, now: now + 100, lastUserResizeAt: now + 80 }), true)
+  assert.equal(shouldRecordUserPanelSize({ ...base, now: now + 100, lastUserResizeAt: now + 80, visible: false }), false)
+  // Without will-resize (Linux) a resize inside the programmatic window is ours.
+  const linux = { ...base, supportsWillResize: false }
+  assert.equal(shouldRecordUserPanelSize({ ...linux, now: now + 100, programmaticUntil: now + 500 }), false)
+  assert.equal(shouldRecordUserPanelSize({ ...linux, now: now + 600, programmaticUntil: now + 500 }), true)
 })
 
 test('plugin panel preferred and manual sizes stay within the display work area', () => {

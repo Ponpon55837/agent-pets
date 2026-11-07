@@ -8,9 +8,29 @@ export interface PluginPanelWorkArea {
   height: number
 }
 
-/** Fractional display scaling can round a native resize by one DIP. */
-export function matchesProgrammaticPluginPanelSize(expected: PluginPanelSize, actual: PluginPanelSize): boolean {
-  return Math.abs(expected.width - actual.width) <= 1 && Math.abs(expected.height - actual.height) <= 1
+/** A user drag keeps its flag alive this long after the last 'will-resize'. */
+export const USER_PANEL_RESIZE_WINDOW_MS = 600
+/** setBounds may emit several 'resize' events; all of them within this window are ours. */
+export const PROGRAMMATIC_PANEL_RESIZE_WINDOW_MS = 500
+
+export interface UserPanelResizeInput {
+  visible: boolean
+  now: number
+  /** Platforms with 'will-resize' (macOS, Windows) only emit it for manual resizes. */
+  supportsWillResize: boolean
+  lastUserResizeAt: number
+  programmaticUntil: number
+}
+
+/**
+ * Decides whether a 'resize' event is the user's size. Programmatic resizes
+ * (wizard minimum, view switch) must never be persisted, no matter how many
+ * resize events one setBounds produces or whether the min-size clamp changes it.
+ */
+export function shouldRecordUserPanelSize(input: UserPanelResizeInput): boolean {
+  if (!input.visible) return false
+  if (input.supportsWillResize) return input.now - input.lastUserResizeAt <= USER_PANEL_RESIZE_WINDOW_MS
+  return input.now >= input.programmaticUntil
 }
 
 export interface PluginPanelRect {

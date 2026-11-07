@@ -22,7 +22,6 @@ import type { PluginHostGrantController } from '../plugin-host-grants.ts'
 import type { PluginHostWindowController } from '../plugin-host-window'
 import type { PluginNetworkClient } from '../plugin-net.ts'
 import type { PluginPanelViewController } from '../plugin-panel-view.ts'
-import { PluginPanelWindowSizer } from '../plugin-panel-window.ts'
 import type { PanelSizeStore } from '../panel-size-store.ts'
 import { PluginUiMessageGuard } from '../plugin-ui-messages.ts'
 import type { PluginPreferencesStore } from '../plugin-preferences'
@@ -85,9 +84,9 @@ export const mainState = {
   pluginPanelViewController: null as PluginPanelViewController | null,
   pluginPanelViewOpenSequence: 0,
   pluginUiMessageGuard: new PluginUiMessageGuard() as PluginUiMessageGuard,
-  pluginPanelWindowSizer: new PluginPanelWindowSizer() as PluginPanelWindowSizer,
-  programmaticPluginPanelSize: null as { width: number; height: number } | null,
-  pluginPanelResizeResetTimer: null as ReturnType<typeof setTimeout> | null,
+  // Resize bookkeeping: programmatic setBounds window end, and the last native 'will-resize' (user drag).
+  programmaticPluginPanelUntil: 0,
+  lastUserPanelResizeAt: 0,
   // The user's own panel size (persisted), a transient wizard / MCP minimum, and the settle timer.
   panelUserSize: null as { width: number; height: number } | null,
   panelMinimumSize: null as { width: number; height: number } | null,
