@@ -31,6 +31,7 @@ import { formatProject } from '@/utils/format'
 import { AgentSessionIndex } from '@/utils/agent-session-index'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
+import { PANEL_SIZES } from '@/utils/panel-layout'
 import {
   createToastCountdown,
   getToastRemainingMs,
@@ -1460,37 +1461,37 @@ export const useAgentStore = defineStore('agent', () => {
   function openSettings() {
     panelView.value = 'settings'
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(720, 460)
+    window.electronAPI?.resizePanel(PANEL_SIZES.settings)
   }
 
   function openSetupWizard() {
     showWizard.value = true
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(520, 680)
+    window.electronAPI?.resizePanel(PANEL_SIZES.wizard)
   }
 
   function closeSetupWizard() {
     showWizard.value = false
-    window.electronAPI?.resizePanel(panelView.value === 'settings' ? 720 : 560, 460)
+    window.electronAPI?.resizePanel(panelView.value === 'settings' ? PANEL_SIZES.settings : PANEL_SIZES.sessions)
   }
 
   function openProjectMcpPanel() {
     panelView.value = 'settings'
     showWizard.value = false
     showProjectMcpPanel.value = true
-    window.electronAPI?.resizePanel(560, 720)
+    window.electronAPI?.resizePanel(PANEL_SIZES.mcp)
   }
 
   function closeProjectMcpPanel() {
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(720, 460)
+    window.electronAPI?.resizePanel(PANEL_SIZES.settings)
   }
 
   function backToSessions() {
     panelView.value = 'sessions'
     showWizard.value = false
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(560, 460)
+    window.electronAPI?.resizePanel(PANEL_SIZES.sessions)
   }
 
   // Called by electron/main.ts whenever the panel window transitions from
