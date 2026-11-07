@@ -834,6 +834,23 @@ function upgradeClaudeCodeHooks(): ConfigWriteResult | null {
   })))
 }
 
+function claudeHooksUpgradeMarkerPath(): string {
+  return path.join(hookScriptDeployPath(), 'claude-hooks-upgraded')
+}
+
+/**
+ * Runs the upgrade at most once per app version, so an Agent Pets entry the user removed on
+ * purpose is not added back on every launch. Settings without any Agent Pets hook are never
+ * changed (ensureAgentPetsHookEntries returns null for them).
+ */
+function upgradeClaudeCodeHooksOnce(appVersion: string): ConfigWriteResult | null {
+  const marker = claudeHooksUpgradeMarkerPath()
+  if ((readFile(marker) ?? '').trim() === appVersion) return null
+  const result = upgradeClaudeCodeHooks()
+  writeFileEnsured(marker, `${appVersion}\n`)
+  return result
+}
+
 function uninstallClaudeCode(): void {
   const settingsFile = claudeCodeSettingsPath()
   if (!fileExists(settingsFile)) return
@@ -885,7 +902,7 @@ function repairWindowsInstalledHooks(): void {
   if (codexChanged || claudeChanged) installHookScript()
 }
 
-function refreshInstalledIntegrationScripts(): string {
+function refreshInstalledIntegrationScripts(appVersion?: string): string {
   const token = ensureEventToken()
   ensurePermissionToken()
   ensurePresentationToken()
@@ -910,7 +927,7 @@ function refreshInstalledIntegrationScripts(): string {
     console.error('Installed integration refresh skipped', error)
   }
   try {
-    upgradeClaudeCodeHooks()
+    if (appVersion) upgradeClaudeCodeHooksOnce(appVersion)
   } catch (error) {
     console.error('Claude Code hook upgrade skipped', error)
   }
@@ -969,6 +986,7 @@ function cleanupDeployDirectory(): void {
     hookWrapperPath(),
     codexFeatureMarkerPath(),
     claudePermissionRespondPath(),
+    claudeHooksUpgradeMarkerPath(),
   ]) {
     removeFile(filePath)
   }
@@ -1031,6 +1049,8 @@ export {
   claudePermissionRespondPath,
   syncClaudePermissionRespondOptIn,
   upgradeClaudeCodeHooks,
+  upgradeClaudeCodeHooksOnce,
+  claudeHooksUpgradeMarkerPath,
   ensureDir,
   writeFileEnsured,
   fileExists,

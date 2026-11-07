@@ -348,7 +348,7 @@ async function bootstrapApp(): Promise<void> {
     callback(false)
   })
 
-  await startupStep('integration-scripts', () => { mainState.eventToken = refreshInstalledIntegrationScripts() })
+  await startupStep('integration-scripts', () => { mainState.eventToken = refreshInstalledIntegrationScripts(app.getVersion()) })
   await startupStep('adapters', () => {
     mainState.agentAdapterRegistry = createAgentAdapterRegistry(createAgentAdapterOperations({ claudePermissionRespondEnabled: isClaudePermissionRespondEnabled }))
     mainState.projectMcpRegistry = new ProjectMcpRegistryStore(

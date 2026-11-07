@@ -12,6 +12,8 @@ import {
   claudePermissionRespondPath,
   syncClaudePermissionRespondOptIn,
   upgradeClaudeCodeHooks,
+  upgradeClaudeCodeHooksOnce,
+  claudeHooksUpgradeMarkerPath,
   codexConfigPath,
   codexHooksPath,
   hookScriptPath,
@@ -208,5 +210,38 @@ test('the Claude respond opt-in file is private, clamped, removable and cleared 
     syncClaudePermissionRespondOptIn(30)
     uninstallIntegration('all')
     assert.equal(fs.existsSync(file), false)
+  })
+})
+
+test('the startup upgrade runs once per app version and never re-adds an entry the user removed', () => {
+  withHome(() => {
+    installIntegration('claudeCode')
+    const settings = () => JSON.parse(fs.readFileSync(claudeCodeSettingsPath(), 'utf8'))
+    // The user deliberately drops our PermissionRequest handler.
+    const edited = settings()
+    delete edited.hooks.PermissionRequest
+    fs.writeFileSync(claudeCodeSettingsPath(), `${JSON.stringify(edited, null, 2)}\n`)
+
+    assert.equal(upgradeClaudeCodeHooksOnce('1.11.0')?.status, 'written')
+    assert.ok(settings().hooks.PermissionRequest)
+    assert.equal(fs.readFileSync(claudeHooksUpgradeMarkerPath(), 'utf8').trim(), '1.11.0')
+
+    delete edited.hooks.PermissionRequest
+    fs.writeFileSync(claudeCodeSettingsPath(), `${JSON.stringify(edited, null, 2)}\n`)
+    assert.equal(upgradeClaudeCodeHooksOnce('1.11.0'), null)
+    assert.equal(settings().hooks.PermissionRequest, undefined, 'same version: the removal sticks')
+
+    uninstallIntegration('all')
+    assert.equal(fs.existsSync(claudeHooksUpgradeMarkerPath()), false)
+  })
+})
+
+test('the startup upgrade leaves settings without Agent Pets hooks untouched', () => {
+  withHome((home) => {
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true })
+    const mine = '{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"echo mine"}]}]}}'
+    fs.writeFileSync(claudeCodeSettingsPath(), mine)
+    assert.equal(upgradeClaudeCodeHooksOnce('1.11.0'), null)
+    assert.equal(fs.readFileSync(claudeCodeSettingsPath(), 'utf8'), mine)
   })
 })
