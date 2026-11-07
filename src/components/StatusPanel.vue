@@ -176,6 +176,9 @@ onUnmounted(() => {
         <Button v-if="store.panelView === 'sessions'" variant="ghost" icon-only :title="`${t('settings')} (${settingsShortcut})`" :aria-label="t('settings')" @click="store.openSettings()">
           <Icon name="settings" />
         </Button>
+        <Button v-if="store.panelView === 'sessions'" variant="ghost" icon-only :active="store.dndEnabled" :title="`${t('dnd')}: ${store.dndEnabled ? t('panel.stateOn') : t('panel.stateOff')}`" :aria-label="t('dnd')" @click="store.setDndEnabled(!store.dndEnabled)">
+          <Icon name="moon" />
+        </Button>
         <Button v-if="store.panelView === 'sessions'" variant="ghost" icon-only :active="store.panelPinned" :title="store.panelPinned ? t('panel.unpin') : t('panel.pin')" :aria-label="store.panelPinned ? t('panel.unpin') : t('panel.pin')" :aria-pressed="store.panelPinned" @click="store.setPanelPinned(!store.panelPinned)">
           <Icon name="pin" />
         </Button>
