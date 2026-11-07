@@ -46,5 +46,11 @@
   "panel.petSearchEmpty": "沒有符合搜尋的寵物。",
   "panel.renameEmpty": "名稱不能是空白。",
   "panel.renameDuplicate": "已有其他寵物使用這個名稱。",
-  "panel.renameTooLong": "名稱太長。"
+  "panel.renameTooLong": "名稱太長。",
+  "panel.sizeSmall": "小",
+  "panel.sizeMedium": "中",
+  "panel.sizeLarge": "大",
+  "panel.sizeXLarge": "特大",
+  "panel.sizeXXLarge": "超大",
+  "panel.sizeHelp": "目前大小：原始素材的 {percent}%。"
 }

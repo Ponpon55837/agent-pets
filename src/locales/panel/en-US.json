@@ -46,5 +46,11 @@
   "panel.petSearchEmpty": "No pets match your search.",
   "panel.renameEmpty": "Name cannot be empty.",
   "panel.renameDuplicate": "Another pet already uses this name.",
-  "panel.renameTooLong": "Name is too long."
+  "panel.renameTooLong": "Name is too long.",
+  "panel.sizeSmall": "Small",
+  "panel.sizeMedium": "Medium",
+  "panel.sizeLarge": "Large",
+  "panel.sizeXLarge": "X-Large",
+  "panel.sizeXXLarge": "XX-Large",
+  "panel.sizeHelp": "Current size: {percent}% of the original sprite."
 }
