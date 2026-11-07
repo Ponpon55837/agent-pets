@@ -121,6 +121,9 @@ export const mainState = {
   windowsFullscreenAutoHiddenPet: false,
   windowsFullscreenAutoHiddenPanel: false,
   panelBlurHideHandle: null as ReturnType<typeof setTimeout> | null,
+  // Renderer-reported locks that suspend hide-on-blur: user pin and open modal flows.
+  panelPinned: false,
+  panelModalOpen: false,
   petCaptureProtectionApplied: null as boolean | null,
   petWindowMode: 'normal' as PetWindowMode,
   petWindowEdge: null as PetEdge | null,

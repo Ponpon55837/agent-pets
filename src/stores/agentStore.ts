@@ -11,7 +11,14 @@ import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '@/types/desktop'
 import type { DesktopVisibilityCapabilities } from '@/types/desktop-visibility'
 import type { AppLocale } from '@/types/locale'
-import type { PermissionDecisionValue, PermissionRequestView } from '@/types/permission'
+import type {
+  PermissionDecideResult,
+  PermissionDecisionValue,
+  PermissionOutcome,
+  PermissionOutcomeKind,
+  PermissionRequestView,
+} from '@/types/permission'
+import { classifyDecideResponse, inferVanishedOutcome, outcomeVisibleMs } from '@/utils/permission-view'
 import type { ProgressionSnapshot } from '@/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
 import { ACHIEVEMENT_DEFINITIONS } from '@/types/achievement'
@@ -32,6 +39,7 @@ import { AgentSessionIndex } from '@/utils/agent-session-index'
 import { SESSION_REMOVE_MS, sessionLifecycleAction } from '@/utils/session-lifecycle'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
+import { PANEL_SIZES } from '@/utils/panel-layout'
 import {
   createToastCountdown,
   getToastRemainingMs,
@@ -115,15 +123,18 @@ function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
       if (typeof window.id !== 'string' || typeof window.label !== 'string') continue
       if (typeof window.usedPercent !== 'number' || !Number.isFinite(window.usedPercent)) continue
       if (typeof window.remainingPercent !== 'number' || !Number.isFinite(window.remainingPercent)) continue
-      if (window.usedPercent < 0 || window.usedPercent > 100 || window.remainingPercent < 0 || window.remainingPercent > 100) continue
+      // Clamp rather than drop: an over-quota reading must show as exhausted.
+      const usedPercent = Math.min(100, Math.max(0, window.usedPercent))
+      const remainingPercent = Math.min(100, Math.max(0, window.remainingPercent))
       const resetsAt = typeof window.resetsAt === 'string' && Number.isFinite(Date.parse(window.resetsAt))
         ? new Date(window.resetsAt).toISOString()
         : undefined
       windows.push({
         id: window.id.slice(0, MAX_QUOTA_TEXT_LENGTH),
         label: window.label.slice(0, MAX_QUOTA_TEXT_LENGTH),
-        usedPercent: window.usedPercent,
-        remainingPercent: window.remainingPercent,
+        usedPercent,
+        remainingPercent,
+        ...(window.overage === true || window.usedPercent > 100 ? { overage: true } : {}),
         ...(resetsAt ? { resetsAt } : {}),
       })
     }
@@ -1409,6 +1420,37 @@ export const useAgentStore = defineStore('agent', () => {
 
   const permissionRequest = computed(() => permissionRequests.value[0] ?? null)
 
+  // Result of the most recent request that left the broker's active queue
+  // (expired, handled elsewhere, delivery failed). Shown briefly so a bubble
+  // never just vanishes silently.
+  const permissionOutcome = shallowRef<PermissionOutcome | null>(null)
+  let permissionOutcomeTimer: ReturnType<typeof setTimeout> | null = null
+  // Requests with a decide() call in flight: the broker's broadcast can land
+  // before the IPC result does, and that result decides what the UI says.
+  const decidingRequestIds = new Set<string>()
+
+  function showPermissionOutcome(
+    request: Pick<PermissionRequestView, 'requestId' | 'agentId' | 'action' | 'projectId'>,
+    kind: PermissionOutcomeKind,
+  ): void {
+    if (permissionOutcomeTimer) clearTimeout(permissionOutcomeTimer)
+    permissionOutcome.value = {
+      kind,
+      requestId: request.requestId,
+      agentId: request.agentId,
+      action: request.action,
+      ...(request.projectId ? { projectId: request.projectId } : {}),
+      at: Date.now(),
+    }
+    permissionOutcomeTimer = setTimeout(dismissPermissionOutcome, outcomeVisibleMs(kind))
+  }
+
+  function dismissPermissionOutcome(): void {
+    if (permissionOutcomeTimer) clearTimeout(permissionOutcomeTimer)
+    permissionOutcomeTimer = null
+    permissionOutcome.value = null
+  }
+
   // The broker's `agentId` is the literal AgentSource string for every
   // respond-capable adapter (see electron/permission-adapter-server.ts,
   // which sets `agentId: payload.source` from the same 'opencode-cli' /
@@ -1452,8 +1494,14 @@ export const useAgentStore = defineStore('agent', () => {
     // caller at all).
     const stillPending = new Set(next.map(request => request.requestId))
     for (const request of permissionRequests.value) {
-      if (!stillPending.has(request.requestId)) settleWaitingPermission(request.agentId, request.sessionId)
+      if (stillPending.has(request.requestId)) continue
+      // decidePermission() reports and settles these itself once the IPC returns.
+      if (decidingRequestIds.has(request.requestId)) continue
+      settleWaitingPermission(request.agentId, request.sessionId)
+      showPermissionOutcome(request, inferVanishedOutcome(request, now))
     }
+    // A new request supersedes any result card for an older one.
+    if (next.length > 0 && permissionOutcome.value?.kind !== 'error') dismissPermissionOutcome()
     permissionRequests.value = next
   }
 
@@ -1468,17 +1516,27 @@ export const useAgentStore = defineStore('agent', () => {
   async function decidePermission(
     requestId: string,
     decision: PermissionDecisionValue,
-  ): Promise<void> {
-    // Settle locally right away rather than waiting on the broker's own
-    // broadcast round-trip — see settleWaitingPermission for why this can't
-    // just wait for the next hook event.
+  ): Promise<PermissionDecideResult> {
     const request = permissionRequests.value.find(candidate => candidate.requestId === requestId)
-    if (request) settleWaitingPermission(request.agentId, request.sessionId)
+    if (!request) return { ok: false, kind: 'cancelled' }
+    decidingRequestIds.add(requestId)
+    let result: PermissionDecideResult
     try {
-      await window.electronAPI?.decidePermission(requestId, decision)
-    } catch {
-      // Main process remains authoritative; the next broker broadcast restores UI state.
+      result = classifyDecideResponse(await window.electronAPI?.decidePermission(requestId, decision))
+    } catch (error) {
+      console.warn('[permission] decision IPC failed', error instanceof Error ? error.name : 'unknown')
+      result = { ok: false, kind: 'error' }
+    } finally {
+      decidingRequestIds.delete(requestId)
     }
+    // Only a delivered decision means the agent is no longer waiting. For a
+    // failed delivery or IPC error the pet must keep showing the wait — the
+    // agent really is still blocked.
+    if (result.ok || result.kind === 'cancelled' || result.kind === 'expired') {
+      settleWaitingPermission(request.agentId, request.sessionId)
+    }
+    if (!result.ok) showPermissionOutcome(request, result.kind)
+    return result
   }
 
   // --- 控制面板視窗導覽 ---------------------------------------------------------
@@ -1487,6 +1545,23 @@ export const useAgentStore = defineStore('agent', () => {
   // so opening/closing/resizing it never touches the pet window's bounds.
   function togglePanel() {
     window.electronAPI?.togglePanel()
+  }
+
+  // Pinning and in-progress modal flows (wizard, MCP setup, confirmations)
+  // suspend the main process's hide-on-blur so the panel stays for reference.
+  const panelPinned = ref(false)
+  const panelModalLocks = reactive(new Set<string>())
+  const panelModalOpen = computed(() => showWizard.value || showProjectMcpPanel.value || panelModalLocks.size > 0)
+  watch(panelModalOpen, open => window.electronAPI?.setPanelBlurLock?.({ modal: open }))
+
+  function setPanelPinned(pinned: boolean) {
+    panelPinned.value = pinned
+    window.electronAPI?.setPanelBlurLock?.({ pinned })
+  }
+
+  function setPanelModalLock(key: string, open: boolean) {
+    if (open) panelModalLocks.add(key)
+    else panelModalLocks.delete(key)
   }
 
   function closePanel() {
@@ -1498,37 +1573,37 @@ export const useAgentStore = defineStore('agent', () => {
   function openSettings() {
     panelView.value = 'settings'
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(720, 460)
+    window.electronAPI?.resizePanel(PANEL_SIZES.settings)
   }
 
   function openSetupWizard() {
     showWizard.value = true
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(520, 680)
+    window.electronAPI?.resizePanel(PANEL_SIZES.wizard)
   }
 
   function closeSetupWizard() {
     showWizard.value = false
-    window.electronAPI?.resizePanel(panelView.value === 'settings' ? 720 : 560, 460)
+    window.electronAPI?.resizePanel(panelView.value === 'settings' ? PANEL_SIZES.settings : PANEL_SIZES.sessions)
   }
 
   function openProjectMcpPanel() {
     panelView.value = 'settings'
     showWizard.value = false
     showProjectMcpPanel.value = true
-    window.electronAPI?.resizePanel(560, 720)
+    window.electronAPI?.resizePanel(PANEL_SIZES.mcp)
   }
 
   function closeProjectMcpPanel() {
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(720, 460)
+    window.electronAPI?.resizePanel(PANEL_SIZES.settings)
   }
 
   function backToSessions() {
     panelView.value = 'sessions'
     showWizard.value = false
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(560, 460)
+    window.electronAPI?.resizePanel(PANEL_SIZES.sessions)
   }
 
   // Called by electron/main.ts whenever the panel window transitions from
@@ -1770,6 +1845,8 @@ export const useAgentStore = defineStore('agent', () => {
     getPresentationStatus,
     permissionRequests,
     permissionRequest,
+    permissionOutcome,
+    dismissPermissionOutcome,
     progression,
     achievements,
     achievementUnlock,
@@ -1798,6 +1875,9 @@ export const useAgentStore = defineStore('agent', () => {
     closeProjectMcpPanel,
     backToSessions,
     handlePanelOpened,
+    panelPinned,
+    setPanelPinned,
+    setPanelModalLock,
     setPet,
     setScale,
     setPetWindowModeState,

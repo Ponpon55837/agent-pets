@@ -101,7 +101,8 @@ export interface ElectronAPI {
       setMousePassthrough: (ignore: boolean) => void
       requestPetHide: () => void
       togglePanel: () => void
-      resizePanel: (height: number, width?: number) => void
+      resizePanel: ((size: { height: number; width?: number }) => void) & ((height: number, width?: number) => void)
+      setPanelBlurLock: (lock: { pinned?: boolean; modal?: boolean }) => void
       hidePanel: () => void
       onPanelOpened: (callback: (options: { restore: boolean }) => void) => () => void
       onPanelOpenSettings: (callback: () => void) => () => void
@@ -145,6 +146,7 @@ export interface ElectronAPI {
             usedPercent: number
             remainingPercent: number
             resetsAt?: string
+            overage?: boolean
           }>
           error?: string
         }>
@@ -170,7 +172,7 @@ export interface ElectronAPI {
       listProjectMcp: () => Promise<ProjectMcpRegistrySnapshot>
       removeProjectMcp: (projectPath: string) => Promise<ProjectMcpRemovalSummary>
       forgetProjectMcp: (projectPath: string) => Promise<{ ok: boolean; removed: boolean; error?: string }>
-      uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => Promise<{ ok: boolean; error?: string }>
+      uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode' | 'all') => Promise<{ ok: boolean; error?: string }>
       loadPets: () => Promise<Array<{
         id: string
         displayName: string

@@ -52,6 +52,12 @@ Download `AgentPets-<version>-arm64.dmg` (Apple Silicon) or `AgentPets-<version>
 3. Click **Install** next to a tool (or **Install All**) to wire up its hooks — the wizard does not do this automatically, you need to click.
 4. Once hooks are installed, restart your coding tools; the pet's appearance will then change to reflect your agents' status.
 
+### Uninstall / remove the integrations
+
+Open the **Setup Wizard** (Settings → Advanced) and use **Remove** on a tool's card to take out only that tool's Agent Pets hooks. Agent Pets edits user config files conservatively: it never overwrites a file it cannot parse, writes a timestamped `*.agent-pets-bak-*` backup (latest 5 kept) before every change, and removes only its own entries, so your other hooks and settings stay. The shared hook script is kept while another tool still uses it. Before deleting the app, run **Full cleanup…** in the same wizard to remove every hook, the connection tokens and the files under `~/.desktop-pet`.
+
+Manual removal: delete the Agent Pets entries (commands containing `.desktop-pet/agent-hook`) from `~/.claude/settings.json` and `~/.codex/hooks.json`, delete `~/.config/opencode/plugin/desktop-pet.js` (and the OpenCode Desktop equivalent), remove `hooks = true` from `[features]` in `~/.codex/config.toml` only if you did not enable it yourself, then delete the `~/.desktop-pet` folder (`%USERPROFILE%\.desktop-pet` on Windows).
+
 ---
 
 ## Usage

@@ -22,6 +22,7 @@ export const IPC_CHANNELS = {
   installIntegrations: 'install-integrations',
   integrationStatus: 'integration-status',
   loadPets: 'load-pets',
+  panelBlurLock: 'panel-blur-lock',
   panelHide: 'panel-hide',
   panelOpened: 'panel-opened',
   panelOpenPluginView: 'panel-open-plugin-view',

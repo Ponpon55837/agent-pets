@@ -95,15 +95,15 @@ withDefaults(defineProps<{
 
 /* ── primary ─────────────────────────────────────────────────────────── */
 .variant-primary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-bright);
+  border-color: var(--accent-hover, var(--accent));
+  background: var(--accent-hover, var(--accent));
+  color: var(--accent-on);
 }
 
 .variant-primary:hover:not(:disabled) {
-  border-color: var(--accent-hover, var(--accent));
-  background: var(--accent-hover, var(--accent-strong));
-  color: var(--text-bright);
+  border-color: color-mix(in srgb, var(--accent-hover, var(--accent)) 88%, black);
+  background: color-mix(in srgb, var(--accent-hover, var(--accent)) 88%, black);
+  color: var(--accent-on);
 }
 
 /* ── secondary ───────────────────────────────────────────────────────── */
@@ -145,8 +145,8 @@ withDefaults(defineProps<{
 
 /* Selected state for segmented controls (pet size, tabs). */
 .btn.active {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-bright);
+  border-color: var(--accent-hover, var(--accent));
+  background: var(--accent-hover, var(--accent));
+  color: var(--accent-on);
 }
 </style>
