@@ -7,3 +7,16 @@ export function shouldRunLocalUsageTick(tick: number, onBattery: boolean): boole
   if (!onBattery) return true
   return tick % LOCAL_USAGE_BATTERY_TICK_DIVISOR === 0
 }
+
+/** Delay before a follow-up scan when the last one ran out of budget mid-way. */
+export const LOCAL_USAGE_CATCH_UP_DELAY_MS = 3_000
+
+/**
+ * A scan that stopped on its byte or time budget leaves work for the next one.
+ * On AC it continues after a short pause (each scan yields to the event loop
+ * and is itself bounded); on battery it waits for the regular tick instead so
+ * a large first import never keeps the disk awake.
+ */
+export function localUsageCatchUpDelayMs(pending: boolean, onBattery: boolean): number | null {
+  return pending && !onBattery ? LOCAL_USAGE_CATCH_UP_DELAY_MS : null
+}

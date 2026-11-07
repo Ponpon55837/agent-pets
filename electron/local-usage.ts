@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { constants as fsConstants, type Dirent } from 'node:fs'
 import { lstat, open, readdir, realpath } from 'node:fs/promises'
 import { extname, join, relative } from 'node:path'
-import type { HistoryStore } from './history.ts'
+import { safeModelId, type HistoryStore } from './history.ts'
 import type { HistoryTokenUsageRecord } from '../src/types/history.ts'
 
 export type UsageProvider = 'codex' | 'claude-code'
@@ -31,6 +31,8 @@ export interface IncrementalLocalUsageParserState {
   nextLineNumber: number
   previousCodexTotal: TokenCounters | null
   codexCwd: string | undefined
+  /** Latest model announced by a Codex turn_context line; later token_count events inherit it. */
+  codexModel?: string
   discardingLongLine: boolean
 }
 
@@ -61,7 +63,16 @@ export interface LocalUsageReaderOptions {
   maxFileBytes?: number
   maxTotalBytes?: number
   maxLineBytes?: number
+  /** Wall-clock work budget per scan; the rest continues on the next scan. */
+  maxScanMs?: number
+  /** Monotonic clock for the work budget (tests inject a fake one). */
+  clock?: () => number
   projectRouting?: ProjectPathResolver | null
+  /**
+   * Called with every fresh record of each import batch (already imported or
+   * not), so a downstream ledger such as achievements can upsert idempotently.
+   */
+  onRecordsImported?: (records: readonly HistoryTokenUsageRecord[]) => void
 }
 
 export interface LocalUsageScanResult {
@@ -69,6 +80,10 @@ export interface LocalUsageScanResult {
   filesSkipped: number
   recordsParsed: number
   recordsImported: number
+  /** Files with bytes still unread because the byte or time budget ran out. */
+  filesDeferred: number
+  /** True when another scan should run soon to finish the deferred work. */
+  pending: boolean
 }
 
 export interface LocalUsageScanDiagnostics extends LocalUsageScanResult {
@@ -88,6 +103,7 @@ const DEFAULT_MAX_FILES = 2_000
 const DEFAULT_MAX_FILE_BYTES = 16 * 1024 * 1024
 const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024
 const DEFAULT_MAX_LINE_BYTES = 256 * 1024
+const DEFAULT_MAX_SCAN_MS = 4_000
 const MAX_WALK_DEPTH = 8
 const MAX_TOKEN_COUNT = 1_000_000_000_000
 
@@ -184,7 +200,9 @@ function claudeUsage(
     ? `message:${messageId}:${requestId ?? ''}`
     : `line:${fileKey}:${lineNumber}`
   const occurredAt = timestamp(record.timestamp ?? message.timestamp, fallbackAt)
+  const model = safeModelId(message.model)
   return {
+    ...(model ? { model } : {}),
     adapterId: 'claude-code',
     agentId: 'claude',
     sessionId,
@@ -219,6 +237,7 @@ function codexUsage(
   fallbackAt: number,
   previousTotal: TokenCounters | null,
   fileCwd: string | undefined,
+  fileModel: string | undefined,
 ): CodexUsageResult | null {
   const totalUsage = asObject(info.total_token_usage)
   // Codex's total_token_usage is cumulative for the rollout. last_token_usage
@@ -257,6 +276,7 @@ function codexUsage(
   const occurredAt = timestamp(record.timestamp ?? payload.timestamp, fallbackAt)
   return {
     record: {
+      ...(fileModel ? { model: fileModel } : {}),
       adapterId: 'codex',
       agentId: 'codex',
       sessionId,
@@ -468,16 +488,19 @@ export function parseUsageFile(
     // Codex only reports the workspace path once, on the file's leading
     // session_meta line; every later token_count event inherits it.
     let codexCwd: string | undefined
+    let codexModel: string | undefined
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index]
       if (!line || lineTooLong(line, maxLineBytes)) continue
       const wantsCwd = codexCwd === undefined && line.includes('"session_meta"')
-      if (!wantsCwd && !line.includes('"token_count"')) continue
-      // 每行只 JSON.parse 一次，同時供 session_meta 與 token_count 判斷使用。
+      const wantsModel = line.includes('"turn_context"') || (codexModel === undefined && line.includes('"session_meta"'))
+      if (!wantsCwd && !wantsModel && !line.includes('"token_count"')) continue
+      // 每行只 JSON.parse 一次，同時供 session_meta、turn_context 與 token_count 判斷使用。
       const record = parseObject(line)
       if (!record) continue
       if (wantsCwd) codexCwd = codexSessionCwd(record) ?? codexCwd
-      const result = parseCodexUsageRecord(record, fileKey, index + 1, fallbackAt, previousCodexTotal, codexCwd)
+      if (wantsModel) codexModel = codexContextModel(record) ?? codexModel
+      const result = parseCodexUsageRecord(record, fileKey, index + 1, fallbackAt, previousCodexTotal, codexCwd, codexModel)
       if (!result) continue
       // Rebase the running baseline even when this event produced no
       // importable record (first sighting, repeat, or a reset) - otherwise a
@@ -525,10 +548,12 @@ function parseUsageLine(
     return parseLocalUsageLine(provider, line, fileKey, lineNumber, fallbackAt)
   }
   const wantsCwd = state.codexCwd === undefined && line.includes('"session_meta"')
-  if (!wantsCwd && !line.includes('"token_count"')) return null
+  const wantsModel = line.includes('"turn_context"') || (state.codexModel === undefined && line.includes('"session_meta"'))
+  if (!wantsCwd && !wantsModel && !line.includes('"token_count"')) return null
   const record = parseObject(line)
   if (!record) return null
   if (wantsCwd) state.codexCwd = codexSessionCwd(record) ?? state.codexCwd
+  if (wantsModel) state.codexModel = codexContextModel(record) ?? state.codexModel
   const result = parseCodexUsageRecord(
     record,
     fileKey,
@@ -536,6 +561,7 @@ function parseUsageLine(
     fallbackAt,
     state.previousCodexTotal,
     state.codexCwd,
+    state.codexModel,
   )
   if (!result) return null
   state.previousCodexTotal = result.cumulative
@@ -602,34 +628,39 @@ export function parseIncrementalLocalUsageChunk(
   return [...records.values()]
 }
 
-async function readUsageFileRange(
+type UsageFileHandle = Awaited<ReturnType<typeof open>>
+
+/**
+ * Opens a candidate without following a final symlink and re-checks that the
+ * opened inode is the one the walk verified (no swap between stat and open).
+ */
+async function openVerifiedUsageFile(
   filePath: string,
-  start: number,
-  end: number,
   expected: Pick<UsageFile, 'dev' | 'ino'>,
-): Promise<Buffer | null> {
-  let handle: Awaited<ReturnType<typeof open>> | null = null
+): Promise<{ handle: UsageFileHandle, size: number } | null> {
+  let handle: UsageFileHandle | null = null
   try {
     const noFollow = (fsConstants as typeof fsConstants & { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0
     handle = await open(filePath, fsConstants.O_RDONLY | noFollow)
     const opened = await handle.stat()
-    if (!opened.isFile() || opened.dev !== expected.dev || opened.ino !== expected.ino) return null
-    const length = Math.max(0, Math.min(end, opened.size) - start)
-    const output = Buffer.allocUnsafe(length)
-    let offset = 0
-    while (offset < length) {
-      const { bytesRead } = await handle.read(output, offset, length - offset, start + offset)
-      if (bytesRead <= 0) break
-      offset += bytesRead
+    if (!opened.isFile() || opened.dev !== expected.dev || opened.ino !== expected.ino) {
+      await handle.close().catch(() => undefined)
+      return null
     }
-    return offset === length ? output : output.subarray(0, offset)
+    return { handle, size: opened.size }
   } catch {
+    if (handle) await handle.close().catch(() => undefined)
     return null
-  } finally {
-    if (handle) {
-      try { await handle.close() } catch {}
-    }
   }
+}
+
+// Codex rollout files announce the model on each `turn_context` line (and some
+// builds also on `session_meta`); token_count events that follow inherit it.
+function codexContextModel(record: Record<string, unknown>): string | undefined {
+  if (record.type !== 'turn_context' && record.type !== 'session_meta') return undefined
+  const payload = asObject(record.payload)
+  const model = payload ? safeModelId(payload.model) : ''
+  return model || undefined
 }
 
 function codexSessionCwd(record: Record<string, unknown>): string | undefined {
@@ -645,6 +676,7 @@ function parseCodexUsageRecord(
   fallbackAt: number,
   previousTotal: TokenCounters | null,
   fileCwd: string | undefined,
+  fileModel: string | undefined,
 ): CodexUsageResult | null {
   if (record.type !== 'event_msg') return null
   const payload = asObject(record.payload)
@@ -652,7 +684,7 @@ function parseCodexUsageRecord(
   const info = asObject(payload.info)
   const usage = info ? asObject(info.last_token_usage) : null
   if (!info || !usage) return null
-  return codexUsage(record, payload, info, usage, fileKey, lineNumber, fallbackAt, previousTotal, fileCwd)
+  return codexUsage(record, payload, info, usage, fileKey, lineNumber, fallbackAt, previousTotal, fileCwd, fileModel)
 }
 
 export class LocalUsageReader {
@@ -664,6 +696,9 @@ export class LocalUsageReader {
   private readonly maxTotalBytes: number
   private readonly maxLineBytes: number
   private readonly projectRouting: ProjectPathResolver | null
+  private readonly maxScanMs: number
+  private readonly clock: () => number
+  private readonly onRecordsImported: ((records: readonly HistoryTokenUsageRecord[]) => void) | null
   private readonly fileCache = new Map<string, LocalUsageFileCacheEntry>()
   private readonly scanCaches = new Map<string, UsageScanCache>()
   private activeScan: Promise<LocalUsageScanResult> | null = null
@@ -678,6 +713,9 @@ export class LocalUsageReader {
     this.maxTotalBytes = Math.max(this.maxFileBytes, Math.min(DEFAULT_MAX_TOTAL_BYTES, Math.floor(options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES)))
     this.maxLineBytes = Math.max(4 * 1024, Math.min(DEFAULT_MAX_LINE_BYTES, Math.floor(options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES)))
     this.projectRouting = options.projectRouting ?? null
+    this.maxScanMs = Math.max(50, Math.min(60_000, Math.floor(options.maxScanMs ?? DEFAULT_MAX_SCAN_MS)))
+    this.clock = options.clock ?? (() => performance.now())
+    this.onRecordsImported = options.onRecordsImported ?? null
   }
 
   scan(): Promise<LocalUsageScanResult> {
@@ -700,7 +738,10 @@ export class LocalUsageReader {
       { provider: 'claude-code', adapterId: 'claude-code', agentId: 'claude', directory: join(this.homeDir, '.claude', 'projects') },
       { provider: 'claude-code', adapterId: 'claude-code', agentId: 'claude', directory: join(this.homeDir, '.claude', 'transcripts') },
     ]
-    const result: LocalUsageScanResult = { filesScanned: 0, filesSkipped: 0, recordsParsed: 0, recordsImported: 0 }
+    const result: LocalUsageScanResult = {
+      filesScanned: 0, filesSkipped: 0, recordsParsed: 0, recordsImported: 0, filesDeferred: 0, pending: false,
+    }
+    const deadline = this.clock() + this.maxScanMs
     const cutoff = Math.max(
       this.history.getLocalUsageCutoff(),
       this.now() - this.history.getRetentionDays() * DAY_MS,
@@ -734,52 +775,65 @@ export class LocalUsageReader {
               nextLineNumber: previous.nextLineNumber,
               previousCodexTotal: previous.previousCodexTotal,
               codexCwd: previous.codexCwd,
+              codexModel: previous.codexModel,
               discardingLongLine: previous.discardingLongLine,
             }
           : createIncrementalLocalUsageParserState()
         const readStart = appendedOnly || resumePartial ? parserState.readOffset : 0
-        // A file bigger than maxFileBytes is consumed one maxFileBytes chunk
-        // per scan instead of being skipped, so long sessions still count.
-        const readEnd = Math.min(stat.size, readStart + this.maxFileBytes)
-        if (readEnd - readStart > remainingBytes) {
-          result.filesSkipped += 1
+        if (remainingBytes <= 0 || this.clock() >= deadline) {
+          // Budget spent: leave this file's cache entry untouched so the next
+          // scan resumes exactly here instead of silently dropping the file.
+          result.filesDeferred += 1
           continue
         }
-        const content = await readUsageFileRange(filePath, readStart, readEnd, stat)
-        if (!content) { result.filesSkipped += 1; continue }
-        remainingBytes -= content.length
-        result.filesScanned += 1
+        // A file bigger than the per-file or remaining per-scan budget is
+        // consumed in successive scans from the persisted parser offset.
+        const readEnd = Math.min(stat.size, readStart + this.maxFileBytes, readStart + remainingBytes)
+        const opened = await openVerifiedUsageFile(filePath, stat)
+        if (!opened) { result.filesSkipped += 1; continue }
         const fileKey = digest(`${root.provider}:${filePath}`)
-        // Parse and import in ~1 MB slices with a yield between them, so a 16 MB
-        // first-time import never blocks the main thread for more than one slice.
         const records = new Map<string, ParsedUsage>()
-        let sliceStart = 0
-        let sliceSize = PARSE_SLICE_BYTES
-        while (sliceStart < content.length) {
-          const sliceEnd = Math.min(content.length, sliceStart + sliceSize)
-          const parsed = parseIncrementalLocalUsageChunk(
-            root.provider,
-            fileKey,
-            content.subarray(sliceStart, sliceEnd),
-            readStart + sliceStart,
-            stat.mtimeMs,
-            this.maxLineBytes,
-            parserState,
-          )
-          for (const record of parsed) records.set(record.dedupeKey, record)
-          const consumed = parserState.readOffset - readStart
-          if (sliceEnd >= content.length) break
-          // A slice with no complete line makes no progress: widen it.
-          sliceSize = consumed > sliceStart ? PARSE_SLICE_BYTES : sliceSize * 2
-          sliceStart = Math.max(sliceStart, consumed)
-          await yieldToEventLoop()
+        let position = readStart
+        try {
+          const end = Math.min(readEnd, opened.size)
+          // Single forward pass: each slice is read once; only the unfinished
+          // tail line (bounded by maxLineBytes, longer lines are discarded)
+          // is carried into the next slice, so memory stays ~1 MB per file.
+          let carry: Buffer = Buffer.alloc(0)
+          while (position < end) {
+            const want = Math.min(PARSE_SLICE_BYTES, end - position)
+            const slice = Buffer.allocUnsafe(want)
+            const { bytesRead } = await opened.handle.read(slice, 0, want, position)
+            if (bytesRead <= 0) break
+            position += bytesRead
+            remainingBytes -= bytesRead
+            const fresh = slice.subarray(0, bytesRead)
+            const chunk = carry.length > 0 ? Buffer.concat([carry, fresh]) : fresh
+            const chunkStart = position - chunk.length
+            for (const record of parseIncrementalLocalUsageChunk(
+              root.provider, fileKey, chunk, chunkStart, stat.mtimeMs, this.maxLineBytes, parserState,
+            )) records.set(record.dedupeKey, record)
+            carry = Buffer.from(chunk.subarray(Math.max(0, parserState.readOffset - chunkStart)))
+            if (position < end) {
+              if (this.clock() >= deadline) break
+              await yieldToEventLoop()
+            }
+          }
+        } catch {
+          result.filesSkipped += 1
+          continue
+        } finally {
+          await opened.handle.close().catch(() => undefined)
         }
+        result.filesScanned += 1
+        if (position < stat.size) result.filesDeferred += 1
         const unique = [...records.values()]
         result.recordsParsed += unique.length
         result.recordsImported += await this.importRecords(unique, cutoff)
-        this.rememberFile(cacheKey, { ...stat, ...parserState, readEnd: readStart + content.length })
+        this.rememberFile(cacheKey, { ...stat, ...parserState, readEnd: position })
       }
     }
+    result.pending = result.filesDeferred > 0
     this.diagnostics = { ...result, finishedAt: Date.now(), durationMs: Date.now() - startedAt }
     return result
   }
@@ -806,6 +860,10 @@ export class LocalUsageReader {
         projectId: record.cwd ? projectByCwd.get(record.cwd) : undefined,
       }))
       imported += this.history.recordTokenUsageBatch(batch)
+      if (this.onRecordsImported) {
+        // A downstream ledger failure must never stop History from importing.
+        try { this.onRecordsImported(batch) } catch (error) { console.error('Local usage consumer failed', error) }
+      }
       if (offset + IMPORT_BATCH_RECORDS < fresh.length) await yieldToEventLoop()
     }
     return imported

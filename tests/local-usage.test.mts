@@ -418,13 +418,19 @@ test('incremental byte budgets charge only bytes read after the cached offset', 
     maxTotalBytes: 64 * 1024,
   })
   const initial = await reader.scan()
-  assert.equal(initial.filesScanned, 1)
-  assert.equal(initial.filesSkipped, 1)
+  // The second file gets the rest of the budget instead of being skipped whole,
+  // and the scan reports that it still has work left.
+  assert.equal(initial.filesScanned, 2)
+  assert.equal(initial.filesSkipped, 0)
+  assert.equal(initial.filesDeferred, 1)
+  assert.equal(initial.pending, true)
 
   fs.appendFileSync(first, `${JSON.stringify(filler(900))}\n`)
   const resumed = await reader.scan()
   assert.equal(resumed.filesScanned, 2)
   assert.equal(resumed.filesSkipped, 0)
+  assert.equal(resumed.filesDeferred, 0)
+  assert.equal(resumed.pending, false)
 })
 
 test('a file larger than maxFileBytes is consumed in chunks instead of being skipped, and scans expose diagnostics', async t => {
@@ -605,4 +611,136 @@ test('cached directory listings still see new files, appended data, and skip exp
   fs.appendFileSync(path.join(day, 'a.jsonl'), `${JSON.stringify({ ...codex('a', 200), payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 7, output_tokens: 1 }, total_token_usage: { input_tokens: 107, output_tokens: 2 } } } })}\n`)
   assert.equal((await reader.scan()).recordsImported, 1, 'appended record in an unchanged directory')
   assert.equal(store.getSummary('aang-airbender', undefined, 7).totals.tokenInput, 157)
+})
+
+test('model ids are parsed from Claude messages and Codex turn_context lines and summed per model', async t => {
+  const fixture = setup()
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const store = new HistoryStore(fixture.database, { now: () => now, localDate: () => '2026-08-13' })
+  t.after(() => { store.close(); fixture.cleanup() })
+  const at = new Date(now).toISOString()
+  const tokenCount = (input: number, output: number) => ({
+    type: 'event_msg', timestamp: at,
+    payload: { type: 'token_count', info: {
+      last_token_usage: { input_tokens: input },
+      total_token_usage: { input_tokens: input, output_tokens: output },
+    } },
+  })
+  writeJsonl(path.join(fixture.home, '.codex', 'sessions', 'c.jsonl'), [
+    { type: 'session_meta', timestamp: at, payload: { cwd: '/nonexistent/codex' } },
+    { type: 'turn_context', timestamp: at, payload: { cwd: '/nonexistent/codex', model: 'gpt-5-codex' } },
+    tokenCount(100, 10),
+    { type: 'turn_context', timestamp: at, payload: { model: 'gpt-5.1' } },
+    tokenCount(160, 30),
+  ])
+  const assistant = (id: string, model: unknown, input: number) => ({
+    type: 'assistant', timestamp: at, session_id: 's',
+    message: { id, model, usage: { input_tokens: input, output_tokens: 1 } },
+  })
+  writeJsonl(path.join(fixture.home, '.claude', 'projects', 'p', 's.jsonl'), [
+    assistant('m1', 'claude-sonnet-4-5-20250929', 40),
+    assistant('m2', 'claude-opus-4-5', 7),
+    assistant('m3', '<synthetic>', 3),
+    assistant('m4', '../../etc/passwd', 2),
+  ])
+  await new LocalUsageReader({ homeDir: fixture.home, history: store, now: () => now }).scan()
+  const models = store.getSummary().models
+  const byKey = new Map(models.map(stat => [`${stat.adapterId}/${stat.model}`, stat]))
+  assert.equal(byKey.get('codex/gpt-5-codex')?.tokenInput, 100)
+  assert.equal(byKey.get('codex/gpt-5.1')?.tokenInput, 60)
+  assert.equal(byKey.get('codex/gpt-5.1')?.tokenOutput, 20)
+  assert.equal(byKey.get('claude-code/claude-sonnet-4-5-20250929')?.tokenInput, 40)
+  assert.equal(byKey.get('claude-code/claude-opus-4-5')?.tokenInput, 7)
+  // Placeholder or path-like ids are stored as unknown, never verbatim.
+  assert.equal(byKey.get('claude-code/')?.tokenInput, 5)
+  assert.equal(models.some(stat => stat.model.includes('<') || stat.model.includes('..')), false)
+  // Per-model totals add up to the per-agent totals.
+  const summary = store.getSummary()
+  for (const agent of summary.agents) {
+    const sum = models.filter(stat => stat.adapterId === agent.adapterId).reduce((total, stat) => total + stat.tokenInput, 0)
+    assert.equal(sum, agent.tokenInput)
+  }
+})
+
+test('the Codex model survives a chunk boundary between turn_context and token_count', () => {
+  const lines = [
+    JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5-codex' } }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: {
+      last_token_usage: { input_tokens: 5 }, total_token_usage: { input_tokens: 5, output_tokens: 1 },
+    } } }),
+  ]
+  const bytes = Buffer.from(`${lines.join('\n')}\n`)
+  const state = createIncrementalLocalUsageParserState()
+  const split = lines[0]!.length + 1
+  assert.deepEqual(parseIncrementalLocalUsageChunk('codex', 'k', bytes.subarray(0, split), 0, 0, 4_096, state), [])
+  const [record] = parseIncrementalLocalUsageChunk('codex', 'k', bytes.subarray(split), split, 0, 4_096, state)
+  assert.equal(record?.model, 'gpt-5-codex')
+  assert.equal(parseUsageFile('codex', 'k', bytes.toString('utf8'), 0, 4_096)[0]?.model, 'gpt-5-codex')
+})
+
+test('a rescan backfills the model of a row imported before model tracking', async t => {
+  const fixture = setup()
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const store = new HistoryStore(fixture.database, { now: () => now, localDate: () => '2026-08-13' })
+  t.after(() => { store.close(); fixture.cleanup() })
+  writeJsonl(path.join(fixture.home, '.claude', 'projects', 'p', 's.jsonl'), [{
+    type: 'assistant', timestamp: new Date(now).toISOString(), session_id: 's',
+    message: { id: 'm1', model: 'claude-haiku-4-5', usage: { input_tokens: 9, output_tokens: 1 } },
+  }])
+  await new LocalUsageReader({ homeDir: fixture.home, history: store, now: () => now }).scan()
+  // Simulate a pre-v8 row: model unknown, aggregates rebuilt from events.
+  const raw = (store as unknown as { database: { exec(sql: string): void } }).database
+  raw.exec("UPDATE events SET token_model = ''")
+  store.rebuildDailyStats()
+  assert.deepEqual(store.getSummary().models.map(stat => stat.model), [''])
+  const rescan = await new LocalUsageReader({ homeDir: fixture.home, history: store, now: () => now }).scan()
+  assert.equal(rescan.recordsImported, 1)
+  const models = store.getSummary().models
+  assert.deepEqual(models.map(stat => [stat.model, stat.tokenInput]), [['claude-haiku-4-5', 9]])
+  // Token totals are unchanged by the backfill.
+  assert.equal(store.getSummary().totals.tokenInput, 9)
+})
+
+test('the scan time budget defers remaining files to the next scan without losing records', async t => {
+  const fixture = setup()
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const store = new HistoryStore(fixture.database, { now: () => now, localDate: () => '2026-08-13' })
+  t.after(() => { store.close(); fixture.cleanup() })
+  for (let index = 0; index < 4; index += 1) {
+    writeJsonl(path.join(fixture.home, '.claude', 'projects', `p${index}`, 's.jsonl'), [{
+      type: 'assistant', timestamp: new Date(now).toISOString(), session_id: `s${index}`,
+      message: { id: `m${index}`, usage: { input_tokens: 10, output_tokens: 1 } },
+    }])
+  }
+  // Fake monotonic clock: every reading advances 40 ms against a 50 ms budget.
+  let clockMs = 0
+  const reader = new LocalUsageReader({
+    homeDir: fixture.home, history: store, now: () => now, maxScanMs: 50, clock: () => (clockMs += 40),
+  })
+  const first = await reader.scan()
+  assert.equal(first.pending, true)
+  assert.ok(first.filesDeferred > 0)
+  assert.ok(first.filesScanned < 4)
+  let passes = 1
+  while ((await reader.scan()).pending) passes += 1
+  assert.ok(passes <= 4)
+  assert.equal(store.getSummary().totals.tokenInput, 40)
+})
+
+test('onRecordsImported receives every fresh record and a rescan presents the same ids', async t => {
+  const fixture = setup()
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const store = new HistoryStore(fixture.database, { now: () => now, localDate: () => '2026-08-13' })
+  t.after(() => { store.close(); fixture.cleanup() })
+  writeJsonl(path.join(fixture.home, '.claude', 'projects', 'p', 's.jsonl'), [
+    { type: 'assistant', timestamp: new Date(now).toISOString(), message: { id: 'a', usage: { input_tokens: 3, output_tokens: 1 } } },
+    { type: 'assistant', timestamp: new Date(now).toISOString(), message: { id: 'b', usage: { input_tokens: 4, output_tokens: 1 } } },
+  ])
+  const seen: string[][] = []
+  const options = { homeDir: fixture.home, history: store, now: () => now, onRecordsImported: (records: readonly { sourceEventId: string }[]) => { seen.push(records.map(record => record.sourceEventId).sort()) } }
+  await new LocalUsageReader(options).scan()
+  await new LocalUsageReader(options).scan()
+  assert.equal(seen.length, 2)
+  assert.deepEqual(seen[0], seen[1])
+  assert.equal(seen[0]!.length, 2)
 })
