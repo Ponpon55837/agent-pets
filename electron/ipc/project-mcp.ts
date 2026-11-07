@@ -34,6 +34,8 @@ export interface ProjectMcpIpcDependencies {
   removeProjectMcp: typeof removeProjectMcp
   installOptions(): ProjectMcpInstallOptions
   getRegistry(): ProjectMcpRegistryStore | null
+  /** Current app language, for native dialog text. */
+  getLocale?(): 'zh-TW' | 'en-US'
 }
 
 const MAX_REMEMBERED_PICKS = 16
@@ -75,12 +77,13 @@ export function registerProjectMcpIpc(deps: ProjectMcpIpcDependencies): void {
     if (!owner || owner.isDestroyed()) return { ok: false, error: 'No settings window is available' }
     if (deps.isDialogOpen()) return { ok: false, error: 'Another dialog is already open' }
 
+    const english = deps.getLocale?.() === 'en-US'
     deps.setDialogOpen(true)
     let result: DirectoryDialogResult
     try {
       result = await deps.showOpenDialog(owner, {
-        title: '將 Agent Pets MCP 安裝到專案',
-        message: '選擇本機專案資料夾',
+        title: english ? 'Set up Agent Pets MCP for a project' : '為專案設定 Agent Pets MCP',
+        message: english ? 'Choose a local project folder' : '選擇本機專案資料夾',
         properties: ['openDirectory', 'createDirectory'],
       })
     } catch (error) {

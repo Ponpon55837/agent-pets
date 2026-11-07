@@ -308,6 +308,7 @@ async function diagnoseAdapter(tool: ToolStatus) {
 }
 
 const CHECK_KEYS: Readonly<Record<string, TranslationKey>> = {
+  'runtime.warn': 'onboarding.check.runtime.warn',
   'opencode-cli.pass': 'onboarding.check.opencode-cli.pass',
   'opencode-cli.warn': 'onboarding.check.opencode-cli.warn',
   'opencode-desktop.pass': 'onboarding.check.opencode-desktop.pass',

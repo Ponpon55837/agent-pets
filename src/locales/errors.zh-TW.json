@@ -44,5 +44,9 @@
   "Claude quota is rate limited. Wait a minute and retry.": "Claude Quota 受到速率限制，請稍候一分鐘再試。",
   "Claude returned no quota windows.": "Claude 沒有回傳 Quota 視窗。",
   "Could not load Claude usage.": "Claude 用量載入失敗。",
-  "Project MCP registry supports at most 128 projects": "專案 MCP 清單最多支援 128 個專案。請先移除不再使用的專案。"
+  "Project MCP registry supports at most 128 projects": "專案 MCP 清單最多支援 128 個專案。請先移除不再使用的專案。",
+  "Invalid project MCP request": "專案 MCP 的請求格式不正確",
+  "Project folder was not chosen in this session": "這個專案資料夾不是在目前這次執行中選擇的，請重新選擇",
+  "Select at least one MCP client": "請至少選擇一個工具",
+  "Node.js was not found. Install Node.js and try again.": "找不到 Node.js。請先安裝 Node.js 後再試。"
 }

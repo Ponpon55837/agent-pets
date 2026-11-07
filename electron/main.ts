@@ -588,6 +588,7 @@ async function bootstrapApp(): Promise<void> {
     ensurePresentationMcpScript,
     installOptions: () => ({ nodeExecutable: resolveNodeBin(), bridgePath: presentationMcpScriptPath() }),
     getRegistry: () => mainState.projectMcpRegistry,
+    getLocale: () => currentDesktopPreferences().locale,
     installProjectMcp,
     planProjectMcp,
     removeProjectMcp,
