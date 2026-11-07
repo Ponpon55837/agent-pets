@@ -842,14 +842,20 @@
 }
 
 .line-text {
+  display: flex;
   flex: 1;
   min-width: 0;
+  align-items: baseline;
   overflow: hidden;
   white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
+/* Label and project shrink (project first) with their own ellipsis; the state and (+N) never do. */
 .line-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 600;
 }
 
@@ -859,14 +865,23 @@
 }
 
 .line-sep {
+  flex: none;
   opacity: 0.45;
   margin: 0 3px;
 }
 
 /* With several sessions in a family: which one needs you, and how many others there are. */
 .line-project {
+  flex: 0 100 auto;
+  min-width: 2ch;
   margin-right: 0.3em;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 500;
+}
+
+.line-state {
+  flex: none;
 }
 
 .line-more {

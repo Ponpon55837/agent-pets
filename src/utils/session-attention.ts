@@ -1,13 +1,23 @@
 import type { AgentSession, AgentSource } from '@/types/agent'
 import { SOURCE_FAMILIES, STATE_PRIORITY } from '../types/agent.ts'
 
-// "Who needs you" ordering: higher state priority first, then the most recent session, then the
-// session key, so the same set of sessions always picks the same winner regardless of Map order.
+// States that wait on the user; among these the most recent one is shown first.
+const ATTENTION_STATES: ReadonlySet<AgentSession['state']> = new Set(['waiting-permission', 'waiting-input', 'error'])
+
+// "Who needs you" ordering: higher state priority first. Among waiting sessions the most recent
+// wins (it rarely changes: waiting sessions send few events). Among working sessions lastSeenAt
+// changes on every heartbeat, so the tie-break is the stable firstSeenAt (oldest first), then the
+// key; otherwise two busy sessions would swap the line (and the multi-pet sprite) on each event.
 export function compareAttention(a: AgentSession, b: AgentSession): number {
   const priorityDelta = (STATE_PRIORITY[b.state] ?? 0) - (STATE_PRIORITY[a.state] ?? 0)
   if (priorityDelta !== 0) return priorityDelta
-  const recencyDelta = b.lastSeenAt - a.lastSeenAt
-  if (recencyDelta !== 0) return recencyDelta
+  if (ATTENTION_STATES.has(a.state)) {
+    const recencyDelta = b.lastSeenAt - a.lastSeenAt
+    if (recencyDelta !== 0) return recencyDelta
+  } else {
+    const ageDelta = (a.firstSeenAt ?? a.lastSeenAt) - (b.firstSeenAt ?? b.lastSeenAt)
+    if (ageDelta !== 0) return ageDelta
+  }
   return a.key < b.key ? -1 : a.key > b.key ? 1 : 0
 }
 

@@ -56,6 +56,8 @@ export interface AgentSession {
   routedPetId?: string
   state: AgentState
   lastSeenAt: number
+  /** When this session was first seen; a stable tie-break for "who needs you" ordering. */
+  firstSeenAt?: number
   toolName?: string
   permissionNotice?: PermissionNotice
   host?: AgentHost

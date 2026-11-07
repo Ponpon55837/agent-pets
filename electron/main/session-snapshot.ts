@@ -9,6 +9,7 @@ export interface SessionSnapshotEntry {
   routedPetId?: string
   state: AgentState
   lastSeenAt: number
+  firstSeenAt?: number
   toolName?: string
   host?: AgentHost
 }
@@ -35,7 +36,8 @@ export class SessionSnapshotStore {
       return
     }
     // Re-insert so Map order tracks recency for eviction.
-    const host = event.host ?? this.entries.get(key)?.host
+    const previous = this.entries.get(key)
+    const host = event.host ?? previous?.host
     this.entries.delete(key)
     this.entries.set(key, {
       source: event.source,
@@ -45,6 +47,7 @@ export class SessionSnapshotStore {
       routedPetId: event.routedPetId,
       state: event.state,
       lastSeenAt: event.timestamp,
+      firstSeenAt: previous?.firstSeenAt ?? event.timestamp,
       toolName: event.toolName,
       ...(host ? { host: { ...host } } : {}),
     })

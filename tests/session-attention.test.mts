@@ -23,6 +23,25 @@ test('attention order is priority, then most recent, then key, whatever the inpu
   assert.equal(mostUrgentSession([session('codex:x', { state: 'offline' })]), null)
 })
 
+test('two busy sessions keep a stable winner while their heartbeats alternate', () => {
+  // Regression: with a recency tie-break the top session (and the multi-pet sprite) flipped on
+  // every event. Busy sessions now tie-break on firstSeenAt, waiting ones on recency.
+  const a = session('claude:a', { state: 'thinking', firstSeenAt: 10, lastSeenAt: 10, routedPetId: 'pet-a' })
+  const b = session('claude:b', { state: 'tool-running', firstSeenAt: 20, lastSeenAt: 20, routedPetId: 'pet-b' })
+  b.state = 'thinking'
+  const winners = new Set<string>()
+  for (let tick = 0; tick < 20; tick += 1) {
+    const busy = tick % 2 === 0 ? a : b
+    busy.lastSeenAt = 100 + tick
+    winners.add(summarizeFamilies([a, b])[0]!.top.key)
+  }
+  assert.deepEqual([...winners], ['claude:a'])
+
+  const waitingOld = session('claude:c', { state: 'waiting-permission', firstSeenAt: 1, lastSeenAt: 50 })
+  const waitingNew = session('claude:d', { state: 'waiting-permission', firstSeenAt: 2, lastSeenAt: 60 })
+  assert.equal(mostUrgentSession([waitingOld, waitingNew])?.key, 'claude:d')
+})
+
 test('family summary names the session that needs you and counts the rest in one pass', () => {
   const summary = summarizeFamilies([
     session('codex:1', { state: 'tool-running' }),
@@ -45,7 +64,7 @@ test('family summary stays linear for a large session set', () => {
   const startedAt = performance.now()
   const summary = summarizeFamilies(sessions)
   assert.equal(summary[0]?.count, 20_000)
-  assert.equal(summary[0]?.top.key, 'codex:19999')
+  assert.equal(summary[0]?.top.key, 'codex:0') // busy: oldest first
   assert.ok(performance.now() - startedAt < 500)
 })
 

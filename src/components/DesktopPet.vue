@@ -1018,7 +1018,7 @@ watch(() => store.levelUpEvent, (event) => {
               <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
               <span class="line-text">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
-                <span class="line-sep">·</span><template v-if="line.count > 1 && line.project"><span class="line-project">{{ truncateProject(line.project) }}</span></template>{{ stateAriaLabel(line.state) }}<span v-if="line.count > 1" class="line-more">(+{{ line.count - 1 }})</span>
+                <span class="line-sep">·</span><template v-if="line.count > 1 && line.project"><span class="line-project">{{ truncateProject(line.project) }}</span></template><span class="line-state">{{ stateAriaLabel(line.state) }}<span v-if="line.count > 1" class="line-more">(+{{ line.count - 1 }})</span></span>
               </span>
               <span v-if="pluginBadgesVisible" class="plugin-status-badges">
                 <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
@@ -1098,7 +1098,7 @@ watch(() => store.levelUpEvent, (event) => {
               <template v-if="line.label">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
                 <span class="line-sep">·</span>
-              </template><template v-if="line.count > 1 && line.project"><span class="line-project">{{ truncateProject(line.project) }}</span></template>{{ stateAriaLabel(line.state) }}<span v-if="line.count > 1" class="line-more">(+{{ line.count - 1 }})</span>
+              </template><template v-if="line.count > 1 && line.project"><span class="line-project">{{ truncateProject(line.project) }}</span></template><span class="line-state">{{ stateAriaLabel(line.state) }}<span v-if="line.count > 1" class="line-more">(+{{ line.count - 1 }})</span></span>
             </span>
             <span v-if="pluginBadgesVisible" class="plugin-status-badges">
               <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">

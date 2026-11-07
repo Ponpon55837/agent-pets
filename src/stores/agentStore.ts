@@ -1027,7 +1027,7 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   // "Switch to app" is offered only when main said this session's app can be activated
-  // (macOS, built-in adapter, allowlisted app) and the user has it turned on.
+  // (macOS, allowlisted app, not an explicit generic-http event) and the user has it turned on.
   function canSwitchToSessionApp(session: Pick<AgentSession, 'host'> | undefined): boolean {
     return Boolean(sessionJumpEnabled.value && sessionJumpSwitchAppEnabled.value && session?.host?.switchable)
   }
@@ -1390,6 +1390,7 @@ export const useAgentStore = defineStore('agent', () => {
         routedPetId: event.routedPetId,
         state: event.state,
         lastSeenAt: event.timestamp,
+        firstSeenAt: event.timestamp,
         toolName: event.toolName,
         permissionNotice: event.permissionNotice,
         ...(sanitizeHost(event.host) ? { host: sanitizeHost(event.host) } : {}),
@@ -1486,6 +1487,7 @@ export const useAgentStore = defineStore('agent', () => {
         routedPetId: typeof entry.routedPetId === 'string' ? entry.routedPetId : undefined,
         state: entry.state,
         lastSeenAt: entry.lastSeenAt,
+        firstSeenAt: typeof entry.firstSeenAt === 'number' && Number.isFinite(entry.firstSeenAt) ? entry.firstSeenAt : entry.lastSeenAt,
         toolName: typeof entry.toolName === 'string' ? entry.toolName : undefined,
         ...(sanitizeHost(entry.host) ? { host: sanitizeHost(entry.host) } : {}),
       }, MAX_SESSION_COUNT)
