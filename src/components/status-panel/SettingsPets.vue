@@ -194,7 +194,7 @@ function projectPetStatusLabel(status: 'unbound' | 'bound' | 'missing-pet'): str
       <Button variant="primary" size="sm" :disabled="importing" @click="importPet">{{ importing ? t('importing') : t('importSprite') }}</Button>
       <Button variant="primary" size="sm" :disabled="importingZip" @click="importPetZip">{{ importingZip ? t('importing') : t('importZip') }}</Button>
     </div>
-    <div v-if="importZipError" class="import-error">{{ importZipError }}</div>
+    <div v-if="importZipError" class="import-error" role="alert">{{ importZipError }}</div>
   </Card>
 
   <Card :title="t('multiPet')">
@@ -218,7 +218,7 @@ function projectPetStatusLabel(status: 'unbound' | 'bound' | 'missing-pet'): str
       <div class="project-pet-actions">
         <Button variant="secondary" size="sm" :disabled="store.projectPetsLoading" @click="store.addProjectPet()">{{ store.projectPetsLoading ? t('checking') : t('addProjectPet') }}</Button>
       </div>
-      <div v-if="store.projectPetsError" class="import-error" role="status">{{ store.projectPetsError }}</div>
+      <div v-if="store.projectPetsError" class="import-error" role="alert">{{ store.projectPetsError }}</div>
       <EmptyState v-if="store.projectPetsLoading && store.projectPets.length === 0" compact :title="t('panel.loading')" aria-busy="true" />
       <div v-else-if="store.projectPets.length > 0" class="project-pet-list">
         <div v-for="project in store.projectPets" :key="project.projectId" class="project-pet-row">

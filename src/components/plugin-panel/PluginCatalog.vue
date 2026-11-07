@@ -91,7 +91,7 @@ function sizeLabel(bytes: number): string {
       :placeholder="t('pluginCatalogSearchPlaceholder')"
     />
 
-    <div v-if="catalogLoading && catalogItems.length === 0" class="catalog-skeleton">
+    <div v-if="catalogLoading && catalogItems.length === 0" class="catalog-skeleton" role="status" aria-busy="true" :aria-label="t('panel.loading')">
       <Skeleton v-for="n in 3" :key="n" variant="block" height="88px" />
     </div>
     <EmptyState v-else-if="catalogItems.length === 0 && !catalogError" compact :title="t('plugins.catalogEmpty')" />
