@@ -1,116 +1,180 @@
 <script setup lang="ts">
-import { computed, useId } from 'vue'
+import { ref } from 'vue'
+import Icon from '@/components/ui/Icon.vue'
 
-// Single-line text input with a visible (or screen-reader-only) label, help
-// text and an inline error wired through aria-invalid / aria-describedby.
+// The one text input. Replaces the bare <input> styles (.pet-rename-input and
+// the settings search box). Supports a leading search icon, a clear button, an
+// optional error line, and a character counter when maxlength is set.
 const props = withDefaults(defineProps<{
-  label: string
-  type?: 'text' | 'url' | 'search' | 'password'
-  help?: string
-  error?: string
+  label?: string
+  ariaLabel?: string
   placeholder?: string
+  type?: 'text' | 'search'
   maxlength?: number
-  autocomplete?: string
-  disabled?: boolean
-  hideLabel?: boolean
+  error?: string
+  clearLabel?: string
+  size?: 'sm' | 'md'
+  /** Shows a leading magnifier icon. */
+  search?: boolean
+  /** Escape is handled by the parent: stop it from reaching panel-level Esc handling. */
+  consumeEscape?: boolean
 }>(), {
   type: 'text',
-  disabled: false,
-  hideLabel: false,
+  size: 'md',
+  search: false,
 })
 
+const emit = defineEmits<{ enter: []; escape: []; blur: [] }>()
 const model = defineModel<string>({ required: true })
-const emit = defineEmits<{ enter: [] }>()
+const input = ref<HTMLInputElement | null>(null)
 
-const id = useId()
-const describedBy = computed(() => [props.help ? `${id}-help` : '', props.error ? `${id}-error` : ''].filter(Boolean).join(' ') || undefined)
+defineExpose({ focus: () => input.value?.focus(), select: () => input.value?.select() })
+
+function onEscape(event: KeyboardEvent): void {
+  if (props.consumeEscape) event.preventDefault()
+  emit('escape')
+}
+
+function clear(): void {
+  model.value = ''
+  input.value?.focus()
+}
 </script>
 
 <template>
-  <div class="field">
-    <label :for="id" class="field-label" :class="{ 'sr-only': hideLabel }">{{ label }}</label>
-    <input
-      :id="id"
-      v-model="model"
-      class="field-input"
-      :type="type"
-      :placeholder="placeholder"
-      :maxlength="maxlength"
-      :autocomplete="autocomplete"
-      :disabled="disabled"
-      :aria-invalid="error ? true : undefined"
-      :aria-describedby="describedBy"
-      @keydown.enter="emit('enter')"
-    />
-    <small v-if="help" :id="`${id}-help`" class="field-help">{{ help }}</small>
-    <small v-if="error" :id="`${id}-error`" class="field-error" role="alert">{{ error }}</small>
-  </div>
+  <label class="text-field" :class="[`size-${size}`, { invalid: !!error, search }]">
+    <span v-if="label" class="text-field-label">{{ label }}</span>
+    <span class="text-field-control">
+      <Icon v-if="search" class="text-field-icon" name="search" :size="14" />
+      <input
+        ref="input"
+        v-model="model"
+        class="text-field-input"
+        :type="type"
+        :placeholder="placeholder"
+        :maxlength="maxlength"
+        :aria-label="ariaLabel || label"
+        :aria-invalid="error ? true : undefined"
+        @keydown.enter="emit('enter')"
+        @keydown.escape="onEscape"
+        @blur="emit('blur')"
+      />
+      <button v-if="clearLabel && model" type="button" class="text-field-clear" :aria-label="clearLabel" :title="clearLabel" @click.prevent="clear">
+        <Icon name="close" :size="12" />
+      </button>
+    </span>
+    <span v-if="error || maxlength" class="text-field-meta">
+      <span v-if="error" class="text-field-error" role="alert">{{ error }}</span>
+      <span v-if="maxlength" class="text-field-count">{{ model.length }} / {{ maxlength }}</span>
+    </span>
+  </label>
 </template>
 
 <style scoped>
-.field {
+.text-field {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: var(--space-1);
 }
 
-.field-label {
+.text-field-label {
   color: var(--text-secondary);
-  font-size: var(--font-xs);
+  font-size: var(--font-body-sm, var(--font-xs));
+  font-weight: var(--weight-medium);
 }
 
-.field-input {
+.text-field-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.text-field-icon {
+  position: absolute;
+  left: var(--space-3);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.text-field-input {
   width: 100%;
   min-width: 0;
-  min-height: 34px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border-accent);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-pill);
-  outline: none;
   background: var(--surface-raised-hover);
   color: var(--text-primary);
   font: inherit;
-  font-size: var(--font-sm);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.field-input:hover:not(:disabled) {
-  border-color: var(--border-accent-strong);
+.size-md .text-field-input {
+  padding: 8px var(--space-3);
+  font-size: var(--font-body-md, var(--font-sm));
 }
 
-.field-input:focus-visible {
+.size-sm .text-field-input {
+  padding: 6px var(--space-3);
+  font-size: var(--font-body-sm, var(--font-xs));
+}
+
+.search .text-field-input {
+  padding-left: 32px;
+}
+
+.text-field-input::placeholder {
+  color: var(--text-muted);
+}
+
+.text-field-input:focus-visible {
   border-color: var(--accent);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 1px;
   box-shadow: 0 0 0 var(--focus-ring-width) var(--accent-glow);
 }
 
-.field-input[aria-invalid="true"] {
+.invalid .text-field-input {
   border-color: var(--state-error);
 }
 
-.field-input:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+.text-field-input::-webkit-search-cancel-button {
+  display: none;
 }
 
-.field-help {
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  line-height: 1.4;
-}
-
-.field-error {
-  color: var(--state-error-soft);
-  font-size: var(--font-xs);
-  line-height: 1.4;
-}
-
-.sr-only {
+.text-field-clear {
   position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
+  right: var(--space-2);
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.text-field-clear:hover {
+  background: var(--surface-raised-hover);
+  color: var(--text-primary);
+}
+
+.text-field-clear:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+}
+
+.text-field-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-label, var(--font-xs));
+}
+
+.text-field-error {
+  color: var(--accent-text, var(--state-error));
+}
+
+.text-field-count {
+  margin-left: auto;
+  color: var(--text-muted);
 }
 </style>

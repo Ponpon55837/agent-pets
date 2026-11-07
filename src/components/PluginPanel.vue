@@ -4,7 +4,7 @@ import { t } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import ActionMenu from '@/components/ui/ActionMenu.vue'
-import Toast from '@/components/ui/Toast.vue'
+import PluginToastStack from '@/components/plugin-panel/PluginToastStack.vue'
 import SegmentedTabs from '@/components/ui/SegmentedTabs.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
 import PluginAdvanced from '@/components/plugin-panel/PluginAdvanced.vue'
@@ -181,7 +181,7 @@ function showTab(tab: PluginTab): void {
     />
   </div>
 
-  <Toast :toasts="toasts" @dismiss="dismissToast" @action="runToastAction" />
+  <PluginToastStack :toasts="toasts" @dismiss="dismissToast" @action="runToastAction" />
 </template>
 
 <style scoped src="./PluginPanel.css"></style>

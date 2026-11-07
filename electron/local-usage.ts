@@ -1,15 +1,6 @@
 import { createHash } from 'node:crypto'
-import {
-  closeSync,
-  constants as fsConstants,
-  fstatSync,
-  lstatSync,
-  openSync,
-  readSync,
-  readdirSync,
-  realpathSync,
-  type Dirent,
-} from 'node:fs'
+import { constants as fsConstants, type Dirent } from 'node:fs'
+import { lstat, open, readdir, realpath } from 'node:fs/promises'
 import { extname, join, relative } from 'node:path'
 import type { HistoryStore } from './history.ts'
 import type { HistoryTokenUsageRecord } from '../src/types/history.ts'
@@ -29,7 +20,9 @@ export interface ParsedUsage extends HistoryTokenUsageRecord {
 }
 
 interface TokenCounters {
+  /** Provider-reported input including any cached portion (Codex semantics). */
   input: number
+  cached: number
   output: number
 }
 
@@ -46,6 +39,9 @@ interface LocalUsageFileCacheEntry extends IncrementalLocalUsageParserState {
   ino: number
   size: number
   mtimeMs: number
+  // Byte position this entry's read stopped at. A file larger than
+  // maxFileBytes is consumed in successive chunks, one per scan.
+  readEnd: number
 }
 
 export interface ProjectPathResolver {
@@ -74,6 +70,16 @@ export interface LocalUsageScanResult {
   recordsParsed: number
   recordsImported: number
 }
+
+export interface LocalUsageScanDiagnostics extends LocalUsageScanResult {
+  finishedAt: number
+  durationMs: number
+}
+
+// Yield to the event loop every this many file-system entries so a scan over
+// thousands of session logs never blocks the main process for long.
+const YIELD_EVERY = 25
+const yieldToEventLoop = (): Promise<void> => new Promise(resolve => setImmediate(resolve))
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_MAX_FILES = 2_000
@@ -155,15 +161,19 @@ function claudeUsage(
   lineNumber: number,
   fallbackAt: number,
 ): ParsedUsage | null {
-  const input = tokenSum(usage, ['input_tokens', 'cache_read_input_tokens'])
+  // Fresh input only. Cache reads are re-sent context (often >90% of a long
+  // session) and cache writes are reported separately, so neither is folded
+  // into "input" or the headline token total would be wildly inflated.
+  const input = token(usage.input_tokens)
+  const cacheRead = token(usage.cache_read_input_tokens)
   const topLevelCacheCreation = token(usage.cache_creation_input_tokens)
   const cacheCreation = asObject(usage.cache_creation)
   const cacheCreationNested = cacheCreation
     ? tokenSum(cacheCreation, ['ephemeral_5m_input_tokens', 'ephemeral_1h_input_tokens'])
     : 0
   const output = outputCount(usage)
-  const totalInput = Math.min(MAX_TOKEN_COUNT, input + (cacheCreationNested || topLevelCacheCreation))
-  if (totalInput === 0 && output === 0) return null
+  const cacheWrite = Math.min(MAX_TOKEN_COUNT, cacheCreationNested || topLevelCacheCreation)
+  if (input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0) return null
 
   const sessionId = text(record.session_id) ?? text(record.sessionId) ?? fileKey
   const messageId = text(message.id)
@@ -178,8 +188,10 @@ function claudeUsage(
     sessionId,
     sourceEventId: usageId('claude-code', stableKey),
     occurredAt,
-    input: totalInput,
+    input,
     output,
+    cacheRead,
+    cacheWrite,
     quality: 'exact',
     dedupeKey: stableKey,
     cwd: text(record.cwd),
@@ -213,6 +225,7 @@ function codexUsage(
   if (!totalUsage) return null
   const currentTotal: TokenCounters = {
     input: token(totalUsage.input_tokens),
+    cached: token(totalUsage.cached_input_tokens),
     output: outputCount(totalUsage),
   }
   // A drop below the previous cumulative total means context compaction or a
@@ -222,9 +235,16 @@ function codexUsage(
   // for this event and simply rebase the baseline to the new total, rather
   // than (as before) treating the entire post-reset value as fresh spend,
   // which could spike the displayed total far past what Codex actually used.
-  const input = previousTotal ? Math.max(0, currentTotal.input - previousTotal.input) : currentTotal.input
+  const rawInput = previousTotal ? Math.max(0, currentTotal.input - previousTotal.input) : currentTotal.input
+  // Codex reports cached_input_tokens as a subset of input_tokens: split it
+  // out so fresh input excludes cache reads (Codex exposes no cache writes).
+  const cacheRead = Math.min(
+    rawInput,
+    previousTotal ? Math.max(0, currentTotal.cached - previousTotal.cached) : currentTotal.cached,
+  )
+  const input = rawInput - cacheRead
   const output = previousTotal ? Math.max(0, currentTotal.output - previousTotal.output) : currentTotal.output
-  if (input === 0 && output === 0) return { record: null, cumulative: currentTotal }
+  if (input === 0 && output === 0 && cacheRead === 0) return { record: null, cumulative: currentTotal }
 
   const sessionId = text(record.session_id)
     ?? text(record.sessionId)
@@ -242,6 +262,8 @@ function codexUsage(
       occurredAt,
       input,
       output,
+      cacheRead,
+      cacheWrite: 0,
       quality: 'exact',
       dedupeKey: stableKey,
       cwd: fileCwd,
@@ -282,13 +304,13 @@ interface UsageFile {
   mtimeMs: number
 }
 
-function filesUnder(root: string, maxFiles: number): UsageFile[] {
+async function filesUnder(root: string, maxFiles: number, minMtimeMs: number): Promise<UsageFile[]> {
   const files: UsageFile[] = []
   let realRoot: string
   try {
-    const rootStat = lstatSync(root)
+    const rootStat = await lstat(root)
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return files
-    realRoot = realpathSync.native(root)
+    realRoot = await realpath(root)
   } catch {
     return files
   }
@@ -298,32 +320,36 @@ function filesUnder(root: string, maxFiles: number): UsageFile[] {
     return relativePath === '' || (!relativePath.startsWith('..') && !relativePath.includes(':'))
   }
 
-  const visit = (directory: string, depth: number): void => {
+  let visited = 0
+  const visit = async (directory: string, depth: number): Promise<void> => {
     if (files.length >= maxFiles || depth > MAX_WALK_DEPTH) return
     let entries: Dirent[]
     try {
-      entries = readdirSync(directory, { withFileTypes: true })
+      entries = await readdir(directory, { withFileTypes: true })
     } catch {
       return
     }
     for (const entry of entries) {
       if (files.length >= maxFiles) return
+      visited += 1
+      if (visited % YIELD_EVERY === 0) await yieldToEventLoop()
       const candidate = join(directory, entry.name)
       let stat
-      try { stat = lstatSync(candidate) } catch { continue }
+      try { stat = await lstat(candidate) } catch { continue }
       if (stat.isSymbolicLink()) continue
+      if (stat.isFile() && stat.mtimeMs < minMtimeMs) continue
       let realCandidate: string
-      try { realCandidate = realpathSync.native(candidate) } catch { continue }
+      try { realCandidate = await realpath(candidate) } catch { continue }
       if (!isWithinRoot(realCandidate)) continue
       if (stat.isDirectory()) {
-        visit(candidate, depth + 1)
+        await visit(candidate, depth + 1)
       } else if (stat.isFile() && extname(entry.name).toLowerCase() === '.jsonl') {
         files.push({ path: realCandidate, dev: stat.dev, ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs })
       }
     }
   }
 
-  visit(realRoot, 0)
+  await visit(realRoot, 0)
   return files
 }
 
@@ -476,32 +502,32 @@ export function parseIncrementalLocalUsageChunk(
   return [...records.values()]
 }
 
-function readUsageFileRange(
+async function readUsageFileRange(
   filePath: string,
   start: number,
   end: number,
   expected: Pick<UsageFile, 'dev' | 'ino'>,
-): Buffer | null {
-  let descriptor: number | null = null
+): Promise<Buffer | null> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null
   try {
     const noFollow = (fsConstants as typeof fsConstants & { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0
-    descriptor = openSync(filePath, fsConstants.O_RDONLY | noFollow)
-    const opened = fstatSync(descriptor)
+    handle = await open(filePath, fsConstants.O_RDONLY | noFollow)
+    const opened = await handle.stat()
     if (!opened.isFile() || opened.dev !== expected.dev || opened.ino !== expected.ino) return null
     const length = Math.max(0, Math.min(end, opened.size) - start)
     const output = Buffer.allocUnsafe(length)
     let offset = 0
     while (offset < length) {
-      const count = readSync(descriptor, output, offset, length - offset, start + offset)
-      if (count <= 0) break
-      offset += count
+      const { bytesRead } = await handle.read(output, offset, length - offset, start + offset)
+      if (bytesRead <= 0) break
+      offset += bytesRead
     }
     return offset === length ? output : output.subarray(0, offset)
   } catch {
     return null
   } finally {
-    if (descriptor !== null) {
-      try { closeSync(descriptor) } catch {}
+    if (handle) {
+      try { await handle.close() } catch {}
     }
   }
 }
@@ -540,6 +566,7 @@ export class LocalUsageReader {
   private readonly projectRouting: ProjectPathResolver | null
   private readonly fileCache = new Map<string, LocalUsageFileCacheEntry>()
   private activeScan: Promise<LocalUsageScanResult> | null = null
+  private diagnostics: LocalUsageScanDiagnostics | null = null
 
   constructor(options: LocalUsageReaderOptions) {
     this.homeDir = options.homeDir
@@ -554,13 +581,19 @@ export class LocalUsageReader {
 
   scan(): Promise<LocalUsageScanResult> {
     if (this.activeScan) return this.activeScan
-    this.activeScan = Promise.resolve().then(() => this.scanNow()).finally(() => {
+    this.activeScan = this.scanNow().finally(() => {
       this.activeScan = null
     })
     return this.activeScan
   }
 
-  private scanNow(): LocalUsageScanResult {
+  /** Last completed scan, for the History footer and Advanced diagnostics. */
+  getDiagnostics(): LocalUsageScanDiagnostics | null {
+    return this.diagnostics
+  }
+
+  private async scanNow(): Promise<LocalUsageScanResult> {
+    const startedAt = Date.now()
     const roots: UsageRoot[] = [
       { provider: 'codex', adapterId: 'codex', agentId: 'codex', directory: join(this.homeDir, '.codex', 'sessions') },
       { provider: 'claude-code', adapterId: 'claude-code', agentId: 'claude', directory: join(this.homeDir, '.claude', 'projects') },
@@ -576,22 +609,25 @@ export class LocalUsageReader {
 
     for (const root of roots) {
       if (remainingFiles <= 0) break
-      const files = filesUnder(root.directory, remainingFiles)
+      // Files not modified since the cutoff cannot hold importable records,
+      // so they are never stat-resolved, opened, or read.
+      const files = await filesUnder(root.directory, remainingFiles, cutoff)
       remainingFiles -= files.length
       for (const { path: filePath, ...stat } of files) {
-        if (stat.size > this.maxFileBytes) {
-          result.filesSkipped += 1
-          continue
-        }
+        await yieldToEventLoop()
         const cacheKey = `${root.provider}:${filePath}`
         const previous = this.fileCache.get(cacheKey)
         const sameFile = previous && previous.dev === stat.dev && previous.ino === stat.ino
-        if (sameFile && previous.mtimeMs === stat.mtimeMs && previous.size === stat.size) {
+        if (
+          sameFile && previous.mtimeMs === stat.mtimeMs && previous.size === stat.size
+          && previous.readEnd >= stat.size
+        ) {
           this.rememberFile(cacheKey, previous)
           continue
         }
         const appendedOnly = Boolean(sameFile && previous && stat.size > previous.size)
-        const parserState = appendedOnly && previous
+        const resumePartial = Boolean(sameFile && previous && previous.readEnd < previous.size && stat.size >= previous.size)
+        const parserState = (appendedOnly || resumePartial) && previous
           ? {
               readOffset: previous.readOffset,
               nextLineNumber: previous.nextLineNumber,
@@ -600,12 +636,15 @@ export class LocalUsageReader {
               discardingLongLine: previous.discardingLongLine,
             }
           : createIncrementalLocalUsageParserState()
-        const readStart = appendedOnly ? parserState.readOffset : 0
-        if (stat.size - readStart > remainingBytes) {
+        const readStart = appendedOnly || resumePartial ? parserState.readOffset : 0
+        // A file bigger than maxFileBytes is consumed one maxFileBytes chunk
+        // per scan instead of being skipped, so long sessions still count.
+        const readEnd = Math.min(stat.size, readStart + this.maxFileBytes)
+        if (readEnd - readStart > remainingBytes) {
           result.filesSkipped += 1
           continue
         }
-        const content = readUsageFileRange(filePath, readStart, stat.size, stat)
+        const content = await readUsageFileRange(filePath, readStart, readEnd, stat)
         if (!content) { result.filesSkipped += 1; continue }
         remainingBytes -= content.length
         result.filesScanned += 1
@@ -622,9 +661,10 @@ export class LocalUsageReader {
         result.recordsParsed += records.length
         // 同一檔案的所有紀錄合併成單一 SQLite 交易寫入。
         result.recordsImported += this.history.batch(() => this.importRecords(records, cutoff))
-        this.rememberFile(cacheKey, { ...stat, ...parserState })
+        this.rememberFile(cacheKey, { ...stat, ...parserState, readEnd: readStart + content.length })
       }
     }
+    this.diagnostics = { ...result, finishedAt: Date.now(), durationMs: Date.now() - startedAt }
     return result
   }
 

@@ -107,6 +107,10 @@ const model = defineModel<boolean>({ required: true })
   background: var(--accent-bright);
 }
 
+.switch input:focus-visible {
+  outline: none;
+}
+
 .switch input:focus-visible + .track {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);

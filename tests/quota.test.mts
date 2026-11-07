@@ -61,3 +61,24 @@ test('a CLI without a subscription sign-in asks the user to run /login', () => {
     return true
   })
 })
+
+test('over-quota readings are clamped to [0, 100] with an overage flag instead of being dropped', async () => {
+  const { clampedUsage, parseClaudeUsage, parseCodexUsage } = await import('../electron/quota.ts')
+  assert.deepEqual(clampedUsage(105), { usedPercent: 100, remainingPercent: 0, overage: true })
+  assert.deepEqual(clampedUsage(-3), { usedPercent: 0, remainingPercent: 100 })
+  assert.deepEqual(clampedUsage('42'), { usedPercent: 42, remainingPercent: 58 })
+  assert.equal(clampedUsage('abc'), null)
+  assert.equal(clampedUsage(undefined), null)
+
+  const claude = parseClaudeUsage({ five_hour: { utilization: 112 }, seven_day: { utilization: 41 } })
+  assert.deepEqual(claude.map(w => [w.id, w.usedPercent, w.remainingPercent, w.overage ?? false]), [
+    ['session', 100, 0, true],
+    ['weekly', 41, 59, false],
+  ])
+  const codex = parseCodexUsage({ rate_limit: { primary_window: { used_percent: 130, limit_window_seconds: 18000 } } })
+  assert.ok(codex.windows.every(w => w.remainingPercent === 0 && w.overage === true))
+  assert.deepEqual(
+    parseClaudeCliUsage('Current session: 105% used').map(w => [w.usedPercent, w.remainingPercent, w.overage]),
+    [[100, 0, true]],
+  )
+})

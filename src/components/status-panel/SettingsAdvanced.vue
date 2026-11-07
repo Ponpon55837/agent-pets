@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
 import Button from '@/components/ui/Button.vue'
@@ -10,6 +11,19 @@ function restartApp(): void {
   window.electronAPI?.restartApp()
 }
 
+const diagnosticsMessage = ref('')
+
+async function exportDiagnostics(): Promise<void> {
+  diagnosticsMessage.value = ''
+  try {
+    const result = await window.electronAPI?.exportDiagnostics()
+    if (result?.ok) diagnosticsMessage.value = t('reliability.diagnostics.saved')
+    else if (!result?.canceled) diagnosticsMessage.value = t('reliability.diagnostics.failed')
+  } catch {
+    diagnosticsMessage.value = t('reliability.diagnostics.failed')
+  }
+}
+
 function quitApp(): void {
   window.electronAPI?.quitApp()
 }
@@ -19,6 +33,11 @@ function quitApp(): void {
   <Card :title="t('presentationMcpSection')">
     <p class="section-copy">{{ t('presentationMcpSetupHelp') }}</p>
     <Button variant="primary" size="sm" block @click="store.openProjectMcpPanel">{{ t('projectMcpPanelTitle') }}</Button>
+  </Card>
+  <Card :title="t('reliability.diagnostics.title')">
+    <p class="section-copy">{{ t('reliability.diagnostics.help') }}</p>
+    <Button variant="secondary" size="sm" block @click="exportDiagnostics">{{ t('reliability.diagnostics.export') }}</Button>
+    <p v-if="diagnosticsMessage" class="section-copy" role="status">{{ diagnosticsMessage }}</p>
   </Card>
   <Card :title="t('keepControl')">
     <p class="section-copy">{{ t('keepControlHelp') }}</p>

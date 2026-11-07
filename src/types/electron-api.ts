@@ -7,7 +7,9 @@ import type { AchievementSnapshot, AchievementUnlock } from './achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from './history'
 import type { PetWindowMode, PetWindowModeState } from './pet-window'
 import type { PetBehaviorManifest, PluginSkinPetSource } from './pet'
+import type { AgentSession } from './agent'
 import type { AgentAdapterId } from './agent-adapter'
+import type { LocalServerHealthSnapshot, LocalServerId } from './reliability'
 import type { PresentationIntent, PresentationStatusUpdate } from './presentation'
 import type {
   PluginBadgeView,
@@ -42,6 +44,11 @@ import type {
 } from './ipc'
 
 export interface ElectronAPI {
+      exportDiagnostics: () => Promise<{ ok: boolean; canceled?: boolean }>
+      getSessionSnapshot: () => Promise<Array<Omit<AgentSession, 'key' | 'permissionNotice'>>>
+      getServerHealth: () => Promise<LocalServerHealthSnapshot>
+      retryServerHealth: (id?: LocalServerId) => Promise<LocalServerHealthSnapshot>
+      onServerHealthChanged: (callback: (snapshot: LocalServerHealthSnapshot) => void) => () => void
       onAgentStatusEvent: (callback: (event: any) => void) => () => void
       onPresentationIntent: (callback: (intent: PresentationIntent) => void) => () => void
       onPluginFeedItem: (callback: (item: PluginFeedItem) => void) => () => void
@@ -94,7 +101,8 @@ export interface ElectronAPI {
       setMousePassthrough: (ignore: boolean) => void
       requestPetHide: () => void
       togglePanel: () => void
-      resizePanel: (height: number, width?: number) => void
+      resizePanel: ((size: { height: number; width?: number }) => void) & ((height: number, width?: number) => void)
+      setPanelBlurLock: (lock: { pinned?: boolean; modal?: boolean }) => void
       hidePanel: () => void
       onPanelOpened: (callback: (options: { restore: boolean }) => void) => () => void
       onPanelOpenSettings: (callback: () => void) => () => void
@@ -138,6 +146,7 @@ export interface ElectronAPI {
             usedPercent: number
             remainingPercent: number
             resetsAt?: string
+            overage?: boolean
           }>
           error?: string
         }>
@@ -163,7 +172,7 @@ export interface ElectronAPI {
       listProjectMcp: () => Promise<ProjectMcpRegistrySnapshot>
       removeProjectMcp: (projectPath: string) => Promise<ProjectMcpRemovalSummary>
       forgetProjectMcp: (projectPath: string) => Promise<{ ok: boolean; removed: boolean; error?: string }>
-      uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => Promise<{ ok: boolean; error?: string }>
+      uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode' | 'all') => Promise<{ ok: boolean; error?: string }>
       loadPets: () => Promise<Array<{
         id: string
         displayName: string

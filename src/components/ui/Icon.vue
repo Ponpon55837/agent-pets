@@ -38,17 +38,20 @@ const paths: Record<string, string> = {
   // Plugin area: overflow menu, disclosure, external link, refresh, search,
   // package placeholder, trust shield, info, trash and update arrow.
   more: 'M3.2 8h.01M8 8h.01M12.8 8h.01',
-  'chevron-right': 'm6 3.2 4.8 4.8L6 12.8',
   external: 'M9.2 2.8h4v4M13.2 2.8 7.6 8.4M11.6 9.2v3.2a.8.8 0 0 1-.8.8H3.6a.8.8 0 0 1-.8-.8V5.2a.8.8 0 0 1 .8-.8h3.2',
   refresh: 'M13.2 8a5.2 5.2 0 1 1-1.6-3.7M13.2 2.6v2.8H10.4',
-  search: 'M7.2 2.6a4.6 4.6 0 1 0 0 9.2 4.6 4.6 0 0 0 0-9.2M10.6 10.6l3 3',
   'plugin-box': 'M8 1.8 13.6 4.9v6.2L8 14.2 2.4 11.1V4.9zM2.4 4.9 8 8l5.6-3.1M8 8v6.2',
   shield: 'M8 1.8 13 3.6v4c0 3-2.2 5.2-5 6.6-2.8-1.4-5-3.6-5-6.6v-4zM5.8 8l1.6 1.6 3-3.2',
-  info: 'M8 1.8a6.2 6.2 0 1 0 0 12.4A6.2 6.2 0 0 0 8 1.8M8 7.2v3.6M8 5v.01',
   trash: 'M3 4.4h10M6.2 4.4V2.8h3.6v1.6M4.4 4.4l.5 8.8h6.2l.5-8.8M6.8 7v3.8M9.2 7v3.8',
   'arrow-up': 'M8 13V3M3.8 7.2 8 3l4.2 4.2',
   edit: 'M11.2 2.4 13.6 4.8 5.6 12.8 2.4 13.6l.8-3.2zM9.6 4l2.4 2.4',
   warning: 'M8 2.4 14.4 13.6H1.6zM8 6.4v3.2M8 11.6v.4',
+  info: 'M8 1.8a6.2 6.2 0 1 0 0 12.4A6.2 6.2 0 0 0 8 1.8M8 7.2v3.6M8 4.8v.2',
+  search: 'M7 2.4a4.6 4.6 0 1 0 0 9.2 4.6 4.6 0 0 0 0-9.2M10.4 10.4l3.2 3.2',
+  volume: 'M2.2 6.2v3.6h2.1l3 2.4V3.8l-3 2.4H2.2ZM10.2 5.6a3.4 3.4 0 0 1 0 4.8M12 3.8a6 6 0 0 1 0 8.4',
+  'chevron-right': 'M6 3.2 10.8 8 6 12.8',
+  // Pin — keeps a floating panel open (angled push-pin).
+  pin: 'M9.8 2.2 13.8 6.2l-1.5.5-2.3 2.3.2 2.2-1 1L5 8.6 2.6 11l-.6-.6L4.4 8 1.8 5.5l1-1 2.2.2L7.3 2.4zM2.4 13.6l2.6-2.6',
 }
 
 withDefaults(defineProps<{

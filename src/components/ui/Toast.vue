@@ -1,165 +1,131 @@
 <script setup lang="ts">
-import { t } from '@/i18n'
-import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
+import Button from '@/components/ui/Button.vue'
+import { t } from '@/i18n'
 
-// Fixed-position feedback stack. Errors use role="alert" and stay until
-// dismissed; success/info use role="status" and clear themselves. Being fixed
-// means a message never moves the layout and is always where the user is
-// looking, instead of in the middle of a scrolled page.
-export interface ToastItem {
-  id: number
-  tone: 'success' | 'error' | 'info'
-  text: string
-  detail?: string
-  action?: { label: string }
+// One transient message: replaces the hand-rolled .pet-toast variants.
+// "danger" toasts are announced assertively (role="alert"); everything else
+// is polite (role="status"). The countdown bar is static under
+// prefers-reduced-motion.
+withDefaults(defineProps<{
+  tone?: 'neutral' | 'accent' | 'success' | 'warn' | 'danger'
+  title?: string
+  message?: string
+  actionLabel?: string
+  /** Auto-dismiss time in ms; drives the countdown bar. 0 = persistent. */
+  duration?: number
+  dismissible?: boolean
+}>(), {
+  tone: 'neutral',
+  duration: 0,
+  dismissible: true,
+})
+
+const emit = defineEmits<{ action: []; dismiss: [] }>()
+
+const icons: Record<string, string> = {
+  neutral: 'info',
+  accent: 'info',
+  success: 'check',
+  warn: 'warning',
+  danger: 'warning',
 }
-
-defineProps<{ toasts: ToastItem[] }>()
-const emit = defineEmits<{ dismiss: [id: number]; action: [id: number] }>()
-
-const iconByTone = { success: 'check', error: 'warning', info: 'info' } as const
 </script>
 
 <template>
-  <div class="toast-stack">
-    <TransitionGroup name="toast">
-      <div
-        v-for="toast in toasts"
-        :key="toast.id"
-        class="toast"
-        :class="`tone-${toast.tone}`"
-        :role="toast.tone === 'error' ? 'alert' : 'status'"
-      >
-        <Icon :name="iconByTone[toast.tone]" :size="16" class="toast-icon" />
-        <div class="toast-copy">
-          <span class="toast-text">{{ toast.text }}</span>
-          <details v-if="toast.detail" class="toast-detail">
-            <summary>{{ t('plugins.technicalDetails') }}</summary>
-            <code>{{ toast.detail }}</code>
-          </details>
-        </div>
-        <Button v-if="toast.action" variant="secondary" size="sm" @click="emit('action', toast.id)">
-          {{ toast.action.label }}
-        </Button>
-        <Button variant="ghost" size="sm" icon-only class="toast-close" :aria-label="t('plugins.dismiss')" @click="emit('dismiss', toast.id)">
-          <Icon name="close" :size="14" />
-        </Button>
-      </div>
-    </TransitionGroup>
+  <div class="toast" :class="`tone-${tone}`" :role="tone === 'danger' ? 'alert' : 'status'">
+    <span class="toast-icon"><Icon :name="icons[tone]" :size="16" /></span>
+    <div class="toast-body">
+      <strong v-if="title" class="toast-title">{{ title }}</strong>
+      <span v-if="message" class="toast-message">{{ message }}</span>
+      <slot />
+    </div>
+    <Button v-if="actionLabel" variant="secondary" size="sm" @click="emit('action')">{{ actionLabel }}</Button>
+    <Button
+      v-if="dismissible"
+      variant="ghost"
+      size="sm"
+      icon-only
+      :aria-label="t('close')"
+      @click="emit('dismiss')"
+    >
+      <Icon name="close" :size="14" />
+    </Button>
+    <span
+      v-if="duration > 0"
+      class="toast-countdown"
+      :style="{ animationDuration: `${duration}ms` }"
+      aria-hidden="true"
+    />
   </div>
 </template>
 
 <style scoped>
-.toast-stack {
-  position: fixed;
-  right: var(--space-3);
-  bottom: var(--space-3);
-  left: var(--space-3);
-  z-index: 200;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-  pointer-events: none;
-}
-
 .toast {
+  position: relative;
   display: flex;
-  width: 100%;
-  max-width: 420px;
   align-items: center;
   gap: var(--space-2);
+  overflow: hidden;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   background: var(--surface-overlay);
-  box-shadow: var(--shadow-panel);
+  box-shadow: var(--shadow-raised);
   color: var(--text-primary);
-  font-size: var(--font-sm);
-  pointer-events: auto;
 }
 
 .toast-icon {
+  display: inline-flex;
   flex: 0 0 auto;
 }
 
-.tone-success .toast-icon {
-  color: var(--state-success);
-}
-
-.tone-error {
-  border-color: var(--state-error);
-}
-
-.tone-error .toast-icon {
-  color: var(--state-error-soft);
-}
-
-.tone-info .toast-icon {
-  color: var(--state-info);
-}
-
-.toast-copy {
+.toast-body {
   display: flex;
   min-width: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 2px;
 }
 
-.toast-text {
-  overflow-wrap: anywhere;
-  line-height: 1.4;
+.toast-title {
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
 }
 
-.toast-detail {
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-}
-
-.toast-detail summary {
-  cursor: pointer;
-}
-
-.toast-detail code {
+.toast-message {
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
   overflow-wrap: anywhere;
 }
 
-.toast-close {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
+.tone-accent .toast-icon { color: var(--accent); }
+.tone-success .toast-icon { color: var(--text-success); }
+.tone-warn .toast-icon { color: var(--text-warning); }
+.tone-danger .toast-icon { color: var(--text-danger); }
+.tone-danger { border-color: var(--text-danger); }
+
+.toast-countdown {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--accent);
+  transform-origin: left;
+  animation: toast-countdown linear forwards;
 }
 
-.toast-enter-active,
-.toast-leave-active {
-  transition: opacity var(--transition-base), transform var(--transition-base);
-}
-
-.toast-enter-from,
-.toast-leave-to {
-  opacity: 0;
-  transform: translateY(var(--space-2));
+@keyframes toast-countdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .toast-enter-active,
-  .toast-leave-active {
-    transition: none;
-  }
-
-  .toast-enter-from,
-  .toast-leave-to {
-    transform: none;
-  }
-}
-
-@media (forced-colors: active) {
-  .toast {
-    border: 1px solid CanvasText;
-    background: Canvas;
-    color: CanvasText;
+  .toast-countdown {
+    animation: none;
+    opacity: 0.4;
   }
 }
 </style>

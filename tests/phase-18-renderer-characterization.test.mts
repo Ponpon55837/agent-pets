@@ -21,27 +21,32 @@ test('status panel preserves dashboard and settings navigation contracts', () =>
     '../src/components/status-panel/StatusPanelSessions.vue',
     '../src/components/status-panel/StatusPanelUsage.vue',
     '../src/components/status-panel/StatusPanelHistory.vue',
+    '../src/components/status-panel/SettingsPage.vue',
+    '../src/composables/useRovingTabs.ts',
+    '../src/utils/settingsRegistry.ts',
   ].map(read).join('\n')
-  for (const id of ['sessions', 'usage', 'history', 'language', 'appearance', 'desktop', 'plugins', 'pets', 'growth', 'advanced']) {
+  for (const id of ['sessions', 'usage', 'history', 'language', 'appearance', 'desktop', 'plugins', 'pets', 'growth', 'advanced', 'general', 'integrations']) {
     assert.ok(source.includes(`'${id}'`), `missing tab id ${id}`)
   }
   assert.match(source, /role="tablist"/)
   assert.match(source, /role="tabpanel"/)
   assert.match(source, /ArrowRight/)
-  assert.match(source, /settingsTab\.value = 'appearance'/)
+  assert.match(source, /localStorage\.getItem\(SETTINGS_GROUP_STORAGE_KEY\)/)
   assert.match(source, /onPanelOpenPluginView/)
   assert.match(source, /store\.decidePermission\(store\.permissionRequest\.requestId, \$event\)/)
   assert.match(source, /store\.clearOfflineSessions\(\)/)
   assert.match(source, /store\.sessionList\.filter\(session => session\.state !== 'offline'\)/)
   const shell = read('../src/components/StatusPanel.vue')
-  assert.match(shell, /defineAsyncComponent\(\(\) => import\('@\/components\/status-panel\/SettingsAppearance\.vue'\)\)/)
-  assert.match(shell, /void import\('@\/components\/status-panel\/SettingsAppearance\.vue'\)/)
+  assert.match(shell, /defineAsyncComponent\(\(\) => import\('@\/components\/status-panel\/SettingsPage\.vue'\)\)/)
+  assert.match(shell, /void import\('@\/components\/status-panel\/SettingsPage\.vue'\)/)
+  assert.match(read('../src/components/status-panel/SettingsPage.vue'), /defineAsyncComponent\(\(\) => import\('@\/components\/status-panel\/SettingsAppearance\.vue'\)\)/)
 })
 
 test('plugin panel preserves install, settings, diagnostics and notification actions', () => {
   const dir = '../src/components/plugin-panel/'
   const source = [
     '../src/components/PluginPanel.vue',
+    '../src/components/plugin-panel/PluginToastStack.vue',
     '../src/components/ui/Toast.vue',
     ...readdirSync(new URL(dir, import.meta.url)).filter(name => name.endsWith('.vue')).map(name => `${dir}${name}`),
   ].map(read).join('\n')
@@ -73,6 +78,8 @@ test('renderer panel and extracted component files stay below the 500-line targe
     '../src/components/status-panel/SettingsLanguage.vue',
     '../src/components/status-panel/SettingsPets.vue',
     '../src/components/status-panel/SettingsPlugins.vue',
+    '../src/components/status-panel/SettingsPage.vue',
+    '../src/components/status-panel/SettingsNotifications.vue',
   ]
   const panelParts = readdirSync(new URL('../src/components/plugin-panel/', import.meta.url))
     .filter(name => name.endsWith('.vue')).map(name => `../src/components/plugin-panel/${name}`)

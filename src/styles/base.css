@@ -1,0 +1,10 @@
+/* Global base rules (renderer only; tokens.css stays declarations-only
+   because it is also served to plugin panels).
+
+   :where() keeps specificity at zero so a component can still refine the
+   ring, but nothing can remove it without an explicit, reviewable override. */
+
+:where(a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex='-1'])):focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}

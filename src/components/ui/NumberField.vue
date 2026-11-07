@@ -108,7 +108,6 @@ function revert(): void {
   padding: 0 var(--space-3);
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-pill);
-  outline: none;
   background: var(--surface-raised-hover);
   color: var(--text-primary);
   font: inherit;
@@ -122,7 +121,8 @@ function revert(): void {
 
 .field-input:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 var(--focus-ring-width) var(--accent-glow);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .field-input[aria-invalid="true"] {
