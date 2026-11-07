@@ -29,3 +29,10 @@ Tokens: `--blur-chip`, `--blur-bubble`, `--blur-scrim` (all `none` under reduced
 - `SetupWizard.css:71`, `ProjectMcpPanel.css:71`: `blur(4px)` scrims -> `var(--blur-scrim)` (or adopt `ui/Dialog.vue`, see DS-11).
 - `StatusPanel.css`: keep an opaque background under reduced transparency (only ~1357 handles it today); the `--blur-*` tokens already go to `none`.
 - Never place a `backdrop-filter` element inside another; glass is only the outer container.
+
+## Type scale (DS-04)
+Tokens added: `--font-2xl` (22px), `--font-floor` (11px), `--leading-tight/normal/relaxed`. `check-design-tokens` `small-font` now also catches `max(10px, …)`.
+- `PluginPanel.css:91` `10px` -> `var(--font-xs)`.
+- `DesktopPet.css:330` `10px` -> `var(--font-xs)` (widen/truncate the status-line badge if needed); `:742`, `:853` `max(10px, …)` -> `max(var(--font-floor), calc(11px * var(--pet-scale, 1)))`; `:830` `max(8px, calc(9px * …))` -> same floor.
+- `SetupWizard.css:109`, `ProjectMcpPanel.css:121` `font-size: 24px` -> `var(--font-2xl)`.
+- Replace scattered `line-height: 1 / 1.25 / 1.5` with `--leading-*`.

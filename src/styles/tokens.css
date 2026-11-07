@@ -79,6 +79,8 @@
   --font-md: 13px;
   --font-lg: 15px;
   --font-xl: 18px;
+  --font-2xl: 22px; /* dialog / wizard display titles */
+  --font-floor: 11px; /* use in max(var(--font-floor), calc(11px * var(--pet-scale))) so scaled pet text never drops below 11px */
 
   --weight-normal: 400;
   --weight-medium: 600;

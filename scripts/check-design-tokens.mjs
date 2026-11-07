@@ -82,7 +82,7 @@ export function analyze(root = defaultRoot) {
       if (/backdrop-filter:\s*blur\(\s*[\d.]+px/i.test(line)) {
         findings.push({ rule: 'literal-blur', file: rel(file), line: i + 1, text: line.trim() })
       }
-      const fs = line.match(/font-size:\s*([\d.]+)px/i)
+      const fs = line.match(/font-size:\s*(?:max\(\s*)?([\d.]+)px/i)
       if (fs && Number(fs[1]) < 11) {
         findings.push({ rule: 'small-font', file: rel(file), line: i + 1, text: line.trim() })
       }
