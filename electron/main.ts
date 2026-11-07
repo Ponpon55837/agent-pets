@@ -96,9 +96,11 @@ import { registerPetMotionIpc } from './ipc/pet-motion'
 
 
 import { mainState } from './main/state'
+import { flushMainLog, logMain, teeConsoleToLog } from './diagnostics/main-log'
+import { acquireRunMarker } from './diagnostics/session-marker'
 import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
 import { setPluginPanelWindowBounds } from './main/runtime'
-import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt } from './main/runtime'
+import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt } from './main/runtime'
 
 
 
@@ -192,6 +194,8 @@ import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MA
 // Process-level error boundary: installed before anything else so a failure in
 // any later service can never surface Electron's native crash dialog or kill
 // the tray application silently.
+teeConsoleToLog()
+const runMarker = acquireRunMarker(join(app.getPath('userData'), 'logs'))
 const crashGuard = installCrashGuard({
   log: (level, message, detail) => {
     if (level === 'error') console.error(message, ...(detail === undefined ? [] : [detail]))
@@ -204,7 +208,7 @@ const crashGuard = installCrashGuard({
     } catch {}
   },
 })
-installChildProcessGoneLogger(app, (level, message) => console.error(message))
+installChildProcessGoneLogger(app, (_level, message) => console.error(message))
 export const mainCrashGuardStats = () => crashGuard.stats()
 
 // Enforce Chromium's renderer sandbox even if a future BrowserWindow option
@@ -246,6 +250,7 @@ if (!hasSingleInstanceLock) {
 const startupResults: StartupStepResult[] = []
 const startupLog = (level: 'error' | 'warn', message: string, detail?: unknown) => {
   console.error(message, ...(detail === undefined ? [] : [detail]))
+  logMain(level, 'startup', message)
 }
 const startupStep = (name: string, fn: () => void | Promise<void>) => runStartupStep(name, fn, startupLog, startupResults)
 
@@ -270,6 +275,16 @@ async function showStartupFailureDialog(): Promise<void> {
 
 async function bootstrapApp(): Promise<void> {
   if (!hasSingleInstanceLock) return
+
+  registerRuntimeDiagnostics(() => startupResults.map(result => ({ name: result.name, ok: result.ok })), () => crashGuard.stats(), runMarker.previousRunUnclean)
+  if (runMarker.previousRunUnclean) {
+    logMain('warn', 'startup', 'previous run did not exit cleanly')
+    try {
+      if (Notification.isSupported()) {
+        new Notification({ title: t('reliability.unclean.title'), body: t('reliability.unclean.body') }).show()
+      }
+    } catch {}
+  }
 
   session.defaultSession.setPermissionCheckHandler(() => false)
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
@@ -384,6 +399,7 @@ async function bootstrapApp(): Promise<void> {
     getPanelWindow: () => mainState.panelWindow,
     getServerHealth: () => serverHealthTracker().snapshot(),
     getSessionSnapshot: () => mainState.sessionSnapshot.list(),
+    exportDiagnostics,
     retryServer: id => serverHealthTracker().retry(id),
   })
 
@@ -634,6 +650,8 @@ app.whenReady().then(bootstrapApp).catch(async error => {
 
 app.on('before-quit', () => {
   mainState.isQuitting = true
+  runMarker.clear()
+  flushMainLog()
   mainState.pluginPanelViewController?.close()
   mainState.pluginPanelViewController = null
   mainState.pluginDeveloperModeWatcher?.destroy()

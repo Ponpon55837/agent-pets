@@ -2,6 +2,8 @@ import { IPC_CHANNELS } from '../ipc/channels'
 import { app, BrowserWindow, WebContentsView, screen, ipcMain, dialog, net, session, protocol, globalShortcut, powerMonitor, shell, safeStorage, Notification } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
+import { logMain, mainLogger } from '../diagnostics/main-log'
+import { buildDiagnosticsReport, registerDiagnosticsSection } from '../diagnostics/report'
 import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
 import { join, resolve } from 'path'
 import { randomUUID } from 'node:crypto'
@@ -995,6 +997,7 @@ export async function createPluginServices(): Promise<void> {
   })
   mainState.pluginBroker = new PluginBroker({
     userDataDirectory,
+    onLog: (pluginId, entry) => logMain(entry.level === 'info' ? 'info' : entry.level === 'warn' ? 'warn' : 'error', `plugin:${pluginId}`, entry.message),
     getContext: pluginId => {
       const context = mainState.pluginRuntimeContexts.get(pluginId)
       return context ? { ...context, dndEnabled: currentDesktopPreferences().dndEnabled } : null
@@ -2556,9 +2559,7 @@ export function createAchievementServices(): void {
 }
 
 export function logAchievementDiagnostic(label: string, error: unknown, extra?: unknown): void {
-  const line = `${new Date().toISOString()} [${label}] ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`
-    + `${extra !== undefined ? ` extra=${JSON.stringify(extra)}` : ''}\n`
-  void fs.promises.appendFile(join(app.getPath('userData'), 'achievements-init-error.log'), line).catch(() => {})
+  logMain('error', 'achievements', `[${label}] attempt=${mainState.achievementStoreRetryAttempt}`, { error, extra })
 }
 
 export function scheduleAchievementStoreRetry(): void {
@@ -2865,4 +2866,48 @@ export async function normalizeIngressEvent(input: unknown, receivedAt?: number)
     console.error('Project routing failed; preserving unbound event behavior', error)
     return normalized
   }
+}
+
+export async function exportDiagnostics(): Promise<{ ok: boolean; canceled?: boolean }> {
+  const recentLogLines = mainLogger().readRecent(300)
+  const report = buildDiagnosticsReport({
+    app: {
+      version: app.getVersion(),
+      electron: process.versions.electron ?? '',
+      chrome: process.versions.chrome ?? '',
+      node: process.versions.node ?? '',
+      platform: process.platform,
+      arch: process.arch,
+      packaged: app.isPackaged,
+      locale: locale.value,
+    },
+    recentLogLines,
+    generatedAt: Date.now(),
+  })
+  const parent = mainState.panelWindow && !mainState.panelWindow.isDestroyed() ? mainState.panelWindow : undefined
+  const options = {
+    defaultPath: join(app.getPath('documents'), `agent-pets-diagnostics-${new Date().toISOString().slice(0, 10)}.json`),
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  }
+  const result = parent ? await dialog.showSaveDialog(parent, options) : await dialog.showSaveDialog(options)
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+  await fs.promises.writeFile(result.filePath, report, { encoding: 'utf8', mode: 0o600 })
+  return { ok: true }
+}
+
+export function registerRuntimeDiagnostics(startupResults: () => unknown, crashStats: () => unknown, previousRunUnclean: boolean): void {
+  registerDiagnosticsSection('startup', startupResults)
+  registerDiagnosticsSection('crashGuard', crashStats)
+  registerDiagnosticsSection('previousRunUnclean', () => previousRunUnclean)
+  registerDiagnosticsSection('localServers', () => serverHealthTracker().snapshot().servers.map(server => ({
+    id: server.id, port: server.port, state: server.state, attempt: server.attempt, code: server.code ?? null,
+  })))
+  registerDiagnosticsSection('stores', () => ({
+    history: mainState.historyStore ? 'ready' : 'unavailable',
+    achievements: mainState.achievementStore ? 'ready' : 'unavailable',
+    achievementInitRetries: mainState.achievementStoreRetryAttempt,
+    progression: mainState.progressionStore ? 'ready' : 'unavailable',
+    plugins: mainState.pluginRegistry ? 'ready' : 'unavailable',
+    sessionsTracked: mainState.sessionSnapshot.list().length,
+  }))
 }

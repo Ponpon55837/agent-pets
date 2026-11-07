@@ -8,6 +8,7 @@ export const IPC_CHANNELS = {
   adapterUninstall: 'adapter-uninstall',
   addCustomPet: 'add-custom-pet',
   agentStatusEvent: 'agent-status-event',
+  diagnosticsExport: 'diagnostics-export',
   desktopPreferencesInit: 'desktop-preferences-init',
   desktopPreferencesSet: 'desktop-preferences-set',
   desktopPreferencesUpdated: 'desktop-preferences-updated',

@@ -44,6 +44,7 @@ import type {
 } from './ipc'
 
 export interface ElectronAPI {
+      exportDiagnostics: () => Promise<{ ok: boolean; canceled?: boolean }>
       getSessionSnapshot: () => Promise<Array<Omit<AgentSession, 'key' | 'permissionNotice'>>>
       getServerHealth: () => Promise<LocalServerHealthSnapshot>
       retryServerHealth: (id?: LocalServerId) => Promise<LocalServerHealthSnapshot>

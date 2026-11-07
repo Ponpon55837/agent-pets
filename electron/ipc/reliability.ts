@@ -10,6 +10,7 @@ export interface ReliabilityIpcDependencies {
   getServerHealth(): LocalServerHealthSnapshot
   retryServer(id?: LocalServerId): void
   getSessionSnapshot(): SessionSnapshotEntry[]
+  exportDiagnostics(): Promise<{ ok: boolean; canceled?: boolean }>
 }
 
 const SERVER_IDS: readonly LocalServerId[] = ['event', 'permission', 'presentation']
@@ -23,6 +24,15 @@ export function registerReliabilityIpc(deps: ReliabilityIpcDependencies): void {
   deps.ipcMain.handle(IPC_CHANNELS.sessionSnapshotGet, (event): SessionSnapshotEntry[] => {
     deps.assertTrustedIpcSender(event)
     return deps.getSessionSnapshot()
+  })
+
+  deps.ipcMain.handle(IPC_CHANNELS.diagnosticsExport, async (event): Promise<{ ok: boolean; canceled?: boolean }> => {
+    deps.assertTrustedIpcSender(event, deps.getPanelWindow())
+    try {
+      return await deps.exportDiagnostics()
+    } catch {
+      return { ok: false }
+    }
   })
 
   deps.ipcMain.handle(IPC_CHANNELS.serverHealthRetry, (event, id: unknown): LocalServerHealthSnapshot => {

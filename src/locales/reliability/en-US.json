@@ -18,5 +18,12 @@
   "reliability.server.retry": "Retry now",
   "reliability.server.name.event": "Event",
   "reliability.server.name.permission": "Permission relay",
-  "reliability.server.name.presentation": "Presentation MCP"
+  "reliability.server.name.presentation": "Presentation MCP",
+  "reliability.unclean.title": "Agent Pets did not exit cleanly last time",
+  "reliability.unclean.body": "If your pet crashed or stopped responding, export diagnostics from Settings > Advanced.",
+  "reliability.diagnostics.title": "Diagnostics",
+  "reliability.diagnostics.help": "Export versions, system info and recent error logs for bug reports. Saved locally only, with tokens, prompts and personal paths removed; nothing is uploaded.",
+  "reliability.diagnostics.export": "Export diagnostics",
+  "reliability.diagnostics.saved": "Diagnostics saved.",
+  "reliability.diagnostics.failed": "Could not save diagnostics."
 }

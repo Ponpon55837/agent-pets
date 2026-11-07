@@ -193,6 +193,8 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.send(IPC_CHANNELS.panelHide)
   },
 
+  exportDiagnostics: (): Promise<{ ok: boolean; canceled?: boolean }> => ipcRenderer.invoke(IPC_CHANNELS.diagnosticsExport),
+
   getSessionSnapshot: (): Promise<SessionSnapshotEntry[]> => ipcRenderer.invoke(IPC_CHANNELS.sessionSnapshotGet),
 
   getServerHealth: (): Promise<LocalServerHealthSnapshot> => ipcRenderer.invoke(IPC_CHANNELS.serverHealthGet),
