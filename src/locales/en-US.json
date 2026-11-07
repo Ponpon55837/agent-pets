@@ -94,7 +94,7 @@
   "edgePeekHelp": "After 650ms at a screen edge, replace the pet with a dedicated handle.",
   "attention": "Attention",
   "dnd": "Do Not Disturb",
-  "dndHelp": "Mute notifications, sounds, and extra motion.",
+  "dndHelp": "Silences notifications and sounds. Permission bubbles and the tray count still appear.",
   "notifications": "Notifications",
   "notificationsHelp": "Show native waiting and completion notifications.",
   "permissionBubble": "Permission bubble",

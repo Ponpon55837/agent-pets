@@ -35,5 +35,7 @@
   "permission.queueLabel": "待處理的權限請求",
   "permission.denyAll": "全部拒絕",
   "permission.denyAllConfirm": "再按一次，拒絕全部 {count} 個",
-  "permission.notifyAggregateFailed": "{count} 個工作結束（{failed} 個失敗）"
+  "permission.notifyAggregateFailed": "{count} 個工作結束（{failed} 個失敗）",
+  "permission.dndEndedTitle": "勿擾模式已結束",
+  "permission.dndEndedBody": "勿擾期間有 {count} 則通知被靜音"
 }

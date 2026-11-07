@@ -94,7 +94,7 @@
   "edgePeekHelp": "停靠螢幕邊緣 650ms 後，以專用把手取代寵物顯示。",
   "attention": "提醒",
   "dnd": "勿擾模式",
-  "dndHelp": "靜音通知、音效與額外動態。",
+  "dndHelp": "靜音通知與音效。需要你處理的 Permission 泡泡與 Tray 計數仍會顯示。",
   "notifications": "通知",
   "notificationsHelp": "顯示等待與完成的原生通知。",
   "permissionBubble": "Permission 泡泡",

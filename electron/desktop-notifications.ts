@@ -50,6 +50,7 @@ export class DesktopNotificationService {
   // Newest notification per key: a repeat for the same session replaces the old
   // one instead of stacking in the notification centre.
   private readonly shown = new Map<string, Notification>()
+  private dndMissed = 0
   private logRecords: NotificationLogRecord[] | null = null
   private logTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -99,6 +100,17 @@ export class DesktopNotificationService {
     )
   }
 
+  /** Notifications silenced since DND started; resets the counter. */
+  takeDndMissedCount(): number {
+    const missed = this.dndMissed
+    this.dndMissed = 0
+    return missed
+  }
+
+  showDndSummary(missed: number): void {
+    this.deliver(t('permission.dndEndedTitle'), t('permission.dndEndedBody', { count: missed }), 'summary', 1)
+  }
+
   clearAttention(): void {
     if (this.attentionCount === 0) return
     this.attentionCount = 0
@@ -139,6 +151,7 @@ export class DesktopNotificationService {
       return
     }
     if (preferences.dndEnabled) {
+      this.dndMissed += count
       this.log(kind, 'suppressed-dnd', count)
       return
     }

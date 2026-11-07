@@ -2155,6 +2155,7 @@ export function currentDesktopPreferences(): DesktopPreferences {
   if (!mainState.desktopPreferences) {
     return {
       dndEnabled: false,
+      dndUntil: null,
       notificationsEnabled: true,
       permissionBubbleEnabled: true,
       presentationMcpEnabled: true,
@@ -2340,12 +2341,31 @@ export function createWindowsFullscreenServices(): void {
   }
 }
 
+let dndExpiryTimer: ReturnType<typeof setTimeout> | null = null
+
+// A timed Do Not Disturb ends by itself; when it does, summarise what was
+// silenced so the user is not left wondering what they missed.
+function scheduleDndExpiry(preferences: DesktopPreferences): void {
+  if (dndExpiryTimer) clearTimeout(dndExpiryTimer)
+  dndExpiryTimer = null
+  if (!preferences.dndEnabled || preferences.dndUntil === null) return
+  const delay = Math.min(Math.max(0, preferences.dndUntil - Date.now()) + 50, 2_147_483_647)
+  dndExpiryTimer = setTimeout(() => {
+    dndExpiryTimer = null
+    const missed = mainState.desktopNotifications?.takeDndMissedCount() ?? 0
+    updateDesktopPreferences({ dndEnabled: false, dndUntil: null })
+    if (missed > 0) mainState.desktopNotifications?.showDndSummary(missed)
+  }, delay)
+  dndExpiryTimer.unref?.()
+}
+
 export function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   if (!mainState.desktopPreferences) throw new Error('Desktop preferences are not ready')
   const previousPreferences = mainState.desktopPreferences.get()
   const achievementsWereEnabled = previousPreferences.achievementsEnabled
   const preferences = mainState.desktopPreferences.update(patch)
   if (previousPreferences.dndEnabled !== preferences.dndEnabled) mainState.pluginFeedController?.onVisibilityChanged()
+  scheduleDndExpiry(preferences)
   setLocale(preferences.locale)
   if (!preferences.edgeModeEnabled && mainState.petWindowMode === 'edge') applyNormalPetBounds()
   applyPetCaptureProtection()
@@ -2723,6 +2743,8 @@ export function createDesktopServices(): void {
       syncTrayAttention()
     },
   })
+
+  scheduleDndExpiry(currentDesktopPreferences())
 
   mainState.desktopTray = new DesktopTrayController(
     join(__dirname, '..', 'build', 'icon.png'),

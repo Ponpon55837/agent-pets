@@ -3,6 +3,8 @@ import type { DesktopVisibilityCapabilities } from '@/types/desktop-visibility'
 
 export interface DesktopPreferences {
   dndEnabled: boolean
+  /** Epoch ms when a timed DND ends; null means it lasts until turned off. */
+  dndUntil: number | null
   notificationsEnabled: boolean
   permissionBubbleEnabled: boolean
   presentationMcpEnabled: boolean
@@ -22,6 +24,7 @@ export interface DesktopPreferences {
 export type DesktopPreferencesPatch = Partial<Pick<
   DesktopPreferences,
   'dndEnabled'
+  | 'dndUntil'
   | 'notificationsEnabled'
   | 'permissionBubbleEnabled'
   | 'presentationMcpEnabled'

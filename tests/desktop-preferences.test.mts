@@ -181,3 +181,10 @@ test('uses only the original regular portable executable for Windows startup', (
   )
   assert.equal(resolveLoginItemExecutable('win32', false, portablePath, portablePath), null)
 })
+
+test('dndUntil is validated, bounded, and cleared when DND is off', async () => {
+  const { parseDesktopPreferencesPatch } = await import('../electron/desktop-preferences.ts')
+  assert.deepEqual(parseDesktopPreferencesPatch({ dndUntil: null }), { dndUntil: null })
+  assert.throws(() => parseDesktopPreferencesPatch({ dndUntil: 'soon' }))
+  assert.throws(() => parseDesktopPreferencesPatch({ dndUntil: -5 }))
+})

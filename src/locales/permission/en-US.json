@@ -35,5 +35,7 @@
   "permission.queueLabel": "Pending permission requests",
   "permission.denyAll": "Deny all",
   "permission.denyAllConfirm": "Press again to deny all {count}",
-  "permission.notifyAggregateFailed": "{count} tasks ended ({failed} failed)"
+  "permission.notifyAggregateFailed": "{count} tasks ended ({failed} failed)",
+  "permission.dndEndedTitle": "Do Not Disturb has ended",
+  "permission.dndEndedBody": "{count} notifications were silenced while it was on"
 }
