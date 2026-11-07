@@ -28,6 +28,8 @@ import type {
 } from './plugin'
 import type { PluginCatalogPanelItem } from './plugin-catalog'
 import type {
+  ProjectMcpApplyRequest,
+  ProjectMcpPlan,
   ProjectMcpRegistrySnapshot,
   ProjectMcpRemovalSummary,
   ProjectMcpSetupSummary,
@@ -159,7 +161,8 @@ export interface ElectronAPI {
         error?: string
       }>
       installIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => Promise<{ ok: boolean; error?: string }>
-      setupProjectMcp: () => Promise<ProjectMcpSetupSummary>
+      setupProjectMcp: () => Promise<ProjectMcpPlan>
+      applyProjectMcp: (request: ProjectMcpApplyRequest) => Promise<ProjectMcpSetupSummary>
       listProjectMcp: () => Promise<ProjectMcpRegistrySnapshot>
       removeProjectMcp: (projectPath: string) => Promise<ProjectMcpRemovalSummary>
       forgetProjectMcp: (projectPath: string) => Promise<{ ok: boolean; removed: boolean; error?: string }>

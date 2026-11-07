@@ -26,7 +26,7 @@ import { ProgressionStore } from './progression'
 
 
 import { ProjectMcpRegistryStore } from './project-mcp-registry'
-import { installProjectMcp, removeProjectMcp } from './project-mcp-setup'
+import { installProjectMcp, planProjectMcp, removeProjectMcp } from './project-mcp-setup'
 
 import { PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES } from './plugin-registry'
 
@@ -482,6 +482,7 @@ app.whenReady().then(async () => {
     installOptions: () => ({ nodeExecutable: resolveNodeBin(), bridgePath: presentationMcpScriptPath() }),
     getRegistry: () => mainState.projectMcpRegistry,
     installProjectMcp,
+    planProjectMcp,
     removeProjectMcp,
   })
 

@@ -161,11 +161,13 @@ Configure an MCP client to launch that script with the real Node.js executable. 
 
 #### One-click project setup
 
-In **Settings → Advanced**, click **Setup MCP for a project**. Choose the local project folder in the native folder picker; Agent Pets then installs the same presentation bridge for all three supported project clients:
+In **Settings → Advanced**, click **Setup MCP for a project**. Choose the local project folder in the native folder picker. Nothing is written yet: a review step lists the tools you can set up (the ones that look in use are pre-ticked), the exact file each one would create or modify, whether Git already tracks that file, and a preview of what would be added. Only the ticked clients are written:
 
 - Codex: `.codex/config.toml` (`mcp_servers.agent-pets`)
 - Claude Code: `.mcp.json` (`mcpServers.agent-pets`)
 - OpenCode: `opencode.json` (`mcp.servers.agent-pets`)
+
+The written entry contains the path of the Node.js executable and bridge script on **your** machine, so it is useless to teammates and should not be committed. In a Git repository the **Local only** option (on by default) adds the new files to the project's `.git/info/exclude`; if Git already tracks a target file the review and result steps warn you instead. A config file with comments or trailing commas (JSONC, common for `opencode.json`) or invalid JSON is never rewritten: the result card shows the reason and a copyable snippet to paste by hand. Existing indentation, line endings and other MCP servers are preserved, and the result card shows each config path (copyable) and the next step: approve `agent-pets` in `/mcp` for Claude Code, trust the project for Codex (`codex mcp list`), restart OpenCode.
 
 The operation is idempotent. Existing matching entries are reported as already configured; a different entry with the same server name is reported as a conflict and is never overwritten. The setup writes only project-local configuration and does not run a shell command or reinstall hooks. Restart the affected agent client after setup so it reloads its MCP catalog.
 

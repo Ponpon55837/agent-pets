@@ -29,6 +29,8 @@ import type {
 } from '../src/types/plugin.ts'
 import type { PluginCatalogPanelItem } from '../src/types/plugin-catalog.ts'
 import type {
+  ProjectMcpApplyRequest,
+  ProjectMcpPlan,
   ProjectMcpRegistrySnapshot,
   ProjectMcpRemovalSummary,
   ProjectMcpSetupSummary,
@@ -383,8 +385,12 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.installIntegrations, target)
   },
 
-  setupProjectMcp: (): Promise<ProjectMcpSetupSummary> => {
+  setupProjectMcp: (): Promise<ProjectMcpPlan> => {
     return ipcRenderer.invoke(IPC_CHANNELS.projectMcpSetup)
+  },
+
+  applyProjectMcp: (request: ProjectMcpApplyRequest): Promise<ProjectMcpSetupSummary> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.projectMcpApply, request)
   },
 
   listProjectMcp: (): Promise<ProjectMcpRegistrySnapshot> => {

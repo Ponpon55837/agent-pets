@@ -88,6 +88,7 @@ export const IPC_CHANNELS = {
   progressionInit: 'progression-init',
   progressionSetPet: 'progression-set-pet',
   progressionUpdated: 'progression-updated',
+  projectMcpApply: 'project-mcp-apply',
   projectMcpForget: 'project-mcp-forget',
   projectMcpList: 'project-mcp-list',
   projectMcpRemove: 'project-mcp-remove',
