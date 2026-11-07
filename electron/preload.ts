@@ -199,6 +199,14 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.send(IPC_CHANNELS.panelHide)
   },
 
+  reportRendererError: (report: { message: string; stack?: string; kind: 'vue' | 'unhandledrejection' | 'error' }): void => {
+    ipcRenderer.send(IPC_CHANNELS.rendererErrorReport, report)
+  },
+
+  reloadRenderer: (): void => {
+    ipcRenderer.send(IPC_CHANNELS.rendererReload)
+  },
+
   exportDiagnostics: (): Promise<{ ok: boolean; canceled?: boolean }> => ipcRenderer.invoke(IPC_CHANNELS.diagnosticsExport),
 
   getSessionSnapshot: (): Promise<SessionSnapshotEntry[]> => ipcRenderer.invoke(IPC_CHANNELS.sessionSnapshotGet),

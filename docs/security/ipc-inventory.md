@@ -1,6 +1,6 @@
 # IPC 安全清單
 
-由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 88 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
+由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 90 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
 
 | 頻道 | 類型 | 允許的寄件者 | 輸入驗證概況 | Preload API | 對應測試 |
 | --- | --- | --- | --- | --- | --- |
@@ -77,9 +77,11 @@
 | `project-pets-bind` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | setProjectPetBinding (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `project-pets-archive` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | archiveProjectPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `quota-usage` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getQuotaUsage (invoke) | `tests/ipc-quota.test.mts` |
-| `server-health-get` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getServerHealth (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `session-snapshot-get` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getSessionSnapshot (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `diagnostics-export` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | exportDiagnostics (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `renderer-error-report` | `on` | 受信任寵物或設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | reportRendererError (send) | `tests/ipc-reliability.test.mts` |
+| `renderer-reload` | `on` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | reloadRenderer (send) | `tests/ipc-reliability.test.mts` |
+| `server-health-get` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getServerHealth (invoke) | `tests/ipc-reliability.test.mts` |
+| `session-snapshot-get` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getSessionSnapshot (invoke) | `tests/ipc-reliability.test.mts` |
+| `diagnostics-export` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | exportDiagnostics (invoke) | `tests/ipc-reliability.test.mts` |
 | `server-health-retry` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | retryServerHealth (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `pet-mouse-passthrough` | `on` | 寵物視窗 main frame | 型別；無效輸入回安全預設或錯誤 | setMousePassthrough (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `pet-hide-request` | `on` | 寵物視窗 main frame | handler／controller 驗證 payload；拒絕無效輸入 | requestPetHide (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |

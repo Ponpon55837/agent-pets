@@ -25,5 +25,7 @@
   "reliability.diagnostics.help": "匯出版本、系統與近期錯誤紀錄，方便回報問題。內容只存在本機，已移除 token、提示內容與個人路徑，不會自動上傳。",
   "reliability.diagnostics.export": "匯出診斷資訊",
   "reliability.diagnostics.saved": "診斷資訊已儲存。",
-  "reliability.diagnostics.failed": "無法儲存診斷資訊。"
+  "reliability.diagnostics.failed": "無法儲存診斷資訊。",
+  "reliability.renderer.errorMessage": "畫面發生錯誤。",
+  "reliability.renderer.reload": "重新載入"
 }

@@ -2954,6 +2954,7 @@ export function registerRuntimeDiagnostics(startupResults: () => unknown, crashS
     id: server.id, port: server.port, state: server.state, attempt: server.attempt, code: server.code ?? null,
   })))
   registerDiagnosticsSection('pluginHost', () => mainState.pluginHostWindow?.diagnostics() ?? null)
+  registerDiagnosticsSection('rendererErrors', () => ({ count: mainState.rendererErrorCount }))
   registerDiagnosticsSection('eventPipeline', () => ({ ...eventPipelineStats }))
   registerDiagnosticsSection('stores', () => ({
     history: mainState.historyStore ? 'ready' : 'unavailable',

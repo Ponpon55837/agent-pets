@@ -132,6 +132,7 @@ export const mainState = {
   edgeDwellHandle: null as ReturnType<typeof setTimeout> | null,
   edgeDwellCandidate: null as { displayId: number; edge: PetEdge } | null,
   isQuitting: false,
+  rendererErrorCount: 0,
   serverHealth: null as ServerHealthTracker | null,
   sessionSnapshot: new SessionSnapshotStore() as SessionSnapshotStore,
   notificationAttentionCount: 0,
