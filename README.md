@@ -173,6 +173,8 @@ The main-process log is `logs/main.log` inside the app's userData folder (`~/Lib
 | Hook script out of date | **Repair** redeploys it. |
 | Claude Code does not show the project MCP | Approve `agent-pets` in `/mcp`. Codex needs the project to be trusted. |
 | Pet frozen or blank | Use **Reload pet** in the Tray (Advanced) or **Restart Pet** in Settings → Advanced. |
+| macOS: **Launch at login** stays pending | Approve Agent Pets in System Settings → General → Login Items (the toggle has a button). Move the app to the Applications folder first; a login item cannot be registered from a disk image or Downloads. |
+| Windows: **Restart** closes the app without reopening | Fixed for the portable build: it now relaunches the original `.exe`, not its temporary extraction folder. If it still fails, start the `.exe` again by hand. |
 | Bug report | Export diagnostics and attach the file. |
 
 ## Development

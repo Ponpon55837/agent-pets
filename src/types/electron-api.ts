@@ -116,6 +116,7 @@ export interface ElectronAPI {
       onPanelOpenSettings: (callback: () => void) => () => void
       onPanelOpenPluginView: (callback: (pluginId: string) => void) => () => void
       initializeDesktopPreferences: (legacySoundEnabled: boolean) => Promise<DesktopPreferences>
+      openLoginItemsSettings: () => Promise<boolean>
       setDesktopPreferences: (patch: DesktopPreferencesPatch) => Promise<DesktopPreferences>
       getPowerSaveState: () => Promise<boolean>
       onPowerSaveStateUpdated: (callback: (powerSave: boolean) => void) => () => void

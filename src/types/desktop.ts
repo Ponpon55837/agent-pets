@@ -1,6 +1,14 @@
 import type { AppLocale } from '@/types/locale'
 import type { DesktopVisibilityCapabilities } from '@/types/desktop-visibility'
 
+export type LaunchAtStartupStatus =
+  | 'enabled'
+  | 'disabled'
+  | 'requires-approval'
+  | 'not-in-applications'
+  | 'unsupported'
+  | 'error'
+
 export interface DesktopPreferences {
   dndEnabled: boolean
   /** Epoch ms when a timed DND ends; null means it lasts until turned off. */
@@ -22,6 +30,8 @@ export interface DesktopPreferences {
   soundOnSuccess: boolean
   launchAtStartup: boolean
   launchAtStartupSupported: boolean
+  /** OS-reported login item state; `launchAtStartup` stays the user's intent. */
+  launchAtStartupStatus: LaunchAtStartupStatus
   locale: AppLocale
   visibilityCapabilities: DesktopVisibilityCapabilities
 }

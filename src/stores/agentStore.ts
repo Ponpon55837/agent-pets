@@ -8,7 +8,7 @@ import type {
   AgentStatusEvent,
 } from '@/types/agent'
 import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
-import type { DesktopPreferences, DesktopPreferencesPatch } from '@/types/desktop'
+import type { DesktopPreferences, DesktopPreferencesPatch, LaunchAtStartupStatus } from '@/types/desktop'
 import type { DesktopVisibilityCapabilities } from '@/types/desktop-visibility'
 import type { AppLocale } from '@/types/locale'
 import type {
@@ -446,6 +446,7 @@ export const useAgentStore = defineStore('agent', () => {
   })
   const launchAtStartup = ref(false)
   const launchAtStartupSupported = ref(false)
+  const launchAtStartupStatus = ref<LaunchAtStartupStatus>('unsupported')
   const desktopPreferencesReady = ref(false)
   const reactionsActive = computed(() => isDesktopEffectActive(
     desktopPreferencesReady.value,
@@ -902,6 +903,7 @@ export const useAgentStore = defineStore('agent', () => {
     soundOnSuccess.value = preferences.soundOnSuccess
     launchAtStartup.value = preferences.launchAtStartup
     launchAtStartupSupported.value = preferences.launchAtStartupSupported
+    launchAtStartupStatus.value = preferences.launchAtStartupStatus ?? 'unsupported'
     desktopPreferencesReady.value = true
     localStorage.setItem('agent-pet-sound', preferences.soundEnabled ? '1' : '0')
     if (preferences.dndEnabled) clearPresentation()
@@ -994,6 +996,10 @@ export const useAgentStore = defineStore('agent', () => {
     if (!launchAtStartupSupported.value) return
     launchAtStartup.value = enabled
     updateDesktopPreferences({ launchAtStartup: enabled })
+  }
+
+  function openLoginItemsSettings() {
+    void window.electronAPI?.openLoginItemsSettings?.().catch(() => {})
   }
 
   function setMultiPetEnabled(enabled: boolean) {
@@ -2111,6 +2117,8 @@ export const useAgentStore = defineStore('agent', () => {
     desktopVisibilityCapabilities,
     launchAtStartup,
     launchAtStartupSupported,
+    launchAtStartupStatus,
+    openLoginItemsSettings,
     desktopPreferencesReady,
     multiPetEnabled,
     reactionsEnabled,
