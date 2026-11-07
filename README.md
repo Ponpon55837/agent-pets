@@ -24,7 +24,7 @@ On the very first launch a pet appears and the panel opens with a short intro (w
 
 1. Click **Install** next to a tool, or **Install all**, to wire up its hooks. Nothing is installed without your click, existing config files are backed up first (`*.agent-pets-bak-*`, latest 5 kept), and only Agent Pets' own entries are added. A file it cannot parse is never overwritten.
 2. Restart the tool. Use **Wait for real event** (run any prompt; it waits 30 seconds for an event the tool itself sends) to confirm the connection end to end. **Test receiver** only proves the app can receive a local event, and **Diagnose** lists the individual checks with a fix hint.
-3. The wizard reappears on later launches only until you finish it or choose **Not now**. Reopen it any time from **Settings → Integrations → Advanced → Setup Wizard**.
+3. The wizard reappears on later launches only until you finish it or choose **Not now**. Reopen it any time from **Settings → Advanced → Setup Wizard**.
 
 To remove integrations, use **Remove** on a tool's card in the wizard (only that tool's entries are taken out), or **Full cleanup…** before deleting the app (removes every hook, the connection tokens and the files under `~/.desktop-pet`, `%USERPROFILE%\.desktop-pet` on Windows).
 
@@ -72,7 +72,7 @@ Sprite requirements (checked on import):
 
 ## Control panel
 
-Open it with a click on the pet or the Tray. The header shows the pet, its level and the number of running / attention sessions, plus, left to right, a **⋯ menu** (Do Not Disturb, Keep open, and a quick Appearance toggle that cycles system / light / dark; a dot on the button shows Do Not Disturb is on), Settings (`Cmd/Ctrl+,`) and Close. **Esc** steps back one level, then hides the panel. Drag any edge to resize the panel (from 360×420 up to full screen); every view shares that one size and it is remembered, and **Settings → General → Reset panel size** restores the default.
+Open it with a click on the pet or the Tray. The header shows the pet, its level and the number of running / attention sessions, plus, left to right, a **⋮ menu** (Do Not Disturb, Keep open, and a quick Appearance toggle that cycles system / light / dark; a dot on the button shows Do Not Disturb is on), Settings (`Cmd/Ctrl+,`) and Close. **Esc** steps back one level, then hides the panel. Drag any edge to resize the panel (from 360×420 up to full screen); every view shares that one size and it is remembered, and **Settings → General → Reset panel size** restores the default.
 
 - **Sessions** — grouped into **Needs attention**, **Running** and **Idle & finished**. Filter by All / Needs attention / Running and by tool, and sort by urgency or most recent. Live states show elapsed time; a row expands to show path, tool, last seen and session ID. **Clear offline items** removes ended sessions from view; sessions silent for 15 minutes go stale. A banner appears if a local server port is busy, with **Retry now**.
 - **Quota** — the remaining Codex and Claude Code subscription quota (session and weekly windows, reset times in your local time). Agent Pets has no account system and never asks for agent credentials: it reuses the CLI's local sign-in, queries the provider from the main process and passes only percentages to the UI. If the CLI session is missing or expired, sign in again in that CLI. Results refresh every 2 minutes while the panel is open (**Refresh now** is rate limited); the last good reading stays visible if a refresh fails. A thin quota meter also appears in the pet's status pill while that tool is active.
@@ -90,14 +90,15 @@ Under **Settings → Pets → Growth**: XP, level, evolution stage and streak, r
 
 ## Settings
 
-Open from the panel header or the pet menu. Settings are in four groups, with **search** at the top that jumps to the matching setting:
+Open from the panel header or the pet menu. Settings are in five groups, with **search** at the top that jumps to the matching setting:
 
 | Group | Contents |
 |-------|----------|
-| General | Language (Traditional Chinese / English), **Theme** (Panel: match system / light / dark; Pet: dark by default, light, or follow the panel — set separately, e.g. a dark system with a light pet), pet size, bounce & shake, status bubble, ambient motion, working hint |
+| General | Language (Traditional Chinese / English), **Theme** (Panel: match system / light / dark; Pet: dark by default, light, or follow the panel — set separately, e.g. a dark system with a light pet), pet size, reset panel size, bounce & shake, status bubble, ambient motion, working hint |
 | Pets | Pet library and imports, multiple pets, project pets, Growth (mood, XP, achievements) |
-| Desktop & alerts | Notifications, Do Not Disturb, sound; Mini mode, Edge peek, Shimeji, capture exclusion, fullscreen auto-hide, right-click hide, permission bubble, Presentation MCP, launch at startup (packaged builds), permission log |
-| Integrations | Advanced (Setup Wizard, project MCP, diagnostics, restart, quit) and Plugins |
+| Desktop | Notifications, Do Not Disturb, sound; Mini mode, Edge peek, Shimeji, capture exclusion, fullscreen auto-hide, right-click hide, permission bubble, Presentation MCP, launch at startup (packaged builds), permission log |
+| Advanced | Setup Wizard, project MCP, diagnostics, restart, quit |
+| Plugins | Install, enable, permissions, updates and plugin notifications (day-to-day use is in the dashboard plugin tabs) |
 
 - **Do Not Disturb** silences native notifications, sounds, extra motion and non-essential bubbles without stopping event ingestion. Timed presets are in the Tray menu: 30 minutes, 1 hour, until 9:00 tomorrow, or until turned off (a timed DND lasts at most 7 days). A summary notification reports how many alerts were silenced when it ends.
 - **Notifications** (on by default) cover waiting-permission, waiting-input, completion and errors, with a per-session cooldown and batching of terminal events. **Sound** (off by default) plays short synthesized cues with per-event toggles and a volume slider.
@@ -112,21 +113,21 @@ When an agent asks for permission, a Liquid Glass bubble appears on the pet and 
 - **Hotkeys** — global shortcuts exist only while the top request is eligible (not high risk): **Cmd+Shift+Y** allow once / **Cmd+Shift+N** deny on macOS, **Ctrl+Shift+Y** / **Ctrl+Shift+N** on Windows. If another app owns the key, the bubble says so and the buttons still work. In the bubble itself: **N** or **Esc** denies; **Y** allows once for low risk, and must be held for 0.6 s for other risk levels.
 - **Queue** — several pending requests show as a list you can expand; **Deny all** needs a second press to confirm.
 - For agents that cannot be answered here (Codex, Claude Code) the bubble is a reminder that tells you to go back to the tool. Only `allow once` and `deny` exist; permanent approval is intentionally unavailable.
-- **Permission Bubble** can be switched off in Settings; pending requests then stay with the broker and the Tray badge. **Settings → Desktop & alerts** also shows a bounded log of recent decisions (time, tool, source, result only).
+- **Permission Bubble** can be switched off in Settings; pending requests then stay with the broker and the Tray badge. **Settings → Desktop** also shows a bounded log of recent decisions (time, tool, source, result only).
 
 ## Plugins
 
 Plugins add pet notifications and reactions, a panel page, Tray commands, badges, pet skins and status rows. They run in a sandbox with no Node.js, filesystem or shell access, and network use is limited to HTTPS hosts you approve.
 
-**Settings → Integrations → Plugins** has four sections: **Installed** (enable, update, settings, details), **Explore** (the opt-in online catalog with signature checks and updates), **Notifications** (an inbox of plugin messages with per-plugin mute) and **Advanced** (developer mode, resource limits, diagnostics). Installing shows a sheet that groups the requested permissions by risk; new high-risk permissions or a changed signing key must be acknowledged. Plugins install disabled and you turn each on yourself.
+**Settings → Plugins** has four sections: **Installed** (enable, update, settings, details), **Explore** (the opt-in online catalog with signature checks and updates), **Notifications** (an inbox of plugin messages with per-plugin mute) and **Advanced** (developer mode, resource limits, diagnostics). Installing shows a sheet that groups the requested permissions by risk; new high-risk permissions or a changed signing key must be acknowledged. Plugins install disabled and you turn each on yourself.
 
 To build a plugin, read the [plugin developer handbook](docs/plugins/README.md).
 
 ## Project MCP and Presentation MCP
 
-**Presentation MCP** is a local stdio bridge, `~/.desktop-pet/presentation-mcp.mjs`, that lets an MCP-capable agent make the pet speak or react. It exposes three tools: `pet_status` (read-only), `pet_react` (five bounded reactions) and `pet_say` (up to 240 characters for 1–15 seconds). Each client is limited to 3 requests per 10 seconds. It cannot run commands, touch files, answer permissions or change XP, and Do Not Disturb and permission/error states take precedence. It can be switched off under Settings → Desktop & alerts.
+**Presentation MCP** is a local stdio bridge, `~/.desktop-pet/presentation-mcp.mjs`, that lets an MCP-capable agent make the pet speak or react. It exposes three tools: `pet_status` (read-only), `pet_react` (five bounded reactions) and `pet_say` (up to 240 characters for 1–15 seconds). Each client is limited to 3 requests per 10 seconds. It cannot run commands, touch files, answer permissions or change XP, and Do Not Disturb and permission/error states take precedence. It can be switched off under Settings → Desktop.
 
-**Setup MCP for a project** (Settings → Integrations → Advanced) registers the bridge in a project in two steps, so nothing is written before you review it:
+**Setup MCP for a project** (Settings → Advanced) registers the bridge in a project in two steps, so nothing is written before you review it:
 
 1. Choose the project folder. A review lists each tool, the exact file it would create or modify, whether Git already tracks it, and a preview of the entry. Only ticked tools are written: Codex `.codex/config.toml`, Claude Code `.mcp.json`, OpenCode `opencode.json`.
 2. **Local only** (on by default in a Git repository) adds the new files to `.git/info/exclude`, because the entry contains absolute Node.js and bridge paths from your machine that mean nothing to teammates. Files with comments (JSONC), invalid JSON or an existing different `agent-pets` entry are never rewritten; the result shows a copyable snippet instead.
@@ -148,7 +149,7 @@ Hooks post status updates to `http://127.0.0.1:17373/v1/events` with the per-ins
 
 ## Diagnostics and logs
 
-**Settings → Integrations → Advanced → Export diagnostics** saves a JSON report to a place you choose: versions, system info, local server and plugin host state, counters and the recent log. Tokens, prompts and personal paths are removed and nothing is uploaded. If the previous run ended abnormally, the app suggests exporting it.
+**Settings → Advanced → Export diagnostics** saves a JSON report to a place you choose: versions, system info, local server and plugin host state, counters and the recent log. Tokens, prompts and personal paths are removed and nothing is uploaded. If the previous run ended abnormally, the app suggests exporting it.
 
 The main-process log is `logs/main.log` inside the app's userData folder (`~/Library/Application Support/Agent Pets/` on macOS, `%APPDATA%\Agent Pets\` on Windows), rotated at 1 MB with 3 files kept and redacted when written. Plugin diagnostics are under each plugin's **Diagnostics** tab.
 
