@@ -72,6 +72,7 @@ import { pluginHostAssets } from '../plugin-host-assets'
 import { parsePluginManifest } from '../plugin-manifest'
 import { createPermissionAdapterServer, PermissionAdapterRelay } from '../permission-adapter-server'
 import type { DesktopPreferences } from '../../src/types/desktop'
+import { CLAUDE_ANSWERABLE_GRACE_MS, withAnswerableClaudeNotice } from '../claude-permission-notice'
 import { locale, setLocale, t } from '../../src/i18n'
 import tokensCss from '../../src/styles/tokens.css?raw'
 import type { ProgressionAwardEvent, ProgressionEventResult, ProgressionSnapshot } from '../../src/types/progression'
@@ -3250,8 +3251,15 @@ export function rawProjectPath(input: unknown): string | undefined {
 }
 
 export async function normalizeIngressEvent(input: unknown, receivedAt?: number) {
-  const normalized = await mainState.agentAdapterRegistry?.normalize(input, receivedAt)
-  if (!normalized) return { ok: false as const, error: 'adapter_registry_unavailable' }
+  const normalized = withAnswerableClaudeNotice(
+    await mainState.agentAdapterRegistry?.normalize(input, receivedAt) ?? { ok: false as const, error: 'adapter_registry_unavailable' },
+    {
+      enabled: claudePermissionRespondEnabled,
+      hasRecentRequest: (source, sessionId) => Boolean(
+        mainState.permissionBroker?.hasRecentRequestForSession(source, sessionId, CLAUDE_ANSWERABLE_GRACE_MS),
+      ),
+    },
+  )
   if (!normalized.ok || !mainState.projectRoutingStore) return normalized
 
   try {
