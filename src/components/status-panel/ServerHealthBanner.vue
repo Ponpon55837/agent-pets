@@ -14,8 +14,12 @@ function describe(server: LocalServerHealth): string {
   const name = t(`reliability.server.name.${server.id}`)
   if (server.state === 'failed') return `${name}：${t('reliability.server.bannerFailed', { port: server.port, code: server.code ?? 'UNKNOWN' })}`
   if (server.occupant === 'agent-pets') return `${name}：${t('reliability.server.bannerBusyAgentPets', { port: server.port })}`
-  return `${name}：${t('reliability.server.bannerBusy', { port: server.port, attempt: server.attempt })}`
+  return `${name}：${t('reliability.server.bannerBusy', { port: server.port })}`
 }
+
+const expanded = ref(false)
+const allRetrying = computed(() => offline.value.every(server => server.state === 'retrying' && server.occupant !== 'agent-pets'))
+const summary = computed(() => t(allRetrying.value ? 'reliability.server.summaryBusy' : 'reliability.server.summaryMixed', { count: offline.value.length }))
 
 function retry() {
   void window.electronAPI?.retryServerHealth?.().then(snapshot => { servers.value = snapshot.servers }).catch(() => {})
@@ -32,10 +36,17 @@ onUnmounted(() => dispose?.())
   <div v-if="offline.length > 0" class="server-health-banner" role="alert">
     <Icon name="warning" :size="18" />
     <div class="server-health-text">
-      <strong>{{ t('reliability.server.bannerTitle') }}</strong>
-      <small v-for="server in offline" :key="server.id">{{ describe(server) }}</small>
+      <strong class="server-health-summary">{{ summary }}</strong>
+      <ul v-if="expanded" id="server-health-details" class="server-health-details">
+        <li v-for="server in offline" :key="server.id">{{ describe(server) }}</li>
+      </ul>
     </div>
-    <Button size="sm" variant="secondary" @click="retry">{{ t('reliability.server.retry') }}</Button>
+    <div class="server-health-actions">
+      <Button size="sm" variant="secondary" @click="retry">{{ t('reliability.server.retry') }}</Button>
+      <Button size="sm" variant="ghost" :aria-expanded="expanded" aria-controls="server-health-details" @click="expanded = !expanded">
+        {{ expanded ? t('reliability.server.hideDetails') : t('reliability.server.showDetails') }}
+      </Button>
+    </div>
   </div>
 </template>
 
@@ -64,8 +75,26 @@ onUnmounted(() => dispose?.())
   font-size: var(--font-heading-sm);
 }
 
-.server-health-text small {
+.server-health-summary {
+  line-height: 1.4;
+}
+
+.server-health-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--organic-space-1) 0 0;
+  padding: 0;
   font-size: var(--font-body-sm);
   line-height: 1.45;
+  list-style: none;
+}
+
+.server-health-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--organic-space-1);
 }
 </style>

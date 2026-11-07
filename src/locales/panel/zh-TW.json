@@ -4,7 +4,7 @@
   "panel.groupGeneral": "通用",
   "panel.groupPets": "寵物",
   "panel.groupDesktop": "桌面與通知",
-  "panel.groupIntegrations": "整合與進階",
+  "panel.groupIntegrations": "進階",
   "panel.searchLabel": "搜尋設定",
   "panel.searchPlaceholder": "搜尋設定…",
   "panel.searchClear": "清除搜尋",
@@ -55,5 +55,7 @@
   "panel.sizeHelp": "目前大小：原始素材的 {percent}%。",
   "panel.changePet": "更換寵物",
   "panel.subtitleActive": "{running} 個執行中 · {attention} 個待處理",
-  "panel.progressUnavailable": "成長資料暫時無法使用"
+  "panel.progressUnavailable": "成長資料暫時無法使用",
+  "panel.groupPlugins": "插件",
+  "panel.setupWizardHelp": "重新執行 Hook 安裝與整合檢查。"
 }

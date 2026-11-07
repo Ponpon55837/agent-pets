@@ -37,7 +37,10 @@ test('each section belongs to exactly one group and every entry points at a grou
   for (const entry of SETTINGS_ENTRIES) assert.ok(sections.includes(entry.section), entry.id)
   assert.equal(new Set(SETTINGS_ENTRIES.map(entry => entry.id)).size, SETTINGS_ENTRIES.length)
   assert.equal(groupOfSection('notifications'), 'desktop')
-  assert.equal(groupOfSection('plugins'), 'integrations')
+  assert.equal(groupOfSection('plugins'), 'plugins')
+  assert.equal(groupOfSection('advanced'), 'integrations')
+  assert.ok(isSettingsGroupId('plugins'))
+  assert.equal(SETTINGS_GROUPS.length, 5)
   assert.ok(isSettingsGroupId('pets'))
   assert.ok(!isSettingsGroupId('appearance'))
 })
@@ -56,6 +59,13 @@ test('search matches labels, help and synonyms in both languages', () => {
   assert.deepEqual(ids('zzzz-no-match'), [])
   assert.ok(ids('通知').includes('notifications'))
   assert.deepEqual(ids('勿擾 音效'), [])
+})
+
+test('plugin search results land in the dedicated plugins group', () => {
+  const messages = catalog('zh-TW')
+  const hit = searchSettings('插件', ((key: string) => messages[key] ?? key) as never).find(item => item.entry.id === 'plugins')
+  assert.ok(hit)
+  assert.equal(groupOfSection(hit.entry.section), 'plugins')
 })
 
 test('roving tab navigation wraps and supports Home and End', () => {

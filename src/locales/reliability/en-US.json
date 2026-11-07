@@ -12,7 +12,7 @@
   "reliability.server.portBusyBody": "Local port {port} is held by another program, so agent events cannot arrive. Close the old Agent Pets or the program using it.",
   "reliability.server.failedBody": "Local port {port} could not start, so agent events cannot arrive. Check system permissions or firewall settings.",
   "reliability.server.bannerTitle": "Event receiver offline",
-  "reliability.server.bannerBusy": "Port {port} is in use. Retrying automatically (attempt {attempt}).",
+  "reliability.server.bannerBusy": "Port {port} is in use; retrying automatically.",
   "reliability.server.bannerBusyAgentPets": "Port {port} is held by another Agent Pets. Close it first.",
   "reliability.server.bannerFailed": "Port {port} could not start ({code}).",
   "reliability.server.retry": "Retry now",
@@ -28,6 +28,10 @@
   "reliability.diagnostics.failed": "Could not save diagnostics.",
   "reliability.renderer.errorMessage": "Something went wrong in this view.",
   "reliability.renderer.reload": "Reload",
+  "reliability.server.summaryBusy": "{count} local service ports are in use; retrying automatically",
+  "reliability.server.summaryMixed": "{count} local services are offline",
+  "reliability.server.showDetails": "Show details",
+  "reliability.server.hideDetails": "Hide details",
   "reliability.history.recoveredTitle": "History database was rebuilt",
   "reliability.history.recoveredBody": "The history database was damaged. A backup copy was kept and a new database was created; history will build up again from now."
 }

@@ -120,7 +120,7 @@ function openPetSettings(): void {
 }
 
 function openPluginSettings(): void {
-  settingsGroup.value = 'integrations'
+  settingsGroup.value = 'plugins'
   store.openSettings()
 }
 
@@ -158,7 +158,7 @@ onMounted(() => {
     pluginViewRequestNonce.value += 1
   }) ?? null
   removePluginViewRequestListener = window.electronAPI?.onPanelOpenPluginView(pluginId => {
-    settingsGroup.value = 'integrations'
+    settingsGroup.value = 'plugins'
     requestedPluginViewId.value = pluginId
     pluginViewRequestNonce.value += 1
   }) ?? null
@@ -208,8 +208,8 @@ onUnmounted(() => {
         <Button v-if="store.panelView === 'sessions'" variant="ghost" icon-only :title="`${t('settings')} (${settingsShortcut})`" :aria-label="t('settings')" @click="store.openSettings()">
           <Icon name="settings" />
         </Button>
-        <Button v-if="store.panelView === 'sessions'" variant="ghost" icon-only :active="store.dndEnabled" :title="`${t('dnd')}: ${store.dndEnabled ? t('panel.stateOn') : t('panel.stateOff')}`" :aria-label="t('dnd')" @click="store.setDndEnabled(!store.dndEnabled)">
-          <Icon name="moon" />
+        <Button v-if="store.panelView === 'sessions'" variant="ghost" icon-only :active="store.dndEnabled" :title="`${t('dnd')}: ${store.dndEnabled ? t('panel.stateOn') : t('panel.stateOff')}`" :aria-label="t('dnd')" :aria-pressed="store.dndEnabled" @click="store.setDndEnabled(!store.dndEnabled)">
+          <Icon name="bell-off" />
         </Button>
         <Button v-if="store.panelView === 'sessions'" variant="ghost" icon-only :active="store.panelPinned" :title="store.panelPinned ? t('panel.unpin') : t('panel.pin')" :aria-label="store.panelPinned ? t('panel.unpin') : t('panel.pin')" :aria-pressed="store.panelPinned" @click="store.setPanelPinned(!store.panelPinned)">
           <Icon name="pin" />

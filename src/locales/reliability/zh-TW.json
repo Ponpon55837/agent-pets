@@ -12,7 +12,7 @@
   "reliability.server.portBusyBody": "本機埠 {port} 被其他程式佔用，Agent 事件暫時收不到。請關閉舊的 Agent Pets 或佔用該埠的程式。",
   "reliability.server.failedBody": "本機埠 {port} 無法啟動，Agent 事件暫時收不到。請檢查系統權限或防火牆設定。",
   "reliability.server.bannerTitle": "事件接收器離線",
-  "reliability.server.bannerBusy": "埠 {port} 被佔用，正在自動重試（第 {attempt} 次）。",
+  "reliability.server.bannerBusy": "埠 {port} 被佔用，正在自動重試。",
   "reliability.server.bannerBusyAgentPets": "埠 {port} 被另一個 Agent Pets 佔用，請先關閉它。",
   "reliability.server.bannerFailed": "埠 {port} 無法啟動（{code}）。",
   "reliability.server.retry": "立即重試",
@@ -28,6 +28,10 @@
   "reliability.diagnostics.failed": "無法儲存診斷資訊。",
   "reliability.renderer.errorMessage": "畫面發生錯誤。",
   "reliability.renderer.reload": "重新載入",
+  "reliability.server.summaryBusy": "{count} 個本機服務的埠被佔用，正在自動重試",
+  "reliability.server.summaryMixed": "{count} 個本機服務離線",
+  "reliability.server.showDetails": "顯示詳情",
+  "reliability.server.hideDetails": "收合詳情",
   "reliability.history.recoveredTitle": "歷史資料庫已重建",
   "reliability.history.recoveredBody": "偵測到歷史資料庫損毀，已保留一份備份並建立新的資料庫。歷史統計會從現在重新累積。"
 }
