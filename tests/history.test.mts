@@ -566,3 +566,120 @@ test('runtime prune deletes expired events and sessions in bounded batches', asy
   assert.equal(Number(raw.prepare('SELECT COUNT(*) AS n FROM events').get().n), 5)
   assert.equal(Number(raw.prepare('SELECT COUNT(*) AS n FROM sessions').get().n), 5)
 })
+
+test('v6 migration is set-based: 50k events rebuild identically to the legacy row-by-row logic within a time bound', (t) => {
+  const now = Date.UTC(2026, 9, 26, 12)
+  const localDate = (timestamp: number): string => new Date(timestamp).toISOString().slice(0, 10)
+  const database = databasePath()
+  const first = new HistoryStore(database.filePath, { now: () => now, localDate })
+  first.close()
+
+  const moduleRequire = createRequire(import.meta.url)
+  const { DatabaseSync } = moduleRequire('node:sqlite') as {
+    DatabaseSync: new (filePath: string) => {
+      exec(sql: string): void
+      close(): void
+      prepare(sql: string): { all(...p: unknown[]): Array<Record<string, unknown>>, run(...p: unknown[]): unknown }
+    }
+  }
+  const raw = new DatabaseSync(database.filePath)
+  const EVENTS = 50_000
+  const pets = ['aang-airbender', 'wolf', 'local-usage']
+  const adapters = ['claude-code', 'codex', 'generic-http']
+  const projects = ['', 'a'.repeat(32), 'b'.repeat(32), 'c'.repeat(32)]
+  let seed = 4242
+  const rand = () => { seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0; return seed / 2 ** 32 }
+  raw.exec('BEGIN')
+  const insertEvent = raw.prepare(`
+    INSERT INTO events(event_id, schema_version, type, trust, adapter_id, agent_id, session_id, project_id, pet_id,
+      local_date, occurred_at, received_at, state, active_delta_ms, token_input, token_output, token_cache_read,
+      token_cache_write, token_quality, payload_json)
+    VALUES (?, 2, 'x', 'adapter_verified', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}')
+  `)
+  const insertSession = raw.prepare(`
+    INSERT INTO sessions(session_pk, adapter_id, agent_id, external_session_id, project_id, pet_id, started_at, ended_at,
+      terminal_state, last_state, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'error', ?)
+  `)
+  for (let i = 0; i < EVENTS; i += 1) {
+    const at = now - Math.floor(rand() * 60 * 24 * 3600_000)
+    const kind = rand()
+    const quality = rand() < 0.3 ? 'exact' : rand() < 0.5 ? 'estimated' : 'none'
+    const tokens = quality === 'none' ? [null, null, 0, 0] : [Math.floor(rand() * 5000), Math.floor(rand() * 900), Math.floor(rand() * 400), Math.floor(rand() * 90)]
+    insertEvent.run(
+      `ev-${i}`, adapters[i % 3], 'agent', `sess-${Math.floor(rand() * 4000)}`, projects[i % 4], pets[Math.floor(rand() * 3)],
+      localDate(at), at, at, kind < 0.04 ? 'success' : 'thinking', kind < 0.5 ? Math.floor(rand() * 300_000) : 0,
+      ...tokens, quality,
+    )
+    if (i % 25 === 0) {
+      insertSession.run(`err-${i}`, adapters[i % 3], 'agent', `e${i}`, projects[i % 4], pets[i % 3], at, at, 'error', at)
+    }
+  }
+  raw.exec('COMMIT')
+  raw.exec(`
+    DELETE FROM schema_migrations WHERE version IN (6, 7);
+    DELETE FROM daily_stats;
+  `)
+
+  // Oracle: the legacy migration, reimplemented over the raw rows (read AFTER the
+  // v6 exact->estimated downgrade is applied, exactly as the old order did).
+  const expected = new Map<string, Record<string, number | string>>()
+  const bump = (key: string, base: Record<string, number | string>, patch: (row: Record<string, number | string>) => void): void => {
+    const row = expected.get(key) ?? { ...base, sessions_completed: 0, sessions_failed: 0, active_ms: 0, token_input: 0, token_output: 0, token_cache_read: 0, token_cache_write: 0, token_quality: 'none' }
+    patch(row)
+    expected.set(key, row)
+  }
+  const merge = (a: string, b: string): string => a === 'exact' || b === 'exact' ? 'exact' : a === 'estimated' || b === 'estimated' ? 'estimated' : 'none'
+
+  const started = Date.now()
+  const migrated = new HistoryStore(database.filePath, { now: () => now, localDate })
+  const elapsedMs = Date.now() - started
+  t.after(() => { migrated.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  t.diagnostic(`v6 rebuild of ${EVENTS} events: ${elapsedMs} ms`)
+  assert.ok(elapsedMs < 10_000, `v6/v7 migration of ${EVENTS} events took ${elapsedMs} ms`)
+
+  const events = raw.prepare('SELECT * FROM events ORDER BY occurred_at ASC, event_id ASC').all()
+  for (const row of events) {
+    const key = [row.local_date, row.pet_id, row.project_id, row.adapter_id].join('|')
+    bump(key, { local_date: row.local_date as string, pet_id: row.pet_id as string, project_id: row.project_id as string, adapter_id: row.adapter_id as string }, agg => {
+      agg.active_ms = Number(agg.active_ms) + Number(row.active_delta_ms)
+      agg.token_input = Number(agg.token_input) + Number(row.token_input ?? 0)
+      agg.token_output = Number(agg.token_output) + Number(row.token_output ?? 0)
+      agg.token_cache_read = Number(agg.token_cache_read) + Number(row.token_cache_read ?? 0)
+      agg.token_cache_write = Number(agg.token_cache_write) + Number(row.token_cache_write ?? 0)
+      agg.token_quality = merge(String(agg.token_quality), String(row.token_quality))
+    })
+  }
+  const seen = new Set<string>()
+  for (const row of events) {
+    if (row.state !== 'success') continue
+    const projectId = /^[a-f0-9]{32}$/.test(String(row.project_id)) ? String(row.project_id) : 'unbound'
+    const identity = `${row.pet_id}:${row.agent_id}:${row.session_id}:${projectId}`
+    if (seen.has(identity)) continue
+    seen.add(identity)
+    const key = [localDate(Number(row.occurred_at)), row.pet_id, projectId === 'unbound' ? '' : projectId, row.adapter_id].join('|')
+    bump(key, { local_date: localDate(Number(row.occurred_at)), pet_id: row.pet_id as string, project_id: projectId === 'unbound' ? '' : projectId, adapter_id: row.adapter_id as string }, agg => { agg.sessions_completed = Number(agg.sessions_completed) + 1 })
+  }
+  for (const row of raw.prepare("SELECT * FROM sessions WHERE terminal_state = 'error' AND ended_at IS NOT NULL").all()) {
+    const date = localDate(Number(row.ended_at))
+    const key = [date, row.pet_id, row.project_id, row.adapter_id].join('|')
+    bump(key, { local_date: date, pet_id: row.pet_id as string, project_id: row.project_id as string, adapter_id: row.adapter_id as string }, agg => { agg.sessions_failed = Number(agg.sessions_failed) + 1 })
+  }
+
+  const actual = new Map<string, Record<string, unknown>>()
+  for (const row of raw.prepare('SELECT * FROM daily_stats').all()) {
+    actual.set([row.local_date, row.pet_id, row.project_id, row.adapter_id].join('|'), row)
+  }
+  const shape = (row: Record<string, unknown>): unknown[] => [
+    row.sessions_completed, row.sessions_failed, row.active_ms, row.token_input, row.token_output,
+    row.token_cache_read, row.token_cache_write, row.token_quality,
+  ]
+  // Heartbeat-only zero rows are not materialised by the new writer; compare non-empty rows.
+  const nonEmpty = (rows: Map<string, Record<string, unknown>>): Array<[string, unknown[]]> => [...rows.entries()]
+    .map(([key, row]) => [key, shape(row)] as [string, unknown[]])
+    .filter(([, values]) => values.some(value => value !== 0 && value !== 'none'))
+    .sort((a, b) => a[0].localeCompare(b[0]))
+  // v6 downgrades exact local-log rows; the synthetic rows are not 'agent.token_usage', so they are unchanged.
+  assert.deepEqual(nonEmpty(actual), nonEmpty(expected as Map<string, Record<string, unknown>>))
+  assert.ok(actual.size > 50, 'synthetic data produced a meaningful aggregate')
+  raw.close()
+})

@@ -59,7 +59,7 @@ const MAX_QUEUED_EVENTS = 500
 const PRUNE_BATCH_ROWS = 5000
 const ACTIVE_ROLLUP_STATE = 'active-rollup'
 const MAX_ACTIVE_GAP_MS = 5 * 60 * 1000
-const MAX_ACHIEVEMENT_BACKFILL_EVENTS = 100_000
+const COMPLETED_SESSION_PAGE_ROWS = 5000
 const LOCAL_USAGE_CUTOFF_KEY = 'local_usage_cutoff_at'
 const HISTORY_RANGES: readonly number[] = [7, 30, 90]
 const ACTIVE_STATES = new Set<AgentState>(['thinking', 'tool-running'])
@@ -733,36 +733,62 @@ export class HistoryStore {
    */
   getAchievementCompletedSessions(sinceMs = 0): AchievementCompletedSessionFact[] {
     this.flushQueued()
-    const rows = this.statement(`
-      SELECT event_id, adapter_id, agent_id, session_id, project_id, pet_id, occurred_at, state
-      FROM events
-      WHERE state = 'success' AND session_id IS NOT NULL AND occurred_at >= ?
-      ORDER BY occurred_at ASC, event_id ASC
-      LIMIT ?
-    `).all(Math.max(0, Math.floor(sinceMs)), MAX_ACHIEVEMENT_BACKFILL_EVENTS)
-    const successfulSessions = new Set<string>()
     const completed: AchievementCompletedSessionFact[] = []
-    for (const row of rows) {
-      const adapterId = safeText(row.adapter_id)
-      const source = safeText(row.agent_id)
-      const sessionId = safeText(row.session_id)
-      const projectId = safeText(row.project_id)
-      if (!adapterId || !source || !sessionId) continue
-      const petId = safePetId(typeof row.pet_id === 'string' ? row.pet_id : undefined)
-      const achievementProjectId = PROJECT_ID.test(projectId) ? projectId : 'unbound'
-      const identity = digest(`${petId}:${source}:${sessionId}:${achievementProjectId}`)
-      if (successfulSessions.has(identity)) continue
-      successfulSessions.add(identity)
-      completed.push({
-        petId,
-        source,
-        sessionId,
-        ...(achievementProjectId !== 'unbound' ? { projectId: achievementProjectId } : {}),
-        adapterId,
-        completedAt: Math.max(0, asInteger(row.occurred_at)),
-      })
-    }
+    this.forEachCompletedSession(sinceMs, fact => { completed.push(fact) })
     return completed
+  }
+
+  /**
+   * Streams first-success facts per session identity using keyset pages over the
+   * partial (occurred_at, event_id) success index: bounded memory per page and no
+   * silent truncation for very large histories.
+   */
+  private forEachCompletedSession(sinceMs: number, visit: (fact: AchievementCompletedSessionFact) => void): void {
+    const seen = new Set<string>()
+    const since = Math.max(0, Math.floor(sinceMs))
+    let afterAt = -1
+    let afterId = ''
+    for (;;) {
+      const rows = afterAt < 0
+        ? this.statement(`
+            SELECT event_id, adapter_id, agent_id, session_id, project_id, pet_id, occurred_at
+            FROM events
+            WHERE state = 'success' AND session_id IS NOT NULL AND occurred_at >= ?
+            ORDER BY occurred_at ASC, event_id ASC
+            LIMIT ?
+          `).all(since, COMPLETED_SESSION_PAGE_ROWS)
+        : this.statement(`
+            SELECT event_id, adapter_id, agent_id, session_id, project_id, pet_id, occurred_at
+            FROM events
+            WHERE state = 'success' AND session_id IS NOT NULL AND (occurred_at, event_id) > (?, ?)
+            ORDER BY occurred_at ASC, event_id ASC
+            LIMIT ?
+          `).all(afterAt, afterId, COMPLETED_SESSION_PAGE_ROWS)
+      for (const row of rows) {
+        const adapterId = safeText(row.adapter_id)
+        const source = safeText(row.agent_id)
+        const sessionId = safeText(row.session_id)
+        const projectId = safeText(row.project_id)
+        if (!adapterId || !source || !sessionId) continue
+        const petId = safePetId(typeof row.pet_id === 'string' ? row.pet_id : undefined)
+        const achievementProjectId = PROJECT_ID.test(projectId) ? projectId : 'unbound'
+        const identity = digest(`${petId}:${source}:${sessionId}:${achievementProjectId}`)
+        if (seen.has(identity)) continue
+        seen.add(identity)
+        visit({
+          petId,
+          source,
+          sessionId,
+          ...(achievementProjectId !== 'unbound' ? { projectId: achievementProjectId } : {}),
+          adapterId,
+          completedAt: Math.max(0, asInteger(row.occurred_at)),
+        })
+      }
+      if (rows.length < COMPLETED_SESSION_PAGE_ROWS) return
+      const last = rows[rows.length - 1]!
+      afterAt = asInteger(last.occurred_at)
+      afterId = String(last.event_id)
+    }
   }
 
   clear(): void {
@@ -1062,12 +1088,8 @@ export class HistoryStore {
         UPDATE events SET token_quality = 'estimated'
           WHERE type = 'agent.token_usage' AND token_quality = 'exact';
         DROP INDEX IF EXISTS idx_daily_stats_summary_cover;
-        CREATE INDEX IF NOT EXISTS idx_daily_stats_summary_cover
-          ON daily_stats(
-            pet_id, local_date, project_id, adapter_id,
-            sessions_completed, sessions_failed, active_ms, token_input, token_output,
-            token_cache_read, token_cache_write, token_quality
-          );
+        CREATE INDEX IF NOT EXISTS idx_history_events_success_time
+          ON events(occurred_at, event_id) WHERE state = 'success';
         DELETE FROM daily_stats;
       `)
       this.rebuildEventDailyStats()
@@ -1113,28 +1135,42 @@ export class HistoryStore {
     }
   }
 
+  /**
+   * Rebuilds the event-derived daily_stats columns with one set-based statement:
+   * SQLite folds the events (O(E) scan, no per-row JS round trip, no E-sized
+   * array in memory) and only the aggregated rows are written. Sums commute, so
+   * no ORDER BY is needed. ON CONFLICT keeps it additive if two raw keys
+   * normalise to the same dimension tuple.
+   */
   private rebuildEventDailyStats(): void {
-    const rows = this.statement(`
-      SELECT local_date, pet_id, project_id, adapter_id,
-             active_delta_ms, token_input, token_output, token_cache_read, token_cache_write,
-             token_quality
-      FROM events ORDER BY occurred_at ASC, event_id ASC
-    `).all()
-    for (const row of rows) {
-      this.updateDailyStat(
-        safeText(row.local_date),
-        safePetId(typeof row.pet_id === 'string' ? row.pet_id : undefined),
-        safeText(row.project_id),
-        safeText(row.adapter_id, 'unknown'),
-        null,
-        Math.max(0, asInteger(row.active_delta_ms)),
-        Math.max(0, asInteger(row.token_input)),
-        Math.max(0, asInteger(row.token_output)),
-        isTokenQuality(row.token_quality) ? row.token_quality : 'none',
-        Math.max(0, asInteger(row.token_cache_read)),
-        Math.max(0, asInteger(row.token_cache_write)),
+    this.statement(`
+      INSERT INTO daily_stats(
+        local_date, pet_id, project_id, adapter_id, sessions_completed, sessions_failed,
+        active_ms, token_input, token_output, token_cache_read, token_cache_write, token_quality
       )
-    }
+      SELECT local_date, pet_id, project_id, COALESCE(NULLIF(adapter_id, ''), 'unknown'), 0, 0,
+             SUM(MAX(0, active_delta_ms)),
+             SUM(MAX(0, COALESCE(token_input, 0))),
+             SUM(MAX(0, COALESCE(token_output, 0))),
+             SUM(MAX(0, COALESCE(token_cache_read, 0))),
+             SUM(MAX(0, COALESCE(token_cache_write, 0))),
+             CASE WHEN SUM(token_quality = 'exact') > 0 THEN 'exact'
+                  WHEN SUM(token_quality = 'estimated') > 0 THEN 'estimated'
+                  ELSE 'none' END
+      FROM events
+      WHERE 1
+      GROUP BY local_date, pet_id, project_id, COALESCE(NULLIF(adapter_id, ''), 'unknown')
+      ON CONFLICT(local_date, pet_id, project_id, adapter_id) DO UPDATE SET
+        active_ms = active_ms + excluded.active_ms,
+        token_input = token_input + excluded.token_input,
+        token_output = token_output + excluded.token_output,
+        token_cache_read = token_cache_read + excluded.token_cache_read,
+        token_cache_write = token_cache_write + excluded.token_cache_write,
+        token_quality = CASE
+          WHEN token_quality = 'exact' OR excluded.token_quality = 'exact' THEN 'exact'
+          WHEN token_quality = 'estimated' OR excluded.token_quality = 'estimated' THEN 'estimated'
+          ELSE 'none' END
+    `).run()
   }
 
   private repairSuccessfulSessionOutcomes(): void {
@@ -1169,38 +1205,46 @@ export class HistoryStore {
   }
 
   private rebuildSessionCompletions(): void {
-    for (const fact of this.getAchievementCompletedSessions()) {
-      this.updateDailyStat(
-        this.localDate(fact.completedAt),
-        fact.petId,
-        fact.projectId ?? '',
-        fact.adapterId,
-        'success',
-        0,
-        0,
-        0,
-        'none',
-      )
+    // Count first, write once per (date, pet, project, adapter) key.
+    const counts = new Map<string, { localDate: string, petId: string, projectId: string, adapterId: string, completed: number, failed: number }>()
+    const add = (localDate: string, petId: string, projectId: string, adapterId: string, kind: 'success' | 'error'): void => {
+      const key = `${localDate}\u0000${petId}\u0000${projectId}\u0000${adapterId}`
+      let entry = counts.get(key)
+      if (!entry) {
+        entry = { localDate, petId, projectId, adapterId, completed: 0, failed: 0 }
+        counts.set(key, entry)
+      }
+      if (kind === 'success') entry.completed += 1
+      else entry.failed += 1
     }
+    this.forEachCompletedSession(0, fact => {
+      add(this.localDate(fact.completedAt), fact.petId, fact.projectId ?? '', fact.adapterId, 'success')
+    })
     const rows = this.statement(`
-      SELECT pet_id, project_id, adapter_id, ended_at, terminal_state
+      SELECT pet_id, project_id, adapter_id, ended_at
       FROM sessions
       WHERE ended_at IS NOT NULL AND terminal_state = 'error'
-      ORDER BY ended_at ASC, session_pk ASC
     `).all()
     for (const row of rows) {
-      const endedAt = Math.max(0, asInteger(row.ended_at))
-      this.updateDailyStat(
-        this.localDate(endedAt),
+      add(
+        this.localDate(Math.max(0, asInteger(row.ended_at))),
         safePetId(typeof row.pet_id === 'string' ? row.pet_id : undefined),
         safeText(row.project_id),
         safeText(row.adapter_id, 'unknown'),
-        row.terminal_state === 'success' || row.terminal_state === 'error' ? row.terminal_state : null,
-        0,
-        0,
-        0,
-        'none',
+        'error',
       )
+    }
+    const upsert = this.statement(`
+      INSERT INTO daily_stats(
+        local_date, pet_id, project_id, adapter_id, sessions_completed, sessions_failed,
+        active_ms, token_input, token_output, token_cache_read, token_cache_write, token_quality
+      ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 'none')
+      ON CONFLICT(local_date, pet_id, project_id, adapter_id) DO UPDATE SET
+        sessions_completed = sessions_completed + excluded.sessions_completed,
+        sessions_failed = sessions_failed + excluded.sessions_failed
+    `)
+    for (const entry of counts.values()) {
+      upsert.run(entry.localDate, entry.petId, entry.projectId, entry.adapterId, entry.completed, entry.failed)
     }
   }
 
