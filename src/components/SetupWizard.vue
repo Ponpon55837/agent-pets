@@ -4,6 +4,8 @@ import type {
   AdapterRuntimeStatus,
   AgentAdapterId,
   DiagnosticReport,
+  InstallErrorCode,
+  InstallOutcome,
 } from '@/types/agent-adapter'
 import type { AgentSource } from '@/types/agent'
 import { locale, t, translateBackendError, type TranslationKey } from '@/i18n'
@@ -43,6 +45,8 @@ interface ToolStatus extends AdapterRuntimeStatus {
   verifiedAt?: number
   testError?: string
   diagnosis?: DiagnosticReport
+  /** Result of the last install/repair, shown inside the card until the next one. */
+  outcome?: InstallOutcome
 }
 
 const tools = ref<ToolStatus[]>([])
@@ -73,30 +77,69 @@ function stopElapsedTimer() {
   }
 }
 
+// Re-detect without throwing away what the user already learned: results of tests, diagnoses and
+// the last install outcome survive a refresh. Only the very first load shows the full loader.
 async function detectTools() {
-  loading.value = true
+  const firstLoad = tools.value.length === 0
+  if (firstLoad) loading.value = true
   error.value = ''
-  startElapsedTimer()
+  if (firstLoad) startElapsedTimer()
   try {
     const status = await Promise.race([
       window.electronAPI?.checkIntegration() ?? Promise.resolve(null),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
     ])
     if (status) {
-      tools.value = status.adapters.map(adapter => ({ ...adapter }))
-    } else {
+      const previous = new Map(tools.value.map(tool => [tool.id, tool]))
+      tools.value = status.adapters.map((adapter) => {
+        const old = previous.get(adapter.id)
+        return {
+          ...adapter,
+          verifiedAt: old?.verifiedAt,
+          testError: old?.testError,
+          diagnosis: old?.diagnosis,
+          outcome: old?.outcome,
+        }
+      })
+    } else if (firstLoad) {
       error.value = t('couldNotDetectTools')
     }
   } catch {
-    error.value = t('failedToDetectTools')
+    if (firstLoad) error.value = t('failedToDetectTools')
   }
   loading.value = false
   stopElapsedTimer()
 }
 
+const INSTALL_ERROR_KEYS: Record<InstallErrorCode, TranslationKey> = {
+  config_unparseable: 'onboarding.errorConfigUnparseable',
+  config_unsafe: 'onboarding.errorConfigUnsafe',
+  config_too_large: 'onboarding.errorConfigTooLarge',
+  permission_denied: 'onboarding.errorPermissionDenied',
+  file_busy: 'onboarding.errorFileBusy',
+  read_only: 'onboarding.errorReadOnly',
+  unknown: 'onboarding.errorUnknown',
+}
+
+function outcomeText(outcome: InstallOutcome): string {
+  if (outcome.action === 'failed') {
+    const code = outcome.errorCode ?? 'unknown'
+    const raw = outcome.errorPath ?? ''
+    const isConfigIssue = code.startsWith('config_')
+    return t(INSTALL_ERROR_KEYS[code], { path: isConfigIssue ? raw : raw ? ` (${raw})` : '' })
+  }
+  return t(`onboarding.outcome.${outcome.action}`, { count: outcome.changedFiles.length })
+}
+
+const installSummary = ref('')
+
+// Every selected tool is installed independently; one failure never blocks the others.
 async function install(target?: AgentAdapterId) {
   installing.value = target ?? 'all'
   installError.value = ''
+  installSummary.value = ''
+  let succeeded = 0
+  let failed = 0
   try {
     const targets = target
       ? [target]
@@ -106,18 +149,44 @@ async function install(target?: AgentAdapterId) {
       if (tool) {
         tool.verifiedAt = undefined
         tool.testError = undefined
+        tool.outcome = undefined
       }
-      const result = await window.electronAPI?.installAdapter(adapterId)
-      if (result && !result.ok) {
-        installError.value = translateBackendError(result.error || t('installFailed'))
-        break
+      try {
+        const result = await window.electronAPI?.installAdapter(adapterId)
+        const outcome: InstallOutcome = result?.outcome ?? {
+          adapterId,
+          action: result?.ok ? 'installed' : 'failed',
+          changedFiles: [],
+          backupPaths: [],
+          ...(result?.ok ? {} : { errorCode: 'unknown' as const }),
+        }
+        if (tool) tool.outcome = outcome
+        if (outcome.action === 'failed') failed += 1
+        else succeeded += 1
+      } catch {
+        failed += 1
+        if (tool) tool.outcome = { adapterId, action: 'failed', changedFiles: [], backupPaths: [], errorCode: 'unknown' }
       }
     }
   } catch {
     installError.value = t('installFailed')
   }
+  if (!target) installSummary.value = t('onboarding.installSummary', { ok: succeeded, failed })
   installing.value = null
   await detectTools()
+}
+
+function actionLabel(tool: ToolStatus): string {
+  if (installing.value === tool.id) return t('installing')
+  if (tool.health === 'ready') return t('reinstall')
+  return t(tool.health === 'degraded' ? 'onboarding.repair' : 'install')
+}
+
+const RESTART_KEYS: Record<AgentAdapterId, TranslationKey> = {
+  opencode: 'onboarding.restartOpenCode',
+  codex: 'onboarding.restartCodex',
+  'claude-code': 'onboarding.restartClaudeCode',
+  'generic-http': 'onboarding.restartOpenCode',
 }
 
 function requestRemoval(target: AgentAdapterId | 'all') {
@@ -298,14 +367,14 @@ onUnmounted(() => {
                 {{ diagnosing === tool.id ? t('diagnosing') : t('diagnose') }}
               </Button>
               <Button
-                variant="primary"
+                :variant="tool.health === 'ready' ? 'secondary' : 'primary'"
                 size="sm"
                 class="tool-action install-action install-btn"
                 v-if="tool.installable && tool.installTarget"
                 :disabled="installing !== null || testing !== null || diagnosing !== null || removing !== null"
                 @click="install(tool.id)"
               >
-                {{ installing === tool.id ? t('installing') : tool.installed ? t('reinstall') : t('install') }}
+                {{ actionLabel(tool) }}
               </Button>
               <Button
                 variant="secondary"
@@ -325,6 +394,20 @@ onUnmounted(() => {
           </div>
           <div class="capability-list">
             <span v-for="capability in capabilityLabels(tool)" :key="capability" class="capability-chip">{{ capability }}</span>
+          </div>
+          <div
+            v-if="tool.outcome"
+            class="test-result"
+            :class="tool.outcome.action === 'failed' ? 'failed' : 'passed'"
+            :role="tool.outcome.action === 'failed' ? 'alert' : 'status'"
+          >
+            {{ outcomeText(tool.outcome) }}
+            <template v-if="tool.outcome.backupPaths.length">
+              {{ t('onboarding.backupMade', { path: tool.outcome.backupPaths[0] ?? '' }) }}
+            </template>
+            <template v-if="tool.outcome.action === 'installed' || tool.outcome.action === 'repaired'">
+              {{ t(RESTART_KEYS[tool.id]) }}
+            </template>
           </div>
           <div v-if="tool.verifiedAt" class="test-result passed">
             {{ t('receiverVerifiedAt', { time: new Date(tool.verifiedAt).toLocaleTimeString(locale) }) }}
@@ -352,6 +435,7 @@ onUnmounted(() => {
       <p class="wizard-note">{{ t('adapterNote') }}</p>
   
         <div v-if="installError" class="error-msg" role="alert">{{ installError }}</div>
+        <p v-if="installSummary" class="wizard-note" role="status">{{ installSummary }}</p>
         <p v-else-if="removalNotice" class="wizard-note" role="status">{{ removalNotice }}</p>
   
         <div class="wizard-actions">

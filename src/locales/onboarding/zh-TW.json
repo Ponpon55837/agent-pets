@@ -53,5 +53,21 @@
   "onboarding.start": "開始設定",
   "onboarding.skipForNow": "稍後再說",
   "onboarding.finish": "完成",
-  "onboarding.nextSteps": "已連線。請重新啟動你的 AI 工具，寵物就會開始顯示它的狀態。之後可以在「設定 → 進階」重新開啟精靈。"
+  "onboarding.nextSteps": "已連線。請重新啟動你的 AI 工具，寵物就會開始顯示它的狀態。之後可以在「設定 → 進階」重新開啟精靈。",
+  "onboarding.repair": "修復",
+  "onboarding.outcome.installed": "已安裝（更新了 {count} 個檔案）。",
+  "onboarding.outcome.repaired": "已修復（更新了 {count} 個檔案）。",
+  "onboarding.outcome.unchanged": "已經是最新，沒有任何變更。",
+  "onboarding.installSummary": "{ok} 個成功 · {failed} 個失敗",
+  "onboarding.backupMade": "原設定已備份到 {path}。",
+  "onboarding.restartOpenCode": "請重新啟動 OpenCode。",
+  "onboarding.restartCodex": "請重新啟動 Codex，然後執行任何一個提示；寵物就會開始顯示狀態。",
+  "onboarding.restartClaudeCode": "請重新啟動 Claude Code（CLI 與 Desktop 皆需要）。",
+  "onboarding.errorConfigUnparseable": "{path} 不是有效的 JSON（不支援註解或結尾逗號），所以 Agent Pets 沒有修改它。請修正後再試。",
+  "onboarding.errorConfigUnsafe": "{path} 不是一般檔案，所以沒有修改。",
+  "onboarding.errorConfigTooLarge": "{path} 太大，所以沒有修改。",
+  "onboarding.errorPermissionDenied": "沒有寫入權限{path}。請檢查檔案或資料夾權限。",
+  "onboarding.errorFileBusy": "檔案正被其他程式使用{path}。請關閉該工具後重試。",
+  "onboarding.errorReadOnly": "磁碟或資料夾是唯讀的{path}，無法寫入設定。",
+  "onboarding.errorUnknown": "安裝失敗。可按「診斷」查看詳細檢查結果。"
 }

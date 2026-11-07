@@ -53,5 +53,21 @@
   "onboarding.start": "Start setup",
   "onboarding.skipForNow": "Not now",
   "onboarding.finish": "Done",
-  "onboarding.nextSteps": "Connected. Restart your AI tools and the pet will start showing their status. You can reopen this wizard from Settings → Advanced."
+  "onboarding.nextSteps": "Connected. Restart your AI tools and the pet will start showing their status. You can reopen this wizard from Settings → Advanced.",
+  "onboarding.repair": "Repair",
+  "onboarding.outcome.installed": "Installed ({count} files updated).",
+  "onboarding.outcome.repaired": "Repaired ({count} files updated).",
+  "onboarding.outcome.unchanged": "Already up to date; nothing changed.",
+  "onboarding.installSummary": "{ok} succeeded · {failed} failed",
+  "onboarding.backupMade": "Your previous config was backed up to {path}.",
+  "onboarding.restartOpenCode": "Restart OpenCode.",
+  "onboarding.restartCodex": "Restart Codex, then run any prompt; the pet will start showing its status.",
+  "onboarding.restartClaudeCode": "Restart Claude Code (both CLI and Desktop).",
+  "onboarding.errorConfigUnparseable": "{path} is not valid JSON (comments and trailing commas are not supported), so Agent Pets did not change it. Fix it and try again.",
+  "onboarding.errorConfigUnsafe": "{path} is not a regular file, so it was not changed.",
+  "onboarding.errorConfigTooLarge": "{path} is too large, so it was not changed.",
+  "onboarding.errorPermissionDenied": "No permission to write{path}. Check the file or folder permissions.",
+  "onboarding.errorFileBusy": "The file is in use by another program{path}. Close that tool and retry.",
+  "onboarding.errorReadOnly": "The disk or folder is read-only{path}, so settings cannot be written.",
+  "onboarding.errorUnknown": "Installation failed. Use Diagnose to see detailed checks."
 }
