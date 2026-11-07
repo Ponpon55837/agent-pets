@@ -14,6 +14,7 @@ import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import Icon from '@/components/ui/Icon.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import { formatNumber, formatTimeFull } from '@/utils/intl-format'
 
 const props = defineProps<{
   /** Opened automatically on the first launch: start with the short intro. */
@@ -458,7 +459,7 @@ onUnmounted(() => {
           <span v-for="i in 9" :key="i" class="pixel-cell" :style="{ animationDelay: `${(i % 3) * 0.12}s` }" />
         </div>
         <span>{{ t('detectingTools') }}</span>
-        <span class="elapsed">{{ (elapsedMs / 1000).toFixed(1) }}s</span>
+        <span class="elapsed">{{ formatNumber(elapsedMs / 1000, locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }}s</span>
       </div>
 
       <div v-else-if="error" class="error-msg">
@@ -561,13 +562,13 @@ onUnmounted(() => {
             {{ t('onboarding.waitingReal', { name: tool.displayName, seconds: Math.ceil(waitRemainingMs / 1000) }) }}
           </div>
           <div v-else-if="tool.realEvent" class="test-result passed" role="status">
-            {{ t('onboarding.realEventOk', { source: SOURCE_LABELS[tool.realEvent.source], time: new Date(tool.realEvent.at).toLocaleTimeString(locale) }) }}
+            {{ t('onboarding.realEventOk', { source: SOURCE_LABELS[tool.realEvent.source], time: formatTimeFull(tool.realEvent.at, locale) }) }}
           </div>
           <div v-else-if="tool.realEventTimedOut" class="test-result failed" role="alert">
             {{ t('onboarding.realEventTimeout', { name: tool.displayName }) }}
           </div>
           <div v-if="tool.verifiedAt" class="test-result passed">
-            {{ t('receiverVerifiedAt', { time: new Date(tool.verifiedAt).toLocaleTimeString(locale) }) }}
+            {{ t('receiverVerifiedAt', { time: formatTimeFull(tool.verifiedAt, locale) }) }}
           </div>
           <div v-else-if="tool.testError" class="test-result failed">{{ tool.testError }}</div>
           <div v-if="tool.diagnosis" class="diagnosis-list">

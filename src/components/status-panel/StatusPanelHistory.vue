@@ -20,6 +20,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Icon from '@/components/ui/Icon.vue'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
 import Select from '@/components/ui/Select.vue'
+import { formatDate } from '@/utils/intl-format'
 
 const props = defineProps<{ active: boolean }>()
 const store = useAgentStore()
@@ -146,7 +147,7 @@ function trackingDate(): string {
   const since = historySummary.value?.tokenTrackingSince
   if (!since) return ''
   const date = new Date(since)
-  return Number.isFinite(date.getTime()) ? date.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''
+  return Number.isFinite(date.getTime()) ? formatDate(date) : ''
 }
 
 const scanLine = computed(() => {

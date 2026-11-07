@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { locale, t } from '@/i18n'
 import { SOURCE_LABELS, STATE_COLORS, STATE_LABELS, STATE_LABELS_SHORT, type AgentSession } from '@/types/agent'
 import SessionElapsed from '@/components/status-panel/SessionElapsed.vue'
+import { formatTimeFull } from '@/utils/intl-format'
 
 // One active session. The whole row is a disclosure button (keyboard focusable,
 // aria-expanded) that reveals the full path, tool and timing; nothing
@@ -11,7 +12,7 @@ const props = defineProps<{ session: AgentSession; projectLabel: string; detail:
 
 const expanded = ref(false)
 const detailsId = computed(() => `session-details-${props.session.key.replace(/[^\w-]/g, '_')}`)
-const lastSeen = computed(() => new Date(props.session.lastSeenAt).toLocaleTimeString(locale.value))
+const lastSeen = computed(() => formatTimeFull(props.session.lastSeenAt, locale.value))
 const title = computed(() => `${SOURCE_LABELS[props.session.source]}${props.projectLabel ? ` · ${props.projectLabel}` : ''}`)
 </script>
 

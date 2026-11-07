@@ -23,6 +23,7 @@ import Icon from '@/components/ui/Icon.vue'
 import { describeTool } from '@/utils/pet-toast'
 import PermissionBubble from '@/components/permission/PermissionBubble.vue'
 import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
+import { formatDateParts } from '@/utils/intl-format'
 
 const store = useAgentStore()
 const clickAreaRef = ref<HTMLElement | null>(null)
@@ -484,7 +485,7 @@ function quotaResetLabel(resetsAt?: string): string {
   if (!Number.isFinite(reset.getTime())) return t('resetTimeUnavailable')
   // No year: the longest quota window is 7 days out, so it carries no
   // information and is the single widest chunk of the tooltip.
-  return t('resetAt', { time: reset.toLocaleString(locale.value, {
+  return t('resetAt', { time: formatDateParts(reset, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
