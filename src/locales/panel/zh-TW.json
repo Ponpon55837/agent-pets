@@ -1,1 +1,19 @@
-{}
+{
+  "panel.pin": "釘選面板（失焦不隱藏）",
+  "panel.unpin": "取消釘選",
+  "panel.groupGeneral": "通用",
+  "panel.groupPets": "寵物",
+  "panel.groupDesktop": "桌面與通知",
+  "panel.groupIntegrations": "整合與進階",
+  "panel.searchLabel": "搜尋設定",
+  "panel.searchPlaceholder": "搜尋設定…",
+  "panel.searchClear": "清除搜尋",
+  "panel.searchResults": "設定搜尋結果",
+  "panel.searchCount": "共 {count} 個結果",
+  "panel.searchNoResults": "找不到與「{query}」相符的設定。",
+  "panel.notificationsCard": "通知與勿擾",
+  "panel.stateOn": "開啟",
+  "panel.stateOff": "關閉",
+  "panel.pausedByDnd": "勿擾模式已暫停",
+  "panel.dndExplain": "勿擾模式開啟時，會暫停桌面通知與寵物反應。"
+}
