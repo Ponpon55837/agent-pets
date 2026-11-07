@@ -45,27 +45,29 @@ export function relaunchApp(app: RelaunchApp): void {
 /**
  * Takes the single-instance lock, tolerating a relaunch racing the previous
  * process's exit: a relaunched instance retries for about 2s before giving up.
+ * The wait is asynchronous so the main thread is never blocked.
  */
-export function acquireSingleInstanceLock(
+export async function acquireSingleInstanceLock(
   request: () => boolean,
   options: {
     argv: readonly string[]
-    sleep: (ms: number) => void
+    sleep?: (ms: number) => Promise<void> | void
     attempts?: number
     delayMs?: number
   },
-): boolean {
+): Promise<boolean> {
   if (request()) return true
   if (!options.argv.includes(RELAUNCH_FLAG)) return false
   const attempts = options.attempts ?? 8
   const delayMs = options.delayMs ?? 250
+  const sleep = options.sleep ?? sleepAsync
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    options.sleep(delayMs)
+    await sleep(delayMs)
     if (request()) return true
   }
   return false
 }
 
-export function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+export function sleepAsync(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }

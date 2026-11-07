@@ -10,3 +10,5 @@ release
 .mcp.json
 opencode.json
 /.codex/config.toml
+
+*.tsbuildinfo

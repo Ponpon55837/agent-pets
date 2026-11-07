@@ -64,7 +64,7 @@ import { PluginDeveloperModeWatcher } from '../plugin-developer-mode.ts'
 import { catalogFingerprintMatches, createPluginCatalogGateway, isPluginCatalogUrl, PLUGIN_CATALOG_ALLOWED_HOSTS, PLUGIN_CATALOG_MAX_PACKAGE_BYTES, selectLatestCompatiblePluginVersion } from '../plugin-catalog.ts'
 import { buildPluginCatalogPanelItems, PluginCatalogAutoCheckSchedule } from '../plugin-catalog-updates.ts'
 import { PluginPanelViewController, type PluginPanelNativeView, type PluginPanelViewSession } from '../plugin-panel-view.ts'
-import { matchesProgrammaticPluginPanelSize, validatePluginPanelViewBounds, type PluginPanelRect } from '../plugin-panel-window.ts'
+import { PROGRAMMATIC_PANEL_RESIZE_WINDOW_MS, shouldRecordUserPanelSize, validatePluginPanelViewBounds, type PluginPanelRect } from '../plugin-panel-window.ts'
 import { isPluginPanelInstallConfirmation, isPluginPanelPluginId, isPluginPanelPreferencePatch, pluginPanelErrorCode } from '../plugin-panel-validation.ts'
 import { handlePluginProtocolRequest } from '../plugin-protocol'
 import { pluginHostAssets } from '../plugin-host-assets'
@@ -1947,19 +1947,20 @@ export function createPanelWindow() {
     mainState.pluginPanelViewController?.relayout({ width: contentBounds.width, height: contentBounds.height })
   })
   mainState.panelWindow.webContents.on('did-start-loading', () => mainState.pluginPanelViewController?.onPanelRendererReload())
+  // 'will-resize' (macOS / Windows) fires only for user-initiated resizes, never for setBounds.
+  mainState.panelWindow.on('will-resize', () => { mainState.lastUserPanelResizeAt = Date.now() })
   mainState.panelWindow.on('resize', () => {
     if (!mainState.panelWindow || mainState.panelWindow.isDestroyed()) return
     const contentBounds = mainState.panelWindow.getContentBounds()
     mainState.pluginPanelViewController?.relayout({ width: contentBounds.width, height: contentBounds.height })
+    if (!shouldRecordUserPanelSize({
+      visible: mainState.panelWindow.isVisible(),
+      now: Date.now(),
+      supportsWillResize: process.platform === 'darwin' || process.platform === 'win32',
+      lastUserResizeAt: mainState.lastUserPanelResizeAt,
+      programmaticUntil: mainState.programmaticPluginPanelUntil,
+    })) return
     const [width, height] = mainState.panelWindow.getSize()
-    if (mainState.programmaticPluginPanelSize) {
-      const programmatic = matchesProgrammaticPluginPanelSize(mainState.programmaticPluginPanelSize, { width, height })
-      mainState.programmaticPluginPanelSize = null
-      if (mainState.pluginPanelResizeResetTimer) clearTimeout(mainState.pluginPanelResizeResetTimer)
-      mainState.pluginPanelResizeResetTimer = null
-      if (programmatic) return
-    }
-    if (!mainState.panelWindow.isVisible()) return
     recordUserPanelSize({ width, height })
   })
 
@@ -2058,12 +2059,7 @@ export function applyPanelWindowLimits(workArea = panelWorkArea()): void {
 export function setPluginPanelWindowBounds(bounds: ReturnType<typeof computePanelBounds>): void {
   if (!mainState.panelWindow || mainState.panelWindow.isDestroyed()) return
   applyPanelWindowLimits(panelWorkArea(bounds))
-  mainState.programmaticPluginPanelSize = { width: bounds.width, height: bounds.height }
-  if (mainState.pluginPanelResizeResetTimer) clearTimeout(mainState.pluginPanelResizeResetTimer)
-  mainState.pluginPanelResizeResetTimer = setTimeout(() => {
-    mainState.programmaticPluginPanelSize = null
-    mainState.pluginPanelResizeResetTimer = null
-  }, 500)
+  mainState.programmaticPluginPanelUntil = Date.now() + PROGRAMMATIC_PANEL_RESIZE_WINDOW_MS
   mainState.panelWindow.setBounds(bounds)
 }
 

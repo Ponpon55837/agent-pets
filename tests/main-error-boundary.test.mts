@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { installChildProcessGoneLogger, installCrashGuard, runStartupStep } from '../electron/main/crash-guard.ts'
+import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, shouldEscalateCrashes } from '../electron/main/crash-guard.ts'
 
 function fakeProcess() {
   return new EventEmitter() as EventEmitter & { off: EventEmitter['off'] }
@@ -70,4 +70,26 @@ test('child-process-gone is logged', () => {
   installChildProcessGoneLogger(app, (_l, m) => logs.push(m))
   app.emit('child-process-gone', {}, { type: 'GPU', reason: 'crashed', exitCode: 9 })
   assert.match(logs[0], /type=GPU reason=crashed/)
+})
+
+test('crash escalation policy: 5 distinct errors or 20 repeats inside 2 minutes', () => {
+  const at = (signature: string, t: number) => ({ signature, at: t })
+  const distinct = ['a', 'b', 'c', 'd'].map((s, i) => at(s, i * 1000))
+  assert.equal(shouldEscalateCrashes(distinct, 10_000), false)
+  assert.equal(shouldEscalateCrashes([...distinct, at('e', 5000)], 10_000), true)
+  // Old occurrences fall out of the window.
+  assert.equal(shouldEscalateCrashes([...distinct, at('e', 130_000)], 131_000), false)
+  const repeats = Array.from({ length: 20 }, (_, i) => at('same', i * 100))
+  assert.equal(shouldEscalateCrashes(repeats.slice(1), 5000), false)
+  assert.equal(shouldEscalateCrashes(repeats, 5000), true)
+})
+
+test('crash guard escalates at most once per run', () => {
+  const handlers: Record<string, (value: unknown) => void> = {}
+  const proc = { on: (event: string, listener: (value: unknown) => void) => { handlers[event] = listener } }
+  let now = 0
+  let escalations = 0
+  installCrashGuard({ proc: proc as never, log: () => {}, now: () => now, onEscalate: () => { escalations += 1 } })
+  for (let i = 0; i < 12; i += 1) { now += 100; handlers.uncaughtException!(new Error(`boom ${i}`)) }
+  assert.equal(escalations, 1)
 })

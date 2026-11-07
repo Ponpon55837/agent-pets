@@ -22,19 +22,31 @@ test('relaunch uses the portable launcher on windows, default exec path elsewher
   assert.deepEqual(resolveRelaunchOptions('darwin', true, ['app', '--a', RELAUNCH_FLAG], '/ignored', '/app'), { args: ['--a', RELAUNCH_FLAG] })
 })
 
-test('single-instance lock retries only for relaunched instances', () => {
+test('single-instance lock retries only for relaunched instances', async () => {
   let attempts = 0
   const sleeps: number[] = []
   const grantOnThird = () => ++attempts >= 3
-  assert.equal(acquireSingleInstanceLock(grantOnThird, { argv: ['a', RELAUNCH_FLAG], sleep: ms => sleeps.push(ms) }), true)
+  assert.equal(await acquireSingleInstanceLock(grantOnThird, { argv: ['a', RELAUNCH_FLAG], sleep: async ms => { sleeps.push(ms) } }), true)
   assert.equal(attempts, 3)
   assert.deepEqual(sleeps, [250, 250])
 
   attempts = 0
-  assert.equal(acquireSingleInstanceLock(() => { attempts += 1; return false }, { argv: ['a'], sleep: () => {} }), false)
+  assert.equal(await acquireSingleInstanceLock(() => { attempts += 1; return false }, { argv: ['a'], sleep: () => {} }), false)
   assert.equal(attempts, 1)
 
   attempts = 0
-  assert.equal(acquireSingleInstanceLock(() => { attempts += 1; return false }, { argv: [RELAUNCH_FLAG], sleep: () => {} }), false)
+  assert.equal(await acquireSingleInstanceLock(() => { attempts += 1; return false }, { argv: [RELAUNCH_FLAG], sleep: () => {} }), false)
   assert.equal(attempts, 9)
+})
+
+test('single-instance lock waits asynchronously instead of blocking the thread', async () => {
+  let granted = false
+  const started = Date.now()
+  setTimeout(() => { granted = true }, 20)
+  let ticked = false
+  const pending = acquireSingleInstanceLock(() => granted, { argv: [RELAUNCH_FLAG], delayMs: 10, attempts: 20 })
+  setImmediate(() => { ticked = true })
+  assert.equal(await pending, true)
+  assert.equal(ticked, true)
+  assert.ok(Date.now() - started >= 15)
 })

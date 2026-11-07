@@ -38,5 +38,9 @@
   "reliability.launch.openSettings": "開啟登入項目設定",
   "reliability.launch.notInApplications": "請先把 Agent Pets 移到「應用程式」資料夾再開啟。從磁碟映像或下載資料夾直接執行時，macOS 不允許註冊登入項目。",
   "reliability.launch.error": "無法變更開機啟動，請稍後再試，或檢查系統設定。",
-  "reliability.launch.trayPending": "（需核准）"
+  "reliability.launch.trayPending": "（需核准）",
+  "reliability.crash.escalateTitle": "Agent Pets 發生重複錯誤",
+  "reliability.crash.escalateMessage": "背景持續發生未預期的錯誤。建議重新啟動 Agent Pets 以恢復穩定；你也可以繼續執行。",
+  "reliability.crash.escalateRestart": "重新啟動",
+  "reliability.crash.escalateContinue": "繼續執行"
 }
