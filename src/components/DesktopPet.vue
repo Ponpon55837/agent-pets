@@ -17,6 +17,8 @@ import { selectBubble } from '@/utils/feed-arbiter'
 import { summarizePluginBadgesForPet } from '@/utils/plugin-badges'
 import PetAnimation from '@/components/PetAnimation.vue'
 import Button from '@/components/ui/Button.vue'
+import Icon from '@/components/ui/Icon.vue'
+import { describeTool } from '@/utils/pet-toast'
 
 const store = useAgentStore()
 const dragOffset = ref({ x: 0, y: 0 })
@@ -265,6 +267,22 @@ const coachShown = computed(() => (
   && store.desktopPreferencesReady
   && !store.dndEnabled
 ))
+
+const activityLabel = computed(() => {
+  const raw = store.activityText
+  if (!raw) return ''
+  const description = describeTool(raw)
+  return t(description.key as TranslationKey, description.params)
+})
+
+const toastAutoCloseSeconds = computed(() => (
+  store.toast ? Math.max(1, Math.round(store.toast.countdown.durationMs / 1000)) : 0
+))
+
+function openFromToast(): void {
+  store.dismissToast()
+  store.togglePanel()
+}
 
 function openPluginFeedLink(itemId: string): void {
   store.openPluginFeedLink(itemId)
@@ -742,8 +760,8 @@ watch(() => store.achievementUnlock, (unlock) => {
           aria-live="polite"
           data-pet-hit-target="solid"
         >
-          <span class="presentation-say-icon" aria-hidden="true">✦</span>
-          <span>{{ store.presentationSay.message }}</span>
+          <Icon class="presentation-say-icon" name="pets" :size="14" />
+          <span class="presentation-say-text">{{ store.presentationSay.message }}</span>
         </div>
       </Transition>
 
@@ -752,12 +770,26 @@ watch(() => store.achievementUnlock, (unlock) => {
           v-if="store.toast"
           :key="`toast-${store.toast.id}`"
           class="pet-toast timed-toast"
-          :class="store.toast.tone"
+          :class="[store.toast.tone, { paused: store.toastPaused }]"
           role="status"
           aria-live="polite"
           data-pet-hit-target="solid"
+          @mousedown.stop
+          @mouseenter="store.pauseToast()"
+          @mouseleave="store.resumeToast()"
+          @focusin="store.pauseToast()"
+          @focusout="store.resumeToast()"
+          @click.stop="openFromToast"
         >
-          <span class="timed-toast-copy">{{ store.toast.text }}</span>
+          <span class="timed-toast-head">
+            <Icon class="timed-toast-icon" :name="store.toast.tone === 'success' ? 'check' : 'warning'" :size="14" />
+            <strong class="timed-toast-title">{{ store.toast.title }}</strong>
+            <span v-if="store.toast.meta" class="timed-toast-meta">{{ store.toast.meta }}</span>
+          </span>
+          <span v-if="store.toast.detail" class="timed-toast-detail">{{ store.toast.detail }}</span>
+          <button type="button" class="timed-toast-action" @mousedown.stop @click.stop="openFromToast">
+            {{ t('pet.toastOpen') }}
+          </button>
           <span
             class="toast-countdown-track"
             aria-hidden="true"
@@ -767,10 +799,11 @@ watch(() => store.achievementUnlock, (unlock) => {
               :style="{ '--toast-duration': `${store.toast.countdown.durationMs}ms` }"
             />
           </span>
-          <span class="sr-only">{{ t('permissionCountdown') }}</span>
+          <span class="sr-only">{{ t('pet.toastAutoClose', { seconds: toastAutoCloseSeconds }) }}</span>
         </div>
         <div v-else-if="!isMultiPet && store.activityText" key="activity" class="pet-toast activity" data-pet-hit-target="solid">
-          🔧 {{ store.activityText }}
+          <Icon class="activity-icon" name="settings" :size="14" />
+          <span class="activity-text">{{ activityLabel }}</span>
         </div>
       </Transition>
 

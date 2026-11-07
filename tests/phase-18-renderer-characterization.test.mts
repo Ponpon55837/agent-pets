@@ -12,7 +12,7 @@ test('agent session store keeps the existing bounded eviction and presentation b
   assert.match(source, /sessionIndex\.updatePriority\(key, event\.state, event\.timestamp\)/)
   assert.match(source, /if \(event\.originalEvent === 'AgentPetsIntegrationTest' && event\.state === 'offline'\)/)
   assert.match(source, /prevState !== event\.state/)
-  assert.match(source, /showToast\(event\.source, event\.project, event\.state\)/)
+  assert.match(source, /showToast\(\s*event\.source,\s*event\.project,\s*event\.state,/)
 })
 
 test('status panel preserves dashboard and settings navigation contracts', () => {

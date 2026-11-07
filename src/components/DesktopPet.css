@@ -1080,9 +1080,23 @@
 
 .presentation-say-icon {
   flex: 0 0 auto;
+  margin-top: 2px;
   color: #aab8ff;
-  font-size: var(--font-md);
-  line-height: 1.25;
+}
+
+/* A long message is clamped to four lines and opens up while hovered. */
+.presentation-say-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.pet-toast.presentation-say:hover .presentation-say-text,
+.pet-toast.presentation-say:focus-within .presentation-say-text {
+  display: block;
+  max-height: calc(var(--pet-bubble-max-h) - 24px);
+  overflow-y: auto;
 }
 
 .permission-notice-icon {
@@ -1164,15 +1178,77 @@
 
 .pet-toast.timed-toast {
   display: flex;
-  min-width: 118px;
+  min-width: 150px;
+  max-width: min(260px, calc(var(--pet-w, 250px) - 10px));
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   padding-bottom: max(6px, calc(7px * var(--pet-scale, 1)));
+  cursor: pointer;
 }
 
-.timed-toast-copy {
+.timed-toast-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.timed-toast-icon {
+  flex: 0 0 auto;
+}
+
+.timed-toast-title {
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.timed-toast-meta {
+  min-width: 0;
   overflow: hidden;
+  color: var(--text-secondary);
+  font-weight: 500;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timed-toast-detail {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  font-weight: 500;
+}
+
+.timed-toast-action {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.timed-toast-action:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
+}
+
+.pet-toast.timed-toast.paused .toast-countdown-fill {
+  animation-play-state: paused;
+}
+
+.pet-toast.activity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.activity-icon {
+  flex: 0 0 auto;
 }
 
 .sr-only {

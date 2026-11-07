@@ -29,12 +29,12 @@ import type {
 import { PRESENTATION_REACTIONS } from '@/types/presentation'
 import { formatProject } from '@/utils/format'
 import { AgentSessionIndex } from '@/utils/agent-session-index'
+import { formatElapsedShort, toastDurationFor } from '@/utils/pet-toast'
 import { readPetFeedbackDefaults } from '@/utils/pet-defaults'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
 import {
   createToastCountdown,
-  getToastRemainingMs,
   type ToastCountdown,
 } from '@/utils/toast-countdown'
 
@@ -287,10 +287,19 @@ export const useAgentStore = defineStore('agent', () => {
   const showProjectMcpPanel = ref(false)
   const toast = ref<{
     id: number
-    text: string
     tone: 'success' | 'error'
+    /** Semantic headline, e.g. "Done" / "Failed" / "3 tasks done". */
+    title: string
+    /** Source and project, e.g. "Claude · my-repo". */
+    meta: string
+    /** Optional second line (elapsed time). */
+    detail?: string
+    /** How many finished results this bubble stands for. */
+    count: number
     countdown: ToastCountdown
   } | null>(null)
+  const toastPaused = ref(false)
+  let toastPausedRemainingMs: number | null = null
   const toastRemainingMs = ref(0)
   let toastTimer: ReturnType<typeof setTimeout> | null = null
   let toastProgressTimer: ReturnType<typeof setTimeout> | null = null
@@ -438,46 +447,92 @@ export const useAgentStore = defineStore('agent', () => {
 
   // --- Toast 提示 ----------------------------------------------------------
 
-  function showToast(source: AgentSource, project: string | undefined, tone: 'success' | 'error') {
+  function clearToastTimers() {
+    if (toastTimer) clearTimeout(toastTimer)
+    if (toastProgressTimer) clearTimeout(toastProgressTimer)
+    toastTimer = null
+    toastProgressTimer = null
+  }
+
+  function armToastTimers(toastId: number, remainingMs: number) {
+    clearToastTimers()
+    toastRemainingMs.value = remainingMs
+    const startedAt = Date.now()
+    const tick = () => {
+      if (toast.value?.id !== toastId) return
+      const remaining = Math.max(0, remainingMs - (Date.now() - startedAt))
+      toastRemainingMs.value = remaining
+      toastProgressTimer = remaining > 0 ? setTimeout(tick, Math.min(100, remaining)) : null
+    }
+    toastProgressTimer = setTimeout(tick, 100)
+    toastTimer = setTimeout(() => {
+      if (toast.value?.id !== toastId) return
+      dismissToast()
+    }, remainingMs)
+  }
+
+  function dismissToast() {
+    clearToastTimers()
+    toast.value = null
+    toastRemainingMs.value = 0
+    toastPaused.value = false
+    toastPausedRemainingMs = null
+  }
+
+  // Hovering the bubble freezes its countdown so a slow reader never loses it.
+  function pauseToast() {
+    const current = toast.value
+    if (!current || toastPaused.value) return
+    toastPausedRemainingMs = toastRemainingMs.value
+    toastPaused.value = true
+    clearToastTimers()
+  }
+
+  function resumeToast() {
+    const current = toast.value
+    if (!current || !toastPaused.value) return
+    const remaining = toastPausedRemainingMs ?? 0
+    toastPaused.value = false
+    toastPausedRemainingMs = null
+    if (remaining <= 0) dismissToast()
+    else armToastTimers(current.id, remaining)
+  }
+
+  function showToast(
+    source: AgentSource,
+    project: string | undefined,
+    tone: 'success' | 'error',
+    elapsedMs?: number,
+  ) {
     const label = SOURCE_LABELS[source]
     const proj = formatProject(project)
     const startedAt = Date.now()
-    const countdown = createToastCountdown(tone, startedAt)
+    const durationMs = toastDurationFor(tone)
+    const countdown = createToastCountdown(tone, startedAt, durationMs)
     if (!countdown) return
+
+    // Several tasks finishing back to back collapse into one count instead of
+    // each bubble overwriting the previous one.
+    const previous = toast.value
+    const merge = tone === 'success' && previous?.tone === 'success'
+    const count = merge ? previous.count + 1 : 1
+    const elapsed = formatElapsedShort(elapsedMs)
     const nextToast = {
       id: ++toastSequence,
-      text: proj ? `${label} · ${proj}` : label,
       tone,
+      title: count > 1
+        ? t('pet.toastManyDone', { count })
+        : t(tone === 'success' ? 'pet.toastDone' : 'pet.toastFailed'),
+      meta: count > 1 ? '' : proj ? `${label} · ${proj}` : label,
+      ...(count === 1 && elapsed ? { detail: t('pet.toastElapsed', { time: elapsed }) } : {}),
+      count,
       countdown,
     }
 
-    if (toastTimer) clearTimeout(toastTimer)
-    if (toastProgressTimer) clearTimeout(toastProgressTimer)
-
     toast.value = nextToast
-    toastRemainingMs.value = getToastRemainingMs(countdown, startedAt)
-
-    const updateRemainingTime = () => {
-      if (toast.value?.id !== nextToast.id) return
-
-      const remaining = getToastRemainingMs(countdown, Date.now())
-      toastRemainingMs.value = remaining
-      if (remaining > 0) {
-        toastProgressTimer = setTimeout(updateRemainingTime, Math.min(100, remaining))
-      } else {
-        toastProgressTimer = null
-      }
-    }
-
-    toastProgressTimer = setTimeout(updateRemainingTime, 100)
-    toastTimer = setTimeout(() => {
-      if (toast.value?.id !== nextToast.id) return
-      toast.value = null
-      toastRemainingMs.value = 0
-      if (toastProgressTimer) clearTimeout(toastProgressTimer)
-      toastProgressTimer = null
-      toastTimer = null
-    }, getToastRemainingMs(countdown, startedAt))
+    toastPaused.value = false
+    toastPausedRemainingMs = null
+    armToastTimers(nextToast.id, durationMs)
   }
 
   // --- Presentation MCP（本機 MCP client 的簡短反應/語音佇列） -----------------
@@ -1124,11 +1179,19 @@ export const useAgentStore = defineStore('agent', () => {
       clearPresentation()
     }
 
+    // Read before awardMoodProgress clears it on a terminal state.
+    const taskStartedAt = moodTaskProgress.get(key)?.startedAt
+
     awardMoodProgress(event, key, prevState)
 
     if ((event.state === 'success' || event.state === 'error') && prevState !== event.state) {
       if (isQuotaCapableSource(event.source)) quotaStaleSignal.value += 1
-      showToast(event.source, event.project, event.state)
+      showToast(
+        event.source,
+        event.project,
+        event.state,
+        taskStartedAt === undefined ? undefined : Date.now() - taskStartedAt,
+      )
       adjustMood(event.state === 'success' ? MOOD_SUCCESS_REWARD : -MOOD_ERROR_PENALTY)
       return event.state
     }
@@ -1708,6 +1771,10 @@ export const useAgentStore = defineStore('agent', () => {
     showProjectMcpPanel,
     toast,
     toastRemainingMs,
+    toastPaused,
+    pauseToast,
+    resumeToast,
+    dismissToast,
     pluginFeedItem,
     pluginFeedUnreadCount,
     mood,
