@@ -27,5 +27,7 @@
   "reliability.diagnostics.saved": "診斷資訊已儲存。",
   "reliability.diagnostics.failed": "無法儲存診斷資訊。",
   "reliability.renderer.errorMessage": "畫面發生錯誤。",
-  "reliability.renderer.reload": "重新載入"
+  "reliability.renderer.reload": "重新載入",
+  "reliability.history.recoveredTitle": "歷史資料庫已重建",
+  "reliability.history.recoveredBody": "偵測到歷史資料庫損毀，已保留一份備份並建立新的資料庫。歷史統計會從現在重新累積。"
 }

@@ -27,5 +27,7 @@
   "reliability.diagnostics.saved": "Diagnostics saved.",
   "reliability.diagnostics.failed": "Could not save diagnostics.",
   "reliability.renderer.errorMessage": "Something went wrong in this view.",
-  "reliability.renderer.reload": "Reload"
+  "reliability.renderer.reload": "Reload",
+  "reliability.history.recoveredTitle": "History database was rebuilt",
+  "reliability.history.recoveredBody": "The history database was damaged. A backup copy was kept and a new database was created; history will build up again from now."
 }

@@ -21,6 +21,8 @@ export interface HistoryIpcDependencies {
   refreshLocalUsage(): Promise<void>
   currentHistorySummary(projectId?: string, rangeDays?: number): HistorySummary | null
   broadcastHistoryUpdated(): void
+  /** Optional hook after the history was cleared (e.g. remove set-aside corrupt copies). */
+  onHistoryCleared?(): void
   documentsPath(): string
   joinPath(...parts: string[]): string
   showSaveDialog(window: BrowserWindow | null, options: HistoryExportDialogOptions): Promise<{ canceled: boolean; filePath?: string }>
@@ -52,6 +54,7 @@ export function registerHistoryIpc(deps: HistoryIpcDependencies): void {
     if (!historyStore) return { ok: false, error: 'unavailable' }
     try {
       historyStore.clear()
+      deps.onHistoryCleared?.()
       deps.broadcastHistoryUpdated()
       return { ok: true }
     } catch {

@@ -2713,6 +2713,16 @@ export function cancelHistoryStoreRetry(): void {
   historyStoreRetryTimer = null
 }
 
+function notifyHistoryRecovered(): void {
+  try {
+    if (!Notification.isSupported()) return
+    new Notification({
+      title: t('reliability.history.recoveredTitle'),
+      body: t('reliability.history.recoveredBody'),
+    }).show()
+  } catch {}
+}
+
 export function createHistoryServices(): void {
   if (mainState.historyStore) return
   try {
@@ -2720,7 +2730,12 @@ export function createHistoryServices(): void {
     mainState.historyStore = openWithCorruptionRecovery(
       databasePath,
       () => new HistoryStore(databasePath),
-      { log: (message, detail) => console.error(message, detail) },
+      {
+        log: (message, detail) => console.error(message, detail),
+        verify: store => store.quickCheck(),
+        dispose: store => store.close(),
+        onRecovered: () => notifyHistoryRecovered(),
+      },
     )
     if (!mainState.historyStore) throw new Error('History database could not be opened')
     historyStoreRetryAttempt = 0
