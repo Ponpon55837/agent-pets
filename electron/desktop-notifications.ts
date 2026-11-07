@@ -38,6 +38,7 @@ interface DesktopNotificationServiceOptions {
 }
 
 const MAX_LOG_RECORDS = 200
+const LOG_FLUSH_DELAY_MS = 2_000
 
 export class DesktopNotificationService {
   private readonly options: DesktopNotificationServiceOptions
@@ -46,6 +47,11 @@ export class DesktopNotificationService {
   private readonly batchWindowMs: number
   private batchTimer: ReturnType<typeof setTimeout> | null = null
   private attentionCount = 0
+  // Newest notification per key: a repeat for the same session replaces the old
+  // one instead of stacking in the notification centre.
+  private readonly shown = new Map<string, Notification>()
+  private logRecords: NotificationLogRecord[] | null = null
+  private logTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(options: DesktopNotificationServiceOptions) {
     this.options = options
@@ -72,7 +78,7 @@ export class DesktopNotificationService {
       return
     }
 
-    this.deliver(candidate.title, candidate.body, candidate.kind, 1)
+    this.deliver(candidate.title, candidate.body, candidate.kind, 1, candidate.key)
   }
 
   showAchievement(unlock: AchievementUnlock): void {
@@ -103,6 +109,11 @@ export class DesktopNotificationService {
     if (this.batchTimer) clearTimeout(this.batchTimer)
     this.batchTimer = null
     this.terminalQueue.clear()
+    for (const notification of this.shown.values()) {
+      try { notification.close() } catch { /* already gone */ }
+    }
+    this.shown.clear()
+    this.flushLog()
   }
 
   private flushTerminalQueue(): void {
@@ -120,6 +131,7 @@ export class DesktopNotificationService {
     body: string,
     kind: NotificationKind,
     count: number,
+    key?: string,
   ): void {
     const preferences = this.options.getPreferences()
     if (!preferences.notificationsEnabled) {
@@ -140,7 +152,12 @@ export class DesktopNotificationService {
     }
 
     try {
+      if (key) {
+        try { this.shown.get(key)?.close() } catch { /* already gone */ }
+      }
       const notification = new Notification({ title, body, silent: true })
+      if (key) this.shown.set(key, notification)
+      if (this.shown.size > 200) this.shown.delete(this.shown.keys().next().value as string)
       notification.on('click', () => {
         this.log(kind, 'clicked', count)
         this.clearAttention()
@@ -154,20 +171,34 @@ export class DesktopNotificationService {
   }
 
   private log(kind: NotificationKind, outcome: NotificationOutcome, count = 1): void {
-    const existing = readBoundedJson(this.options.logFilePath)
-    const records = Array.isArray(existing)
-      ? existing.filter((record): record is NotificationLogRecord => (
-          Boolean(record)
-          && typeof record === 'object'
-          && typeof record.at === 'number'
-          && typeof record.kind === 'string'
-          && typeof record.outcome === 'string'
-          && typeof record.count === 'number'
-        ))
-      : []
-    records.push({ at: Date.now(), kind, outcome, count })
+    if (!this.logRecords) {
+      const existing = readBoundedJson(this.options.logFilePath)
+      this.logRecords = Array.isArray(existing)
+        ? existing.filter((record): record is NotificationLogRecord => (
+            Boolean(record)
+            && typeof record === 'object'
+            && typeof record.at === 'number'
+            && typeof record.kind === 'string'
+            && typeof record.outcome === 'string'
+            && typeof record.count === 'number'
+          ))
+        : []
+    }
+    this.logRecords.push({ at: Date.now(), kind, outcome, count })
+    if (this.logRecords.length > MAX_LOG_RECORDS) this.logRecords.splice(0, this.logRecords.length - MAX_LOG_RECORDS)
+    // Debounced: event bursts no longer re-read and rewrite the file each time.
+    if (!this.logTimer) {
+      this.logTimer = setTimeout(() => this.flushLog(), LOG_FLUSH_DELAY_MS)
+      this.logTimer.unref?.()
+    }
+  }
+
+  private flushLog(): void {
+    if (this.logTimer) clearTimeout(this.logTimer)
+    this.logTimer = null
+    if (!this.logRecords) return
     try {
-      writeJsonAtomic(this.options.logFilePath, records.slice(-MAX_LOG_RECORDS))
+      writeJsonAtomic(this.options.logFilePath, this.logRecords)
     } catch {
       // Notification logging is diagnostic only. A read-only/corrupt userData
       // directory must never break event ingestion or Agent state updates.

@@ -59,7 +59,17 @@ test('aggregates terminal notifications without project or session details', () 
   ].filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null)
 
   assert.deepEqual(aggregateTerminalNotifications(candidates), {
-    title: '2 個 Agent 工作已完成',
+    title: '2 個工作結束（1 個失敗）',
     body: '1 個已完成 · 1 個失敗',
   })
+})
+
+test('mixed aggregate title does not claim everything completed', () => {
+  const ok = classifyNotification(event('success', { sessionId: 'a' }) as any)!
+  const bad = classifyNotification(event('error', { sessionId: 'b' }) as any)!
+  const mixed = aggregateTerminalNotifications([ok, bad])
+  assert.match(mixed.title, /1 個失敗/)
+  assert.doesNotMatch(mixed.title, /已完成/)
+  const allOk = aggregateTerminalNotifications([ok, classifyNotification(event('success', { sessionId: 'c' }) as any)!])
+  assert.match(allOk.title, /已完成/)
 })

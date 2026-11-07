@@ -112,7 +112,9 @@ export function aggregateTerminalNotifications(candidates: NotificationCandidate
   const completed = candidates.filter(candidate => candidate.kind === 'success').length
   const failed = candidates.filter(candidate => candidate.kind === 'error').length
   return {
-    title: t('notificationAggregate', { count: candidates.length }),
+    title: failed > 0
+      ? t('permission.notifyAggregateFailed', { count: candidates.length, failed })
+      : t('notificationAggregate', { count: candidates.length }),
     body: [
       completed > 0 ? t('notificationCompletedCount', { count: completed }) : '',
       failed > 0 ? t('notificationFailedCount', { count: failed }) : '',

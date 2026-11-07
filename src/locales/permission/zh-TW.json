@@ -34,5 +34,6 @@
   "permission.queueToggle": "共 {count} 個待處理請求，展開清單",
   "permission.queueLabel": "待處理的權限請求",
   "permission.denyAll": "全部拒絕",
-  "permission.denyAllConfirm": "再按一次，拒絕全部 {count} 個"
+  "permission.denyAllConfirm": "再按一次，拒絕全部 {count} 個",
+  "permission.notifyAggregateFailed": "{count} 個工作結束（{failed} 個失敗）"
 }

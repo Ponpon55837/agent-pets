@@ -34,5 +34,6 @@
   "permission.queueToggle": "{count} pending requests, show the list",
   "permission.queueLabel": "Pending permission requests",
   "permission.denyAll": "Deny all",
-  "permission.denyAllConfirm": "Press again to deny all {count}"
+  "permission.denyAllConfirm": "Press again to deny all {count}",
+  "permission.notifyAggregateFailed": "{count} tasks ended ({failed} failed)"
 }
