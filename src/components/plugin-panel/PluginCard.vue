@@ -4,6 +4,7 @@ import { t } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
 import Chip from '@/components/ui/Chip.vue'
 import Icon from '@/components/ui/Icon.vue'
+import Spinner from '@/components/ui/Spinner.vue'
 import ActionMenu from '@/components/ui/ActionMenu.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
 import { usePluginController } from '@/composables/plugin/context'
@@ -12,7 +13,7 @@ import type { PluginPanelPlugin } from '@/types/plugin'
 const props = defineProps<{ plugin: PluginPanelPlugin }>()
 
 const {
-  busy, enabledGlobally, pluginName, pluginIconUrl, hidePluginIcon, pluginStatusLabel, pluginStatusTone,
+  pluginBusy, enabledGlobally, pluginName, pluginIconUrl, hidePluginIcon, pluginStatusLabel, pluginStatusTone,
   openPluginDetail, openPluginPanelView, updatePluginPreference, requestRemove, reportPluginIssue,
 } = usePluginController()
 
@@ -35,7 +36,7 @@ function onMenu(id: string): void {
 </script>
 
 <template>
-  <li class="plugin-card" :class="{ attention: needsAttention }" :aria-label="name">
+  <li class="plugin-card" :class="{ attention: needsAttention }" :aria-label="name" :aria-busy="pluginBusy(plugin.id)">
     <div class="card-head">
       <img v-if="pluginIconUrl(plugin)" class="card-icon" :src="pluginIconUrl(plugin) ?? ''" alt="" @error="hidePluginIcon(plugin.id)" />
       <span v-else class="card-icon card-icon-placeholder" aria-hidden="true"><Icon name="plugin-box" :size="18" /></span>
@@ -46,6 +47,7 @@ function onMenu(id: string): void {
           <template v-if="plugin.manifest?.author"> · {{ plugin.manifest.author }}</template>
         </span>
       </div>
+      <Spinner v-if="pluginBusy(plugin.id)" />
       <Chip :tone="tone === 'success' ? 'success' : tone === 'warn' ? 'warn' : 'neutral'" :icon="tone === 'success' ? 'check' : tone === 'warn' ? 'warning' : undefined">
         {{ pluginStatusLabel(plugin) }}
       </Chip>
@@ -55,7 +57,7 @@ function onMenu(id: string): void {
         v-if="hasPanel"
         variant="primary"
         size="sm"
-        :disabled="busy || !plugin.preference.enabled || !enabledGlobally"
+        :disabled="pluginBusy(plugin.id) || !plugin.preference.enabled || !enabledGlobally"
         :aria-label="t('plugins.openPanelNamed', { name })"
         @click="openPluginPanelView(plugin.id)"
       >
@@ -80,7 +82,7 @@ function onMenu(id: string): void {
         :model-value="plugin.preference.enabled"
         :label="t('pluginEnabled')"
         :aria-label="t('plugins.enableNamed', { name })"
-        :disabled="busy || !plugin.manifest || plugin.status === 'incompatible'"
+        :disabled="!plugin.manifest || plugin.status === 'incompatible'"
         @update:model-value="updatePluginPreference(plugin.id, { enabled: $event })"
       />
       <ActionMenu
@@ -88,7 +90,7 @@ function onMenu(id: string): void {
         :aria-label="t('plugins.moreNamed', { name })"
         icon-only
         variant="ghost"
-        :disabled="busy"
+        :disabled="pluginBusy(plugin.id)"
         @select="onMenu"
       >
         <Icon name="more" :size="18" />

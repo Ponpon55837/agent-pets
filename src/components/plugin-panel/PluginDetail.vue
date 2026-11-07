@@ -17,7 +17,7 @@ import { usePluginController } from '@/composables/plugin/context'
 import type { PluginDetailSection } from '@/composables/usePluginPanelController'
 
 const {
-  busy, enabledGlobally, detailPlugin: plugin, detailSection, petOptions, invokingCommandId,
+  pluginBusy, enabledGlobally, detailPlugin: plugin, detailSection, petOptions, invokingCommandId,
   pluginName, pluginIconUrl, hidePluginIcon, displayFingerprint, pluginStatusLabel, pluginStatusTone,
   closePluginDetail, openPluginPanelView, updatePluginPreference, requestRemove, reportPluginIssue,
   commandTitle, invokePluginCommand,
@@ -88,7 +88,7 @@ watch(plugin, async (value, previous) => {
       <span class="crumb-sep" aria-hidden="true">/</span>
       <span class="crumb-current" :title="name">{{ name }}</span>
       <span class="nav-spacer" />
-      <ActionMenu :items="menuItems" :aria-label="t('plugins.moreNamed', { name })" icon-only variant="ghost" :disabled="busy" @select="onMenu">
+      <ActionMenu :items="menuItems" :aria-label="t('plugins.moreNamed', { name })" icon-only variant="ghost" :disabled="pluginBusy(plugin.id)" @select="onMenu">
         <Icon name="more" :size="18" />
       </ActionMenu>
     </nav>
@@ -120,14 +120,14 @@ watch(plugin, async (value, previous) => {
         :model-value="plugin.preference.enabled"
         :label="t('pluginEnabled')"
         :aria-label="t('plugins.enableNamed', { name })"
-        :disabled="busy || !plugin.manifest || plugin.status === 'incompatible'"
+        :disabled="pluginBusy(plugin.id) || !plugin.manifest || plugin.status === 'incompatible'"
         @update:model-value="updatePluginPreference(plugin.id, { enabled: $event })"
       />
       <div v-if="hasPanel" class="identity-actions">
         <Button
           variant="primary"
           size="sm"
-          :disabled="busy || !plugin.preference.enabled || !enabledGlobally"
+          :disabled="pluginBusy(plugin.id) || !plugin.preference.enabled || !enabledGlobally"
           @click="openPluginPanelView(plugin.id)"
         >
           {{ t('pluginOpenPanel') }}
@@ -144,7 +144,7 @@ watch(plugin, async (value, previous) => {
             :model-value="plugin.preference.muted"
             :label="t('pluginMuted')"
             :aria-label="t('plugins.muteNamed', { name })"
-            :disabled="busy || !plugin.manifest"
+            :disabled="pluginBusy(plugin.id) || !plugin.manifest"
             @update:model-value="updatePluginPreference(plugin.id, { muted: $event })"
           />
           <NumberField
@@ -154,12 +154,12 @@ watch(plugin, async (value, previous) => {
             :range-text="t('pluginPerPluginRateRange')"
             :min="1"
             :max="30"
-            :disabled="busy || !plugin.manifest"
+            :disabled="pluginBusy(plugin.id) || !plugin.manifest"
             @commit="updatePluginPreference(plugin.id, { rateLimitPer10Min: $event })"
           />
           <div class="pet-target">
             <span class="pet-target-label">{{ t('plugins.targetPetLabel') }}</span>
-            <Select v-model="targetPet" size="sm" :aria-label="t('plugins.targetPetLabel')" :disabled="busy || !plugin.manifest">
+            <Select v-model="targetPet" size="sm" :aria-label="t('plugins.targetPetLabel')" :disabled="pluginBusy(plugin.id) || !plugin.manifest">
               <option value="">{{ t('pluginPrimaryPet') }}</option>
               <option v-for="pet in petOptions" :key="pet.id" :value="pet.id">{{ pet.displayName }}</option>
             </Select>

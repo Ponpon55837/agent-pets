@@ -111,7 +111,7 @@ function showTab(tab: PluginTab): void {
         <Button v-else variant="primary" size="sm" :disabled="busy" @click="selectArchive">
           {{ t('pluginInstallButton') }}
         </Button>
-        <Button variant="secondary" size="sm" :disabled="loading || busy" @click="refreshPanel">
+        <Button variant="secondary" size="sm" :disabled="loading || busy" @click="refreshPanel()">
           {{ loading ? t('checking') : t('refresh') }}
         </Button>
       </div>

@@ -30,6 +30,10 @@ import {
   groupPermissionUnits, installAcknowledgementReasons, parsePermissionUnit, permissionUnitsOfPlan,
   type PermissionGroupId, type PermissionRisk,
 } from '@/utils/plugin-permissions'
+import {
+  applyPreferencePatch, createSerialQueue, mergePreferencesResult, rollbackPreferencePatch,
+  type PluginPreferencePatch,
+} from '@/composables/plugin/plugin-state-sync'
 import { usePluginNotify } from '@/composables/plugin/usePluginNotify'
 export interface PermissionEntryView {
   unit: string
@@ -65,7 +69,29 @@ const panelViewOpenToken = ref(0)
 const panelViewFrame = ref<HTMLElement | null>(null)
 const panelViewContent = ref<HTMLElement | null>(null)
 const panelViewMaximized = ref(false)
-const busy = ref(false)
+// 忙碌狀態依範圍追蹤（global / catalog / install / plugin:{id}），UI 只鎖住相關控制項。
+// `busy` 只代表非單一插件的範圍；各插件卡片請用 pluginBusy(id)。
+const busyCounts = ref(new Map<string, number>())
+const busy = computed(() => [...busyCounts.value.keys()].some(scope => !scope.startsWith('plugin:')))
+const enqueueSerial = createSerialQueue()
+let refreshQueued = false
+let refreshInFlight = false
+
+function isBusy(scope: string): boolean {
+  return busyCounts.value.has(scope)
+}
+
+function pluginBusy(pluginId: string): boolean {
+  return busyCounts.value.has(`plugin:${pluginId}`) || busyCounts.value.has('global')
+}
+
+function setBusy(scope: string, on: boolean): void {
+  const next = new Map(busyCounts.value)
+  const count = (next.get(scope) ?? 0) + (on ? 1 : -1)
+  if (count > 0) next.set(scope, count)
+  else next.delete(scope)
+  busyCounts.value = next
+}
 const invokingCommandId = ref('')
 const loading = ref(false)
 const notifier = usePluginNotify()
@@ -378,9 +404,15 @@ async function refreshNotifications(): Promise<void> {
   }
 }
 
-async function refreshPanel(): Promise<void> {
-  if (loading.value) return
-  loading.value = true
+// 重新抓取快照。進行中又被呼叫時排成「結尾再抓一次」，而不是直接丟掉；
+// silent 用於背景同步（例如切換啟用後更新崩潰狀態），不會讓整頁進入 loading。
+async function refreshPanel(options: { silent?: boolean } = {}): Promise<void> {
+  if (refreshInFlight) {
+    refreshQueued = true
+    return
+  }
+  refreshInFlight = true
+  if (!options.silent) loading.value = true
   try {
     const result = await window.electronAPI?.getPluginPanelSnapshot()
     if (!result?.ok) {
@@ -390,13 +422,7 @@ async function refreshPanel(): Promise<void> {
     }
     snapshot.value = result.value
     catalogUrlDraft.value = result.value.preferences.catalogUrl
-    const requestedPluginId = props.requestedPluginId
-    if (requestedPluginId && result.value.plugins.some(plugin => plugin.id === requestedPluginId)) {
-      selectedPluginId.value = requestedPluginId
-      void openPluginPanelView(requestedPluginId)
-    } else if (!result.value.plugins.some(plugin => plugin.id === selectedPluginId.value)) {
-      selectedPluginId.value = ''
-    }
+    if (!result.value.plugins.some(plugin => plugin.id === selectedPluginId.value)) selectedPluginId.value = ''
     if (detailPluginId.value && !result.value.plugins.some(plugin => plugin.id === detailPluginId.value)) {
       detailPluginId.value = ''
     }
@@ -404,7 +430,12 @@ async function refreshPanel(): Promise<void> {
   } catch {
     setError('plugin_service_unavailable')
   } finally {
-    loading.value = false
+    refreshInFlight = false
+    if (!options.silent) loading.value = false
+    if (refreshQueued) {
+      refreshQueued = false
+      void refreshPanel({ silent: true })
+    }
   }
 }
 
@@ -501,8 +532,9 @@ function updateSetting(key: string, type: string, raw: string | boolean): void {
 
 async function savePluginSettings(): Promise<void> {
   const pluginId = selectedPluginId.value
-  if (!pluginId || busy.value) return
-  busy.value = true
+  const scope = `plugin:${pluginId}`
+  if (!pluginId || isBusy(scope)) return
+  setBusy(scope, true)
   try {
     const result = await window.electronAPI?.setPluginSettings(pluginId, settingsDraft.value)
     if (!result?.ok) {
@@ -515,13 +547,14 @@ async function savePluginSettings(): Promise<void> {
   } catch {
     setError('plugin_action_failed')
   } finally {
-    busy.value = false
+    setBusy(scope, false)
   }
 }
 
 async function savePluginSecret(key: string): Promise<void> {
   const pluginId = selectedPluginId.value
-  if (!pluginId || busy.value) return
+  const scope = `plugin:${pluginId}`
+  if (!pluginId || isBusy(scope)) return
   if ((secretDrafts.value[key] ?? '').length > 0) {
     try {
       const consent = await window.electronAPI?.getPluginSecretConsent()
@@ -538,7 +571,7 @@ async function savePluginSecret(key: string): Promise<void> {
       return
     }
   }
-  busy.value = true
+  setBusy(scope, true)
   try {
     const result = await window.electronAPI?.setPluginSecret(pluginId, key, secretDrafts.value[key] ?? '')
     if (!result?.ok) {
@@ -551,14 +584,15 @@ async function savePluginSecret(key: string): Promise<void> {
   } catch {
     setError('plugin_action_failed')
   } finally {
-    busy.value = false
+    setBusy(scope, false)
   }
 }
 
 async function confirmSecretConsent(): Promise<void> {
   const key = pendingSecretConsentKey.value
-  if (!key || busy.value) return
-  busy.value = true
+  const scope = `plugin:${selectedPluginId.value}`
+  if (!key || isBusy(scope)) return
+  setBusy(scope, true)
   try {
     const result = await window.electronAPI?.acceptPluginSecretConsent()
     if (!result?.ok) {
@@ -569,33 +603,36 @@ async function confirmSecretConsent(): Promise<void> {
   } catch {
     setError('plugin_action_failed')
   } finally {
-    busy.value = false
+    setBusy(scope, false)
   }
   if (!pendingSecretConsentKey.value) await savePluginSecret(key)
 }
 
+// 全域偏好以串行佇列送出：連續修改（例如多個欄位）依序生效，不會被「忙碌」丟棄。
+// 成功後直接採用主行程回傳的偏好，不再整頁重新抓取。
 async function updateGlobalPreferences(patch: PluginGlobalPreferencesPatch): Promise<void> {
-  if (busy.value) return
-  const previousCatalogUrl = snapshot.value?.preferences.catalogUrl
-  busy.value = true
-  try {
-    const result = await window.electronAPI?.setPluginGlobalPreferences(patch)
-    if (!result?.ok) {
-      if (result && !result.ok) setError(result.error)
-      return
+  await enqueueSerial('global', async () => {
+    const previousCatalogUrl = snapshot.value?.preferences.catalogUrl
+    setBusy('global', true)
+    try {
+      const result = await window.electronAPI?.setPluginGlobalPreferences(patch)
+      if (!result?.ok) {
+        if (result && !result.ok) setError(result.error)
+        return
+      }
+      if (snapshot.value) mergePreferencesResult(snapshot.value, result.value)
+      catalogUrlDraft.value = result.value.catalogUrl
+      if (patch.onlineCatalogEnabled === false
+        || (patch.catalogUrl !== undefined && patch.catalogUrl !== previousCatalogUrl)) {
+        catalogItems.value = []
+        catalogCheckComplete.value = false
+      }
+    } catch {
+      setError('plugin_action_failed')
+    } finally {
+      setBusy('global', false)
     }
-    if (snapshot.value) snapshot.value.preferences = result.value
-    if (patch.onlineCatalogEnabled === false
-      || (patch.catalogUrl !== undefined && patch.catalogUrl !== previousCatalogUrl)) {
-      catalogItems.value = []
-      catalogCheckComplete.value = false
-    }
-    await refreshPanel()
-  } catch {
-    setError('plugin_action_failed')
-  } finally {
-    busy.value = false
-  }
+  })
 }
 
 async function saveCatalogUrl(): Promise<void> {
@@ -608,8 +645,9 @@ async function saveCatalogUrl(): Promise<void> {
 }
 
 async function loadPluginCatalog(): Promise<void> {
-  if (busy.value || !onlineCatalogEnabled.value) return
-  busy.value = true
+  const scope = 'catalog'
+  if (!onlineCatalogEnabled.value || isBusy(scope)) return
+  setBusy(scope, true)
   try {
     const result = await window.electronAPI?.listPluginCatalog()
     if (!result?.ok) {
@@ -625,13 +663,14 @@ async function loadPluginCatalog(): Promise<void> {
   } catch {
     setError('catalog_unavailable', () => void loadPluginCatalog())
   } finally {
-    busy.value = false
+    setBusy(scope, false)
   }
 }
 
 async function installCatalogPlugin(item: PluginCatalogPanelItem): Promise<void> {
-  if (busy.value) return
-  busy.value = true
+  const scope = 'install'
+  if (isBusy(scope)) return
+  setBusy(scope, true)
   try {
     const result = await window.electronAPI?.installPluginFromCatalog(item.plugin.id, item.latestVersion.version)
     if (!result?.ok) {
@@ -642,13 +681,14 @@ async function installCatalogPlugin(item: PluginCatalogPanelItem): Promise<void>
   } catch {
     setError('plugin_action_failed')
   } finally {
-    busy.value = false
+    setBusy(scope, false)
   }
 }
 
 async function reportPluginIssue(pluginId: string): Promise<void> {
-  if (busy.value) return
-  busy.value = true
+  const scope = `plugin:${pluginId}`
+  if (isBusy(scope)) return
+  setBusy(scope, true)
   try {
     const result = await window.electronAPI?.reportInstalledPluginIssue(pluginId)
     if (!result?.ok) {
@@ -659,7 +699,7 @@ async function reportPluginIssue(pluginId: string): Promise<void> {
   } catch {
     setError('plugin_action_failed')
   } finally {
-    busy.value = false
+    setBusy(scope, false)
   }
 }
 
@@ -692,24 +732,31 @@ function resourceBoundText(key: keyof PluginResourceLimits, value: number): stri
   return String(value)
 }
 
-async function updatePluginPreference(
-  pluginId: string,
-  patch: Partial<Pick<PluginInstancePreferences, 'enabled' | 'muted' | 'rateLimitPer10Min' | 'targetPetId' | 'grantedHosts'>>,
-): Promise<void> {
-  if (busy.value) return
-  busy.value = true
+// 單一插件的偏好採樂觀更新：先改畫面，失敗再回滾該欄位並顯示錯誤；同一插件的變更依序送出。
+async function updatePluginPreference(pluginId: string, patch: PluginPreferencePatch): Promise<void> {
+  const current = snapshot.value
+  if (!current) return
+  const previous = applyPreferencePatch(current, pluginId, patch)
+  const scope = `plugin:${pluginId}`
+  setBusy(scope, true)
   try {
-    const result = await window.electronAPI?.setPluginInstancePreferences(pluginId, patch)
-    if (!result?.ok) {
-      if (result && !result.ok) setError(result.error)
-      return
-    }
-    if (snapshot.value) snapshot.value.preferences = result.value
-    await refreshPanel()
-  } catch {
-    setError('plugin_action_failed')
+    await enqueueSerial(scope, async () => {
+      try {
+        const result = await window.electronAPI?.setPluginInstancePreferences(pluginId, patch)
+        if (!result?.ok) {
+          if (snapshot.value) rollbackPreferencePatch(snapshot.value, pluginId, previous)
+          setError(result && !result.ok ? result.error : 'plugin_service_unavailable')
+          return
+        }
+        if (snapshot.value) mergePreferencesResult(snapshot.value, result.value)
+        if (patch.enabled !== undefined) void refreshPanel({ silent: true })
+      } catch {
+        if (snapshot.value) rollbackPreferencePatch(snapshot.value, pluginId, previous)
+        setError('plugin_action_failed')
+      }
+    })
   } finally {
-    busy.value = false
+    setBusy(scope, false)
   }
 }
 
@@ -733,8 +780,9 @@ async function revokeGrantedHost(plugin: PluginPanelPlugin, host: string): Promi
 }
 
 async function selectArchive(): Promise<void> {
-  if (busy.value) return
-  busy.value = true
+  const scope = 'install'
+  if (isBusy(scope)) return
+  setBusy(scope, true)
   pendingPlan.value = null
   try {
     const result = await window.electronAPI?.selectPluginArchive()
@@ -746,13 +794,14 @@ async function selectArchive(): Promise<void> {
   } catch {
     setError('plugin_action_failed')
   } finally {
-    busy.value = false
+    setBusy(scope, false)
   }
 }
 
 async function selectDeveloperFolder(): Promise<void> {
-  if (busy.value) return
-  busy.value = true
+  const scope = 'install'
+  if (isBusy(scope)) return
+  setBusy(scope, true)
   pendingPlan.value = null
   try {
     const result = await window.electronAPI?.selectPluginFolder()
@@ -764,7 +813,7 @@ async function selectDeveloperFolder(): Promise<void> {
   } catch {
     setError('plugin_action_failed')
   } finally {
-    busy.value = false
+    setBusy(scope, false)
   }
 }
 
@@ -853,8 +902,9 @@ const installAcknowledgements = computed(() => installAcknowledgementReasons(pen
 
 async function confirmInstall(): Promise<void> {
   const plan = pendingPlan.value
-  if (!plan || plan.kind === 'incompatible' || busy.value) return
-  busy.value = true
+  const scope = 'install'
+  if (!plan || plan.kind === 'incompatible' || isBusy(scope)) return
+  setBusy(scope, true)
   try {
     const result = await window.electronAPI?.installPluginPlan(
       plan.token,
@@ -877,7 +927,7 @@ async function confirmInstall(): Promise<void> {
   } catch {
     setError('plugin_action_failed')
   } finally {
-    busy.value = false
+    setBusy(scope, false)
   }
 }
 
@@ -894,8 +944,9 @@ function requestRemove(plugin: PluginPanelPlugin): void {
 
 async function confirmRemove(): Promise<void> {
   const plugin = pendingRemove.value
-  if (!plugin || busy.value) return
-  busy.value = true
+  const scope = `plugin:${plugin?.id ?? ''}`
+  if (!plugin || isBusy(scope)) return
+  setBusy(scope, true)
   try {
     const result = await window.electronAPI?.removeInstalledPlugin(plugin.id, keepData.value)
     if (!result?.ok) {
@@ -908,7 +959,7 @@ async function confirmRemove(): Promise<void> {
   } catch {
     setError('plugin_action_failed')
   } finally {
-    busy.value = false
+    setBusy(scope, false)
   }
 }
 
@@ -1008,7 +1059,10 @@ watch(() => props.requestedPluginId, pluginId => {
 })
 
 onMounted(() => {
-  void refreshPanel()
+  void refreshPanel().then(() => {
+    const requested = props.requestedPluginId
+    if (requested && plugins.value.some(plugin => plugin.id === requested)) void openPluginPanelView(requested)
+  })
   void loadPetOptions()
   window.addEventListener('keydown', onPluginPanelViewKeydown)
   removePanelClosedListener = window.electronAPI?.onPluginPanelViewClosed(handlePluginPanelViewClosed) ?? null
@@ -1050,6 +1104,8 @@ onUnmounted(() => {
     panelViewContent,
     panelViewMaximized,
     busy,
+    isBusy,
+    pluginBusy,
     invokingCommandId,
     loading,
     toasts: notifier.toasts,
