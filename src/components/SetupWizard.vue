@@ -262,6 +262,69 @@ async function diagnoseAdapter(tool: ToolStatus) {
   diagnosing.value = null
 }
 
+const CHECK_KEYS: Readonly<Record<string, TranslationKey>> = {
+  'opencode-cli.pass': 'onboarding.check.opencode-cli.pass',
+  'opencode-cli.warn': 'onboarding.check.opencode-cli.warn',
+  'opencode-desktop.pass': 'onboarding.check.opencode-desktop.pass',
+  'opencode-desktop.warn': 'onboarding.check.opencode-desktop.warn',
+  'plugin-current.pass': 'onboarding.check.plugin-current.pass',
+  'plugin-current.warn': 'onboarding.check.plugin-current.warn',
+  'permission-channel.pass': 'onboarding.check.permission-channel.pass',
+  'hooks-file.pass': 'onboarding.check.hooks-file.pass',
+  'hooks-file.fail': 'onboarding.check.hooks-file.fail',
+  'hooks-enabled.pass': 'onboarding.check.hooks-enabled.pass',
+  'hooks-enabled.fail': 'onboarding.check.hooks-enabled.fail',
+  'settings-file.pass': 'onboarding.check.settings-file.pass',
+  'settings-file.fail': 'onboarding.check.settings-file.fail',
+  'hook-script.pass': 'onboarding.check.hook-script.pass',
+  'hook-script.fail': 'onboarding.check.hook-script.fail',
+  'hook-script-current.pass': 'onboarding.check.hook-script-current.pass',
+  'hook-script-current.warn': 'onboarding.check.hook-script-current.warn',
+  'hook-command.pass': 'onboarding.check.hook-command.pass',
+  'hook-command.fail': 'onboarding.check.hook-command.fail',
+  'node.pass': 'onboarding.check.node.pass',
+  'node.fail': 'onboarding.check.node.fail',
+  'agent-present.pass': 'onboarding.check.agent-present.pass',
+  'agent-present.warn': 'onboarding.check.agent-present.warn',
+  'loopback.pass': 'onboarding.check.loopback.pass',
+  'token.pass': 'onboarding.check.token.pass',
+  'permissions.pass': 'onboarding.check.permissions.pass',
+}
+
+const FIX_KEYS: Readonly<Record<string, TranslationKey>> = {
+  'hooks-file': 'onboarding.fix.hooks-file',
+  'hooks-enabled': 'onboarding.fix.hooks-enabled',
+  'settings-file': 'onboarding.fix.settings-file',
+  'hook-script': 'onboarding.fix.hook-script',
+  'hook-script-current': 'onboarding.fix.hook-script-current',
+  'plugin-current': 'onboarding.fix.plugin-current',
+  'hook-command': 'onboarding.fix.hook-command',
+  'node': 'onboarding.fix.node',
+}
+
+const SUMMARY_KEYS: Readonly<Record<string, TranslationKey>> = {
+  ready: 'onboarding.summary.ready',
+  needs_install: 'onboarding.summary.needs_install',
+  degraded: 'onboarding.summary.degraded',
+  needs_approval: 'onboarding.summary.needs_approval',
+  error: 'onboarding.summary.error',
+}
+
+function checkText(check: { id: string, status: string, code?: string, message: string }): string {
+  const key = check.code ? CHECK_KEYS[check.code] : undefined
+  return key ? t(key) : check.message
+}
+
+function checkFix(check: { id: string, status: string }): string {
+  const key = check.status === 'pass' ? undefined : FIX_KEYS[check.id]
+  return key ? t(key) : ''
+}
+
+function summaryText(tool: ToolStatus): string {
+  const key = SUMMARY_KEYS[tool.health]
+  return key ? t(key) : (tool.message ?? "")
+}
+
 const HEALTH_LABEL_KEYS: Partial<Record<ToolStatus['health'], TranslationKey>> = {
   ready: 'healthReady',
   needs_install: 'healthNeedsInstall',
@@ -388,7 +451,7 @@ onUnmounted(() => {
               </Button>
             </div>
           </div>
-          <div class="tool-desc">{{ tool.message }}</div>
+          <div class="tool-desc">{{ summaryText(tool) }}</div>
           <div class="source-list">
             <span v-for="source in tool.sourceLabels" :key="source" class="source-chip">{{ source }}</span>
           </div>
@@ -419,7 +482,7 @@ onUnmounted(() => {
                 :name="check.status === 'pass' ? 'check' : check.status === 'warn' ? 'warning' : 'close'"
                 :size="14"
               />
-              <span>{{ check.message }}</span>
+              <span>{{ checkText(check) }}<template v-if="checkFix(check)"> {{ checkFix(check) }}</template></span>
             </div>
           </div>
         </Card>

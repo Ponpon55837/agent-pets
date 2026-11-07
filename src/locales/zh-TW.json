@@ -254,7 +254,7 @@
   "clientClaudeCode": "Claude Code",
   "clientOpenCode": "OpenCode",
   "setupWizardTitle": "設定精靈",
-  "setupWizardHelp": "偵測到執行中的 Agent；安裝 hook 後請重新啟動該工具。",
+  "setupWizardHelp": "為你使用的 AI 工具安裝 hook；安裝後請重新啟動該工具。",
   "detectingTools": "正在偵測工具…",
   "couldNotDetectTools": "偵測工具逾時",
   "failedToDetectTools": "工具偵測失敗",

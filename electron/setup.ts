@@ -891,6 +891,33 @@ function refreshInstalledIntegrationScripts(): string {
   return token
 }
 
+// --- Health helpers used by the adapter diagnostics ---
+/** The bundled hook script matches what is deployed (a stale copy keeps old behaviour). */
+function hookScriptIsCurrent(): boolean {
+  try {
+    const deployed = readFile(hookScriptPath())
+    return deployed !== null && deployed === hookScriptContent()
+  } catch {
+    return true // bundle unreadable: do not raise a false alarm
+  }
+}
+
+function openCodePluginIsCurrent(kind: 'cli' | 'desktop'): boolean {
+  const target = kind === 'cli' ? openCodeCliPluginPath() : openCodeDesktopPluginPath()
+  const deployed = readFile(target)
+  return deployed !== null
+    && deployed === openCodePluginContent(kind === 'cli' ? 'opencode-cli' : 'opencode-desktop')
+}
+
+/** Whether each agent's own config directory exists (the tool has been used on this machine). */
+function agentPresence(): { codex: boolean, claude: boolean, opencode: boolean } {
+  return {
+    codex: fs.existsSync(path.join(homeDir(), '.codex')),
+    claude: fs.existsSync(path.join(homeDir(), '.claude')),
+    opencode: fs.existsSync(path.dirname(openCodeCliPluginPath())) || fs.existsSync(path.dirname(openCodeDesktopPluginPath())),
+  }
+}
+
 export type IntegrationTarget = 'opencode' | 'codex' | 'claude' | 'claudeCode'
 
 function installIntegration(target?: IntegrationTarget): ConfigWriteResult[] {
@@ -950,6 +977,9 @@ function uninstallIntegration(target?: IntegrationTarget | 'all'): void {
 }
 
 export {
+  hookScriptIsCurrent,
+  openCodePluginIsCurrent,
+  agentPresence,
   IS_WIN,
   IS_MAC,
   homeDir,

@@ -228,3 +228,28 @@ test('removing Codex hooks leaves Claude Code hooks (shared script) intact', () 
     assert.equal(kept.hooks.Stop[0].hooks[0].command, 'echo mine')
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
+
+import { configuredHookExecutable, isCodexHooksFeatureEnabled, leadingExecutable } from '../electron/hook-config.ts'
+
+test('codex hooks feature requires an explicit hooks = true under [features]', () => {
+  assert.equal(isCodexHooksFeatureEnabled(null), false)
+  assert.equal(isCodexHooksFeatureEnabled('model = "x"\n'), false)
+  assert.equal(isCodexHooksFeatureEnabled('[features]\nother = true\n'), false)
+  assert.equal(isCodexHooksFeatureEnabled('[features]\nhooks = false\n'), false)
+  assert.equal(isCodexHooksFeatureEnabled('[features]\nhooks = true # on\n'), true)
+  assert.equal(isCodexHooksFeatureEnabled('[tui]\nhooks = true\n[features]\n'), false)
+})
+
+test('configured hook executable is read from exec-form and shell-form hooks', () => {
+  const dir = tempDir()
+  try {
+    const exec = path.join(dir, 'a.json')
+    fs.writeFileSync(exec, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '/opt/node', args: [HOOK, 'claude'] }] }] } }))
+    assert.equal(configuredHookExecutable(exec), '/opt/node')
+    const shell = path.join(dir, 'b.json')
+    fs.writeFileSync(shell, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: `"/opt/my node/node" "${HOOK}" codex` }] }] } }))
+    assert.equal(configuredHookExecutable(shell), '/opt/my node/node')
+    assert.equal(configuredHookExecutable(path.join(dir, 'missing.json')), null)
+    assert.equal(leadingExecutable('node /x/.desktop-pet/agent-hook.mjs codex'), 'node')
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})

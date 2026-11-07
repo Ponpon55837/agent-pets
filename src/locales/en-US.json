@@ -254,7 +254,7 @@
   "clientClaudeCode": "Claude Code",
   "clientOpenCode": "OpenCode",
   "setupWizardTitle": "Setup Wizard",
-  "setupWizardHelp": "Agents detected; restart a tool after installing its hook.",
+  "setupWizardHelp": "Install hooks for the AI tools you use; restart a tool after installing its hook.",
   "detectingTools": "Detecting tools…",
   "couldNotDetectTools": "Tool detection timed out",
   "failedToDetectTools": "Tool detection failed",

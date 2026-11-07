@@ -240,3 +240,50 @@ export function disableCodexHooksFeatureText(existing: string): string {
   const joined = next.join(eol).replace(/(\r?\n){3,}/g, `${eol}${eol}`)
   return joined.trim() === '' ? '' : joined.replace(/(\r?\n)*$/, eol)
 }
+
+/** First token of a shell-form command, honouring double quotes. */
+export function leadingExecutable(command: string): string {
+  const trimmed = command.trim()
+  if (trimmed.startsWith('"')) {
+    const end = trimmed.indexOf('"', 1)
+    return end > 0 ? trimmed.slice(1, end) : trimmed.slice(1)
+  }
+  // A Windows path may contain spaces without quotes; stop at the hook script marker if present.
+  const marker = trimmed.search(/\s+["']?[^\s"']*agent-hook/)
+  return (marker > 0 ? trimmed.slice(0, marker) : trimmed.split(/\s+/)[0] ?? '').trim()
+}
+
+/** The executable Agent Pets' hooks in this file would launch (exec-form `command` or shell-form leader). */
+export function configuredHookExecutable(filePath: string): string | null {
+  try {
+    const { root } = readJsonObjectConfig(filePath)
+    if (!isJsonObject(root.hooks)) return null
+    for (const groups of Object.values(root.hooks)) {
+      if (!Array.isArray(groups)) continue
+      for (const group of groups) {
+        if (!isJsonObject(group) || !Array.isArray(group.hooks)) continue
+        for (const hook of group.hooks) {
+          if (!isAgentPetsHook(hook)) continue
+          const command = (hook as HookEntry).command
+          if (typeof command !== 'string') continue
+          return Array.isArray((hook as HookEntry).args) ? command : leadingExecutable(command)
+        }
+      }
+    }
+  } catch { /* unreadable config: no executable to report */ }
+  return null
+}
+
+/** True only when `[features]` explicitly sets `hooks = true` (a missing key leaves hooks off). */
+export function isCodexHooksFeatureEnabled(config: string | null): boolean {
+  if (!config) return false
+  const lines = config.split(/\r?\n/)
+  const start = lines.findIndex(line => /^\s*\[features\]\s*$/.test(line))
+  if (start < 0) return false
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^\s*\[/.test(lines[i]!)) break
+    const match = /^\s*hooks\s*=\s*(true|false)\s*(#.*)?$/.exec(lines[i]!)
+    if (match) return match[1] === 'true'
+  }
+  return false
+}

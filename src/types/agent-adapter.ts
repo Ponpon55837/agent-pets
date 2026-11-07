@@ -75,6 +75,8 @@ export type DiagnosticCheckStatus = 'pass' | 'warn' | 'fail'
 export interface AdapterDiagnosticCheck {
   id: string
   status: DiagnosticCheckStatus
+  /** `<id>.<status>`: stable key for localized text; `message` is an English fallback. */
+  code?: string
   message: string
 }
 
