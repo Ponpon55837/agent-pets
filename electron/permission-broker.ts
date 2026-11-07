@@ -294,10 +294,8 @@ export class PermissionBroker {
     ) {
       return { ok: false, error: 'invalid_request' }
     }
-    const allowedDecisions = Object.freeze(
-      requestedDecisions.filter((value) => adapter.permissionModes.has(value)),
-    )
-    if (allowedDecisions.length === 0) return { ok: false, error: 'capability_denied' }
+    const supportedDecisions = requestedDecisions.filter((value) => adapter.permissionModes.has(value))
+    if (supportedDecisions.length === 0) return { ok: false, error: 'capability_denied' }
 
     const action = sanitizeText(candidate.action, MAX_ACTION_LENGTH)
     const description = sanitizeText(candidate.description, MAX_DESCRIPTION_LENGTH)
@@ -319,6 +317,15 @@ export class PermissionBroker {
       if (cleaned.truncated) detailsTruncated = true
     })
 
+    const risk: PermissionRisk = isRisk(candidate.risk) ? candidate.risk : 'unknown'
+    const truncated = action.truncated || description.truncated || detailsTruncated
+    // A risky request whose arguments were cut off cannot be approved here: the user would be
+    // allowing text they never saw. Deny stays available; allowing happens in the agent itself.
+    const allowedDecisions = Object.freeze(truncated && !isHotkeyRisk(risk)
+      ? supportedDecisions.filter((value) => value !== 'allow_once')
+      : supportedDecisions)
+    if (allowedDecisions.length === 0) return { ok: false, error: 'capability_denied' }
+
     const receivedAt = this.readNow()
     if (receivedAt === null) return { ok: false, error: 'invalid_request' }
     const request: InternalPermissionRequest = {
@@ -332,13 +339,13 @@ export class PermissionBroker {
       description: description.value,
       details: Object.freeze(details),
       truncatedChars,
-      risk: isRisk(candidate.risk) ? candidate.risk : 'unknown',
+      risk,
       network: candidate.network === true,
       receivedAt,
       expiresAt: receivedAt + clampTtl(candidate.ttlMs),
       status: 'pending',
       allowedDecisions,
-      truncated: action.truncated || description.truncated || detailsTruncated,
+      truncated,
       responseHandle: candidate.responseHandle,
       adapter,
       order: this.nextOrder++,
@@ -559,6 +566,20 @@ export class PermissionBroker {
     } catch {
       // Observers cannot interrupt the broker state transition.
     }
+  }
+
+  /**
+   * Whether this agent session has a request that is still open or finished within `withinMs`.
+   * Lets the main process tell a prompt that can be answered here from one that cannot.
+   */
+  hasRecentRequestForSession(adapterId: string, sessionId: string, withinMs: number): boolean {
+    const now = this.readNow() ?? 0
+    for (const request of this.requests.values()) {
+      if (request.adapterId !== adapterId || request.sessionId !== sessionId) continue
+      if (!isTerminal(request.status)) return true
+      if (now - (request.finishedAt ?? 0) <= withinMs) return true
+    }
+    return false
   }
 
   /** Whether the broker still remembers this request (active or recently finished). */

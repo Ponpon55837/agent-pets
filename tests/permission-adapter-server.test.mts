@@ -1,5 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { PermissionBroker } from '../electron/permission-broker.ts'
 import {
@@ -211,6 +214,9 @@ test('create budget is per plugin instance, not shared across the whole host', a
   })
 })
 
+const NONCE_A = '1'.repeat(32)
+const NONCE_B = '2'.repeat(32)
+
 function claudePermission(overrides: Record<string, unknown> = {}) {
   return {
     source: 'claude',
@@ -221,6 +227,7 @@ function claudePermission(overrides: Record<string, unknown> = {}) {
     permission: 'Bash',
     detail: 'curl -H "Authorization: Bearer abcdefghijklmnop1234" https://example.com',
     ttlSeconds: 30,
+    nonce: NONCE_A,
     ...overrides,
   }
 }
@@ -242,11 +249,11 @@ test('Claude requests use the Claude risk table, a redacted command and the hook
     assert.deepEqual(view.allowedDecisions, ['allow_once', 'deny'])
 
     const cases: Array<[string, string, boolean]> = [
-      ['Write', 'medium', false], ['Edit', 'medium', false], ['MultiEdit', 'medium', false], ['NotebookEdit', 'medium', false],
+      ['Write', 'high', false], ['Edit', 'high', false], ['MultiEdit', 'high', false], ['NotebookEdit', 'high', false],
       ['WebFetch', 'high', true], ['WebSearch', 'high', true], ['mcp__github__create_issue', 'unknown', false], ['Task', 'unknown', false],
     ]
     for (const [index, [tool, risk, network]] of cases.entries()) {
-      const response = await post('/v1/permission/request', claudePermission({ permissionId: `${index}`.padStart(32, 'b'), permission: tool, detail: undefined }))
+      const response = await post('/v1/permission/request', claudePermission({ permissionId: `${index}`.padStart(32, 'b'), permission: tool, detail: undefined, scope: `agent-${index}` }))
       assert.equal(response.status, 201)
       const { requestId } = await response.json() as { requestId: string }
       const item = broker.listRequests().find(request => request.requestId === requestId)!
@@ -260,7 +267,7 @@ test('Claude requests use the Claude risk table, a redacted command and the hook
 test('Claude TTL is clamped and OpenCode cannot borrow the Claude-only fields', async () => {
   await withServer(async ({ broker, post }) => {
     await post('/v1/permission/request', claudePermission({ ttlSeconds: 100_000 }))
-    await post('/v1/permission/request', claudePermission({ permissionId: 'c'.repeat(32), ttlSeconds: 1 }))
+    await post('/v1/permission/request', claudePermission({ permissionId: 'c'.repeat(32), ttlSeconds: 1, scope: 'agent-2' }))
     await post('/v1/permission/request', permission({ ttlSeconds: 299, detail: 'forged' }))
     const [high, low, opencode] = broker.listRequests()
     assert.equal(high!.expiresAt - high!.receivedAt, 120_000)
@@ -312,7 +319,7 @@ test('the same Claude request asked again after it finished becomes a new reques
 test('resolved-session takes down only that Claude session, and a late decision poll gets 410', async () => {
   await withServer(async ({ broker, post }) => {
     await post('/v1/permission/request', claudePermission())
-    await post('/v1/permission/request', claudePermission({ permissionId: 'd'.repeat(32) }))
+    await post('/v1/permission/request', claudePermission({ permissionId: 'd'.repeat(32), scope: 'agent-2' }))
     await post('/v1/permission/request', claudePermission({ instanceId: 'claude-other', sessionId: 'other', permissionId: 'e'.repeat(32) }))
     await post('/v1/permission/request', permission())
     assert.equal(broker.listRequests().length, 4)
@@ -338,4 +345,109 @@ test('a Claude request in flight when the broker shuts down is never auto-allowe
     assert.deepEqual(await deciding, { ok: false, error: 'conflict', status: 'cancelled' })
     assert.equal((await post('/v1/permission/decision', claudePermission())).status, 410)
   })
+})
+
+test('one decision reaches exactly one hook invocation; a parallel identical request stays silent', async () => {
+  await withServer(async ({ broker, post }) => {
+    const first = await post('/v1/permission/request', claudePermission())
+    assert.equal(first.status, 201)
+    const { requestId } = await first.json() as { requestId: string }
+    // A second invocation of the same command (parallel subagent) is refused, not merged.
+    const parallel = await post('/v1/permission/request', claudePermission({ nonce: NONCE_B }))
+    assert.equal(parallel.status, 409)
+    assert.equal(broker.listRequests().length, 1)
+    // The same invocation retrying is still idempotent.
+    assert.equal((await post('/v1/permission/request', claudePermission())).status, 200)
+
+    const deciding = broker.decide(requestId, 'allow_once', 'bubble')
+    assert.equal((await post('/v1/permission/decision', claudePermission({ nonce: NONCE_B }))).status, 409)
+    assert.equal((await post('/v1/permission/decision', claudePermission({ nonce: undefined }))).status, 409)
+    const polled = await post('/v1/permission/decision', claudePermission())
+    assert.equal(polled.status, 200)
+    const { decisionId } = await polled.json() as { decisionId: string }
+    assert.equal((await post('/v1/permission/result', { ...claudePermission({ nonce: NONCE_B }), decisionId, result: 'delivered' })).status, 409)
+    assert.equal((await post('/v1/permission/result', { ...claudePermission(), decisionId, result: 'delivered' })).status, 204)
+    assert.deepEqual(await deciding, { ok: true, status: 'allowed' })
+  })
+})
+
+test('Claude requests without a valid nonce are rejected', async () => {
+  await withServer(async ({ broker, post }) => {
+    for (const nonce of [undefined, '', 'short', 'Z'.repeat(32), '1'.repeat(65)]) {
+      assert.equal((await post('/v1/permission/request', claudePermission({ nonce }))).status, 400, String(nonce))
+    }
+    assert.equal((await post('/v1/permission/request', claudePermission({ scope: 'bad scope' }))).status, 400)
+    assert.equal(broker.listRequests().length, 0)
+    // OpenCode is unchanged: no nonce needed.
+    assert.equal((await post('/v1/permission/request', permission())).status, 201)
+  })
+})
+
+test('a new prompt or PreToolUse in the same agent scope takes older Claude prompts down', async () => {
+  await withServer(async ({ broker, post }) => {
+    await post('/v1/permission/request', claudePermission())
+    await post('/v1/permission/request', claudePermission({ permissionId: 'f'.repeat(32), scope: 'subagent-1' }))
+    // Same scope ("main"): the earlier prompt was answered in the terminal.
+    await post('/v1/permission/request', claudePermission({ permissionId: 'e'.repeat(32), nonce: NONCE_B }))
+    assert.equal(broker.listRequests().length, 2)
+    assert.equal((await post('/v1/permission/decision', claudePermission())).status, 410)
+
+    // PreToolUse of the main agent settles only the main scope.
+    assert.equal((await post('/v1/permission/resolved-session', { source: 'claude', instanceId: claudePermission().instanceId, scope: 'main' })).status, 204)
+    assert.equal(broker.listRequests().length, 1)
+    assert.equal((await post('/v1/permission/resolved-session', { source: 'claude', instanceId: claudePermission().instanceId, scope: 'bad scope' })).status, 400)
+    assert.equal((await post('/v1/permission/resolved-session', { source: 'claude', instanceId: claudePermission().instanceId, scope: 'subagent-1' })).status, 204)
+    assert.equal(broker.listRequests().length, 0)
+  })
+})
+
+test('a file edit is medium only inside the project and never for execution-relevant paths', async () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-edit-risk-')))
+  const project = path.join(root, 'project')
+  fs.mkdirSync(path.join(project, 'src'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'outside'))
+  fs.symlinkSync(path.join(root, 'outside'), path.join(project, 'linked'))
+  try {
+    await withServer(async ({ broker, post }) => {
+      const cases: Array<[string, unknown, string, string?]> = [
+        ['Write', path.join(project, 'src', 'app.ts'), 'medium', path.join('src', 'app.ts')],
+        ['Edit', 'src/new-file.ts', 'medium', path.join('src', 'new-file.ts')],
+        ['NotebookEdit', path.join(project, 'nb.ipynb'), 'medium', 'nb.ipynb'],
+        ['Write', path.join(root, 'outside', 'x.ts'), 'high'],
+        ['Write', path.join(project, '..', 'escape.ts'), 'high'],
+        ['Write', path.join(project, 'linked', 'x.ts'), 'high'],
+        ['Edit', path.join(project, '.git', 'hooks', 'pre-commit'), 'high'],
+        ['Edit', path.join(project, '.Git', 'hooks', 'pre-commit'), 'high'],
+        ['Write', path.join(project, '.claude', 'settings.json'), 'high'],
+        ['Write', path.join(project, '.husky', 'pre-push'), 'high'],
+        ['Write', path.join(project, '.vscode', 'tasks.json'), 'high'],
+        ['Write', path.join(project, 'node_modules', '.bin', 'tsc'), 'high'],
+        ['Write', path.join(project, '.zshrc'), 'high'],
+        ['Write', path.join(project, '.envrc'), 'high'],
+        ['Write', undefined, 'high'],
+      ]
+      for (const [index, [tool, filePath, risk, relative]] of cases.entries()) {
+        const response = await post('/v1/permission/request', claudePermission({
+          permissionId: `${index}`.padStart(32, 'c'), scope: `edit-${index}`, permission: tool,
+          project, filePath, detail: typeof filePath === 'string' ? filePath : undefined,
+        }))
+        assert.equal(response.status, 201, String(filePath))
+        const { requestId } = await response.json() as { requestId: string }
+        const view = broker.listRequests().find(request => request.requestId === requestId)!
+        assert.equal(view.risk, risk, `${tool} ${String(filePath)}`)
+        assert.equal(view.hotkeyEligible, risk === 'medium', String(filePath))
+        // In-project edits show the project-relative path, never the absolute one.
+        if (relative) assert.equal(view.description, relative)
+      }
+      // A cwd too long to keep whole is never trusted for "inside the project".
+      const long = await post('/v1/permission/request', claudePermission({
+        permissionId: 'z'.repeat(32), scope: 'long', permission: 'Write',
+        project: `/${'a'.repeat(5000)}`, filePath: `/${'a'.repeat(5000)}/x.ts`,
+      }))
+      const { requestId } = await long.json() as { requestId: string }
+      assert.equal(broker.listRequests().find(request => request.requestId === requestId)!.risk, 'high')
+    })
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
 })

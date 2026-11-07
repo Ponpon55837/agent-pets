@@ -1,4 +1,5 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto'
+import * as fs from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import * as path from 'node:path'
 import type { PermissionDecisionValue, PermissionRisk } from '../src/types/permission'
@@ -9,6 +10,8 @@ import {
   type PermissionDeliveryResult,
 } from './permission-broker.ts'
 import {
+  CLAUDE_FILE_EDIT_TOOLS,
+  classifyClaudeFileEdit,
   classifyClaudeToolRisk,
   classifyPermissionRisk,
   isClaudeNetworkTool,
@@ -36,6 +39,10 @@ const CLAUDE_SOURCES: ReadonlySet<string> = new Set<PermissionAdapterSource>(['c
 const MIN_CLAUDE_TTL_SECONDS = 15
 const MAX_CLAUDE_TTL_SECONDS = 120
 const MAX_CLAUDE_DETAIL_LENGTH = 1_000
+const MAX_CLAUDE_PATH_LENGTH = 4_096
+// One hook invocation owns a Claude request; its random nonce is required to read
+// or acknowledge the decision, so one click can never answer two tool calls.
+const NONCE_PATTERN = /^[a-f0-9]{32,64}$/
 
 interface RelayHandle {
   relayKey: string
@@ -51,6 +58,10 @@ interface PendingDelivery {
 interface ExternalRequestRecord {
   brokerRequestId: string
   relayKey: string
+  /** Claude only: the hook invocation that owns this request. */
+  nonce?: string
+  /** Claude only: main agent (`main`) or subagent id, for superseding older requests. */
+  scope?: string
 }
 
 interface CreatePayload {
@@ -66,6 +77,13 @@ interface CreatePayload {
   detail?: string
   /** Claude only: how long the hook will wait for an answer. */
   ttlSeconds?: number
+  /** Claude only (required): per-invocation random nonce. */
+  nonce?: string
+  /** Claude only: agent scope inside the session. */
+  scope?: string
+  /** Claude only: the edited file, classified against `cwd`; never shown as an absolute path. */
+  filePath?: string
+  cwd?: string
 }
 
 export class PermissionAdapterRelay {
@@ -207,13 +225,25 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
       // asked again after the first one finished maps to the same key. Only a
       // still-active record is reused; a finished one is replaced by a fresh
       // request instead of handing back a request that can never be answered.
-      if (existing && (!CLAUDE_SOURCES.has(payload.source) || options.broker.isRequestActive(existing.brokerRequestId))) {
+      const isClaude = CLAUDE_SOURCES.has(payload.source)
+      if (existing && (!isClaude || options.broker.isRequestActive(existing.brokerRequestId))) {
+        // Another invocation asking the same thing at the same time (parallel subagents running
+        // the same command) does not share this request: it stays silent and Claude Code asks
+        // in the terminal, so a single click answers exactly one tool call.
+        if (isClaude && existing.nonce !== payload.nonce) {
+          sendJson(response, 409, { error: 'in_use' })
+          return
+        }
         sendJson(response, 200, { requestId: existing.brokerRequestId })
         return
       }
+      // A new Claude prompt in the same agent scope means any older one was answered in the
+      // terminal (Claude Code asks one at a time), so its bubble and hotkeys come down.
+      if (isClaude) resolveScope(records, options.broker, payload.source, payload.instanceId, payload.scope)
 
       const relayKey = randomId()
       const brokerRequestId = randomId()
+      const edit = claudeFileEdit(payload)
       const projectId = sanitizeProjectId(payload.project)
       const created = options.broker.createRequest(payload.source, {
         requestId: brokerRequestId,
@@ -222,9 +252,9 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
         ...(projectId ? { projectId } : {}),
         generation: 1,
         action: payload.permission,
-        description: describePermission(payload),
+        description: describePermission(payload, edit),
         ...(payload.title && payload.patterns?.length ? { details: payload.patterns } : {}),
-        ...requestPolicy(payload),
+        ...requestPolicy(payload, edit),
         allowedDecisions: ['allow_once', 'deny'],
         responseHandle: { relayKey } satisfies RelayHandle,
       })
@@ -240,7 +270,12 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
           if (!options.broker.hasRecord(record.brokerRequestId)) records.delete(key)
         }
       }
-      records.set(externalKey, { brokerRequestId, relayKey })
+      records.set(externalKey, {
+        brokerRequestId,
+        relayKey,
+        ...(payload.nonce ? { nonce: payload.nonce } : {}),
+        ...(payload.scope ? { scope: payload.scope } : {}),
+      })
       sendJson(response, 201, { requestId: brokerRequestId })
       return
     }
@@ -254,6 +289,10 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
       const record = records.get(toExternalKey(lookup.source, lookup.instanceId, lookup.permissionId))
       if (!record) {
         sendJson(response, 404, { error: 'not_found' })
+        return
+      }
+      if (record.nonce !== undefined && record.nonce !== lookup.nonce) {
+        sendJson(response, 409, { error: 'conflict' })
         return
       }
       const decision = options.relay.poll(record.relayKey)
@@ -277,7 +316,11 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
         return
       }
       const record = records.get(toExternalKey(result.source, result.instanceId, result.permissionId))
-      if (!record || !options.relay.complete(record.relayKey, result.decisionId, result.result)) {
+      if (
+        !record
+        || (record.nonce !== undefined && record.nonce !== result.nonce)
+        || !options.relay.complete(record.relayKey, result.decisionId, result.result)
+      ) {
         sendJson(response, 409, { error: 'conflict' })
         return
       }
@@ -312,10 +355,7 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
         sendJson(response, 400, { error: 'invalid_request' })
         return
       }
-      const prefix = `${lookup.source}:${lookup.instanceId}:`
-      for (const [key, record] of records) {
-        if (key.startsWith(prefix)) options.broker.resolveExternally(record.brokerRequestId, 'agent_resolved')
-      }
+      resolveScope(records, options.broker, lookup.source, lookup.instanceId, lookup.scope)
       response.statusCode = 204
       response.end()
       return
@@ -353,7 +393,12 @@ function normalizeCreatePayload(value: unknown): CreatePayload | null {
     : []
   if (data.patterns !== undefined && !Array.isArray(data.patterns)) return null
   const isClaude = CLAUDE_SOURCES.has(data.source)
+  if (isClaude && (typeof data.nonce !== 'string' || !NONCE_PATTERN.test(data.nonce))) return null
+  if (isClaude && data.scope !== undefined && !isIdentifier(data.scope)) return null
   const detail = isClaude ? sanitizeText(data.detail, MAX_CLAUDE_DETAIL_LENGTH) : ''
+  const filePath = isClaude && typeof data.filePath === 'string' && data.filePath.length <= MAX_CLAUDE_PATH_LENGTH ? data.filePath : undefined
+  // The full cwd is kept only for classification; a cut-off cwd could make an outside path look inside.
+  const cwd = isClaude && typeof data.project === 'string' && data.project.length <= MAX_CLAUDE_PATH_LENGTH ? data.project : undefined
   const ttlSeconds = isClaude && typeof data.ttlSeconds === 'number' && Number.isFinite(data.ttlSeconds)
     ? Math.min(MAX_CLAUDE_TTL_SECONDS, Math.max(MIN_CLAUDE_TTL_SECONDS, Math.round(data.ttlSeconds)))
     : undefined
@@ -369,17 +414,40 @@ function normalizeCreatePayload(value: unknown): CreatePayload | null {
     ...(patterns.length > 0 ? { patterns } : {}),
     ...(detail ? { detail } : {}),
     ...(ttlSeconds !== undefined ? { ttlSeconds } : {}),
+    ...(isClaude ? { nonce: data.nonce as string, scope: typeof data.scope === 'string' ? data.scope : 'main' } : {}),
+    ...(filePath ? { filePath } : {}),
+    ...(cwd ? { cwd } : {}),
   }
 }
 
-function normalizeSessionLookupPayload(value: unknown): Pick<CreatePayload, 'source' | 'instanceId'> | null {
+function normalizeSessionLookupPayload(value: unknown): (Pick<CreatePayload, 'source' | 'instanceId'> & { scope?: string }) | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const data = value as Record<string, unknown>
   if (typeof data.source !== 'string' || !SOURCES.has(data.source) || !isIdentifier(data.instanceId)) return null
-  return { source: data.source as CreatePayload['source'], instanceId: data.instanceId }
+  if (data.scope !== undefined && !isIdentifier(data.scope)) return null
+  return {
+    source: data.source as CreatePayload['source'],
+    instanceId: data.instanceId,
+    ...(typeof data.scope === 'string' ? { scope: data.scope } : {}),
+  }
 }
 
-function normalizeLookupPayload(value: unknown): Pick<CreatePayload, 'source' | 'instanceId' | 'permissionId'> | null {
+/** Settles pending requests of one Claude session, or only one agent scope inside it. */
+function resolveScope(
+  records: Map<string, ExternalRequestRecord>,
+  broker: PermissionBroker,
+  source: string,
+  instanceId: string,
+  scope: string | undefined,
+): void {
+  const prefix = `${source}:${instanceId}:`
+  for (const [key, record] of records) {
+    if (!key.startsWith(prefix) || (scope !== undefined && record.scope !== scope)) continue
+    broker.resolveExternally(record.brokerRequestId, 'agent_resolved')
+  }
+}
+
+function normalizeLookupPayload(value: unknown): (Pick<CreatePayload, 'source' | 'instanceId' | 'permissionId'> & { nonce?: string }) | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const data = value as Record<string, unknown>
   if (
@@ -392,12 +460,13 @@ function normalizeLookupPayload(value: unknown): Pick<CreatePayload, 'source' | 
     source: data.source as CreatePayload['source'],
     instanceId: data.instanceId,
     permissionId: data.permissionId,
+    ...(typeof data.nonce === 'string' && NONCE_PATTERN.test(data.nonce) ? { nonce: data.nonce } : {}),
   }
 }
 
 function normalizeResultPayload(value: unknown): (
   Pick<CreatePayload, 'source' | 'instanceId' | 'permissionId'>
-  & { decisionId: string; result: PermissionDeliveryResult }
+  & { nonce?: string; decisionId: string; result: PermissionDeliveryResult }
 ) | null {
   const lookup = normalizeLookupPayload(value)
   if (!lookup || !value || typeof value !== 'object') return null
@@ -429,8 +498,9 @@ function sanitizeProjectId(project: string | undefined): string | undefined {
   return isIdentifier(base) ? base : undefined
 }
 
-function describePermission(payload: CreatePayload): string {
+function describePermission(payload: CreatePayload, edit: FileEdit | null): string {
   if (CLAUDE_SOURCES.has(payload.source)) {
+    if (edit?.relativePath) return edit.relativePath
     return payload.detail || `Claude Code requests ${payload.permission} permission.`
   }
   if (payload.title) return payload.title
@@ -438,10 +508,10 @@ function describePermission(payload: CreatePayload): string {
   return `OpenCode requests ${payload.permission} permission.`
 }
 
-function requestPolicy(payload: CreatePayload): { risk: PermissionRisk; network: boolean; ttlMs?: number } {
+function requestPolicy(payload: CreatePayload, edit: FileEdit | null): { risk: PermissionRisk; network: boolean; ttlMs?: number } {
   if (CLAUDE_SOURCES.has(payload.source)) {
     return {
-      risk: classifyClaudeToolRisk(payload.permission),
+      risk: edit?.risk ?? classifyClaudeToolRisk(payload.permission),
       network: isClaudeNetworkTool(payload.permission),
       ...(payload.ttlSeconds !== undefined ? { ttlMs: payload.ttlSeconds * 1000 } : {}),
     }
@@ -449,6 +519,22 @@ function requestPolicy(payload: CreatePayload): { risk: PermissionRisk; network:
   return {
     risk: classifyPermissionRisk(payload.permission),
     network: isNetworkPermission(payload.permission),
+  }
+}
+
+type FileEdit = ReturnType<typeof classifyClaudeFileEdit>
+
+// Runs only when a Claude edit request is created (rate-limited), never on the event path.
+function claudeFileEdit(payload: CreatePayload): FileEdit | null {
+  if (!CLAUDE_SOURCES.has(payload.source) || !CLAUDE_FILE_EDIT_TOOLS.has(payload.permission)) return null
+  return classifyClaudeFileEdit(payload.filePath, payload.cwd, path, safeRealpath)
+}
+
+function safeRealpath(value: string): string | null {
+  try {
+    return fs.realpathSync.native(value)
+  } catch {
+    return null
   }
 }
 
