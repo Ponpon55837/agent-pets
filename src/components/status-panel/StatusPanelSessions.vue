@@ -20,6 +20,7 @@ import ProgressTrack from '@/components/ui/ProgressTrack.vue'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import Select from '@/components/ui/Select.vue'
 import SessionRow from '@/components/status-panel/SessionRow.vue'
+import { formatTimeFull } from '@/utils/intl-format'
 
 const props = defineProps<{ nowTick: number; pluginEventSourceStatuses: PluginEventSourceStatusView[] }>()
 const emit = defineEmits<{ managePlugins: [] }>()
@@ -92,7 +93,7 @@ function pluginEventSourceStateLabel(state: PluginEventSourceState): string {
 }
 
 function formatTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString(locale.value)
+  return formatTimeFull(timestamp, locale.value)
 }
 
 </script>

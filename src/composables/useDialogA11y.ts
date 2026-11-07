@@ -50,8 +50,17 @@ export function useDialogA11y(options: DialogA11yOptions) {
     return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(visible)
   }
 
+  // A nested dialog inside the same overlay (e.g. ConfirmDialog) owns Esc/Tab while focus is in it.
+  function focusInNestedDialog(): boolean {
+    const scope = options.scope?.value
+    const root = options.container.value
+    const active = document.activeElement
+    return !!(scope && root && active && scope.contains(active) && !root.contains(active))
+  }
+
   function onKeydown(event: KeyboardEvent) {
     if (!options.open.value) return
+    if (focusInNestedDialog()) return
     if (event.key === 'Escape' && options.closeOnEscape !== false) {
       event.preventDefault()
       event.stopPropagation()

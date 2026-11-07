@@ -7,6 +7,7 @@ import Icon from '@/components/ui/Icon.vue'
 import Select from '@/components/ui/Select.vue'
 import { usePluginController } from '@/composables/plugin/context'
 import { formatRelativeTime, linkHost } from '@/utils/relative-time'
+import { formatDateTimeFull } from '@/utils/intl-format'
 import type { PluginNotificationRecord } from '@/types/plugin'
 
 const {
@@ -66,7 +67,7 @@ function when(record: PluginNotificationRecord): string {
           <div class="copy">
             <div class="head">
               <span class="source">{{ notificationSource(record) }}</span>
-              <time class="time" :datetime="new Date(record.item.createdAt).toISOString()" :title="new Date(record.item.createdAt).toLocaleString(locale)">{{ when(record) }}</time>
+              <time class="time" :datetime="new Date(record.item.createdAt).toISOString()" :title="formatDateTimeFull(record.item.createdAt, locale)">{{ when(record) }}</time>
               <span v-if="!record.read" class="sr-only">{{ t('plugins.unread') }}</span>
             </div>
             <strong class="title">{{ record.item.title }}</strong>

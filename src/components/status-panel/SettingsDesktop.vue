@@ -10,6 +10,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import type { PermissionAuditEntry } from '@/types/permission'
 import { permissionSourceName } from '@/utils/permission-source'
 import { playCue, type SoundCue } from '@/utils/sound'
+import { formatDateParts } from '@/utils/intl-format'
 
 // Product names are proper nouns, not translatable copy.
 const APPROVER_AGENTS = 'OpenCode'
@@ -43,7 +44,7 @@ function auditResult(entry: PermissionAuditEntry): string {
 }
 
 function auditTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleString(locale.value, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return formatDateParts(timestamp, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }, locale.value)
 }
 
 onMounted(() => { void loadAudit() })

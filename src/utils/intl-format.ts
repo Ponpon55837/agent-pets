@@ -21,6 +21,26 @@ export function formatTime(value: Stamp, loc: string = currentLocale()): string 
   return toDate(value).toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' })
 }
 
+/** Default time style (e.g. "2:05:09 PM"), for per-event timestamps. */
+export function formatTimeFull(value: Stamp, loc: string = currentLocale()): string {
+  return toDate(value).toLocaleTimeString(loc)
+}
+
+/** Locale default date + time (hover titles). */
+export function formatDateTimeFull(value: Stamp, loc: string = currentLocale()): string {
+  return toDate(value).toLocaleString(loc)
+}
+
+/** Locale default date (no time). */
+export function formatDateDefault(value: Stamp, loc: string = currentLocale()): string {
+  return toDate(value).toLocaleDateString(loc)
+}
+
+/** Date/time with caller-chosen Intl options (month/day only, weekday, seconds, ...). */
+export function formatDateParts(value: Stamp, options: Intl.DateTimeFormatOptions, loc: string = currentLocale()): string {
+  return toDate(value).toLocaleString(loc, options)
+}
+
 export function formatNumber(value: number, loc: string = currentLocale(), options?: Intl.NumberFormatOptions): string {
   return value.toLocaleString(loc, options)
 }

@@ -1,6 +1,7 @@
 import { locale, t } from '@/i18n'
 import { roundQuotaPercent } from '@/utils/format'
 import { quotaTone, relativeAge, resetCountdown, type QuotaTone } from '@/utils/quota-math'
+import { formatDateParts, formatTime } from '@/utils/intl-format'
 
 // Shared by the Usage tab and the Sessions quota strip so reset countdowns,
 // percentage text and low-quota tones can never drift apart again.
@@ -27,14 +28,14 @@ export function useQuotaFormat(now: () => number) {
     const reset = new Date(timestamp)
     if (!Number.isFinite(reset.getTime())) return ''
     const withinWeek = reset.getTime() - now() < 6 * 24 * 3_600_000
-    return reset.toLocaleString(locale.value, {
+    return formatDateParts(reset, {
       ...(withinWeek ? { weekday: 'short' } : { month: 'numeric', day: 'numeric' }),
       hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
-    })
+    }, locale.value)
   }
 
   function formatClock(timestamp: string | number): string {
-    return new Date(timestamp).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+    return formatTime(new Date(timestamp), locale.value)
   }
 
   function formatAge(pastMs: number): string {

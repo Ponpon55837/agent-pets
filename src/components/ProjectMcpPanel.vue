@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useDialogA11y } from '@/composables/useDialogA11y'
 import type {
   ProjectMcpClientId,
   ProjectMcpInstallStatus,
@@ -312,15 +313,26 @@ async function forgetProject(project: ProjectMcpProjectRecord): Promise<void> {
   }
 }
 
+const overlayRef = ref<HTMLElement | null>(null)
+const panelRef = ref<HTMLElement | null>(null)
+useDialogA11y({
+  open: ref(true),
+  container: panelRef,
+  scope: overlayRef,
+  onClose: () => emit('close'),
+})
+
 onMounted(() => {
   void refreshProjects()
 })
 </script>
 
 <template>
-  <div class="mcp-overlay" @click.self="emit('close')">
+  <div ref="overlayRef" class="mcp-overlay" @click.self="emit('close')">
     <div
+      ref="panelRef"
       class="mcp-wizard"
+      tabindex="-1"
       role="dialog"
       aria-modal="true"
       :aria-label="t('projectMcpPanelTitle')"

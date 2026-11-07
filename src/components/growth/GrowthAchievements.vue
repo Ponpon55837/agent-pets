@@ -8,6 +8,7 @@ import Card from '@/components/ui/Card.vue'
 import Icon from '@/components/ui/Icon.vue'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
+import { formatDateDefault } from '@/utils/intl-format'
 
 const store = useAgentStore()
 const filter = ref<AchievementFilter>('all')
@@ -47,7 +48,7 @@ function isNew(unlockedAt?: number): boolean {
 function unlockedDate(unlockedAt?: number): string {
   return unlockedAt === undefined
     ? ''
-    : t('growth.unlockedOn', { date: new Date(unlockedAt).toLocaleDateString(locale.value) })
+    : t('growth.unlockedOn', { date: formatDateDefault(unlockedAt, locale.value) })
 }
 
 function markSeen(): void {

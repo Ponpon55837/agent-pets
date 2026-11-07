@@ -12,6 +12,7 @@ import { XP_RULES } from '@/types/progression'
 import { displayPercent, etaDaysToLevel, isAlmostLevelUp, streakAtRisk, xpRemaining } from '@/utils/growth-math'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
+import { formatDateParts, formatTime } from '@/utils/intl-format'
 
 const store = useAgentStore()
 const { evolutionLabel, moodStage, ruleLabel, xpSources } = useProgressionLabels()
@@ -52,8 +53,8 @@ function entryTime(timestamp: number): string {
   const date = new Date(timestamp)
   const sameDay = date.toDateString() === new Date().toDateString()
   return sameDay
-    ? date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
-    : date.toLocaleDateString(locale.value, { month: 'numeric', day: 'numeric' })
+    ? formatTime(date, locale.value)
+    : formatDateParts(date, { month: 'numeric', day: 'numeric' }, locale.value)
 }
 
 // The ledger lives in main; re-read it whenever main reports new XP or the

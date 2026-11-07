@@ -4,6 +4,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import DesktopPet from '@/components/DesktopPet.vue'
 import GrowthCelebration from '@/components/growth/GrowthCelebration.vue'
 import StatusPanel from '@/components/StatusPanel.vue'
+import ToastHost from '@/components/ui/ToastHost.vue'
 import SetupWizard from '@/components/SetupWizard.vue'
 import ProjectMcpPanel from '@/components/ProjectMcpPanel.vue'
 import { playCue, setSoundVolume, type SoundCue } from '@/utils/sound'
@@ -520,6 +521,7 @@ onUnmounted(() => {
       <DesktopPet />
       <GrowthCelebration />
     </template>
+    <ToastHost />
   </div>
 </template>
 

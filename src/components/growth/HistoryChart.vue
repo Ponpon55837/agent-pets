@@ -4,6 +4,7 @@ import { locale, t } from '@/i18n'
 import { useHistoryFormat } from '@/composables/useHistoryFormat'
 import type { HistoryDailyStat } from '@/types/history'
 import { niceCeiling } from '@/utils/token-format'
+import { formatDateParts } from '@/utils/intl-format'
 
 const props = defineProps<{ days: HistoryDailyStat[]; todayKey: string; weekdayLabels: boolean }>()
 const { tokens, duration } = useHistoryFormat()
@@ -20,9 +21,9 @@ const labelStep = computed(() => Math.max(1, Math.ceil(props.days.length / 7)))
 function dateLabel(day: HistoryDailyStat, withWeekday: boolean): string {
   const date = new Date(`${day.localDate}T12:00:00`)
   if (!Number.isFinite(date.getTime())) return day.localDate
-  return date.toLocaleDateString(locale.value, withWeekday
+  return formatDateParts(date, withWeekday
     ? { weekday: 'short', month: 'numeric', day: 'numeric' }
-    : { month: 'numeric', day: 'numeric' })
+    : { month: 'numeric', day: 'numeric' }, locale.value)
 }
 
 function total(day: HistoryDailyStat): number {

@@ -153,6 +153,7 @@ onBeforeUnmount(() => {
             <ProgressTrack
               class="quota-progress"
               :value="quota.remainingPercent"
+              :value-text="[usedRemaining(quota.usedPercent, quota.remainingPercent), formatReset(quota.resetsAt)].filter(Boolean).join(', ')"
               :tone="TONE_FOR_QUOTA[quotaTone(quota.remainingPercent)]"
               :aria-label="t('quotaRemainingAria', { provider: provider.name, quota: quotaWindowLabel(quota.id, quota.label) })"
             />

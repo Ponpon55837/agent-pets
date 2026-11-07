@@ -40,6 +40,7 @@ import {
   defaultSettingsDraft, isSettingsDirty, validateSettings, type SettingErrorCode,
 } from '@/utils/plugin-settings-form'
 import { usePluginNotify } from '@/composables/plugin/usePluginNotify'
+import { formatDateParts, formatDateTime, formatNumber } from '@/utils/intl-format'
 export interface PermissionEntryView {
   unit: string
   label: string
@@ -902,9 +903,9 @@ function resourceInputValue(key: keyof PluginResourceLimits, value: number): str
 }
 
 function resourceBoundText(key: keyof PluginResourceLimits, value: number): string {
-  const number = (amount: number) => new Intl.NumberFormat(locale.value, { maximumFractionDigits: 1 }).format(amount)
+  const number = (amount: number) => formatNumber(amount, locale.value, { maximumFractionDigits: 1 })
   const unit = (amount: number, name: 'megabyte' | 'kilobyte' | 'second') =>
-    new Intl.NumberFormat(locale.value, { style: 'unit', unit: name, unitDisplay: 'short', maximumFractionDigits: 1 }).format(amount)
+    formatNumber(amount, locale.value, { style: 'unit', unit: name, unitDisplay: 'short', maximumFractionDigits: 1 })
   if (key === 'memoryMbPerPlugin') return unit(value, 'megabyte')
   if (key === 'netMaxResponseBytes' || key === 'storageBytesPerPlugin') {
     return value % (1024 * 1024) === 0 ? unit(value / (1024 * 1024), 'megabyte') : unit(value / 1024, 'kilobyte')
@@ -1233,11 +1234,11 @@ function notificationSource(item: PluginNotificationRecord): string {
 }
 
 function notificationTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleString(locale.value, { dateStyle: 'short', timeStyle: 'short' })
+  return formatDateTime(timestamp, locale.value)
 }
 
 function diagnosticTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return formatDateParts(timestamp, { hour: '2-digit', minute: '2-digit', second: '2-digit' }, locale.value)
 }
 
 // 診斷以人話呈現；原始的 method / code 只放在 diagnosticTechnical，由畫面收在 title 與技術細節。

@@ -117,6 +117,11 @@ const announcement = computed(() => {
 // are only advertised when the shortcut is actually registered.
 const hotkey = computed(() => request.value?.hotkey ?? null)
 const showHotkeys = computed(() => hotkey.value?.status === 'active')
+// Main reports a platform-formatted label ("⌘⇧Y" or "Ctrl+Shift+Y"); render one key cap per key.
+function keyCaps(label: string | undefined): string[] {
+  if (!label) return []
+  return label.includes('+') ? label.split('+').filter(Boolean) : Array.from(label)
+}
 const hotkeyBlocked = computed(() => hotkey.value?.status === 'unavailable')
 
 // --- In-window keyboard (only while focus is inside the bubble) --------------
@@ -250,7 +255,7 @@ onBeforeUnmount(() => {
         @click.stop="decide('deny')"
       >
         {{ t('permissionDeny') }}
-        <kbd v-if="showHotkeys">{{ hotkey?.denyLabel }}</kbd>
+        <span v-if="showHotkeys" class="permission-keycaps"><kbd v-for="key in keyCaps(hotkey?.denyLabel)" :key="key">{{ key }}</kbd></span>
       </Button>
       <Button
         class="permission-button allow"
@@ -259,7 +264,7 @@ onBeforeUnmount(() => {
         @click.stop="decide('allow_once')"
       >
         {{ request.status === 'deciding' ? t('sending') : t('permissionAllowOnce') }}
-        <kbd v-if="showHotkeys">{{ hotkey?.allowLabel }}</kbd>
+        <span v-if="showHotkeys" class="permission-keycaps"><kbd v-for="key in keyCaps(hotkey?.allowLabel)" :key="key">{{ key }}</kbd></span>
       </Button>
     </div>
     <p v-if="hotkeyBlocked" class="permission-request-hint">{{ t('permission.hotkeyUnavailable') }}</p>
@@ -551,6 +556,11 @@ onBeforeUnmount(() => {
 .permission-request .permission-button:disabled {
   cursor: wait;
   opacity: 0.56;
+}
+
+.permission-keycaps {
+  display: inline-flex;
+  gap: var(--space-1);
 }
 
 .permission-request .permission-button kbd {

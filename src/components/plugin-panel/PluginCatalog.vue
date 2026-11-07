@@ -11,6 +11,7 @@ import Skeleton from '@/components/ui/Skeleton.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
 import { usePluginController } from '@/composables/plugin/context'
 import type { PluginCatalogPanelItem } from '@/types/plugin-catalog'
+import { formatNumber, formatTime } from '@/utils/intl-format'
 
 const props = defineProps<{ active: boolean }>()
 
@@ -27,7 +28,7 @@ const urlChanged = computed(() => catalogUrlDraft.value !== (snapshot.value?.pre
 const isDefaultUrl = computed(() => snapshot.value?.preferences.catalogUrl === DEFAULT_PLUGIN_CATALOG_URL)
 const lastChecked = computed(() => catalogLoadedAt.value === null
   ? ''
-  : new Date(catalogLoadedAt.value).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' }))
+  : formatTime(catalogLoadedAt.value, locale.value))
 const expanded = ref<Record<string, boolean>>({})
 
 // 進入探索分頁（或啟用目錄）時自動載入一次。
@@ -42,8 +43,8 @@ function actionLabel(item: PluginCatalogPanelItem): string {
 
 function sizeLabel(bytes: number): string {
   return bytes >= 1024 * 1024
-    ? `${new Intl.NumberFormat(locale.value, { maximumFractionDigits: 1 }).format(bytes / 1024 / 1024)} MB`
-    : `${new Intl.NumberFormat(locale.value, { maximumFractionDigits: 0 }).format(Math.max(1, bytes / 1024))} KB`
+    ? `${formatNumber(bytes / 1024 / 1024, locale.value, { maximumFractionDigits: 1 })} MB`
+    : `${formatNumber(Math.max(1, bytes / 1024), locale.value, { maximumFractionDigits: 0 })} KB`
 }
 </script>
 
@@ -91,7 +92,7 @@ function sizeLabel(bytes: number): string {
       :placeholder="t('pluginCatalogSearchPlaceholder')"
     />
 
-    <div v-if="catalogLoading && catalogItems.length === 0" class="catalog-skeleton">
+    <div v-if="catalogLoading && catalogItems.length === 0" class="catalog-skeleton" role="status" aria-busy="true" :aria-label="t('panel.loading')">
       <Skeleton v-for="n in 3" :key="n" variant="block" height="88px" />
     </div>
     <EmptyState v-else-if="catalogItems.length === 0 && !catalogError" compact :title="t('plugins.catalogEmpty')" />
