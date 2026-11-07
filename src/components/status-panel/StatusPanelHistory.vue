@@ -16,12 +16,15 @@ import { localDateKey } from '@/utils/local-date'
 import GrowthEmptyState from '@/components/growth/GrowthEmptyState.vue'
 import HistoryChart from '@/components/growth/HistoryChart.vue'
 import HistoryModelList from '@/components/growth/HistoryModelList.vue'
+import HistorySessions from '@/components/growth/HistorySessions.vue'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Icon from '@/components/ui/Icon.vue'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
 import Select from '@/components/ui/Select.vue'
+import TabPanel from '@/components/ui/TabPanel.vue'
+import Tabs from '@/components/ui/Tabs.vue'
 import { formatDate } from '@/utils/intl-format'
 
 const props = defineProps<{ active: boolean }>()
@@ -49,6 +52,8 @@ let dayWatchTimer: ReturnType<typeof setInterval> | null = null
 const RANGE_KEY = 'agent-pet-history-range'
 const COLLAPSE_KEY = 'agent-pet-history-collapsed'
 const INTRO_KEY = 'agent-pet-history-intro-dismissed'
+const VIEW_KEY = 'agent-pet-history-view'
+type HistoryView = 'overview' | 'sessions'
 
 function readRange(): HistoryRangeDays {
   try {
@@ -61,6 +66,16 @@ function readCollapsed(): Record<string, boolean> {
 }
 const historyRange = ref<HistoryRangeDays>(readRange())
 const collapsed = ref<Record<string, boolean>>(readCollapsed())
+const historyView = ref<HistoryView>('overview')
+try { if (localStorage.getItem(VIEW_KEY) === 'sessions') historyView.value = 'sessions' } catch { /* convenience only */ }
+const viewItems = computed(() => [
+  { id: 'overview', label: t('growth.viewOverview') },
+  { id: 'sessions', label: t('growth.viewSessions') },
+])
+function selectView(view: string): void {
+  historyView.value = view === 'sessions' ? 'sessions' : 'overview'
+  try { localStorage.setItem(VIEW_KEY, historyView.value) } catch { /* convenience only */ }
+}
 const introDismissed = ref(true)
 try { introDismissed.value = localStorage.getItem(INTRO_KEY) === '1' } catch { introDismissed.value = false }
 
@@ -303,6 +318,24 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <Tabs
+      :model-value="historyView"
+      :items="viewItems"
+      id-prefix="history-view"
+      variant="pill"
+      :ariaLabel="t('growth.viewLabel')"
+      @update:model-value="selectView"
+    />
+
+    <TabPanel id-prefix="history-view" id="sessions" :active="historyView === 'sessions'">
+      <HistorySessions
+        :active="active && historyView === 'sessions'"
+        :range-days="historyRange"
+        :project-id="historyProjectFilter"
+      />
+    </TabPanel>
+
+    <TabPanel id-prefix="history-view" id="overview" :active="historyView === 'overview'" class="history-overview">
     <GrowthEmptyState v-if="historyLoading && !historySummary" :title="t('checking')" busy />
     <GrowthEmptyState v-else-if="historyError && !historySummary" tone="error" icon="warning" :title="historyError">
       <Button variant="secondary" size="sm" @click="refreshHistory">{{ t('growth.retry') }}</Button>
@@ -407,6 +440,7 @@ onUnmounted(() => {
         </div>
       </div>
     </template>
+    </TabPanel>
 
     <div v-if="historyAction" class="history-action-status" role="status" aria-live="polite">
       <span>{{ historyAction }}</span>
@@ -425,67 +459,4 @@ onUnmounted(() => {
   </div>
 </template>
 
-<style scoped>
-.history-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-2);
-}
-
-.history-range,
-.history-metric {
-  display: flex;
-  gap: var(--space-1);
-}
-
-.history-metric {
-  margin-bottom: var(--space-3);
-}
-
-.history-section > summary:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring-color);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.history-updating {
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-}
-
-.history-section > summary {
-  margin-bottom: var(--space-2);
-  color: var(--text-primary);
-  font-size: var(--font-md);
-  font-weight: var(--weight-bold);
-  cursor: pointer;
-}
-
-.history-agent-outcomes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-}
-
-.outcome {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.outcome.ok {
-  color: var(--state-success);
-}
-
-.outcome.fail {
-  color: var(--state-error);
-}
-
-.history-action-status {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-</style>
+<style scoped src="@/components/status-panel/StatusPanelHistory.css"></style>
