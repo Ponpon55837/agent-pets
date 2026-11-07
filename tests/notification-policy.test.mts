@@ -22,13 +22,20 @@ test('classifies waiting and terminal events without exposing tool data', () => 
     toolName: 'secret command',
   }) as any)
   assert.equal(waiting?.kind, 'waiting-permission')
-  assert.equal(waiting?.title, 'Codex 需要 Permission')
+  assert.equal(waiting?.title, 'Codex 需要你的權限確認')
   assert.equal(waiting?.body, 'agent-pets')
   assert.doesNotMatch(`${waiting?.title} ${waiting?.body}`, /secret command/)
 
   const success = classifyNotification(event('success') as any)
   assert.equal(success?.terminal, true)
   assert.equal(classifyNotification(event('thinking') as any), null)
+})
+
+test('external-only permission waits say they must be answered in the original tool', () => {
+  const external = classifyNotification(event('waiting-permission', {
+    permissionNotice: { responseMode: 'external_only' },
+  }) as any)
+  assert.equal(external?.title, 'Codex 等你核准（請回原工具處理）')
 })
 
 test('suppresses integration-test notifications', () => {

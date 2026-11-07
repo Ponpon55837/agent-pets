@@ -17,6 +17,7 @@ import { selectBubble } from '@/utils/feed-arbiter'
 import { summarizePluginBadgesForPet } from '@/utils/plugin-badges'
 import PetAnimation from '@/components/PetAnimation.vue'
 import PermissionBubble from '@/components/permission/PermissionBubble.vue'
+import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
 
 const store = useAgentStore()
 const dragOffset = ref({ x: 0, y: 0 })
@@ -612,19 +613,7 @@ watch(() => store.achievementUnlock, (unlock) => {
       </Transition>
 
       <Transition v-else-if="bubbleSelection === 'permission-notice' && store.permissionBubbleActive && store.permissionNotice" name="toast" mode="out-in">
-        <div
-          key="permission"
-          class="pet-toast permission-notice"
-          role="status"
-          aria-live="polite"
-          data-pet-hit-target="solid"
-        >
-          <span class="permission-notice-icon" aria-hidden="true">!</span>
-          <span class="permission-notice-copy">
-            <strong>{{ store.permissionNotice.title }}</strong>
-            <span>{{ store.permissionNotice.detail }}</span>
-          </span>
-        </div>
+        <PermissionNoticeBubble key="permission-notice" />
       </Transition>
 
       <Transition v-else-if="bubbleSelection === 'presentation-say' && store.presentationSay" name="toast" mode="out-in">

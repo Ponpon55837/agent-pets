@@ -1117,6 +1117,12 @@ export const useAgentStore = defineStore('agent', () => {
       return event.state
     }
 
+    if (event.state !== 'waiting-permission' && dismissedPermissionNotices.value.has(key)) {
+      const next = new Set(dismissedPermissionNotices.value)
+      next.delete(key)
+      dismissedPermissionNotices.value = next
+    }
+
     if (event.state === 'waiting-permission' && prevState !== 'waiting-permission') {
       return 'waiting-permission'
     }
@@ -1337,15 +1343,50 @@ export const useAgentStore = defineStore('agent', () => {
     return s.toolName
   })
 
+  // Codex / Claude can only *report* a permission wait; the answer has to be
+  // given in the original tool. Every such session is listed (not just the
+  // highest-priority one) so the user can see how many agents are blocked.
+  const dismissedPermissionNotices = shallowRef<ReadonlySet<string>>(new Set())
+
+  const permissionNoticeItems = computed(() => (
+    sessionList.value
+      .filter(session => (
+        session.state === 'waiting-permission'
+        && session.permissionNotice?.responseMode === 'external_only'
+        && !dismissedPermissionNotices.value.has(session.key)
+      ))
+      .map(session => ({
+        key: session.key,
+        source: SOURCE_FAMILIES.find(family => family.sources.includes(session.source))?.label
+          ?? SOURCE_LABELS[session.source] ?? session.source,
+        project: session.project ?? '',
+        desktop: session.source.endsWith('-desktop'),
+      }))
+  ))
+
   const permissionNotice = computed(() => {
-    const session = highestPrioritySession.value
-    if (session?.state !== 'waiting-permission') return null
-    if (session.permissionNotice?.responseMode !== 'external_only') return null
+    const items = permissionNoticeItems.value
+    const first = items[0]
+    if (!first) return null
+    const multiple = items.length > 1
     return {
-      title: t('permissionNeeded'),
-      detail: t('returnToTerminal'),
+      title: multiple
+        ? t('permission.noticeTitleMulti', { count: items.length })
+        : t('permission.noticeTitle', { source: first.source, project: first.project || t('projectUnknown') }),
+      detail: multiple
+        ? t('permission.noticeExternalOnly')
+        : first.desktop
+          ? t('permission.noticeWhereApp', { source: first.source })
+          : t('returnToTerminal'),
+      items,
     }
   })
+
+  function dismissPermissionNotice(): void {
+    const next = new Set(dismissedPermissionNotices.value)
+    for (const item of permissionNoticeItems.value) next.add(item.key)
+    dismissedPermissionNotices.value = next
+  }
 
   function moodLabel(value: number): PresentationMood {
     if (value >= 70) return 'happy'
@@ -1775,6 +1816,7 @@ export const useAgentStore = defineStore('agent', () => {
     activePetId,
     activityText,
     permissionNotice,
+    dismissPermissionNotice,
     presentationSay,
     presentationReaction,
     handlePresentationIntent,

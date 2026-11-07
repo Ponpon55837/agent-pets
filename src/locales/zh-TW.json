@@ -304,7 +304,7 @@
   "projectUnknown": "未指定專案",
   "quotaLocalLoginNote": "沿用 Codex／Claude CLI 的本機登入，不需要帳號。",
   "agentTask": "Agent 工作",
-  "notificationNeedsPermission": "{source} 需要 Permission",
+  "notificationNeedsPermission": "{source} 需要你的權限確認",
   "notificationWaitingInput": "{source} 正在等待輸入",
   "notificationCompleted": "{source} 工作已完成",
   "notificationFailed": "{source} 工作失敗",

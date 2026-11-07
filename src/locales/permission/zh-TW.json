@@ -14,5 +14,17 @@
   "permission.copy": "複製",
   "permission.copied": "已複製",
   "permission.argumentsLabel": "要執行的內容",
-  "permission.network": "會連線到網路"
+  "permission.network": "會連線到網路",
+  "permission.noticeTitle": "{source} · {project} 正在等你核准",
+  "permission.noticeTitleMulti": "{count} 個 Agent 正在等你核准",
+  "permission.noticeWhereApp": "請回到 {source} 桌面版處理",
+  "permission.noticeExternalOnly": "此 Agent 的權限請求只能在原本的工具中回應。",
+  "permission.noticeHelpLabel": "為什麼不能在這裡核准？",
+  "permission.noticeExplain": "Codex 與 Claude 只會通知 Agent Pets「正在等待權限」，沒有提供把決定送回去的管道，所以這裡無法代為核准。目前只有 OpenCode 可以直接在寵物泡泡上核准。",
+  "permission.notifyExternal": "{source} 等你核准（請回原工具處理）",
+  "permission.settingsHeading": "權限請求",
+  "permission.settingsIntro": "哪些 Agent 的權限請求可以直接在寵物泡泡上處理：",
+  "permission.settingsCanApprove": "可在這裡允許一次或拒絕",
+  "permission.settingsReminderOnly": "只提醒，需回原工具處理",
+  "permission.settingsRiskRules": "風險判斷採保守原則：只有讀取、搜尋這類唯讀工具視為低風險，其他工具一律當作高風險，高風險請求不能用全域快捷鍵核准。"
 }

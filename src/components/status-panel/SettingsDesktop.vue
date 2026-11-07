@@ -33,6 +33,21 @@ const store = useAgentStore()
     <ToggleRow :model-value="store.permissionBubbleEnabled" :label="t('permissionBubble')" :help="t('permissionBubbleHelp')" @update:model-value="store.setPermissionBubbleEnabled($event)" />
   </Card>
 
+  <Card :title="t('permission.settingsHeading')">
+    <p class="permission-settings-intro">{{ t('permission.settingsIntro') }}</p>
+    <ul class="permission-settings-list">
+      <li>
+        <strong>OpenCode</strong>
+        <span>{{ t('permission.settingsCanApprove') }}</span>
+      </li>
+      <li>
+        <strong>Codex · Claude</strong>
+        <span>{{ t('permission.settingsReminderOnly') }}</span>
+      </li>
+    </ul>
+    <p class="permission-settings-intro">{{ t('permission.settingsRiskRules') }}</p>
+  </Card>
+
   <Card :title="t('system')">
     <ToggleRow :model-value="store.presentationMcpEnabled" :label="t('presentationMcp')" :help="t('presentationMcpHelp')" @update:model-value="store.setPresentationMcpEnabled($event)" />
     <ToggleRow
@@ -44,3 +59,36 @@ const store = useAgentStore()
     />
   </Card>
 </template>
+
+<style scoped>
+.permission-settings-intro {
+  margin: 0 0 var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+}
+
+.permission-settings-list {
+  display: flex;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  flex-direction: column;
+  gap: var(--space-2);
+  list-style: none;
+}
+
+.permission-settings-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+}
+
+.permission-settings-list span {
+  color: var(--text-secondary);
+}
+</style>

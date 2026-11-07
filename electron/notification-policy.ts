@@ -41,7 +41,11 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
       return {
         key: `${keyBase}:waiting-permission`,
         kind: 'waiting-permission',
-        title: t('notificationNeedsPermission', { source }),
+        // Codex / Claude cannot be answered from Agent Pets; say so in the title so
+        // clicking the notification is not mistaken for a way to approve here.
+        title: event.permissionNotice?.responseMode === 'external_only'
+          ? t('permission.notifyExternal', { source })
+          : t('notificationNeedsPermission', { source }),
         body,
         terminal: false,
       }

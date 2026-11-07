@@ -14,5 +14,17 @@
   "permission.copy": "Copy",
   "permission.copied": "Copied",
   "permission.argumentsLabel": "What will run",
-  "permission.network": "connects to the network"
+  "permission.network": "connects to the network",
+  "permission.noticeTitle": "{source} · {project} is waiting for your approval",
+  "permission.noticeTitleMulti": "{count} agents are waiting for your approval",
+  "permission.noticeWhereApp": "Go back to the {source} desktop app to handle it",
+  "permission.noticeExternalOnly": "This agent's permission requests can only be answered in its original tool.",
+  "permission.noticeHelpLabel": "Why can't I approve this here?",
+  "permission.noticeExplain": "Codex and Claude only tell Agent Pets that they are waiting for permission and give no way to send a decision back, so it cannot be approved here. Only OpenCode can be approved directly from the pet bubble.",
+  "permission.notifyExternal": "{source} is waiting for approval (go back to its tool)",
+  "permission.settingsHeading": "Permission requests",
+  "permission.settingsIntro": "Which agents' permission requests can be handled right from the pet bubble:",
+  "permission.settingsCanApprove": "Allow once or deny here",
+  "permission.settingsReminderOnly": "Reminder only; answer in the original tool",
+  "permission.settingsRiskRules": "Risk is judged conservatively: only read-only tools such as read and search count as low risk, every other tool is treated as high risk, and high-risk requests cannot be approved with the global shortcut."
 }

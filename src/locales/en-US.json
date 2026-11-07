@@ -304,7 +304,7 @@
   "projectUnknown": "No project",
   "quotaLocalLoginNote": "Uses your local Codex / Claude CLI login; no account needed.",
   "agentTask": "Agent task",
-  "notificationNeedsPermission": "{source} needs Permission",
+  "notificationNeedsPermission": "{source} needs your permission",
   "notificationWaitingInput": "{source} is waiting for input",
   "notificationCompleted": "{source} task completed",
   "notificationFailed": "{source} task failed",
