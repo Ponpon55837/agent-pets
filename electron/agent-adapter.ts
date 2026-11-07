@@ -28,6 +28,8 @@ export interface AdapterInspection {
 
 export interface AgentAdapterOperations {
   inspect(id: AgentAdapterId): AdapterInspection
+  /** Async preconditions (e.g. resolving Node.js) that must pass before install writes anything. */
+  prepare?(target: AdapterInstallTarget): Promise<void>
   install(target: AdapterInstallTarget): InstallReport | void
   uninstall(target: AdapterInstallTarget): void
 }
@@ -79,7 +81,10 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
       const before = (await self.detect(context())).health
       let report: InstallReport = { changedFiles: [], backupPaths: [] }
       try {
-        if (definition.installTarget) report = operations.install(definition.installTarget) ?? report
+        if (definition.installTarget) {
+          await operations.prepare?.(definition.installTarget)
+          report = operations.install(definition.installTarget) ?? report
+        }
       } catch (error) {
         // Keep the failure structured; the IPC layer turns this into a per-adapter result.
         throw Object.assign(error instanceof Error ? error : new Error(String(error)), {

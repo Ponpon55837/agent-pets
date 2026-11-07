@@ -127,5 +127,7 @@
   "onboarding.capPermissionNone": "Does not handle Permission",
   "onboarding.capTokensEstimated": "Estimated token usage",
   "onboarding.capTokensExact": "Exact token usage",
-  "onboarding.capQuota": "Shows subscription quota"
+  "onboarding.capQuota": "Shows subscription quota",
+  "onboarding.errorNodeMissing": "Node.js was not found. Install Node.js 18 or newer (nodejs.org) and press Install again; the hook needs it to reach the pet.",
+  "onboarding.errorNodeUnsupported": "The detected Node.js is too old. Upgrade to 18 or newer and try again."
 }

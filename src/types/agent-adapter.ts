@@ -132,6 +132,8 @@ export type InstallErrorCode =
   | 'permission_denied'
   | 'file_busy'
   | 'read_only'
+  | 'node_missing'
+  | 'node_unsupported'
   | 'unknown'
 
 /** Structured result of one install/repair; the renderer localizes it from these codes. */

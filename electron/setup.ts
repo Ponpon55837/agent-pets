@@ -2,8 +2,8 @@ import { app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import { execFileSync } from 'child_process'
 import { randomBytes } from 'crypto'
+import { createNodeResolver, NodeNotFoundError, NodeUnsupportedError, type NodeInfo } from './node-resolver.ts'
 import type { PetEdge, PetWindowMode } from '../src/types/pet-window'
 import { readConfigText, writeConfigSafely, writeTextAtomic, type ConfigWriteResult } from './safe-config-write.ts'
 import {
@@ -29,73 +29,27 @@ function appDataDir(): string {
   return app.getPath('userData')
 }
 
-// GUI apps (Codex Desktop, Claude Desktop, ...) launched from Finder/Dock get
-// launchd's minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) — it doesn't include
-// Homebrew or nvm, so a bare "node" in a hook command silently fails to even
-// start. Resolve an absolute path once at install time instead: ask a login
-// shell (which sources the user's real PATH) where node actually is, same
-// fix GUI apps commonly need (e.g. the "fix-path" pattern). Falls back to
-// common install locations, then the bare command as a last resort.
-let cachedNodeBin: string | null = null
+// Node resolution lives in node-resolver.ts (async, validated cache, no bare-"node" fallback).
+const nodeResolver = createNodeResolver()
+
+/** Legacy synchronous lookup for non-install callers (e.g. project MCP); may return a bare "node". */
 export function resolveNodeBin(): string {
-  if (cachedNodeBin) return cachedNodeBin
+  return nodeResolver.peek()?.path ?? nodeResolver.resolveSync()?.path ?? 'node'
+}
 
-  if (IS_WIN) {
-    // In a packaged Electron app, process.execPath is Agent Pets.exe, not
-    // node.exe. Using it for hooks launches another pet for every lifecycle
-    // event. Prefer standard Node.js locations, then the user's PATH.
-    const candidates = [
-      process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'nodejs', 'node.exe') : '',
-      process.env['ProgramFiles(x86)'] ? path.join(process.env['ProgramFiles(x86)'], 'nodejs', 'node.exe') : '',
-      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs', 'node.exe') : '',
-    ].filter(Boolean)
+/** Resolve (async) and validate Node.js before an install that writes a hook command. */
+export async function prepareNodeForInstall(): Promise<NodeInfo> {
+  const info = await nodeResolver.resolve()
+  if (!info) throw new NodeNotFoundError()
+  if (!info.supported) throw new NodeUnsupportedError(info.version)
+  return info
+}
 
-    for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) {
-        cachedNodeBin = candidate
-        return candidate
-      }
-    }
-
-    try {
-      const out = execFileSync('where.exe', ['node.exe'], {
-        encoding: 'utf-8',
-        timeout: 3000,
-      })
-      const resolved = out
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .find(line => line && fs.existsSync(line))
-      if (resolved) {
-        cachedNodeBin = resolved
-        return resolved
-      }
-    } catch {}
-
-    return 'node'
-  }
-
-  try {
-    const shell = process.env.SHELL || '/bin/zsh'
-    const out = execFileSync(shell, ['-ilc', 'command -v node'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-    }).trim()
-    const resolved = out.split('\n').pop()?.trim()
-    if (resolved && fs.existsSync(resolved)) {
-      cachedNodeBin = resolved
-      return resolved
-    }
-  } catch {}
-
-  for (const candidate of ['/opt/homebrew/bin/node', '/usr/local/bin/node']) {
-    if (fs.existsSync(candidate)) {
-      cachedNodeBin = candidate
-      return candidate
-    }
-  }
-
-  return 'node'
+/** Synchronous accessor for installers; prepareNodeForInstall() must have succeeded first. */
+function requireNodeBin(): string {
+  const info = nodeResolver.peek() ?? nodeResolver.resolveSync()
+  if (!info) throw new NodeNotFoundError()
+  return info.path
 }
 
 // --- OpenCode CLI plugin ---
@@ -410,7 +364,7 @@ function hookScriptContent(): string {
 function hookWrapperContent(): string {
   return fs
     .readFileSync(path.join(integrationsDir(), 'agent-hook.cmd'), 'utf-8')
-    .replace('__NODE_EXECUTABLE__', resolveNodeBin())
+    .replace('__NODE_EXECUTABLE__', () => requireNodeBin())
 }
 
 function installHookScript(): ConfigWriteResult[] {
@@ -704,7 +658,7 @@ const CODEX_HOOK_EVENTS = [
 
 function codexHooksJson(): any {
   const hook = hookScriptPath()
-  const nodeBin = resolveNodeBin()
+  const nodeBin = IS_WIN ? '' : requireNodeBin()
   const command = IS_WIN ? `${hookWrapperPath()} codex` : `${nodeBin} "${hook}" codex`
   const handler = () => ({
     hooks: [
@@ -799,7 +753,7 @@ const CLAUDE_CODE_TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse'])
 
 function claudeCodeHooksJson(): any {
   const hook = hookScriptPath()
-  const nodeBin = resolveNodeBin()
+  const nodeBin = requireNodeBin()
   const handler = (event: string) => {
     const entry: any = { hooks: [{ type: 'command', command: nodeBin, args: [hook, 'claude'] }] }
     if (CLAUDE_CODE_TOOL_EVENTS.has(event)) entry.matcher = '*'
@@ -831,7 +785,8 @@ function uninstallClaudeCode(): void {
 function rewriteInstalledAgentPetsHooks(filePath: string, target: 'codex' | 'claude'): boolean {
   const hookPath = hookScriptPath()
   const codexCommand = `${hookWrapperPath()} codex`
-  const nodeBin = target === 'claude' ? resolveNodeBin() : ''
+  const nodeBin = target === 'claude' ? (nodeResolver.resolveSync()?.path ?? '') : ''
+  if (target === 'claude' && !nodeBin) return false // cannot repair without a real Node path
   return rewriteAgentPetsHookCommands(filePath, (hook) => {
     let changed = false
     if (target === 'codex') {

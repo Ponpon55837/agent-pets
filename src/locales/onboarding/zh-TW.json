@@ -127,5 +127,7 @@
   "onboarding.capPermissionNone": "不處理 Permission",
   "onboarding.capTokensEstimated": "估算 Token 用量",
   "onboarding.capTokensExact": "精確 Token 用量",
-  "onboarding.capQuota": "顯示訂閱額度"
+  "onboarding.capQuota": "顯示訂閱額度",
+  "onboarding.errorNodeMissing": "找不到 Node.js。請先安裝 Node.js 18 以上版本（nodejs.org），再按「安裝」。hook 需要它才能把事件送到寵物。",
+  "onboarding.errorNodeUnsupported": "偵測到的 Node.js 版本太舊。請升級到 18 以上後再試。"
 }

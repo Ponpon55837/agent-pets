@@ -16,6 +16,7 @@ import {
   openCodeCliPluginPath,
   openCodeDesktopPluginPath,
   openCodePluginIsCurrent,
+  prepareNodeForInstall,
   readFile,
   uninstallIntegration,
 } from './setup.ts'
@@ -161,6 +162,10 @@ export function createAgentAdapterOperations(): AgentAdapterOperations {
             ],
           }
       }
+    },
+    async prepare(target: AdapterInstallTarget): Promise<void> {
+      // Codex and Claude Code write a Node command into their hooks; OpenCode's plugin does not.
+      if (target !== 'opencode') await prepareNodeForInstall()
     },
     install(target: AdapterInstallTarget): InstallReport {
       return reportFromWrites(installIntegration(target))

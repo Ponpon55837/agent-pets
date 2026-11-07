@@ -161,6 +161,8 @@ const INSTALL_ERROR_KEYS: Record<InstallErrorCode, TranslationKey> = {
   permission_denied: 'onboarding.errorPermissionDenied',
   file_busy: 'onboarding.errorFileBusy',
   read_only: 'onboarding.errorReadOnly',
+  node_missing: 'onboarding.errorNodeMissing',
+  node_unsupported: 'onboarding.errorNodeUnsupported',
   unknown: 'onboarding.errorUnknown',
 }
 
