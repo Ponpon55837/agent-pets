@@ -94,5 +94,18 @@
   "growth.range30": "30 天",
   "growth.range90": "90 天",
   "growth.trendTitle": "近 {days} 天 Token 用量",
-  "growth.deltaVsPrevious": "較前 {days} 天 {delta}"
+  "growth.deltaVsPrevious": "較前 {days} 天 {delta}",
+  "growth.exportTitle": "匯出工作歷史",
+  "growth.exportExplain": "Token 為新輸入＋輸出，快取另列；日期以本機時區的當地日期計算。",
+  "growth.exportedTo": "已匯出至 {path}",
+  "growth.revealExport": "在檔案總管中顯示",
+  "growth.exportJson": "匯出 JSON",
+  "growth.exportCsv": "匯出 CSV",
+  "growth.exporting": "匯出中…",
+  "growth.exportWriteFailed": "無法寫入檔案，請確認磁碟空間與資料夾權限。",
+  "growth.exportUnavailable": "歷史資料目前無法使用，無法匯出。",
+  "growth.clearDetail": "會清除：工作歷史、每日統計、Token 統計與額度快照。\n不會清除：寵物 XP、等級、連續天數與成就。",
+  "growth.resetMood": "重設今日心情",
+  "growth.resetMoodConfirm": "把心情重設回基準值？這不會影響 XP、等級或成就。",
+  "growth.closeMessage": "關閉訊息"
 }

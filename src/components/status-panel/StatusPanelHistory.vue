@@ -7,6 +7,7 @@ import GrowthEmptyState from '@/components/growth/GrowthEmptyState.vue'
 import { localDateKey } from '@/utils/local-date'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
+import Icon from '@/components/ui/Icon.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
 import Select from '@/components/ui/Select.vue'
@@ -186,16 +187,47 @@ function historyAgentBarPercent(agent: HistoryAgentStat): number {
   return Math.round((agent.activeMs / Math.max(1, summary.totals.activeMs)) * 100)
 }
 
-async function exportHistory(): Promise<void> {
+const historyExporting = ref(false)
+const lastExportPath = ref('')
+let actionTimer: ReturnType<typeof setTimeout> | null = null
+
+function announce(message: string, path = ''): void {
+  historyAction.value = message
+  lastExportPath.value = path
+  if (actionTimer) clearTimeout(actionTimer)
+  // Status text fades away after a few seconds so a stale result never lingers.
+  actionTimer = setTimeout(() => { historyAction.value = ''; lastExportPath.value = '' }, 8_000)
+}
+
+function dismissAction(): void {
   historyAction.value = ''
+  lastExportPath.value = ''
+  if (actionTimer) clearTimeout(actionTimer)
+}
+
+async function exportHistory(format: 'json' | 'csv'): Promise<void> {
+  dismissAction()
+  historyExporting.value = true
   try {
-    const result = await window.electronAPI?.exportHistory()
-    if (result?.ok) historyAction.value = t('historyExported')
-    else if (result?.error === 'cancelled') historyAction.value = t('historyExportCancelled')
-    else historyAction.value = t('historyActionFailed')
+    const result = await window.electronAPI?.exportHistory({
+      format,
+      rangeDays: historyRange.value,
+      ...(historyProjectFilter.value ? { projectId: historyProjectFilter.value } : {}),
+    })
+    if (result?.ok) announce(t('growth.exportedTo', { path: result.path ?? '' }), result.path ?? '')
+    else if (result?.error === 'cancelled') announce(t('historyExportCancelled'))
+    else if (result?.error === 'write_failed') announce(t('growth.exportWriteFailed'))
+    else if (result?.error === 'unavailable') announce(t('growth.exportUnavailable'))
+    else announce(t('historyActionFailed'))
   } catch {
-    historyAction.value = t('historyActionFailed')
+    announce(t('historyActionFailed'))
+  } finally {
+    historyExporting.value = false
   }
+}
+
+async function revealExport(): Promise<void> {
+  try { await window.electronAPI?.revealHistoryExport() } catch { /* nothing to reveal */ }
 }
 
 function askConfirm(request: NonNullable<typeof confirmDialog.value>): void {
@@ -209,19 +241,19 @@ async function acceptConfirm(): Promise<void> {
 }
 
 function clearHistory(): void {
-  askConfirm({ title: t('historyClear'), message: t('historyClearConfirm'), tone: 'danger', onConfirm: performClearHistory })
+  askConfirm({ title: t('historyClear'), message: t('growth.clearDetail'), tone: 'danger', onConfirm: performClearHistory })
 }
 
 async function performClearHistory(): Promise<void> {
-  historyAction.value = ''
+  dismissAction()
   try {
     const result = await window.electronAPI?.clearHistory()
     if (result?.ok) {
-      historyAction.value = t('historyCleared')
+      announce(t('historyCleared'))
       await refreshHistory()
-    } else historyAction.value = t('historyActionFailed')
+    } else announce(t('historyActionFailed'))
   } catch {
-    historyAction.value = t('historyActionFailed')
+    announce(t('historyActionFailed'))
   }
 }
 
@@ -252,6 +284,7 @@ onMounted(() => {
 })
 onUnmounted(() => {
   cleanupHistoryUpdated?.()
+  if (actionTimer) clearTimeout(actionTimer)
   if (dayWatchTimer) clearInterval(dayWatchTimer)
 })
 </script>
@@ -364,12 +397,17 @@ onUnmounted(() => {
       <div class="history-footer">
         <span>{{ t('historyCompactDisclosure', { date: historyTrackingDateLabel() }) }}</span>
         <div class="history-actions">
-          <Button variant="secondary" size="sm" @click="exportHistory">{{ t('historyExportShort') }}</Button>
+          <Button variant="secondary" size="sm" :disabled="historyExporting" @click="exportHistory('json')">{{ historyExporting ? t('growth.exporting') : t('growth.exportJson') }}</Button>
+          <Button variant="secondary" size="sm" :disabled="historyExporting" @click="exportHistory('csv')">{{ t('growth.exportCsv') }}</Button>
           <Button variant="danger" size="sm" @click="clearHistory">{{ t('historyClearShort') }}</Button>
         </div>
       </div>
     </template>
-    <div v-if="historyAction" class="history-action-status" role="status" aria-live="polite">{{ historyAction }}</div>
+    <div v-if="historyAction" class="history-action-status" role="status" aria-live="polite">
+      <span>{{ historyAction }}</span>
+      <Button v-if="lastExportPath" variant="ghost" size="sm" @click="revealExport">{{ t('growth.revealExport') }}</Button>
+      <Button variant="ghost" size="sm" :aria-label="t('growth.closeMessage')" @click="dismissAction"><Icon name="close" :size="12" /></Button>
+    </div>
     <ConfirmDialog
       :open="confirmDialog !== null"
       :title="confirmDialog?.title ?? ''"
@@ -407,6 +445,13 @@ onUnmounted(() => {
 .history-range-button:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
+}
+
+.history-action-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .history-bar-column.today .history-bar-fill {

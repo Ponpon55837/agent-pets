@@ -7,6 +7,7 @@ import { nextEvolution, type ProgressionInsights } from '@/types/progression'
 import GrowthEmptyState from '@/components/growth/GrowthEmptyState.vue'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { XP_RULES } from '@/types/progression'
 import { displayPercent, etaDaysToLevel, isAlmostLevelUp, streakAtRisk, xpRemaining } from '@/utils/growth-math'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
@@ -16,6 +17,7 @@ const store = useAgentStore()
 const { evolutionLabel, moodStage, ruleLabel, xpSources } = useProgressionLabels()
 const progression = computed(() => store.progression)
 const insights = ref<ProgressionInsights | null>(null)
+const confirmMoodReset = ref(false)
 const nextStage = computed(() => (progression.value ? nextEvolution(progression.value.level) : null))
 
 const progressionPercent = computed(() => (
@@ -63,11 +65,19 @@ onMounted(() => { void loadInsights() })
 <template>
   <Card :title="t('petMood')">
     <template #heading>
-      <Button size="sm" variant="secondary" :title="t('resetBaseline')" @click="store.resetMood()">{{ t('reset') }}</Button>
+      <Button size="sm" variant="secondary" :title="t('resetBaseline')" @click="confirmMoodReset = true">{{ t('growth.resetMood') }}</Button>
     </template>
     <div class="stat-row"><span class="stat-readout">{{ store.mood }} · {{ moodStage }}</span></div>
     <ProgressTrack :value="store.mood" tone="success" :aria-label="t('petMood')" />
   </Card>
+
+  <ConfirmDialog
+    :open="confirmMoodReset"
+    :title="t('growth.resetMood')"
+    :message="t('growth.resetMoodConfirm')"
+    @confirm="store.resetMood(); confirmMoodReset = false"
+    @cancel="confirmMoodReset = false"
+  />
 
   <template v-if="progression">
     <Card :title="t('growth')" tone="accent">

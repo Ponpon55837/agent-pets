@@ -104,6 +104,23 @@ export interface HistoryExport {
   schemaVersion: 1
   exportedAt: number
   summary: HistorySummary
+  /** Reading guide for whoever opens the file later. */
+  meta?: {
+    timezone: string
+    generatedAtLocal: string
+    tokenBasis: string
+    dayDefinition: string
+  }
+  /** Growth snapshot (XP/level/streak and unlocked achievements), when available. */
+  growth?: unknown
+}
+
+export type HistoryExportFormat = 'json' | 'csv'
+
+export interface HistoryExportRequest {
+  format: HistoryExportFormat
+  rangeDays: number
+  projectId?: string
 }
 
 export type HistoryCommandResult =

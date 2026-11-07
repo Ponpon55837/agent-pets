@@ -5,7 +5,7 @@ import type { DesktopPreferences, DesktopPreferencesPatch } from './desktop'
 import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView } from './permission'
 import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from './progression'
 import type { AchievementSnapshot, AchievementUnlock } from './achievement'
-import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from './history'
+import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySummary } from './history'
 import type { PetWindowMode, PetWindowModeState } from './pet-window'
 import type { PetBehaviorManifest, PluginSkinPetSource } from './pet'
 import type { AgentSession } from './agent'
@@ -171,7 +171,8 @@ export interface ElectronAPI {
       getProjectPetsEnabled: () => Promise<boolean>
       setProjectPetsEnabled: (enabled: boolean) => Promise<boolean>
       clearHistory: () => Promise<HistoryClearResult>
-      exportHistory: () => Promise<HistoryCommandResult>
+      exportHistory: (request?: HistoryExportRequest) => Promise<HistoryCommandResult>
+      revealHistoryExport: () => Promise<boolean>
       onHistoryUpdated: (callback: () => void) => () => void
       testIntegration: (source: 'opencode-cli' | 'opencode-desktop' | 'codex' | 'codex-desktop' | 'claude' | 'claude-desktop') => Promise<{
         ok: boolean

@@ -94,5 +94,18 @@
   "growth.range30": "30 days",
   "growth.range90": "90 days",
   "growth.trendTitle": "Token usage, last {days} days",
-  "growth.deltaVsPrevious": "{delta} vs previous {days} days"
+  "growth.deltaVsPrevious": "{delta} vs previous {days} days",
+  "growth.exportTitle": "Export work history",
+  "growth.exportExplain": "Tokens are fresh input plus output with cache listed separately; days are local calendar dates in your time zone.",
+  "growth.exportedTo": "Exported to {path}",
+  "growth.revealExport": "Show in folder",
+  "growth.exportJson": "Export JSON",
+  "growth.exportCsv": "Export CSV",
+  "growth.exporting": "Exporting…",
+  "growth.exportWriteFailed": "Could not write the file. Check disk space and folder permissions.",
+  "growth.exportUnavailable": "History is unavailable right now, so it cannot be exported.",
+  "growth.clearDetail": "Clears: work history, daily stats, token stats and quota snapshots.\nKeeps: pet XP, level, streak and achievements.",
+  "growth.resetMood": "Reset today's mood",
+  "growth.resetMoodConfirm": "Reset mood to its baseline? This does not affect XP, level or achievements.",
+  "growth.closeMessage": "Dismiss message"
 }

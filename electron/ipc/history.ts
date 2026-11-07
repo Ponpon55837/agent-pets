@@ -1,6 +1,8 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import type { HistoryStore } from '../history'
-import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../../src/types/history'
+import type { HistoryClearResult, HistoryCommandResult, HistoryExportFormat, HistorySummary } from '../../src/types/history'
+import { t } from '../../src/i18n.ts'
+import { historyDaysToCsv, historyExportFileName } from '../history-export.ts'
 import { IPC_CHANNELS } from './channels.ts'
 
 type HistoryExportDialogOptions = {
@@ -8,6 +10,8 @@ type HistoryExportDialogOptions = {
   defaultPath: string
   filters: Array<{ name: string; extensions: string[] }>
 }
+
+const EXPORT_SCAN_WAIT_MS = 2_000
 
 export interface HistoryIpcDependencies {
   ipcMain: Pick<IpcMain, 'handle'>
@@ -22,9 +26,15 @@ export interface HistoryIpcDependencies {
   showSaveDialog(window: BrowserWindow | null, options: HistoryExportDialogOptions): Promise<{ canceled: boolean; filePath?: string }>
   writeJsonAtomic(filePath: string, value: unknown): void
   activePetId(): string | null
+  writeTextFile(filePath: string, text: string): void
+  revealPath(filePath: string): void
+  /** XP/level/streak and unlocked achievements to embed in the JSON export. */
+  growthExport?(petId: string): unknown
 }
 
 export function registerHistoryIpc(deps: HistoryIpcDependencies): void {
+  let lastExportPath: string | null = null
+
   deps.ipcMain.handle(IPC_CHANNELS.historySummary, async (event, projectId: unknown, rangeDays?: unknown) => {
     deps.assertTrustedIpcSender(event, deps.getPanelWindow())
     // Never block the summary on a log scan: return stored aggregates now and
@@ -49,24 +59,49 @@ export function registerHistoryIpc(deps: HistoryIpcDependencies): void {
     }
   })
 
-  deps.ipcMain.handle(IPC_CHANNELS.historyExport, async (event): Promise<HistoryCommandResult> => {
+  deps.ipcMain.handle(IPC_CHANNELS.historyExport, async (event, request?: unknown): Promise<HistoryCommandResult> => {
     deps.assertTrustedIpcSender(event, deps.getPanelWindow())
     const historyStore = deps.getHistoryStore()
     if (!historyStore) return { ok: false, error: 'unavailable' }
-    await deps.refreshLocalUsage()
-    const defaultName = `agent-pets-history-${new Date().toISOString().slice(0, 10)}.json`
+    const input = request && typeof request === 'object' ? request as Record<string, unknown> : {}
+    const format: HistoryExportFormat = input.format === 'csv' ? 'csv' : 'json'
+    const rangeDays = input.rangeDays === 30 || input.rangeDays === 90 ? input.rangeDays : 7
+    const projectId = typeof input.projectId === 'string' && /^[a-f0-9]{32}$/.test(input.projectId)
+      ? input.projectId
+      : undefined
+    // Freshen local-log totals, but never let a slow scan hold the Save dialog.
+    await Promise.race([
+      deps.refreshLocalUsage().catch(() => undefined),
+      new Promise(resolve => setTimeout(resolve, EXPORT_SCAN_WAIT_MS)),
+    ])
+    const petId = deps.activePetId() ?? 'aang-airbender'
+    const exported = historyStore.getExport(petId, projectId, rangeDays, deps.growthExport?.(petId))
+    const defaultName = historyExportFileName(format, rangeDays, exported.summary.localDate, projectId)
     const saveOptions = {
-      title: '匯出 History',
+      title: t('growth.exportTitle'),
       defaultPath: deps.joinPath(deps.documentsPath(), defaultName),
-      filters: [{ name: 'JSON', extensions: ['json'] }],
+      filters: format === 'csv'
+        ? [{ name: 'CSV', extensions: ['csv'] }]
+        : [{ name: 'JSON', extensions: ['json'] }],
     }
     const result = await deps.showSaveDialog(deps.getPanelWindow(), saveOptions)
     if (result.canceled || !result.filePath) return { ok: false, error: 'cancelled' }
     try {
-      deps.writeJsonAtomic(result.filePath, historyStore.getExport(deps.activePetId() ?? 'aang-airbender'))
+      if (format === 'csv') deps.writeTextFile(result.filePath, historyDaysToCsv(exported.summary.days))
+      else deps.writeJsonAtomic(result.filePath, exported)
+      lastExportPath = result.filePath
       return { ok: true, path: result.filePath }
     } catch {
       return { ok: false, error: 'write_failed' }
     }
+  })
+
+  // Reveals only the file this session just exported; the renderer never
+  // supplies a path, so this cannot be used to reveal arbitrary files.
+  deps.ipcMain.handle(IPC_CHANNELS.historyRevealExport, (event): boolean => {
+    deps.assertTrustedIpcSender(event, deps.getPanelWindow())
+    if (!lastExportPath) return false
+    deps.revealPath(lastExportPath)
+    return true
   })
 }

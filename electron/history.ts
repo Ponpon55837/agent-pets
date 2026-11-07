@@ -640,11 +640,19 @@ export class HistoryStore {
     }
   }
 
-  getExport(petId = DEFAULT_PET_ID, projectId?: string, rangeDays: number = 7): HistoryExport {
+  getExport(petId = DEFAULT_PET_ID, projectId?: string, rangeDays: number = 7, growth?: unknown): HistoryExport {
+    const exportedAt = this.now()
     return {
       schemaVersion: 1,
-      exportedAt: this.now(),
+      exportedAt,
       summary: this.getSummary(petId, projectId, rangeDays),
+      meta: {
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown',
+        generatedAtLocal: `${this.localDate(exportedAt)} ${new Date(exportedAt).toTimeString().slice(0, 8)}`,
+        tokenBasis: 'tokenInput = fresh input only; tokenCacheRead/tokenCacheWrite are prompt-cache tokens counted separately; tokenOutput = output',
+        dayDefinition: 'A day is the local calendar date (in the time zone above) of the event time',
+      },
+      ...(growth === undefined ? {} : { growth }),
     }
   }
 

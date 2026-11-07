@@ -6,7 +6,7 @@ import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/d
 import type { PermissionDecisionValue, PermissionRequestView } from '../src/types/permission'
 import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
-import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
+import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySummary } from '../src/types/history'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 import type { PetBehaviorManifest, PluginSkinPetSource } from '../src/types/pet'
 import type { PresentationIntent, PresentationStatusUpdate } from '../src/types/presentation'
@@ -412,8 +412,12 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.historyClear)
   },
 
-  exportHistory: (): Promise<HistoryCommandResult> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.historyExport)
+  exportHistory: (request?: HistoryExportRequest): Promise<HistoryCommandResult> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.historyExport, request)
+  },
+
+  revealHistoryExport: (): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.historyRevealExport)
   },
 
   onHistoryUpdated: (callback: () => void) => {

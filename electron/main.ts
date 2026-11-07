@@ -1,5 +1,5 @@
 
-import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol, powerMonitor, Notification } from 'electron'
+import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol, powerMonitor, Notification, shell } from 'electron'
 
 import { join } from 'path'
 
@@ -544,6 +544,13 @@ async function bootstrapApp(): Promise<void> {
       ? dialog.showSaveDialog(window, options)
       : dialog.showSaveDialog(options),
     writeJsonAtomic,
+    writeTextFile: (filePath, text) => fs.writeFileSync(filePath, text, { encoding: 'utf8', mode: 0o600 }),
+    revealPath: filePath => shell.showItemInFolder(filePath),
+    growthExport: petId => ({
+      progression: mainState.progressionStore?.getSnapshot(petId) ?? null,
+      achievements: (mainState.achievementStore?.getSnapshot(petId, mainState.progressionStore?.getSnapshot(petId))
+        .achievements ?? []).filter(item => item.unlocked).map(item => ({ id: item.id, unlockedAt: item.unlockedAt ?? null })),
+    }),
     activePetId: () => mainState.progressionStore?.getActivePetId() ?? null,
   })
 

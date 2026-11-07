@@ -15,6 +15,7 @@ export const IPC_CHANNELS = {
   getCustomPetSprite: 'get-custom-pet-sprite',
   historyClear: 'history-clear',
   historyExport: 'history-export',
+  historyRevealExport: 'history-reveal-export',
   historySummary: 'history-summary',
   historyUpdated: 'history-updated',
   importPetSprite: 'import-pet-sprite',
