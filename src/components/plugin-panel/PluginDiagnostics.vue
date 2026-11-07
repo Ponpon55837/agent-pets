@@ -8,7 +8,7 @@ import { usePluginController } from '@/composables/plugin/context'
 import type { PluginBrokerLogEntry } from '@/types/plugin'
 
 const {
-  logs, diagnostics, selectedPluginId, refreshDiagnostics, diagnosticTime, diagnosticCodeLabel, setStatus,
+  logs, diagnostics, selectedPluginId, refreshDiagnostics, diagnosticTime, diagnosticCodeLabel, diagnosticTechnical, setStatus,
 } = usePluginController()
 
 type LevelFilter = 'all' | 'error' | 'warn'
@@ -71,6 +71,7 @@ async function copy(): Promise<void> {
       <li v-for="(entry, index) in shownDiagnostics" :key="`${entry.at}-${index}`">
         <time>{{ diagnosticTime(entry.at) }}</time>
         <span class="message">{{ diagnosticCodeLabel(entry) }}</span>
+        <code class="technical" :title="t('plugins.technicalDetails')">{{ diagnosticTechnical(entry) }}</code>
       </li>
     </ul>
     <Button v-if="hiddenCount > 0 || showAll" variant="ghost" size="sm" class="toggle" :aria-expanded="showAll" @click="showAll = !showAll">
@@ -142,6 +143,12 @@ async function copy(): Promise<void> {
 }
 
 time {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+}
+
+.technical {
   flex: 0 0 auto;
   color: var(--text-muted);
   font-size: var(--font-xs);

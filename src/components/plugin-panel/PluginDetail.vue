@@ -110,7 +110,8 @@ watch(plugin, async (value, previous) => {
         </Chip>
       </div>
       <div class="identity-trust">
-        <Chip v-if="plugin.development || plugin.signatureStatus === 'unverified'" tone="warn" icon="warning">{{ t('pluginSignatureDeveloperUnverified') }}</Chip>
+        <Chip v-if="plugin.development" tone="warn" icon="warning">{{ t('pluginSignatureDeveloperUnverified') }}</Chip>
+        <Chip v-else-if="plugin.signatureStatus === 'unverified'" tone="warn" icon="warning">{{ t('plugins.sigUnverified') }}</Chip>
         <Chip v-else-if="plugin.signatureStatus === 'valid'" tone="success" icon="shield">{{ t('pluginSignatureVerified') }}</Chip>
         <Chip v-else tone="neutral" icon="info">{{ t('pluginSignatureUnsigned') }}</Chip>
         <span v-if="!plugin.development && plugin.signatureFingerprint" class="identity-fingerprint">

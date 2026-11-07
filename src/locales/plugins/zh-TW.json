@@ -187,5 +187,18 @@
   "plugins.diagnosticsCopied": "已複製診斷內容。",
   "plugins.diagnosticsCopyFailed": "無法複製，請稍後再試。",
   "plugins.showAllEntries": "顯示全部（另有 {count} 筆）",
-  "plugins.showRecentOnly": "只顯示最近幾筆"
+  "plugins.showRecentOnly": "只顯示最近幾筆",
+  "plugins.errDialogUnavailable": "無法開啟檔案選擇視窗，請再試一次。",
+  "plugins.errInstallFailed": "安裝失敗。請確認檔案完整，或換一個檔案再試一次。",
+  "plugins.errRegistryUnavailable": "暫時無法讀取已安裝的插件清單。請稍後重試，或重新啟動 Agent Pets。",
+  "plugins.errInvalidRequest": "這個操作的內容無效，請重新整理後再試。",
+  "plugins.unitSeconds": "{value} 秒",
+  "plugins.unitPerMinute": "{value} 次／分鐘",
+  "plugins.unitPerTenMinutes": "{value} 次／10 分鐘",
+  "plugins.diagnosticRejectedHuman": "插件的操作被拒絕：{reason}",
+  "plugins.reasonNotPermitted": "插件沒有這項權限",
+  "plugins.reasonRateLimited": "操作太頻繁",
+  "plugins.reasonDisabled": "插件目前停用",
+  "plugins.reasonOther": "不符合規則",
+  "plugins.sigUnverified": "簽章無法驗證"
 }

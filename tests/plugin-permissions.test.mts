@@ -63,3 +63,24 @@ test('focus trap wraps in both directions and lets the browser handle the middle
   assert.equal(nextTrapIndex(3, -1, false), 0)
   assert.equal(nextTrapIndex(3, -1, true), 2)
 })
+
+test('every unit a manifest can produce is a known permission with copy in both locales', async () => {
+  const { readFileSync } = await import('node:fs')
+  const units = permissionUnitsOfPlan({
+    permissions: { network: { hosts: ['a.example'], userGranted: true }, links: { hosts: ['b.example'] }, storage: true, agentStatus: true, schedule: { minIntervalSec: 60 }, secrets: ['token'] },
+    contributes: {
+      feed: true, reaction: true, panelView: { entry: 'a.html', title: {} }, commands: [{ id: 'x' }], tray: { commands: ['x'] },
+      badge: true, skins: [{}, {}], eventSource: {},
+    },
+  } as never)
+  assert.equal(units.length, 15)
+  for (const unit of units) assert.equal(parsePermissionUnit(unit).known, true, `${unit} should be known`)
+  for (const locale of ['zh-TW', 'en-US']) {
+    const catalog = JSON.parse(readFileSync(new URL(`../src/locales/${locale}.json`, import.meta.url), 'utf8')) as Record<string, string>
+    for (const key of [
+      'pluginPermissionNetwork', 'pluginPermissionLinks', 'pluginPermissionStorage', 'pluginPermissionAgentStatus', 'pluginPermissionSchedule',
+      'pluginPermissionSecret', 'pluginPermissionFeed', 'pluginPermissionReaction', 'pluginPermissionPanel', 'pluginPermissionCommands',
+      'pluginPermissionTray', 'pluginPermissionBadge', 'pluginPermissionSkins', 'pluginPermissionEventSource',
+    ]) assert.equal(typeof catalog[key], 'string', `${locale} is missing ${key}`)
+  }
+})

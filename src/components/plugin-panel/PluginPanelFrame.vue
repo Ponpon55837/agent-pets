@@ -65,7 +65,8 @@ onBeforeUnmount(() => { if (slowTimer) clearTimeout(slowTimer) })
           {{ name }} · {{ t('pluginVersion', { version: panelViewPlugin.currentVersion }) }}
         </span>
       </div>
-      <Chip v-if="panelViewPlugin.development || panelViewPlugin.signatureStatus === 'unverified'" tone="warn" icon="warning">{{ t('pluginSignatureDeveloperUnverified') }}</Chip>
+      <Chip v-if="panelViewPlugin.development" tone="warn" icon="warning">{{ t('pluginSignatureDeveloperUnverified') }}</Chip>
+        <Chip v-else-if="panelViewPlugin.signatureStatus === 'unverified'" tone="warn" icon="warning">{{ t('plugins.sigUnverified') }}</Chip>
       <Chip v-else-if="panelViewPlugin.signatureStatus === 'valid'" tone="success" icon="shield">{{ t('pluginSignatureVerified') }}</Chip>
       <Chip v-else tone="neutral" icon="info">{{ t('pluginSignatureUnsigned') }}</Chip>
       <Button

@@ -187,5 +187,18 @@
   "plugins.diagnosticsCopied": "Diagnostics copied.",
   "plugins.diagnosticsCopyFailed": "Could not copy. Try again.",
   "plugins.showAllEntries": "Show all ({count} more)",
-  "plugins.showRecentOnly": "Show recent only"
+  "plugins.showRecentOnly": "Show recent only",
+  "plugins.errDialogUnavailable": "Could not open the file picker. Try again.",
+  "plugins.errInstallFailed": "The install failed. Check that the file is complete, or try a different file.",
+  "plugins.errRegistryUnavailable": "The installed plugin list is temporarily unavailable. Try again later or restart Agent Pets.",
+  "plugins.errInvalidRequest": "That request was not valid. Refresh and try again.",
+  "plugins.unitSeconds": "{value} s",
+  "plugins.unitPerMinute": "{value} per minute",
+  "plugins.unitPerTenMinutes": "{value} per 10 minutes",
+  "plugins.diagnosticRejectedHuman": "A plugin action was rejected: {reason}",
+  "plugins.reasonNotPermitted": "the plugin does not have this permission",
+  "plugins.reasonRateLimited": "too many requests",
+  "plugins.reasonDisabled": "the plugin is disabled",
+  "plugins.reasonOther": "it did not meet the rules",
+  "plugins.sigUnverified": "Signature could not be verified"
 }

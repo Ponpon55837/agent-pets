@@ -451,14 +451,14 @@ function localizedError(code: string): string {
     plan_not_found: 'pluginPlanExpired',
     plugin_not_found: 'pluginNotFound',
     report_unavailable: 'pluginReportUnavailable',
-    invalid_request: 'pluginActionFailed',
+    invalid_request: 'plugins.errInvalidRequest',
     secret_unavailable: 'pluginSecretUnavailable',
     secret_not_found: 'pluginSecretNotFound',
     secret_consent_required: 'pluginSecretConsentRequired',
     settings_invalid: 'pluginSettingsInvalid',
-    dialog_unavailable: 'pluginActionFailed',
-    install_failed: 'pluginActionFailed',
-    registry_unavailable: 'pluginActionFailed',
+    dialog_unavailable: 'plugins.errDialogUnavailable',
+    install_failed: 'plugins.errInstallFailed',
+    registry_unavailable: 'plugins.errRegistryUnavailable',
     catalog_disabled: 'pluginCatalogDisabledError',
     catalog_url_invalid: 'pluginCatalogUrlInvalid',
     catalog_unavailable: 'pluginCatalogUnavailable',
@@ -896,15 +896,17 @@ function resourceInputValue(key: keyof PluginResourceLimits, value: number): str
 }
 
 function resourceBoundText(key: keyof PluginResourceLimits, value: number): string {
-  if (key === 'memoryMbPerPlugin') return `${value} MB`
+  const number = (amount: number) => new Intl.NumberFormat(locale.value, { maximumFractionDigits: 1 }).format(amount)
+  const unit = (amount: number, name: 'megabyte' | 'kilobyte' | 'second') =>
+    new Intl.NumberFormat(locale.value, { style: 'unit', unit: name, unitDisplay: 'short', maximumFractionDigits: 1 }).format(amount)
+  if (key === 'memoryMbPerPlugin') return unit(value, 'megabyte')
   if (key === 'netMaxResponseBytes' || key === 'storageBytesPerPlugin') {
-    const unit = value % (1024 * 1024) === 0 ? 'MB' : 'KB'
-    return `${value / (unit === 'MB' ? 1024 * 1024 : 1024)} ${unit}`
+    return value % (1024 * 1024) === 0 ? unit(value / (1024 * 1024), 'megabyte') : unit(value / 1024, 'kilobyte')
   }
-  if (key === 'netTimeoutSeconds' || key === 'scheduleMinIntervalSeconds') return `${value} s`
-  if (key === 'netRequestsPerMinute') return `${value} / min`
-  if (key === 'globalFeedPer10Min') return `${value} / 10 min`
-  return String(value)
+  if (key === 'netTimeoutSeconds' || key === 'scheduleMinIntervalSeconds') return t('plugins.unitSeconds', { value: number(value) })
+  if (key === 'netRequestsPerMinute') return t('plugins.unitPerMinute', { value: number(value) })
+  if (key === 'globalFeedPer10Min') return t('plugins.unitPerTenMinutes', { value: number(value) })
+  return number(value)
 }
 
 // 單一插件的偏好採樂觀更新：先改畫面，失敗再回滾該欄位並顯示錯誤；同一插件的變更依序送出。
@@ -1232,6 +1234,7 @@ function diagnosticTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+// 診斷以人話呈現；原始的 method / code 只放在 diagnosticTechnical，由畫面收在 title 與技術細節。
 function diagnosticCodeLabel(item: PluginBrokerDiagnostic): string {
   if (item.code === 'host_unavailable') return t('pluginHostUnavailableTitle')
   if (item.code === 'too_many_enabled') {
@@ -1240,7 +1243,16 @@ function diagnosticCodeLabel(item: PluginBrokerDiagnostic): string {
       limit: String(snapshot.value?.preferences.resources.maxEnabledPlugins ?? 10),
     })
   }
-  return t('pluginDiagnosticRejected', { code: item.code, method: item.method ?? t('pluginDiagnosticUnknownMethod') })
+  const reasons: Record<string, TranslationKey> = {
+    not_permitted: 'plugins.reasonNotPermitted',
+    rate_limited: 'plugins.reasonRateLimited',
+    disabled: 'plugins.reasonDisabled',
+  }
+  return t('plugins.diagnosticRejectedHuman', { reason: t(reasons[item.code] ?? 'plugins.reasonOther') })
+}
+
+function diagnosticTechnical(item: PluginBrokerDiagnostic): string {
+  return item.method ? `${item.code} · ${item.method}` : item.code
 }
 
 watch(pendingPlan, plan => {
@@ -1453,6 +1465,7 @@ onUnmounted(() => {
     notificationSource,
     notificationTime,
     diagnosticTime,
-    diagnosticCodeLabel
+    diagnosticCodeLabel,
+    diagnosticTechnical
   }
 }
