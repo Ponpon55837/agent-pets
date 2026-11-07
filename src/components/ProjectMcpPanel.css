@@ -68,7 +68,8 @@
   align-items: center;
   justify-content: center;
   background: var(--surface-scrim);
-  backdrop-filter: blur(4px);
+  backdrop-filter: var(--blur-scrim);
+  -webkit-backdrop-filter: var(--blur-scrim);
 }
 
 .mcp-wizard {
@@ -336,6 +337,7 @@
 @media (prefers-reduced-transparency: reduce) {
   .mcp-overlay {
     backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 

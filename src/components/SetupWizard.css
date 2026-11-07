@@ -68,7 +68,8 @@
   align-items: center;
   justify-content: center;
   background: var(--surface-scrim);
-  backdrop-filter: blur(4px);
+  backdrop-filter: var(--blur-scrim);
+  -webkit-backdrop-filter: var(--blur-scrim);
 }
 
 .setup-wizard {
@@ -420,6 +421,7 @@
 @media (prefers-reduced-transparency: reduce) {
   .setup-overlay {
     backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 

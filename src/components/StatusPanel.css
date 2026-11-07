@@ -1413,6 +1413,7 @@
   .status-panel {
     background: var(--organic-bg);
     backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 

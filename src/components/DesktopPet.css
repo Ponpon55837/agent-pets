@@ -380,8 +380,8 @@
     linear-gradient(160deg, var(--surface-raised-hover) 0%, transparent 55%),
     var(--organic-status-surface);
   border: 1px solid var(--organic-status-border);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: var(--blur-bubble);
+  -webkit-backdrop-filter: var(--blur-bubble);
   box-shadow:
     var(--organic-status-shadow),
     var(--organic-status-highlight);
