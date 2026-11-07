@@ -189,6 +189,10 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.send(IPC_CHANNELS.panelResize, { height, ...(width === undefined ? {} : { width }) })
   },
 
+  setPanelBlurLock: (lock: { pinned?: boolean; modal?: boolean }) => {
+    ipcRenderer.send(IPC_CHANNELS.panelBlurLock, lock)
+  },
+
   hidePanel: () => {
     ipcRenderer.send(IPC_CHANNELS.panelHide)
   },

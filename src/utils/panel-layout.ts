@@ -63,3 +63,21 @@ export function computePanelPlacement(input: PlacementInput): PanelRect {
   const x = clampNumber(petBounds.x + Math.round(petBounds.width / 2) - Math.round(width / 2), workArea.x, maxX)
   return { x, y: clampNumber(y, workArea.y, maxY), width, height }
 }
+
+// Delay before a blurred panel hides; long enough for the pet-click toggle IPC
+// to arrive first and for the Win32 fullscreen detector to classify the blur.
+export const PANEL_BLUR_HIDE_DELAY_MS = 100
+
+export interface PanelBlurState {
+  dialogOpen: boolean
+  petFocused: boolean
+  pinned: boolean
+  modalOpen: boolean
+}
+
+// Hide-on-blur is only for a genuine click-away: not while a native dialog is
+// open, while the pet was just clicked (the toggle owns that case), while the
+// user pinned the panel, or while a wizard / confirmation is in progress.
+export function shouldHidePanelOnBlur(state: PanelBlurState): boolean {
+  return !state.dialogOpen && !state.petFocused && !state.pinned && !state.modalOpen
+}

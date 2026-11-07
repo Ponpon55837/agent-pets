@@ -13,6 +13,7 @@ import StatusPanelSessions from '@/components/status-panel/StatusPanelSessions.v
 import StatusPanelUsage from '@/components/status-panel/StatusPanelUsage.vue'
 
 const store = useAgentStore()
+const settingsShortcut = /Mac/i.test(navigator.platform) ? '\u2318,' : 'Ctrl+,'
 
 type SettingsSection = 'language' | 'appearance' | 'desktop' | 'plugins' | 'pets' | 'growth' | 'advanced'
 type DashboardTab = 'sessions' | 'usage' | 'history'
@@ -100,6 +101,23 @@ function onSettingsKeydown(event: KeyboardEvent): void {
   document.getElementById(`settings-tab-${next}`)?.focus()
 }
 
+// Esc steps back one level: wizard / MCP, then settings, then hide the panel.
+// Anything that already handled the key (ConfirmDialog, inputs) wins.
+function onGlobalKeydown(event: KeyboardEvent): void {
+  if (event.defaultPrevented) return
+  if ((event.metaKey || event.ctrlKey) && event.key === ',') {
+    event.preventDefault()
+    if (store.panelView !== 'settings') store.openSettings()
+    return
+  }
+  if (event.key !== 'Escape') return
+  event.preventDefault()
+  if (store.showWizard) store.closeSetupWizard()
+  else if (store.showProjectMcpPanel) store.closeProjectMcpPanel()
+  else if (store.panelView === 'settings') store.backToSessions()
+  else store.closePanel()
+}
+
 function selectDashboardTab(tab: DashboardTab): void {
   dashboardTab.value = tab
   if ((tab === 'sessions' || tab === 'usage') && !store.quotaUsage) void store.refreshQuota()
@@ -118,6 +136,7 @@ onMounted(() => {
   // render path, so the first settings click does not wait for its chunk.
   void import('@/components/status-panel/SettingsAppearance.vue').catch(() => {})
   document.addEventListener('visibilitychange', syncTickTimer)
+  window.addEventListener('keydown', onGlobalKeydown)
   syncTickTimer()
   removePanelSettingsListener = window.electronAPI?.onPanelOpenSettings(() => {
     requestedPluginViewId.value = ''
@@ -142,6 +161,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', syncTickTimer)
+  window.removeEventListener('keydown', onGlobalKeydown)
   if (tickTimer) clearInterval(tickTimer)
   removePluginViewRequestListener?.()
   removePanelSettingsListener?.()
@@ -166,10 +186,13 @@ onUnmounted(() => {
       </template>
       <span v-else class="panel-title settings-panel-title">{{ t('settings') }}</span>
       <div class="header-right">
-        <Button v-if="store.panelView === 'sessions'" variant="ghost" icon-only :title="t('settings')" :aria-label="t('settings')" @click="store.openSettings()">
+        <Button v-if="store.panelView === 'sessions'" variant="ghost" icon-only :title="`${t('settings')} (${settingsShortcut})`" :aria-label="t('settings')" @click="store.openSettings()">
           <Icon name="settings" />
         </Button>
-        <Button variant="ghost" icon-only :title="t('close')" :aria-label="t('close')" @click="store.closePanel()">
+        <Button v-if="store.panelView === 'sessions'" variant="ghost" icon-only :active="store.panelPinned" :title="store.panelPinned ? t('panel.unpin') : t('panel.pin')" :aria-label="store.panelPinned ? t('panel.unpin') : t('panel.pin')" :aria-pressed="store.panelPinned" @click="store.setPanelPinned(!store.panelPinned)">
+          <Icon name="pin" />
+        </Button>
+        <Button variant="ghost" icon-only :title="`${t('close')} (Esc)`" :aria-label="t('close')" @click="store.closePanel()">
           <Icon name="close" />
         </Button>
       </div>

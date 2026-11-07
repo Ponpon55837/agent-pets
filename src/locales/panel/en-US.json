@@ -1,1 +1,4 @@
-{}
+{
+  "panel.pin": "Keep panel open",
+  "panel.unpin": "Unpin panel"
+}

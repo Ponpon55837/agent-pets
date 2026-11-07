@@ -98,7 +98,7 @@ import { registerPluginPreferencesIpc } from '../ipc/plugin-preferences'
 import { registerPluginCatalogIpc } from '../ipc/plugin-catalog'
 import { registerPluginInstallIpc } from '../ipc/plugin-install'
 import { mainState, type PluginSkinFallbackInfo } from './state'
-import { PANEL_GAP, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_WIDTH, PANEL_SIZES, computePanelPlacement, fitPanelHeight } from '../../src/utils/panel-layout'
+import { PANEL_GAP, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_WIDTH, PANEL_SIZES, PANEL_BLUR_HIDE_DELAY_MS, computePanelPlacement, fitPanelHeight, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
 
 const PERMISSION_ALLOW_HOTKEY = 'CommandOrControl+Shift+Y'
 const PERMISSION_DENY_HOTKEY = 'CommandOrControl+Shift+N'
@@ -1820,13 +1820,12 @@ export function createPanelWindow() {
   }
 
   mainState.panelWindow.on('blur', () => {
-    if (mainState.dialogOpen) return
     // Clicking the pet focuses petWindow just before the click handler's
     // 'panel-toggle' IPC arrives — if we hid on blur here too, the toggle
     // would then see the panel already hidden and reopen it (a flicker,
     // and clicking the pet could never close the panel). Let the toggle
     // handler own that case; blur-hide is only for genuine click-outside.
-    if (mainState.petWindow?.isFocused()) return
+    if (!shouldHidePanelOnBlur(currentPanelBlurState())) return
     schedulePanelBlurHide()
   })
 
@@ -1835,6 +1834,7 @@ export function createPanelWindow() {
     if (mainState.panelBlurHideHandle) clearTimeout(mainState.panelBlurHideHandle)
     mainState.panelBlurHideHandle = null
     mainState.panelWindow = null
+    mainState.panelModalOpen = false
     mainState.windowsFullscreenAutoHiddenPanel = false
     syncWindowsFullscreenTargets()
   })
@@ -2165,6 +2165,15 @@ export function restoreWindowsHiddenByFullscreen(): void {
   }
 }
 
+function currentPanelBlurState() {
+  return {
+    dialogOpen: mainState.dialogOpen,
+    petFocused: mainState.petWindow?.isFocused() ?? false,
+    pinned: mainState.panelPinned,
+    modalOpen: mainState.panelModalOpen,
+  }
+}
+
 export function schedulePanelBlurHide(): void {
   if (mainState.panelBlurHideHandle) clearTimeout(mainState.panelBlurHideHandle)
   mainState.panelBlurHideHandle = setTimeout(() => {
@@ -2172,13 +2181,15 @@ export function schedulePanelBlurHide(): void {
     if (!mainState.panelWindow || mainState.panelWindow.isDestroyed() || mainState.panelWindow.isFocused() || !mainState.panelWindow.isVisible()) {
       return
     }
+    // A pin / wizard can be engaged during the grace delay.
+    if (mainState.panelPinned || mainState.panelModalOpen) return
     // Give the Win32 detector's event-driven refresh a chance to classify an
     // external fullscreen transition before treating the blur as a manual
     // click-away. This preserves the marker needed to restore an open panel.
     if (process.platform === 'win32' && mainState.windowsFullscreenState.panelDisplayFullscreen) return
     mainState.windowsFullscreenAutoHiddenPanel = false
     mainState.panelWindow.hide()
-  }, 100)
+  }, PANEL_BLUR_HIDE_DELAY_MS)
 }
 
 export function applyWindowsFullscreenAutoHideState(state: WindowsFullscreenState): void {

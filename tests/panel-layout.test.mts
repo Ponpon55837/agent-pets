@@ -5,6 +5,7 @@ import {
   PANEL_SIZES,
   computePanelPlacement,
   fitPanelHeight,
+  shouldHidePanelOnBlur,
 } from '../src/utils/panel-layout.ts'
 
 const inside = (rect: { x: number; y: number; width: number; height: number }, area: { x: number; y: number; width: number; height: number }) =>
@@ -43,4 +44,12 @@ test('panel prefers above the pet and falls back below near the top edge', () =>
   assert.ok(above.y + above.height <= 800)
   const below = computePanelPlacement({ petBounds: { x: 800, y: 10, width: 200, height: 200 }, petContentHeight: 200, petHeadroom: 0, workArea, width: 460, height: 400 })
   assert.ok(below.y >= 210)
+})
+
+test('blur-hide is suspended by a pin, a modal flow, a native dialog or a pet click', () => {
+  const idle = { dialogOpen: false, petFocused: false, pinned: false, modalOpen: false }
+  assert.equal(shouldHidePanelOnBlur(idle), true)
+  for (const key of ['dialogOpen', 'petFocused', 'pinned', 'modalOpen'] as const) {
+    assert.equal(shouldHidePanelOnBlur({ ...idle, [key]: true }), false, key)
+  }
 })

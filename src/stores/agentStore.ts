@@ -1452,6 +1452,23 @@ export const useAgentStore = defineStore('agent', () => {
     window.electronAPI?.togglePanel()
   }
 
+  // Pinning and in-progress modal flows (wizard, MCP setup, confirmations)
+  // suspend the main process's hide-on-blur so the panel stays for reference.
+  const panelPinned = ref(false)
+  const panelModalLocks = reactive(new Set<string>())
+  const panelModalOpen = computed(() => showWizard.value || showProjectMcpPanel.value || panelModalLocks.size > 0)
+  watch(panelModalOpen, open => window.electronAPI?.setPanelBlurLock?.({ modal: open }))
+
+  function setPanelPinned(pinned: boolean) {
+    panelPinned.value = pinned
+    window.electronAPI?.setPanelBlurLock?.({ pinned })
+  }
+
+  function setPanelModalLock(key: string, open: boolean) {
+    if (open) panelModalLocks.add(key)
+    else panelModalLocks.delete(key)
+  }
+
   function closePanel() {
     showWizard.value = false
     showProjectMcpPanel.value = false
@@ -1760,6 +1777,9 @@ export const useAgentStore = defineStore('agent', () => {
     closeProjectMcpPanel,
     backToSessions,
     handlePanelOpened,
+    panelPinned,
+    setPanelPinned,
+    setPanelModalLock,
     setPet,
     setScale,
     setPetWindowModeState,

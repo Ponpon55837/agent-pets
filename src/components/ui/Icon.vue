@@ -37,6 +37,8 @@ const paths: Record<string, string> = {
   back: 'M10 3.2 5.2 8l4.8 4.8',
   edit: 'M11.2 2.4 13.6 4.8 5.6 12.8 2.4 13.6l.8-3.2zM9.6 4l2.4 2.4',
   warning: 'M8 2.4 14.4 13.6H1.6zM8 6.4v3.2M8 11.6v.4',
+  // Pin — keeps a floating panel open (angled push-pin).
+  pin: 'M9.8 2.2 13.8 6.2l-1.5.5-2.3 2.3.2 2.2-1 1L5 8.6 2.6 11l-.6-.6L4.4 8 1.8 5.5l1-1 2.2.2L7.3 2.4zM2.4 13.6l2.6-2.6',
 }
 
 withDefaults(defineProps<{
