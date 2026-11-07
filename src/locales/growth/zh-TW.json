@@ -41,5 +41,12 @@
   "growth.xpSourceStreak": "連續第二天起每天　+{xp}",
   "growth.recentTitle": "最近獲得",
   "growth.recentEmpty": "完成第一個工作階段後，這裡會顯示每筆 XP 的來源。",
-  "growth.xpAmount": "+{amount}"
+  "growth.xpAmount": "+{amount}",
+  "growth.levelUpTitle": "升級！Lv {from} → Lv {to}",
+  "growth.evolveTitle": "進化為「{stage}」",
+  "growth.achievementOne": "解鎖成就：{title}",
+  "growth.achievementMany": "解鎖 {count} 個成就",
+  "growth.xpFloat": "+{amount} XP",
+  "growth.nextEvolution": "下一個稱號：Lv {level} · {stage}（還差 {levels} 級）",
+  "growth.finalStage": "已達最高稱號"
 }

@@ -553,6 +553,11 @@ function playAchievementReward(unlock: AchievementUnlock): void {
 watch(() => store.achievementUnlock, (unlock) => {
   if (unlock) playAchievementReward(unlock)
 })
+
+// Level-up / evolution reuses the reward animation (growth stream).
+watch(() => store.levelUpEvent, (event) => {
+  if (event && store.reactionsActive) petAnimRef.value?.playReward()
+})
 </script>
 
 <template>

@@ -41,5 +41,12 @@
   "growth.xpSourceStreak": "Each consecutive day from day two   +{xp}",
   "growth.recentTitle": "Recent XP",
   "growth.recentEmpty": "Once you finish a session, each XP gain and its source will show up here.",
-  "growth.xpAmount": "+{amount}"
+  "growth.xpAmount": "+{amount}",
+  "growth.levelUpTitle": "Level up! Lv {from} → Lv {to}",
+  "growth.evolveTitle": "Evolved into \"{stage}\"",
+  "growth.achievementOne": "Achievement unlocked: {title}",
+  "growth.achievementMany": "{count} achievements unlocked",
+  "growth.xpFloat": "+{amount} XP",
+  "growth.nextEvolution": "Next title: Lv {level} · {stage} ({levels} levels to go)",
+  "growth.finalStage": "Top title reached"
 }

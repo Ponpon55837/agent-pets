@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import DesktopPet from '@/components/DesktopPet.vue'
+import GrowthCelebration from '@/components/growth/GrowthCelebration.vue'
 import StatusPanel from '@/components/StatusPanel.vue'
 import SetupWizard from '@/components/SetupWizard.vue'
 import ProjectMcpPanel from '@/components/ProjectMcpPanel.vue'
@@ -361,7 +362,10 @@ onUnmounted(() => {
         <ProjectMcpPanel v-if="store.showProjectMcpPanel" @close="store.closeProjectMcpPanel()" />
       </Transition>
     </template>
-    <DesktopPet v-else />
+    <template v-else>
+      <DesktopPet />
+      <GrowthCelebration />
+    </template>
   </div>
 </template>
 

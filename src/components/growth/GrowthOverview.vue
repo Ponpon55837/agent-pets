@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { locale, t } from '@/i18n'
 import { useProgressionLabels } from '@/composables/useProgressionLabels'
 import { useAgentStore } from '@/stores/agentStore'
-import type { ProgressionInsights } from '@/types/progression'
+import { nextEvolution, type ProgressionInsights } from '@/types/progression'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
@@ -18,6 +18,8 @@ const progressionPercent = computed(() => {
   if (!progression.value) return 0
   return Math.min(100, Math.round((progression.value.xpIntoLevel / progression.value.xpToNext) * 100))
 })
+
+const nextStage = computed(() => (progression.value ? nextEvolution(progression.value.level) : null))
 
 async function loadInsights(): Promise<void> {
   try {
@@ -55,6 +57,10 @@ onMounted(() => { void loadInsights() })
       <template #heading><span class="stat-readout">{{ progression.totalXp }} XP</span></template>
       <div class="stat-row"><span class="stat-readout">Lv {{ progression.level }} · {{ evolutionLabel(progression.evolutionStage) }}</span></div>
       <ProgressTrack :value="progressionPercent" :aria-label="t('growth')" />
+      <div class="stat-row muted">
+        <span v-if="nextStage">{{ t('growth.nextEvolution', { level: nextStage.level, stage: evolutionLabel(nextStage.stage), levels: nextStage.level - progression.level }) }}</span>
+        <span v-else>{{ t('growth.finalStage') }}</span>
+      </div>
       <div class="stat-row muted">
         <span>{{ t('toNextLevel', { value: `${progression.xpIntoLevel} / ${progression.xpToNext}` }) }}</span>
         <span v-if="progression.currentStreak > 0">{{ t('dayStreak', { days: progression.currentStreak }) }}</span>
