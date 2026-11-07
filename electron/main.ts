@@ -676,6 +676,8 @@ app.on('before-quit', () => {
   mainState.panelBlurHideHandle = null
   mainState.windowsFullscreenAutoHiddenPet = false
   mainState.windowsFullscreenAutoHiddenPanel = false
+  if (mainState.pluginCatalogAutoCheckTimer) clearInterval(mainState.pluginCatalogAutoCheckTimer)
+  mainState.pluginCatalogAutoCheckTimer = null
   if (mainState.localUsageScanTimer) clearInterval(mainState.localUsageScanTimer)
   mainState.localUsageScanTimer = null
   mainState.localUsageReader = null

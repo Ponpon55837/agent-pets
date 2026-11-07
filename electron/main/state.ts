@@ -94,6 +94,7 @@ export const mainState = {
   pluginNetworkClient: null as PluginNetworkClient | null,
   pluginCatalogCache: null as { url: string; document: PluginCatalogDocument } | null,
   pluginCatalogAutoCheckSchedule: null as PluginCatalogAutoCheckSchedule | null,
+  pluginCatalogAutoCheckTimer: null as ReturnType<typeof setInterval> | null,
   pluginHostGrantController: null as PluginHostGrantController | null,
   pluginFeedController: null as PluginFeedController | null,
   pluginAgentStatusController: null as PluginAgentStatusController | null,

@@ -4,6 +4,7 @@ import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
 import { logMain, mainLogger } from '../diagnostics/main-log'
 import { buildDiagnosticsReport, registerDiagnosticsSection } from '../diagnostics/report'
+import { LOCAL_USAGE_TICK_MS, shouldRunLocalUsageTick } from './scan-schedule'
 import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
 import { join, resolve } from 'path'
 import { randomUUID } from 'node:crypto'
@@ -200,6 +201,13 @@ export function animateBounds(target: { x: number; y: number; width: number; hei
     mainState.resizeAnimHandle = null
   }
 
+  // A hidden window has nothing to animate; jump straight to the end state.
+  if (!mainState.petWindow.isVisible()) {
+    mainState.petWindow.setBounds({ x: Math.round(target.x), y: Math.round(target.y), width: Math.round(target.width), height: Math.round(target.height) })
+    repositionVisiblePanel()
+    return
+  }
+
   const start = mainState.petWindow.getBounds()
   const startTime = Date.now()
 
@@ -225,7 +233,7 @@ export function animateBounds(target: { x: number; y: number; width: number; hei
       clearInterval(mainState.resizeAnimHandle)
       mainState.resizeAnimHandle = null
     }
-  }, 8)
+  }, 16)
 }
 
 export function clamp(value: number, min: number, max: number): number {
@@ -902,9 +910,11 @@ export function initializePluginCatalogAutoCheck(): void {
     },
   })
   void mainState.pluginCatalogAutoCheckSchedule.checkIfDue()
-  setInterval(() => {
+  if (mainState.pluginCatalogAutoCheckTimer) clearInterval(mainState.pluginCatalogAutoCheckTimer)
+  mainState.pluginCatalogAutoCheckTimer = setInterval(() => {
     void mainState.pluginCatalogAutoCheckSchedule?.checkIfDue()
   }, 60 * 60 * 1_000)
+  mainState.pluginCatalogAutoCheckTimer.unref?.()
 }
 
 export async function createPluginServices(): Promise<void> {
@@ -2582,9 +2592,13 @@ export function createHistoryServices(): void {
       history: mainState.historyStore,
       projectRouting: mainState.projectRoutingStore,
     })
+    let scanTick = 0
     mainState.localUsageScanTimer = setInterval(() => {
+      scanTick += 1
+      if (!shouldRunLocalUsageTick(scanTick, powerMonitor.isOnBatteryPower())) return
       void refreshLocalUsage()
-    }, 60_000)
+    }, LOCAL_USAGE_TICK_MS)
+    mainState.localUsageScanTimer.unref?.()
     reconcileAchievementsFromHistory()
     void refreshLocalUsage()
   } catch (error) {
