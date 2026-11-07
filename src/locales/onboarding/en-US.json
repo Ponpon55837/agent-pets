@@ -139,5 +139,7 @@
   "onboarding.mcpCode.updated": "Updated to the current paths",
   "onboarding.check.runtime.warn": "Setup operations are unavailable in this runtime.",
   "onboarding.mcpChooseFolder": "Choose project folder",
-  "onboarding.mcpConcepts": "Hooks tell the pet what your tools are doing (global, no project needed). Project pets give each project its own pet. The MCP setup here lets an AI tool in a project make the pet speak and react."
+  "onboarding.mcpConcepts": "Hooks tell the pet what your tools are doing (global, no project needed). Project pets give each project its own pet. The MCP setup here lets an AI tool in a project make the pet speak and react.",
+  "onboarding.mcpWarnGitOutside": "This project's .git points outside the project folder, so the local-only exclude list was not written for safety. The config files may be tracked by Git.",
+  "onboarding.mcpWarnExcludeFailed": "Couldn't write .git/info/exclude, so the config files may be tracked by Git. Check the folder permissions and try again."
 }

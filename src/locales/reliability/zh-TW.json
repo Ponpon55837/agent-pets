@@ -31,5 +31,7 @@
   "reliability.server.summaryBusy": "{count} 個本機服務的埠被佔用，正在自動重試",
   "reliability.server.summaryMixed": "{count} 個本機服務離線",
   "reliability.server.showDetails": "顯示詳情",
-  "reliability.server.hideDetails": "收合詳情"
+  "reliability.server.hideDetails": "收合詳情",
+  "reliability.history.recoveredTitle": "歷史資料庫已重建",
+  "reliability.history.recoveredBody": "偵測到歷史資料庫損毀，已保留一份備份並建立新的資料庫。歷史統計會從現在重新累積。"
 }

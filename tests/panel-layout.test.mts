@@ -53,3 +53,7 @@ test('blur-hide is suspended by a pin, a modal flow, a native dialog or a pet cl
     assert.equal(shouldHidePanelOnBlur({ ...idle, [key]: true }), false, key)
   }
 })
+
+test('dashboard and settings share one panel size so switching never resizes the window', () => {
+  assert.deepEqual(PANEL_SIZES.sessions, PANEL_SIZES.settings)
+})

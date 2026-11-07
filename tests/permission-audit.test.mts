@@ -57,3 +57,26 @@ test('audit can be cleared and tolerates a torn last line', () => {
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('startup trim shrinks an oversized audit file, drops the legacy json and reads are bounded', async () => {
+  const { trimPermissionAuditOnStartup } = await import('../electron/permission-audit.ts')
+  const directory = mkdtempSync(path.join(tmpdir(), 'agent-pets-audit-'))
+  const filePath = path.join(directory, 'permission-audit.jsonl')
+  const legacy = path.join(directory, 'permission-audit.json')
+  try {
+    writeFileSync(legacy, '[]')
+    const line = (index: number) => JSON.stringify({
+      requestId: `r-${index}`, adapterId: 'a', agentId: 'a', sessionId: 's', generation: 1,
+      receivedAt: index, resolvedAt: index, status: 'denied', terminalReason: 'delivered', action: 'bash', risk: 'high',
+    })
+    writeFileSync(filePath, Array.from({ length: 5000 }, (_, index) => line(index)).join('\n') + '\n')
+    assert.ok(readPermissionAudit(filePath, 10_000).length < 5000, 'reads only the bounded tail')
+    trimPermissionAuditOnStartup(filePath, legacy)
+    const remaining = readFileSync(filePath, 'utf8').trim().split('\n')
+    assert.equal(remaining.length, 500)
+    assert.equal(JSON.parse(remaining.at(-1)!).requestId, 'r-4999')
+    assert.throws(() => readFileSync(legacy), /ENOENT/)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

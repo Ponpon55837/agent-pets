@@ -76,6 +76,7 @@ import { shouldDisableDevHardwareAcceleration } from './dev-runtime'
 import { ensureDirectoryWithin, writeFileWithin } from './ipc/pet-assets-fs.ts'
 
 import { registerHistoryIpc } from './ipc/history'
+import { pruneCorruptCopies } from './main/db-recovery'
 import { registerProgressionIpc } from './ipc/progression'
 import { registerDesktopIpc } from './ipc/desktop'
 import { registerPermissionIpc } from './ipc/permission'
@@ -598,6 +599,7 @@ async function bootstrapApp(): Promise<void> {
     refreshLocalUsage,
     currentHistorySummary,
     broadcastHistoryUpdated,
+    onHistoryCleared: () => pruneCorruptCopies(join(app.getPath('userData'), 'history.sqlite'), 0),
     documentsPath: () => app.getPath('documents'),
     joinPath: join,
     showSaveDialog: (window, options) => window

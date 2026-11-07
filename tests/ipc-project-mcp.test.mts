@@ -7,9 +7,10 @@ test('project MCP IPC preserves setup, list, remove, and forget contracts throug
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const calls: string[] = []
   const panelWindow = { isDestroyed: () => false }
+  const tracked = new Set<string>()
   const registry = {
-    register: (projectPath: string) => { calls.push(`register:${projectPath}`) },
-    has: () => false,
+    register: (projectPath: string) => { calls.push(`register:${projectPath}`); tracked.add(projectPath) },
+    has: (projectPath: string) => tracked.has(projectPath),
     list: () => ({ ok: true, projects: [] }),
     forget: (projectPath: string) => { calls.push(`forget:${projectPath}`); return true },
   }
@@ -57,6 +58,9 @@ test('project MCP IPC preserves setup, list, remove, and forget contracts throug
   assert.equal((await invoke(IPC_CHANNELS.projectMcpApply, { ...request, clients: [] }) as { ok: boolean }).ok, false)
   assert.equal((await invoke(IPC_CHANNELS.projectMcpApply, request) as { ok: boolean }).ok, true)
   assert.deepEqual(await invoke(IPC_CHANNELS.projectMcpList), { ok: true, projects: [] })
+  assert.deepEqual(await invoke(IPC_CHANNELS.projectMcpRemove, '/not/tracked'), {
+    ok: false, projectPath: '/not/tracked', results: [], error: 'Project folder is not tracked',
+  })
   assert.deepEqual(await invoke(IPC_CHANNELS.projectMcpRemove, 'test-project'), { ok: true, projectPath: 'test-project', results: [] })
   assert.deepEqual(await invoke(IPC_CHANNELS.projectMcpForget, 'test-project'), { ok: true, removed: true })
   assert.deepEqual(calls, [

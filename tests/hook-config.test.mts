@@ -8,6 +8,8 @@ import {
   disableCodexHooksFeatureText,
   enableCodexHooksFeatureText,
   fileHasAgentPetsHooks,
+  isAgentPetsHook,
+  isLegacyElectronHook,
   mergeAgentPetsHooksFile,
   removeAgentPetsHooksFile,
   removeJsonKeyFile,
@@ -257,15 +259,56 @@ test('configured hook executable is read from exec-form and shell-form hooks', (
 import { codexHookCommand, escapeCmdQuotedPath } from '../electron/hook-config.ts'
 
 test('Codex hook commands quote every path (spaces, non-ASCII, shell metacharacters)', () => {
-  const nasty = ["C:\\Users\\Jane Doe", "C:\\Users\\王小明", "C:\\Users\\a&b", "C:\\Users\\50%off", "/Users/o'brien", "C:\\Users\\a^b"]
+  const nasty = ["C:\\Users\\Jane Doe", "C:\\Users\\王小明", "C:\\Users\\a&b", "/Users/o'brien", "C:\\Users\\a^b", '/Users/$(touch x)', '/Users/`id`', '/Users/a"b', '/Users/a\\b']
   for (const home of nasty) {
-    const win = codexHookCommand({ isWindows: true, nodeBin: '', hookScript: `${home}\\.desktop-pet\\agent-hook.mjs`, wrapper: `${home}\\.desktop-pet\\agent-hook.cmd` })
-    assert.equal(win, `"${home}\\.desktop-pet\\agent-hook.cmd" codex`)
-    assert.equal(leadingExecutable(win), `${home}\\.desktop-pet\\agent-hook.cmd`)
+    if (!home.includes('"')) {
+      const win = codexHookCommand({ isWindows: true, nodeBin: '', hookScript: `${home}\\.desktop-pet\\agent-hook.mjs`, wrapper: `${home}\\.desktop-pet\\agent-hook.cmd` })
+      assert.equal(win, `"${home}\\.desktop-pet\\agent-hook.cmd" codex`)
+      assert.equal(leadingExecutable(win), `${home}\\.desktop-pet\\agent-hook.cmd`)
+    }
     const mac = codexHookCommand({ isWindows: false, nodeBin: `${home}/node`, hookScript: `${home}/.desktop-pet/agent-hook.mjs`, wrapper: '' })
-    assert.equal(mac, `"${home}/node" "${home}/.desktop-pet/agent-hook.mjs" codex`)
+    const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
+    assert.equal(mac, `${quote(`${home}/node`)} ${quote(`${home}/.desktop-pet/agent-hook.mjs`)} codex`)
     assert.equal(leadingExecutable(mac), `${home}/node`)
+    assert.ok(isAgentPetsHook({ type: 'command', command: mac }), home)
   }
+})
+
+test('unsafe paths are refused instead of producing an ambiguous hook command', () => {
+  assert.throws(() => codexHookCommand({ isWindows: true, nodeBin: '', hookScript: '', wrapper: 'C:\\Users\\50%off\\.desktop-pet\\agent-hook.cmd' }), ConfigRefusedError)
+  assert.throws(() => codexHookCommand({ isWindows: true, nodeBin: '', hookScript: '', wrapper: 'C:\\Users\\a"b\\agent-hook.cmd' }), ConfigRefusedError)
+  assert.throws(() => codexHookCommand({ isWindows: false, nodeBin: '/n\node', hookScript: '/h', wrapper: '' }), ConfigRefusedError)
+  assert.throws(() => codexHookCommand({ isWindows: false, nodeBin: '/node', hookScript: '/h\0', wrapper: '' }), ConfigRefusedError)
+})
+
+test('isAgentPetsHook matches only our deployed hook script, not look-alikes', () => {
+  const mk = (command: string, args?: string[]) => ({ type: 'command', command, ...(args ? { args } : {}) })
+  assert.equal(isAgentPetsHook(mk('/usr/bin/node', ['/home/u/.desktop-pet/agent-hook.mjs', 'claude'])), true)
+  assert.equal(isAgentPetsHook(mk('"C:\\Users\\u\\.desktop-pet\\agent-hook.cmd" codex')), true)
+  assert.equal(isAgentPetsHook(mk('~/desktop-pet-project/agent-hook.sh')), false)
+  assert.equal(isAgentPetsHook(mk('/opt/desktop-pet/agent-hook.mjs')), false)
+  assert.equal(isAgentPetsHook(mk('node', ['/x/.desktop-pet/agent-hook.mjs.bak'])), false)
+  assert.equal(isAgentPetsHook(mk('echo agent-hook desktop-pet')), false)
+})
+
+test('legacy Electron hooks are detected, a different Node install is not', () => {
+  assert.equal(isLegacyElectronHook({ command: 'C:\\Users\\u\\AppData\\Local\\Programs\\Agent Pets\\Agent Pets.exe' }), true)
+  assert.equal(isLegacyElectronHook({ command: '"C:\\Program Files\\Agent Pets\\Agent Pets.exe" "x" codex' }), true)
+  assert.equal(isLegacyElectronHook({ command: 'D:\\tools\\node\\node.exe' }), false)
+  assert.equal(isLegacyElectronHook({ command: '/usr/local/bin/node' }), false)
+})
+
+test('removing hooks from a symlinked dotfile keeps the link and its target', () => {
+  const dir = tempDir()
+  try {
+    const target = path.join(dir, 'real.json')
+    const link = path.join(dir, 'settings.json')
+    fs.writeFileSync(target, JSON.stringify({ hooks: { Stop: [ours()] } }))
+    fs.symlinkSync(target, link)
+    removeAgentPetsHooksFile(link)
+    assert.ok(fs.lstatSync(link).isSymbolicLink())
+    assert.deepEqual(JSON.parse(fs.readFileSync(target, 'utf8')), {})
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('batch wrapper path escaping doubles percent signs and rejects quotes', () => {
