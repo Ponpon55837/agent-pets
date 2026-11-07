@@ -95,6 +95,19 @@ export function tForLocale(targetLocale: AppLocale, key: TranslationKey, params:
   return template.replace(/\{(\w+)\}/g, (_match, name: string) => String(params[name] ?? `{${name}}`))
 }
 
+// Plural-aware lookup. Define `<key>.one` / `<key>.other` (and others the
+// language needs) in the catalog; en-US picks by Intl.PluralRules, zh-TW only
+// needs `.other`. Falls back to `.other`, then to the bare key. `{count}` is
+// filled automatically.
+export function tPlural(key: string, count: number, params: TranslationParams = {}): string {
+  const loc = locale.value
+  const category = new Intl.PluralRules(loc).select(count)
+  const table: Record<string, string> = loc === 'en-US' ? englishMessages : messages
+  const template = table[`${key}.${category}`] ?? table[`${key}.other`] ?? table[key]
+  if (template === undefined) return key
+  return template.replace(/\{(\w+)\}/g, (_m, name: string) => String(name === 'count' ? count : (params[name] ?? `{${name}}`)))
+}
+
 export function translateBackendError(value: unknown): string {
   const raw = typeof value === 'string'
     ? value

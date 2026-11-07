@@ -54,3 +54,6 @@ Added: `<html lang>` follows the locale (`i18n.ts`), `utils/accelerator.ts` (`fo
 - Session state dots/labels: add `:aria-label="stateAriaLabel(state)"` (visual text stays English by decision).
 - `desktop-tray.ts:122`, `runtime.ts:2423/2575`: `'Presentation MCP'`/`'Permission adapter'` labels shown to users should come from locale keys (reliability/permission streams).
 - `node scripts/check-design-tokens.mjs --verbose` lists `english-literal` template text nodes still to move into `t()`.
+
+## Formatting and plurals (DS-18)
+`utils/intl-format.ts` (`formatDateTime/Date/Time/Number/Relative/Duration`) and `tPlural(key, count)` in `i18n.ts` (catalog keys `<key>.one` / `<key>.other`; zh-TW needs only `.other`). Replace the scattered `toLocale*String(locale.value, …)` in `useQuotaFormat.ts`, `usePluginPanelController.ts:897/901`, `DesktopPet.vue:320`, `SetupWizard.vue:296`, `StatusPanelSessions.vue:58`, `StatusPanelHistory.vue:75/124/179/271`, and use `tPlural` where a "{count} items" string is concatenated (English "1 sessions"). The nine `achievement*` same-in-both-languages values are meme names kept on purpose. The glossary is already consistent: zh-TW uses 插件 everywhere (no 外掛).
