@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { zipSync, type Zippable } from 'fflate'
 import { parsePetBehaviorManifest } from '../electron/pet-behavior-manifest.ts'
+import { sanitizePetId } from '../electron/pet-id.ts'
 import {
   PET_IMPORT_STAGING_DIRNAME,
   PetImportStaging,
@@ -29,10 +30,7 @@ const V2 = png(1536, 208 * 11)
 
 const OPTIONS: ParsePetZipOptions = {
   limits: { maxZipBytes: 10 * 1024 * 1024, maxEntries: 64, maxUncompressedBytes: 25 * 1024 * 1024, maxJsonBytes: 256 * 1024, maxImageBytes: 20 * 1024 * 1024 },
-  sanitizePetId: value => {
-    const cleaned = value.replace(/[^a-zA-Z0-9_\-.]/g, '')
-    return cleaned.length > 0 && cleaned.length <= 64 && !cleaned.includes('..') ? cleaned : null
-  },
+  sanitizePetId,
   parsePetBehaviorManifest,
   isSupportedRasterImage: data => data[0] === 0x89 && data[1] === 0x50,
   now: () => 1,
@@ -243,6 +241,46 @@ test('a failed replace restores the previous pet and leaves no partial folders',
   assert.deepEqual(readdirSync(join(root, 'custom')), ['bee'])
 })
 
+test('if rolling back a failed replace also fails, the backup survives and is restored later', async t => {
+  const root = tempRoot(t)
+  let calls = 0
+  const options = { root, sanitizePetId, builtinPetIds: async () => [] as string[] }
+  const importer = new PetImportStaging({
+    ...options,
+    renameDirectory: async (from, to) => {
+      calls += 1
+      if (calls === 2) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' })
+      renameSync(from, to)
+    },
+    restoreDirectory: async () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }) },
+  })
+  const first = await importer.stage(parsed({ id: 'moth', displayName: 'Old' }))
+  await importer.commit(first.token, 'install', first.expectedState)
+  const second = await importer.stage(parsed({ id: 'moth', displayName: 'New' }))
+  const result = await importer.commit(second.token, 'replace', second.expectedState)
+  // No re-preview: the folder looks free, but offering "Install" would bury the only copy.
+  assert.deepEqual(result, { ok: false, code: 'E_IMPORT_FAILED', error: 'Could not install the imported pet' })
+  assert.equal(existsSync(join(root, 'custom', 'moth')), false)
+  assert.equal(stagingEntries(root).filter(name => name.startsWith('backup-')).length, 1)
+
+  // Another import takes the id before the next start: the unverified backup is kept, not deleted.
+  const third = await importer.stage(parsed({ id: 'moth', displayName: 'Third' }))
+  assert.equal((await importer.commit(third.token, 'install', third.expectedState)).ok, true)
+  assert.deepEqual(await new PetImportStaging(options).recoverStale(), { removed: 0, restored: 0, kept: 1 })
+  rmSync(join(root, 'custom', 'moth'), { recursive: true })
+  assert.deepEqual(await new PetImportStaging(options).recoverStale(), { removed: 0, restored: 1, kept: 0 })
+  assert.equal(installedPet(root, 'moth').displayName, 'Old')
+})
+
+test('pet ids that are not portable folder names are rejected', () => {
+  for (const value of ['.', 'pet.', 'CON', 'nul', 'com1', 'LPT9', 'aux.json', 'Con.backup', '..', 'a..b']) {
+    assert.equal(sanitizePetId(value), null, value)
+  }
+  assert.equal(sanitizePetId('console'), 'console')
+  assert.equal(sanitizePetId('.hidden-ok'), '.hidden-ok')
+  assert.equal(sanitizePetId('fox v2!'), 'foxv2')
+})
+
 test('a staged directory that vanished fails cleanly', async t => {
   const root = tempRoot(t)
   const importer = staging(root)
@@ -280,10 +318,14 @@ test('startup recovery restores interrupted replaces and removes only our own st
   writeFileSync(join(outside, 'keep.txt'), 'keep')
   symlinkSync(outside, join(stagingRoot, `stage-${'d'.repeat(32)}`))
 
+  mkdirSync(join(stagingRoot, `backup-${'e'.repeat(32)}-done`), { recursive: true })
+  writeFileSync(join(stagingRoot, `backup-${'e'.repeat(32)}-done`, '.replaced'), '')
+
   const result = await staging(root).recoverStale()
-  assert.deepEqual(result, { removed: 2, restored: 1 })
+  assert.deepEqual(result, { removed: 2, restored: 1, kept: 1 })
   assert.equal(installedPet(root, 'lost').id, 'lost')
-  assert.deepEqual(stagingEntries(root).sort(), [`stage-${'d'.repeat(32)}`, 'unrelated'])
+  // An unmarked backup whose folder is occupied is the only copy of that pet: kept, never deleted.
+  assert.deepEqual(stagingEntries(root).sort(), [`backup-${'c'.repeat(32)}-present`, `stage-${'d'.repeat(32)}`, 'unrelated'])
   assert.equal(readFileSync(join(outside, 'keep.txt'), 'utf8'), 'keep', 'symlinks are never followed')
   assert.equal(lstatSync(join(stagingRoot, `stage-${'d'.repeat(32)}`)).isSymbolicLink(), true)
 })
@@ -295,5 +337,5 @@ test('a symlinked staging root is refused', async t => {
   symlinkSync(elsewhere, join(root, PET_IMPORT_STAGING_DIRNAME))
   await assert.rejects(staging(root).stage(parsed({ id: 'x' })))
   assert.deepEqual(readdirSync(elsewhere), [])
-  assert.deepEqual(await staging(root).recoverStale(), { removed: 0, restored: 0 })
+  assert.deepEqual(await staging(root).recoverStale(), { removed: 0, restored: 0, kept: 0 })
 })

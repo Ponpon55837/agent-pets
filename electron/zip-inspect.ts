@@ -1,8 +1,16 @@
-// Central-directory pre-scan for untrusted ZIP archives. It reads only the
-// end-of-central-directory record, the central directory and each local
-// header (O(entries), no inflation), so archive-level attacks are rejected
-// before fflate allocates anything:
+import { inflateSync } from 'fflate'
+
+// Single ZIP reader for untrusted sprite kits. inspectZipArchive() reads only
+// the end-of-central-directory record, the central directory and each local
+// header (O(entries), no inflation); extractZipEntry() then inflates exactly
+// the bytes that inspection described. Using one parser for both steps is the
+// point: a second parser (e.g. fflate's unzipSync) can pick a different EOCD
+// or follow a ZIP64 locator and extract files the pre-scan never saw.
+// Rejected before anything is inflated:
+//   - more than one EOCD signature, a ZIP64 locator, a central directory that
+//     does not end exactly at the EOCD, or trailing bytes after the comment
 //   - multi-disk / ZIP64 / encrypted / unknown-method archives
+//   - local headers that disagree with their central record
 //   - symlink and reparse-point entries
 //   - names that are not valid UTF-8 or contain control characters
 //   - absolute, drive-letter, backslash or ".." names (zip-slip), even though
@@ -33,18 +41,18 @@ export type ZipInspectError =
   | 'total_size_exceeded'
   | 'compression_ratio_exceeded'
   | 'overlapping_entries'
+  | 'checksum_mismatch'
 
 export interface ZipEntryInfo {
   /** The name decoded as UTF-8 (validated). */
   name: string
-  /**
-   * The name as fflate reports it: UTF-8 when the language-encoding flag is
-   * set, Latin-1 otherwise. Use this to select the entry for extraction.
-   */
-  archiveName: string
   compressedSize: number
   uncompressedSize: number
   directory: boolean
+  method: number
+  crc32: number
+  /** Offset of the entry's data in the archive, from its validated local header. */
+  dataOffset: number
 }
 
 export type ZipInspectResult =
@@ -52,6 +60,9 @@ export type ZipInspectResult =
   | { ok: false; error: ZipInspectError }
 
 const EOCD_SIGNATURE = 0x06054b50
+const ZIP64_LOCATOR_SIGNATURE = 0x07064b50
+const ZIP64_LOCATOR_SIZE = 20
+const FLAG_DATA_DESCRIPTOR = 0x8
 const CENTRAL_SIGNATURE = 0x02014b50
 const LOCAL_SIGNATURE = 0x04034b50
 const EOCD_MIN_SIZE = 22
@@ -64,7 +75,6 @@ const S_IFLNK = 0o120000
 const DOS_REPARSE_POINT = 0x400
 const FLAG_ENCRYPTED = 0x1
 const FLAG_STRONG_ENCRYPTION = 0x40
-const FLAG_UTF8 = 0x800
 const SUPPORTED_METHODS = new Set([0, 8])
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 
@@ -77,13 +87,23 @@ function u32(bytes: Uint8Array, offset: number): number {
 }
 
 function findEndOfCentralDirectory(bytes: Uint8Array): number {
+  // Take the LAST signature (what fflate and most readers use) and require its
+  // comment to end exactly at EOF. A fake EOCD hidden inside the comment of a
+  // real one is therefore the one we see, and its length check fails.
   const lowest = Math.max(0, bytes.length - EOCD_MIN_SIZE - MAX_COMMENT_SIZE)
   for (let offset = bytes.length - EOCD_MIN_SIZE; offset >= lowest; offset -= 1) {
-    if (u32(bytes, offset) === EOCD_SIGNATURE && offset + EOCD_MIN_SIZE + u16(bytes, offset + 20) === bytes.length) {
-      return offset
+    if (u32(bytes, offset) === EOCD_SIGNATURE) {
+      return offset + EOCD_MIN_SIZE + u16(bytes, offset + 20) === bytes.length ? offset : -1
     }
   }
   return -1
+}
+
+function containsSignature(bytes: Uint8Array, start: number, end: number, signature: number): boolean {
+  for (let offset = start; offset + 4 <= end; offset += 1) {
+    if (u32(bytes, offset) === signature) return true
+  }
+  return false
 }
 
 const utf8 = new TextDecoder('utf-8', { fatal: true })
@@ -99,12 +119,6 @@ function decodeName(bytes: Uint8Array): string | null {
   } catch {
     return null
   }
-}
-
-function latin1(bytes: Uint8Array): string {
-  let text = ''
-  for (const byte of bytes) text += String.fromCharCode(byte)
-  return text
 }
 
 function isUnsafePath(name: string): boolean {
@@ -134,7 +148,11 @@ export function inspectZipArchive(bytes: Uint8Array, limits: ZipInspectLimits): 
   }
   if (diskNumber !== 0 || centralDisk !== 0 || entriesOnDisk !== entryCount) return { ok: false, error: 'unsupported_archive' }
   if (entryCount > limits.maxEntries) return { ok: false, error: 'file_limit_exceeded' }
-  if (centralOffset + centralSize > eocd) return { ok: false, error: 'invalid_archive' }
+  if (eocd >= ZIP64_LOCATOR_SIZE && u32(bytes, eocd - ZIP64_LOCATOR_SIZE) === ZIP64_LOCATOR_SIGNATURE) {
+    return { ok: false, error: 'unsupported_archive' }
+  }
+  if (centralOffset + centralSize !== eocd) return { ok: false, error: 'invalid_archive' }
+  if (containsSignature(bytes, eocd + 4, bytes.length, EOCD_SIGNATURE)) return { ok: false, error: 'invalid_archive' }
 
   const entries: ZipEntryInfo[] = []
   const seen = new Set<string>()
@@ -194,15 +212,31 @@ export function inspectZipArchive(bytes: Uint8Array, limits: ZipInspectLimits): 
     if (localOffset + LOCAL_HEADER_SIZE > centralOffset || u32(bytes, localOffset) !== LOCAL_SIGNATURE) {
       return { ok: false, error: 'invalid_archive' }
     }
-    const dataStart = localOffset + LOCAL_HEADER_SIZE + u16(bytes, localOffset + 26) + u16(bytes, localOffset + 28)
+    // The local header must describe the same entry as the central record:
+    // flags, method, name bytes and (unless a data descriptor follows) sizes and CRC.
+    const crc32 = u32(bytes, cursor + 16)
+    const localFlags = u16(bytes, localOffset + 6)
+    const localNameLength = u16(bytes, localOffset + 26)
+    const dataStart = localOffset + LOCAL_HEADER_SIZE + localNameLength + u16(bytes, localOffset + 28)
     const dataEnd = dataStart + compressedSize
     if (dataEnd > centralOffset) return { ok: false, error: 'invalid_archive' }
+    if (localFlags !== flags || u16(bytes, localOffset + 8) !== method || localNameLength !== nameLength) {
+      return { ok: false, error: 'invalid_archive' }
+    }
+    for (let offset = 0; offset < nameLength; offset += 1) {
+      if (bytes[localOffset + LOCAL_HEADER_SIZE + offset] !== bytes[cursor + CENTRAL_HEADER_SIZE + offset]) {
+        return { ok: false, error: 'invalid_archive' }
+      }
+    }
+    if ((flags & FLAG_DATA_DESCRIPTOR) === 0 && (u32(bytes, localOffset + 14) !== crc32
+      || u32(bytes, localOffset + 18) !== compressedSize || u32(bytes, localOffset + 22) !== uncompressedSize)) {
+      return { ok: false, error: 'invalid_archive' }
+    }
     ranges.push([localOffset, dataEnd])
 
-    const archiveName = (flags & FLAG_UTF8) !== 0
-      ? name
-      : latin1(bytes.subarray(cursor + CENTRAL_HEADER_SIZE, cursor + CENTRAL_HEADER_SIZE + nameLength))
-    entries.push({ name, archiveName, compressedSize, uncompressedSize, directory: name.endsWith('/') })
+    entries.push({
+      name, compressedSize, uncompressedSize, directory: name.endsWith('/'), method, crc32, dataOffset: dataStart,
+    })
     cursor = recordEnd
   }
 
@@ -215,4 +249,50 @@ export function inspectZipArchive(bytes: Uint8Array, limits: ZipInspectLimits): 
     return { ok: false, error: 'compression_ratio_exceeded' }
   }
   return { ok: true, entries, totalUncompressedBytes: totalUncompressed }
+}
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256)
+  for (let index = 0; index < 256; index += 1) {
+    let value = index
+    for (let bit = 0; bit < 8; bit += 1) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1
+    table[index] = value >>> 0
+  }
+  return table
+})()
+
+export function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff
+  for (let index = 0; index < bytes.length; index += 1) crc = CRC_TABLE[(crc ^ bytes[index]) & 0xff] ^ (crc >>> 8)
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+export type ZipExtractResult =
+  | { ok: true; data: Uint8Array }
+  | { ok: false; error: 'invalid_archive' | 'checksum_mismatch' }
+
+/**
+ * Inflates one entry returned by inspectZipArchive() from the same archive
+ * bytes. The output buffer is preallocated from the declared size (+1 byte so
+ * an over-long stream is detected rather than silently truncated), then the
+ * exact length and CRC-32 are verified.
+ */
+export function extractZipEntry(archive: Uint8Array, entry: ZipEntryInfo): ZipExtractResult {
+  if (entry.directory || entry.dataOffset + entry.compressedSize > archive.length) return { ok: false, error: 'invalid_archive' }
+  const compressed = archive.subarray(entry.dataOffset, entry.dataOffset + entry.compressedSize)
+  let data: Uint8Array
+  if (entry.method === 0) {
+    data = compressed.slice()
+  } else if (entry.method === 8) {
+    try {
+      data = inflateSync(compressed, { out: new Uint8Array(entry.uncompressedSize + 1) })
+    } catch {
+      return { ok: false, error: 'invalid_archive' }
+    }
+  } else {
+    return { ok: false, error: 'invalid_archive' }
+  }
+  if (data.length !== entry.uncompressedSize) return { ok: false, error: 'invalid_archive' }
+  if (crc32(data) !== entry.crc32) return { ok: false, error: 'checksum_mismatch' }
+  return { ok: true, data }
 }

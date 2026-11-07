@@ -1,4 +1,5 @@
 import { IPC_CHANNELS } from '../ipc/channels'
+import { sanitizePetId } from '../pet-id.ts'
 import { app, BrowserWindow, WebContentsView, screen, ipcMain, dialog, net, session, protocol, globalShortcut, powerMonitor, shell, safeStorage, Notification } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
@@ -368,13 +369,7 @@ export async function pluginPanelSnapshot(): Promise<PluginPanelResult<PluginPan
 }
 
 
-export function sanitizePetId(id: string): string | null {
-  if (typeof id !== 'string') return null
-  const cleaned = id.replace(/[^a-zA-Z0-9_\-.]/g, '')
-  if (cleaned.length === 0 || cleaned.length > 64) return null
-  if (cleaned.includes('..')) return null
-  return cleaned
-}
+export { sanitizePetId }
 
 export function safeJoin(base: string, ...parts: string[]): string | null {
   const root = resolve(base)

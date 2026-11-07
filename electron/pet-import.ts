@@ -15,7 +15,6 @@ import type { BigIntStats, Dirent } from 'node:fs'
 import { lstat, mkdir, open, opendir, readdir, rename, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
-import { guardArchive } from './archive-guard.ts'
 import { ensureDirectoryWithin } from './ipc/pet-assets-fs.ts'
 import type { SanitizedPetBehaviorManifest } from './pet-behavior-manifest'
 import {
@@ -26,7 +25,7 @@ import {
   type SpriteAtlasInfo,
   type SpriteValidationError,
 } from './pet-sprite-validation.ts'
-import { inspectZipArchive, type ZipInspectError } from './zip-inspect.ts'
+import { extractZipEntry, inspectZipArchive, type ZipInspectError } from './zip-inspect.ts'
 import type {
   PetImportCommitResult,
   PetImportConflict,
@@ -41,6 +40,8 @@ const BACKUP_PATTERN = /^backup-[0-9a-f]{32}-(.{1,64})$/
 const MAX_RECOVERY_ENTRIES = 64
 const MAX_RECOVERY_LISTED = 1024
 const MAX_SUFFIX = 99
+const REPLACED_MARKER = '.replaced'
+const RESTORE_FAILED = 'E_RESTORE_FAILED'
 const DEFAULT_TTL_MS = 10 * 60 * 1000
 const SPRITE_FILE = 'spritesheet.webp'
 const PET_JSON_FILE = 'pet.json'
@@ -87,6 +88,7 @@ const ZIP_ERROR_MESSAGES: Record<ZipInspectError, string> = {
   total_size_exceeded: 'Zip expands beyond the 25 MB safety limit',
   compression_ratio_exceeded: 'Zip compression ratio is too high to be a sprite kit',
   overlapping_entries: 'Invalid zip archive',
+  checksum_mismatch: 'Zip entry is corrupted (CRC mismatch)',
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -131,8 +133,8 @@ export interface ParsePetZipOptions {
 
 /**
  * Validates a sprite kit without touching the filesystem. Only pet.json and
- * the one selected image are inflated; every other entry is counted but never
- * decompressed.
+ * the one selected image are inflated (by zip-inspect, from the same parse
+ * that was validated); every other entry is counted but never decompressed.
  */
 export function parsePetZip(zipBytes: Uint8Array, options: ParsePetZipOptions): ParsePetZipResult {
   const { limits } = options
@@ -152,21 +154,11 @@ export function parsePetZip(zipBytes: Uint8Array, options: ParsePetZipOptions): 
   const petJsonEntry = petJsonEntries[0]
   if (petJsonEntry.uncompressedSize > limits.maxJsonBytes) return { ok: false, error: 'pet.json exceeds the 256 KB safety limit' }
 
-  const extract = (wanted: string) => guardArchive(zipBytes, {
-    maxTotalBytes: limits.maxUncompressedBytes,
-    maxFileBytes: limits.maxUncompressedBytes,
-    maxFiles: limits.maxEntries,
-    allowedExtensions: ['.json', '.webp', '.png', '.jpg', '.jpeg'],
-    mode: 'compat',
-    includePath: path => path === wanted,
-  })
-
-  const wantedJson = petJsonEntry.archiveName.normalize('NFC')
-  const jsonResult = extract(wantedJson)
-  if (!jsonResult.ok) return { ok: false, code: 'E_ZIP', error: 'Invalid zip archive' }
-  const petJsonBytes = jsonResult.files.get(wantedJson)
-  if (!petJsonBytes) return { ok: false, error: 'No pet.json found in this zip' }
-  if (petJsonBytes.byteLength > limits.maxJsonBytes) return { ok: false, error: 'pet.json exceeds the 256 KB safety limit' }
+  // Same parser for inspection and extraction: only bytes the pre-scan
+  // validated are ever inflated, with exact length and CRC-32 checks.
+  const jsonResult = extractZipEntry(zipBytes, petJsonEntry)
+  if (!jsonResult.ok) return { ok: false, code: 'E_ZIP', error: ZIP_ERROR_MESSAGES[jsonResult.error] }
+  const petJsonBytes = jsonResult.data
 
   let petData: unknown
   try {
@@ -193,11 +185,9 @@ export function parsePetZip(zipBytes: Uint8Array, options: ParsePetZipOptions): 
   if (!spriteEntry) return { ok: false, error: 'No spritesheet image found in this zip' }
   if (spriteEntry.uncompressedSize > limits.maxImageBytes) return { ok: false, error: 'Spritesheet exceeds the 20 MB safety limit' }
 
-  const wantedSprite = spriteEntry.archiveName.normalize('NFC')
-  const spriteResult = extract(wantedSprite)
-  const sprite = spriteResult.ok ? spriteResult.files.get(wantedSprite) : undefined
-  if (!sprite) return { ok: false, error: 'No spritesheet image found in this zip' }
-  if (sprite.byteLength > limits.maxImageBytes) return { ok: false, error: 'Spritesheet exceeds the 20 MB safety limit' }
+  const spriteResult = extractZipEntry(zipBytes, spriteEntry)
+  if (!spriteResult.ok) return { ok: false, code: 'E_ZIP', error: ZIP_ERROR_MESSAGES[spriteResult.error] }
+  const sprite = spriteResult.data
   if (!options.isSupportedRasterImage(sprite)) {
     return { ok: false, error: 'Spritesheet content is not a valid PNG, JPEG, or WebP image' }
   }
@@ -274,8 +264,9 @@ export interface PetImportStagingOptions {
   builtinPetIds(): Promise<Iterable<string>>
   ttlMs?: number
   previewUrl?(token: string): string
-  /** Test seam for the directory renames that install or replace a pet. */
+  /** Test seams for the directory renames that install, replace and roll back a pet. */
   renameDirectory?(from: string, to: string): Promise<void>
+  restoreDirectory?(from: string, to: string): Promise<void>
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -524,6 +515,10 @@ export class PetImportStaging {
         await fsyncDirectory(this.stagingRoot)
         return { ok: true, id, displayName }
       } catch (error) {
+        if (errorCode(error) === RESTORE_FAILED) {
+          await this.discard(pending.token)
+          return { ok: false, code: 'E_IMPORT_FAILED', error: 'Could not install the imported pet' }
+        }
         // A destination that appeared or changed underneath us is a state
         // change the user must review; anything else is a real failure.
         const refreshed = await this.describe(pending).catch(() => null)
@@ -549,22 +544,31 @@ export class PetImportStaging {
       await renameDirectory(pending.directory, target)
     } catch (error) {
       // Put the previous pet back exactly where it was before reporting failure.
-      await rename(backup, existing)
+      try {
+        await (this.options.restoreDirectory ?? rename)(backup, existing)
+      } catch {
+        // The old pet now exists only as the backup. Never re-preview (the
+        // destination looks free) and leave the backup for recoverStale().
+        throw Object.assign(new Error('Could not restore the previous pet'), { code: RESTORE_FAILED })
+      }
       throw error
     }
     await fsyncDirectory(this.customRoot)
+    // Only a backup carrying this marker belongs to a verified install and may be deleted.
+    await writeNewFileDurably(join(backup, REPLACED_MARKER), '').catch(() => undefined)
     await fsyncDirectory(this.stagingRoot)
     await rm(backup, { recursive: true, force: true }).catch(() => undefined)
   }
 
   /**
-   * Startup cleanup after a crash: removes our own stage-* directories and
-   * either restores (when the pet folder is missing) or deletes backup-*
-   * directories. Bounded, prefix-matched, and never follows a symlink.
+   * Startup cleanup after a crash: removes our own stage-* directories,
+   * deletes backup-* directories marked as replaced, and restores (when the
+   * pet folder is free) or keeps every other backup. Bounded, prefix-matched,
+   * and never follows a symlink.
    */
-  recoverStale(): Promise<{ removed: number; restored: number }> {
+  recoverStale(): Promise<{ removed: number; restored: number; kept: number }> {
     return this.exclusive(async () => {
-      const result = { removed: 0, restored: 0 }
+      const result = { removed: 0, restored: 0, kept: 0 }
       const rootStats = await lstatOrNull(this.stagingRoot)
       if (!rootStats || !rootStats.isDirectory() || rootStats.isSymbolicLink()) return result
       let examined = 0
@@ -589,10 +593,12 @@ export class PetImportStaging {
         const stats = await lstatOrNull(path)
         if (!stats || !stats.isDirectory() || stats.isSymbolicLink()) continue
         if ([...this.pending.values()].some(pending => pending.directory === path)) continue
-        const id = backupMatch ? this.options.sanitizePetId(backupMatch[1]) : null
-        if (backupMatch && id === backupMatch[1]) {
-          const target = join(this.customRoot, id)
-          if (!(await lstatOrNull(target))) {
+        if (backupMatch && !(await lstatOrNull(join(path, REPLACED_MARKER)))) {
+          // An unverified backup is the only copy of a pet: restore it when
+          // its folder is free, otherwise keep it rather than delete it.
+          const id = this.options.sanitizePetId(backupMatch[1])
+          const target = id === backupMatch[1] ? join(this.customRoot, id) : null
+          if (target && !(await lstatOrNull(target))) {
             try {
               await ensureDirectoryWithin(this.root, this.customRoot)
               await rename(path, target)
@@ -600,6 +606,8 @@ export class PetImportStaging {
               continue
             } catch {}
           }
+          result.kept += 1
+          continue
         }
         await rm(path, { recursive: true, force: true }).then(() => { result.removed += 1 }, () => undefined)
       }
