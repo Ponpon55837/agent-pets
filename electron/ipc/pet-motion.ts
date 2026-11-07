@@ -2,6 +2,7 @@ import type { BrowserWindow, IpcMain, IpcMainEvent } from 'electron'
 import type { DesktopPreferences } from '../../src/types/desktop'
 import type { PetWindowMode } from '../../src/types/pet-window'
 import type { WindowBounds } from '../pet-window-mode'
+import { clampDraggedBounds, spriteRect } from '../pet-drag.ts'
 import { IPC_CHANNELS } from './channels.ts'
 
 type CursorPoint = { x: number; y: number }
@@ -32,7 +33,12 @@ export interface PetMotionIpcDependencies {
   clampWindowBounds(bounds: WindowBounds, workArea: WorkArea): WindowBounds
   setNormalPetBounds(bounds: WindowBounds | null): void
   scheduleShimejiPositionPersist(): void
+  /** Optional: when present the panel follows the pet during a drag instead of hiding. */
+  repositionVisiblePanel?(): void
 }
+
+const DRAG_POLL_MS = 16
+const PANEL_FOLLOW_MS = 60
 
 export function registerPetMotionIpc(deps: PetMotionIpcDependencies): void {
   deps.ipcMain.on(IPC_CHANNELS.petDragStart, event => {
@@ -46,10 +52,16 @@ export function registerPetMotionIpc(deps: PetMotionIpcDependencies): void {
     if (previousHandle) deps.clearInterval(previousHandle)
     const startCursor = deps.getCursorScreenPoint()
     const [startX, startY] = petWindow.getPosition()
+    // Fixed for the whole drag: setPosition can grow a window on mixed-DPI
+    // setups, setBounds with the original size cannot.
+    const [startWidth, startHeight] = petWindow.getSize()
     let lastAppliedX = startX
     let lastAppliedY = startY
+    let lastPanelFollowAt = 0
     deps.setAnchorBottomCenter(null)
-    deps.getPanelWindow()?.hide()
+    // The panel is anchored to the pet, so it follows the drag when it can;
+    // otherwise it is hidden rather than left stranded.
+    if (!deps.repositionVisiblePanel) deps.getPanelWindow()?.hide()
 
     const dragPollHandle = deps.setInterval(() => {
       const currentPetWindow = deps.getPetWindow()
@@ -60,13 +72,26 @@ export function registerPetMotionIpc(deps: PetMotionIpcDependencies): void {
         return
       }
       const cursor = deps.getCursorScreenPoint()
-      const targetX = startX + (cursor.x - startCursor.x)
-      const targetY = startY + (cursor.y - startCursor.y)
-      if (targetX === lastAppliedX && targetY === lastAppliedY) return
-      lastAppliedX = targetX
-      lastAppliedY = targetY
-      currentPetWindow.setPosition(targetX, targetY)
-    }, 8)
+      const desired = {
+        x: startX + (cursor.x - startCursor.x),
+        y: startY + (cursor.y - startCursor.y),
+        width: startWidth,
+        height: startHeight,
+      }
+      const display = deps.displayForBounds(spriteRect(desired))
+      const target = clampDraggedBounds(desired, display.workArea)
+      if (target.x === lastAppliedX && target.y === lastAppliedY) return
+      lastAppliedX = target.x
+      lastAppliedY = target.y
+      currentPetWindow.setBounds(target)
+      if (deps.repositionVisiblePanel) {
+        const now = Date.now()
+        if (now - lastPanelFollowAt >= PANEL_FOLLOW_MS) {
+          lastPanelFollowAt = now
+          deps.repositionVisiblePanel()
+        }
+      }
+    }, DRAG_POLL_MS)
     deps.setDragPollHandle(dragPollHandle)
   })
 
@@ -80,6 +105,7 @@ export function registerPetMotionIpc(deps: PetMotionIpcDependencies): void {
     const [width, height] = petWindow.getSize()
     deps.setNormalPetBounds({ x, y, width, height })
     deps.setEdgeRestoreBounds(null)
+    deps.repositionVisiblePanel?.()
     deps.persistCurrentPetWindowState()
     const moved = payload && typeof payload === 'object'
       && (payload as Record<string, unknown>).moved === true

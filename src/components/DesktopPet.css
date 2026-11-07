@@ -26,9 +26,15 @@
   cursor: grabbing;
 }
 
-.pet-click-area.dragging {
-  transform: translateX(-50%) translateY(-6px) scale(1.05);
+/* Only the sprite lifts and casts a shadow: a filter on this container would
+   make it a backdrop root and flatten the glass status lines while dragging. */
+.pet-click-area.dragging :deep(.pet-visual) {
+  transform: translateY(-6px) scale(1.05);
   filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.35));
+}
+
+.pet-click-area :deep(.pet-visual) {
+  transition: transform 0.15s ease, filter 0.15s ease;
 }
 
 .desktop-pet.mode-mini .status-lines,

@@ -525,49 +525,58 @@ function onPetMouseMove(e: MouseEvent): void {
   }
 }
 
+// A press only becomes a drag after the pointer travels this far; a shaky
+// click on a trackpad must still open the panel.
+const DRAG_START_DISTANCE_PX = 4
+const dragLift = ref(false)
+
 function onMouseDown(e: MouseEvent) {
   if (e.button !== 0) return
   dismissCoach()
   store.markPetInteraction()
   hasMoved.value = false
   mouseDownTime = Date.now()
+  // Keeps the window catching events while the button is held, even before a
+  // drag has actually begun.
   store.isDragging = true
   dragOffset.value = { x: e.screenX, y: e.screenY }
+  let dragStarted = false
 
   // Actual window movement is driven entirely by the main process polling
-  // screen.getCursorScreenPoint() (see electron/main.ts's 'pet-drag-start'
-  // handler) rather than by accumulating deltas between renderer mousemove
-  // events. On Windows, moving a frameless window under the cursor makes
-  // the OS resend a synthetic mousemove for the new window position; a
-  // delta-from-previous-event approach picks that up as extra "movement"
-  // and re-moves the window again, which re-triggers another synthetic
-  // event — a feedback loop that reads as the pet continuously drifting
-  // down for as long as the button is held, even with the mouse stationary.
-  // Polling the OS cursor position directly sidesteps that loop entirely.
-  window.electronAPI?.startDrag()
-
+  // screen.getCursorScreenPoint() (see electron/ipc/pet-motion.ts) rather than
+  // by accumulating deltas between renderer mousemove events. On Windows,
+  // moving a frameless window under the cursor makes the OS resend a
+  // synthetic mousemove for the new window position; a delta-from-previous
+  // approach picks that up as extra "movement" and re-moves the window again —
+  // a feedback loop that reads as the pet drifting for as long as the button
+  // is held. Polling the OS cursor position directly sidesteps that loop.
   const onMove = (moveEvent: MouseEvent) => {
+    if (dragStarted) return
     const dx = moveEvent.screenX - dragOffset.value.x
     const dy = moveEvent.screenY - dragOffset.value.y
-
-    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+    if (Math.abs(dx) > DRAG_START_DISTANCE_PX || Math.abs(dy) > DRAG_START_DISTANCE_PX) {
+      dragStarted = true
       hasMoved.value = true
+      dragLift.value = true
+      window.electronAPI?.startDrag()
     }
   }
 
   const onUp = () => {
     store.isDragging = false
+    dragLift.value = false
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
-    // Must fire unconditionally, even on a plain click with no movement:
-    // 'pet-drag-start' unconditionally started a cursor-poll loop in the
-    // main process (see electron/main.ts), and this is the only signal
-    // that tells it to stop. Gating it on hasMoved (as the old "did we
-    // actually move, so is there anything worth writing to disk" check
-    // did) left that poll loop running after a plain click, so the pet
-    // kept chasing the cursor around indefinitely after the button was
-    // released, right up until the next mousedown replaced it.
+    // Must fire unconditionally, even on a plain click with no movement: it is
+    // the only signal that stops the main process' cursor-poll loop, and
+    // gating it on hasMoved left that loop running after a plain click so the
+    // pet kept chasing the cursor until the next mousedown replaced it.
     window.electronAPI?.notifyDragEnd(hasMoved.value)
+    if (dragStarted) {
+      // Landing squash: the pet settles where it was dropped.
+      if (isMultiPet.value) multiPetRefs.value.forEach(anim => anim?.playReaction())
+      else petAnimRef.value?.playReaction()
+    }
   }
 
   window.addEventListener('mousemove', onMove)
@@ -653,7 +662,7 @@ watch(() => store.achievementUnlock, (unlock) => {
     <div
       ref="clickAreaRef"
       class="pet-click-area"
-      :class="{ dragging: store.isDragging }"
+      :class="{ dragging: dragLift }"
       @mousedown="onMouseDown"
       @mousemove="onPetMouseMove"
       @click="onClick"

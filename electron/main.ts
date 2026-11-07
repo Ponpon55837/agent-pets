@@ -340,6 +340,7 @@ app.whenReady().then(async () => {
     clampWindowBounds,
     setNormalPetBounds: bounds => { mainState.normalPetBounds = bounds },
     scheduleShimejiPositionPersist,
+    repositionVisiblePanel,
   })
 
   registerWindowControlsIpc({
