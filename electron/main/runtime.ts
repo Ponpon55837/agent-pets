@@ -98,9 +98,24 @@ import { registerPluginPreferencesIpc } from '../ipc/plugin-preferences'
 import { registerPluginCatalogIpc } from '../ipc/plugin-catalog'
 import { registerPluginInstallIpc } from '../ipc/plugin-install'
 import { mainState, type PluginSkinFallbackInfo } from './state'
+import { attachHotkeyInfo, PermissionHotkeys } from '../permission-hotkeys'
 
-const PERMISSION_ALLOW_HOTKEY = 'CommandOrControl+Shift+Y'
-const PERMISSION_DENY_HOTKEY = 'CommandOrControl+Shift+N'
+let permissionHotkeys: PermissionHotkeys | null = null
+
+function getPermissionHotkeys(): PermissionHotkeys {
+  permissionHotkeys ??= new PermissionHotkeys({
+    platform: process.platform,
+    shortcuts: {
+      register: (accelerator, callback) => globalShortcut.register(accelerator, callback),
+      unregister: (accelerator) => globalShortcut.unregister(accelerator),
+      isRegistered: (accelerator) => globalShortcut.isRegistered(accelerator),
+    },
+    decide: (requestId, decision) => {
+      void mainState.permissionBroker?.decide(requestId, decision, 'hotkey')
+    },
+  })
+  return permissionHotkeys
+}
 
 export const PANEL_WIDTH = 460
 export const PANEL_MIN_WIDTH = 320
@@ -2278,9 +2293,7 @@ export function updateDesktopPreferences(patch: unknown): DesktopPreferences {
 
 export function unregisterPermissionHotkeys(): void {
   if (!app.isReady()) return
-  for (const accelerator of [PERMISSION_ALLOW_HOTKEY, PERMISSION_DENY_HOTKEY]) {
-    if (globalShortcut.isRegistered(accelerator)) globalShortcut.unregister(accelerator)
-  }
+  permissionHotkeys?.clear()
 }
 
 export function syncTrayAttention(): void {
@@ -2288,44 +2301,30 @@ export function syncTrayAttention(): void {
 }
 
 export function broadcastPermissionRequests(): void {
-  const requests = mainState.permissionBroker?.listRequests() ?? []
-  if (requests.length > 0 && mainState.petWindowMode !== 'normal') {
+  const listed = mainState.permissionBroker?.listRequests() ?? []
+  if (listed.length > 0 && mainState.petWindowMode !== 'normal') {
     applyNormalPetBounds()
   }
-  mainState.permissionAttentionCount = requests.length
+  mainState.permissionAttentionCount = listed.length
   syncTrayAttention()
+
+  const top = listed[0]
+  const hotkeyInfo = app.isReady()
+    ? getPermissionHotkeys().sync(
+      top,
+      Boolean(
+        currentDesktopPreferences().permissionBubbleEnabled
+        && mainState.petWindow
+        && !mainState.petWindow.isDestroyed()
+        && mainState.petWindow.isVisible(),
+      ),
+    )
+    : null
+  const requests = attachHotkeyInfo(listed, hotkeyInfo)
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
     if (window && !window.isDestroyed()) {
       window.webContents.send(IPC_CHANNELS.permissionRequestsUpdated, requests)
     }
-  }
-
-  unregisterPermissionHotkeys()
-  const top = requests[0]
-  const permissionBubbleEnabled = currentDesktopPreferences().permissionBubbleEnabled
-  if (
-    !permissionBubbleEnabled
-    || !top
-    || top.status !== 'pending'
-    || !top.hotkeyEligible
-    || !mainState.petWindow
-    || mainState.petWindow.isDestroyed()
-    || !mainState.petWindow.isVisible()
-  ) return
-
-  try {
-    if (top.allowedDecisions.includes('allow_once')) {
-      globalShortcut.register(PERMISSION_ALLOW_HOTKEY, () => {
-        void mainState.permissionBroker?.decide(top.requestId, 'allow_once', 'hotkey')
-      })
-    }
-    if (top.allowedDecisions.includes('deny')) {
-      globalShortcut.register(PERMISSION_DENY_HOTKEY, () => {
-        void mainState.permissionBroker?.decide(top.requestId, 'deny', 'hotkey')
-      })
-    }
-  } catch {
-    unregisterPermissionHotkeys()
   }
 }
 

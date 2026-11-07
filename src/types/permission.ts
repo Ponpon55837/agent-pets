@@ -13,6 +13,14 @@ export type PermissionRequestStatus =
   | 'cancelled'
   | 'delivery_failed'
 
+/** Added by the main process to the top request when a global shortcut applies. */
+export interface PermissionHotkeyInfo {
+  /** `unavailable`: another program owns the shortcut, so it must not be advertised. */
+  status: 'active' | 'unavailable'
+  allowLabel: string
+  denyLabel: string
+}
+
 export interface PermissionRequestView {
   requestId: string
   adapterId: string
@@ -36,6 +44,7 @@ export interface PermissionRequestView {
   queuePosition: number
   queueSize: number
   hotkeyEligible: boolean
+  hotkey?: PermissionHotkeyInfo
   truncated: boolean
 }
 

@@ -26,5 +26,9 @@
   "permission.settingsIntro": "Which agents' permission requests can be handled right from the pet bubble:",
   "permission.settingsCanApprove": "Allow once or deny here",
   "permission.settingsReminderOnly": "Reminder only; answer in the original tool",
-  "permission.settingsRiskRules": "Risk is judged conservatively: only read-only tools such as read and search count as low risk, every other tool is treated as high risk, and high-risk requests cannot be approved with the global shortcut."
+  "permission.settingsRiskRules": "Risk is judged conservatively: only read-only tools such as read and search count as low risk, every other tool is treated as high risk, and high-risk requests cannot be approved with the global shortcut.",
+  "permission.hotkeyUnavailable": "The shortcut is taken by another app; use the buttons instead",
+  "permission.keyboardHint": "Keyboard: N or Esc denies; hold Y for 0.6 s to allow",
+  "permission.keyboardHintLow": "Keyboard: N or Esc denies; Y allows once",
+  "permission.announce": "{source} is asking for \"{action}\" permission, {risk}"
 }

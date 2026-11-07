@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { t, type TranslationKey } from '@/i18n'
 import { permissionSourceName } from '@/utils/permission-source'
@@ -39,6 +39,85 @@ function decide(decision: 'allow_once' | 'deny'): void {
   if (!current || current.status !== 'pending') return
   void store.decidePermission(current.requestId, decision)
 }
+
+const RISK_LABEL_KEYS: Record<string, TranslationKey> = {
+  high: 'permissionRiskHigh',
+  medium: 'permissionRiskMedium',
+  low: 'permissionRiskLow',
+}
+
+const announcement = computed(() => {
+  const current = request.value
+  if (!current) return ''
+  return t('permission.announce', {
+    source: permissionSourceName(current.agentId),
+    action: current.action,
+    risk: t(RISK_LABEL_KEYS[current.risk] ?? 'permissionRiskUnknown'),
+  })
+})
+
+// Global shortcut labels come from the main process (platform-correct); they
+// are only advertised when the shortcut is actually registered.
+const hotkey = computed(() => request.value?.hotkey ?? null)
+const showHotkeys = computed(() => hotkey.value?.status === 'active')
+const hotkeyBlocked = computed(() => hotkey.value?.status === 'unavailable')
+
+// --- In-window keyboard (only while focus is inside the bubble) --------------
+// Never global: Esc / N deny, Y allows. Anything that is not low / medium risk
+// needs Y held so a stray keystroke cannot approve a risky action.
+const HOLD_TO_ALLOW_MS = 600
+const needsHold = computed(() => {
+  const risk = request.value?.risk
+  return risk !== 'low' && risk !== 'medium'
+})
+const holdProgress = ref(false)
+let holdTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelHold(): void {
+  if (holdTimer) clearTimeout(holdTimer)
+  holdTimer = null
+  holdProgress.value = false
+}
+
+function onKeydown(event: KeyboardEvent): void {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return
+  const key = event.key.toLowerCase()
+  if (key === 'escape' || key === 'n') {
+    event.preventDefault()
+    decide('deny')
+    return
+  }
+  if (key !== 'y') return
+  event.preventDefault()
+  if (!needsHold.value) {
+    if (!event.repeat) decide('allow_once')
+    return
+  }
+  if (event.repeat || holdTimer) return
+  holdProgress.value = true
+  holdTimer = setTimeout(() => {
+    holdTimer = null
+    holdProgress.value = false
+    decide('allow_once')
+  }, HOLD_TO_ALLOW_MS)
+}
+
+function onKeyup(event: KeyboardEvent): void {
+  if (event.key.toLowerCase() === 'y') cancelHold()
+}
+
+onBeforeUnmount(cancelHold)
+
+// Move focus to the safe choice (Deny) when a request appears, but only if
+// this window already has focus: stealing focus from another app's text field
+// would be worse than not focusing at all.
+const denyButton = ref<HTMLButtonElement | null>(null)
+watch(() => request.value?.requestId, async (id) => {
+  cancelHold()
+  if (!id) return
+  await nextTick()
+  if (document.hasFocus()) denyButton.value?.focus({ preventScroll: true })
+}, { immediate: true })
 </script>
 
 <template>
@@ -52,7 +131,11 @@ function decide(decision: 'allow_once' | 'deny'): void {
     data-pet-hit-target="solid"
     @mousedown.stop
     @click.stop
+    @keydown="onKeydown"
+    @keyup="onKeyup"
+    @focusout="cancelHold"
   >
+    <span class="permission-sr-only" aria-live="assertive">{{ announcement }}</span>
     <header class="permission-request-header">
       <span class="permission-request-source">{{ permissionSourceName(request.agentId) }}</span>
       <span class="permission-request-project" :title="request.projectId">{{ request.projectId || t('projectUnknown') }}</span>
@@ -68,13 +151,14 @@ function decide(decision: 'allow_once' | 'deny'): void {
     <div class="permission-request-actions">
       <button
         type="button"
+        ref="denyButton"
         class="permission-button deny"
         :disabled="request.status !== 'pending'"
         @mousedown.stop
         @click.stop="decide('deny')"
       >
         {{ t('permissionDeny') }}
-        <kbd v-if="request.hotkeyEligible">Ctrl Shift N</kbd>
+        <kbd v-if="showHotkeys">{{ hotkey?.denyLabel }}</kbd>
       </button>
       <button
         type="button"
@@ -84,9 +168,13 @@ function decide(decision: 'allow_once' | 'deny'): void {
         @click.stop="decide('allow_once')"
       >
         {{ request.status === 'deciding' ? t('sending') : t('permissionAllowOnce') }}
-        <kbd v-if="request.hotkeyEligible">Ctrl Shift Y</kbd>
+        <kbd v-if="showHotkeys">{{ hotkey?.allowLabel }}</kbd>
       </button>
     </div>
+    <p v-if="hotkeyBlocked" class="permission-request-hint">{{ t('permission.hotkeyUnavailable') }}</p>
+    <p class="permission-request-hint permission-keyboard-hint" :class="{ holding: holdProgress }">
+      {{ needsHold ? t('permission.keyboardHint') : t('permission.keyboardHintLow') }}
+    </p>
   </section>
 
   <section
@@ -213,6 +301,35 @@ function decide(decision: 'allow_once' | 'deny'): void {
   color: var(--state-warn-bright);
   font-size: var(--font-xs);
   line-height: 1.3;
+}
+
+.permission-request-hint {
+  margin: var(--space-2) 1px 0;
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  line-height: 1.3;
+}
+
+.permission-keyboard-hint {
+  display: none;
+}
+
+.permission-request:focus-within .permission-keyboard-hint {
+  display: block;
+}
+
+.permission-keyboard-hint.holding {
+  color: var(--state-warn-bright);
+  font-weight: var(--weight-bold);
+}
+
+.permission-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .permission-request-error {

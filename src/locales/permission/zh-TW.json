@@ -26,5 +26,9 @@
   "permission.settingsIntro": "哪些 Agent 的權限請求可以直接在寵物泡泡上處理：",
   "permission.settingsCanApprove": "可在這裡允許一次或拒絕",
   "permission.settingsReminderOnly": "只提醒，需回原工具處理",
-  "permission.settingsRiskRules": "風險判斷採保守原則：只有讀取、搜尋這類唯讀工具視為低風險，其他工具一律當作高風險，高風險請求不能用全域快捷鍵核准。"
+  "permission.settingsRiskRules": "風險判斷採保守原則：只有讀取、搜尋這類唯讀工具視為低風險，其他工具一律當作高風險，高風險請求不能用全域快捷鍵核准。",
+  "permission.hotkeyUnavailable": "快捷鍵已被其他程式佔用，請直接點選按鈕",
+  "permission.keyboardHint": "鍵盤：N 或 Esc 拒絕；按住 Y 約 0.6 秒允許",
+  "permission.keyboardHintLow": "鍵盤：N 或 Esc 拒絕；Y 允許一次",
+  "permission.announce": "{source} 要求「{action}」權限，{risk}"
 }
