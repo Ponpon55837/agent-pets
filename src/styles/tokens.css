@@ -111,10 +111,26 @@
   --focus-ring-color: var(--state-info);
   --focus-ring-offset: 1px;
 
+  /* ── Hit target, layering, leading ────────────────────────────────────
+     --hit-min: every clickable element is at least this big (WCAG 2.5.8
+     asks for 24px; 32px is comfortable for mouse and touch).
+     --z-*: the only z-index values components may use. */
+  --hit-min: 32px;
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-popover: 100;
+  --z-modal: 1000;
+  --z-toast: 1100;
+  --z-system: 10000;
+  --leading-tight: 1.2;
+  --leading-normal: 1.4;
+  --leading-relaxed: 1.55;
+
   /* ── Motion ───────────────────────────────────────────────────────────── */
   --transition-fast: 0.15s ease;
   --transition-base: 0.2s ease;
   --transition-slow: 0.35s ease;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
 
   /* ── Organic panel theme (palette layer) ──────────────────────────────
      --organic-* is the PALETTE of the panel layer. Spacing and type steps

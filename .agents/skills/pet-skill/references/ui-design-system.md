@@ -33,6 +33,20 @@ The floor for any user-facing text is `--font-xs` (11px). CJK glyphs lose stroke
 | `ConfirmDialog.vue` | `window.confirm(...)` | Every destructive/irreversible action (remove, clear, delete). Never call `window.confirm` or `window.alert` — the native dialog steals OS focus, which the main process reads as the panel window losing focus, which hides the panel out from under the confirmation. It also renders as a different native surface on Windows vs. macOS, which is the kind of cross-platform inconsistency this whole system exists to avoid (see the platform note below). |
 | `Icon.vue` | any Unicode/emoji glyph used as a UI icon | Any icon in chrome (nav, buttons, section headers). Plain text glyphs (`⌘ ◈ ✦`) render through the OS font and differ in weight/alignment between Windows and macOS, and some carry unrelated platform meaning (`⌘` is the macOS Command key — do not reuse it as a generic symbol). Add new icons as inline path data in `Icon.vue`'s `paths` map; keep them on the existing 16×16 grid with 1.4 stroke-width so a new icon does not look heavier or lighter than the rest. |
 
+Additional primitives (all backward compatible; existing props above are unchanged):
+
+| Component | Use for |
+| --- | --- |
+| `Input.vue` | Every text field. `v-model`, `label`, `help`, `error` (renders `role="alert"`, sets `aria-invalid` and `aria-describedby`), `ariaLabel` when there is no visible label. Extra attrs fall through to the `<input>`. |
+| `Checkbox.vue` | Selections inside forms/dialogs (`ToggleRow` stays for on/off settings). `v-model`, `label`, `help` (linked via `aria-describedby`). |
+| `Badge.vue` | Plugin / DEV / status / quota chips. `tone` neutral/accent/success/warn/danger, `dot`, `count`. Always pair colour with text. |
+| `Toast.vue` + `ToastHost.vue` + `composables/useToast.ts` | Transient messages. Push with `useToast().push({ tone, title, message, actionLabel, onAction, duration })`; mount `<ToastHost />` once near the app root. Danger toasts are `role="alert"`, the rest `role="status"`; max 3 visible. |
+| `EmptyState.vue` | "Nothing here yet": `icon`, `title`, `description`, default slot for actions, `compact` inside Cards. |
+| `Skeleton.vue` | Loading placeholder (`line` / `block` / `circle`, `lines`). Static under reduced motion; put `aria-busy="true"` on the loading region. |
+| `Tooltip.vue` | Replacement for native `title=` hints: hover (300ms) + focus, `aria-describedby`, Esc closes, clamped to the viewport. Wrap one focusable element. |
+
+New tokens for primitives: `--hit-min` (32px minimum hit area), `--z-*` scale (the only z-index values components may use), `--leading-tight/normal/relaxed`, `--ease-standard`.
+
 Session state labels (`STATE_LABELS` / `STATE_LABELS_SHORT` in `src/types/agent.ts`) and `SOURCE_LABELS` (Codex CLI, OpenCode Desktop, …) are deliberately **not** localized — they're the agent's technical run states and product/vendor names, not prose, and stay English in every locale. This was tried the other way (routed through `t()`) and reverted: translating "Thinking"/"Idle" read as inconsistent next to the untranslated tool vocabulary the rest of the panel already uses. Don't route these through `t()` again; add new state/source copy directly to the constant maps in `types/agent.ts`.
 
 ## Cross-platform is the constraint, not an afterthought
