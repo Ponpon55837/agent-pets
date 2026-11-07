@@ -29,6 +29,8 @@ export interface ProjectMcpInstallOptions {
 }
 
 export interface ProjectMcpSelection {
+  /** Rewrite Agent Pets entries whose paths are outdated (App moved, Node upgraded). */
+  updateStale?: boolean
   /** Clients to configure; defaults to every supported client. */
   clients?: ProjectMcpClientId[]
   /** Add the written files to .git/info/exclude so the local paths they contain are never committed. */
@@ -306,22 +308,83 @@ function codexResult(
   const configured = isCodexConfigured(content, options.nodeExecutable, options.bridgePath)
   return configured
     ? installedResult('codex', 'already_configured', filePath, 'already_configured', 'Codex project MCP is configured.')
-    : installedResult('codex', 'conflict', filePath, 'server_mismatch', 'A different [mcp_servers.agent-pets] entry exists and was left unchanged.', manualSnippetFor('codex', options))
+    : mismatchResult('codex', filePath, codexLooksLikeOurs(existingSection), manualSnippetFor('codex', options))
 }
 
-function installCodex(projectPath: string, options: ProjectMcpInstallOptions): ProjectMcpInstallResult {
+function withoutCodexSection(content: string): string {
+  const eol = content.includes('\r\n') ? '\r\n' : '\n'
+  const lines = content.split(/\r?\n/)
+  const start = lines.findIndex(line => line.trim() === `[mcp_servers.${SERVER_NAME}]`)
+  if (start < 0) return content
+  let end = start + 1
+  while (end < lines.length && !/^\s*\[[^\]]+\]\s*$/.test(lines[end]!)) end += 1
+  let removeStart = start
+  if (removeStart > 0 && lines[removeStart - 1]!.trim() === '# Agent Pets Presentation MCP') removeStart -= 1
+  return lines.slice(0, removeStart).concat(lines.slice(end)).join(eol)
+}
+
+function installCodex(
+  projectPath: string,
+  options: ProjectMcpInstallOptions,
+  updateStale = false,
+): ProjectMcpInstallResult {
   const filePath = configPath(projectPath, 'codex')
-  const content = readBoundedText(filePath) ?? ''
+  let content = readBoundedText(filePath) ?? ''
   const existingSection = readTomlSection(content, `mcp_servers.${SERVER_NAME}`)
+  let updated = false
   if (existingSection !== null) {
-    return codexResult(projectPath, options)
+    const current = codexResult(projectPath, options)
+    if (!(updateStale && current.status === 'stale')) return current
+    content = withoutCodexSection(content).replace(/(\r?\n)+$/, '\n')
+    updated = true
   }
 
   const eol = content.includes('\r\n') ? '\r\n' : '\n'
   const block = codexBlock(options.nodeExecutable, options.bridgePath).replace(/\n/g, eol)
   const separator = content.length > 0 && !content.endsWith('\n') ? eol : ''
   writeTextAtomic(filePath, `${content}${separator}${content.length > 0 ? eol : ''}${block}`)
-  return installedResult('codex', 'installed', filePath, 'installed', 'Codex project MCP installed.')
+  return installedResult('codex', 'installed', filePath, updated ? 'updated' : 'installed', updated ? 'Codex project MCP paths updated.' : 'Codex project MCP installed.')
+}
+
+function bridgeName(value: unknown): boolean {
+  return typeof value === 'string' && /(^|[\\/])presentation-mcp\.mjs$/.test(value)
+}
+
+// An entry that has the shape Agent Pets writes but with other paths: our own entry gone stale
+// (App moved, Node upgraded) rather than something the user wrote.
+function looksLikeOurs(client: ProjectMcpClientId, entry: unknown): boolean {
+  if (!isRecord(entry)) return false
+  // Extra keys (env, headers, ...) mean the user customized the entry: never treat it as ours.
+  const onlyKeys = (allowed: string[]) => Object.keys(entry).every(key => allowed.includes(key))
+  if (client === 'claude') {
+    return onlyKeys(['type', 'command', 'args']) && entry.type === 'stdio'
+      && typeof entry.command === 'string' && Array.isArray(entry.args) && entry.args.length === 1 && bridgeName(entry.args[0])
+  }
+  if (client === 'opencode') {
+    return onlyKeys(['type', 'command', 'enabled']) && entry.type === 'local'
+      && Array.isArray(entry.command) && entry.command.length === 2 && bridgeName(entry.command[1])
+  }
+  return false
+}
+
+function codexLooksLikeOurs(section: string): boolean {
+  const keys = section.split(/\r?\n/)
+    .map(line => /^\s*([A-Za-z0-9_-]+)\s*=/.exec(line)?.[1])
+    .filter((key): key is string => Boolean(key))
+  if (keys.some(key => key !== 'command' && key !== 'args')) return false
+  const args = tomlValue(section, 'args')
+  return Array.isArray(args) && args.length === 1 && bridgeName(args[0])
+}
+
+function mismatchResult(
+  client: ProjectMcpClientId,
+  filePath: string,
+  stale: boolean,
+  snippet: string,
+): ProjectMcpInstallResult {
+  return stale
+    ? installedResult(client, 'stale', filePath, 'stale_paths', 'The Agent Pets entry points at outdated paths; update it to the current ones.', snippet)
+    : installedResult(client, 'conflict', filePath, 'server_mismatch', 'A different agent-pets server exists and was left unchanged.', snippet)
 }
 
 function sameStdioServer(existing: unknown, expected: JsonRecord): boolean {
@@ -350,10 +413,12 @@ function installJsonServer(
   client: 'claude' | 'opencode',
   expected: JsonRecord,
   options: ProjectMcpInstallOptions,
+  updateStale = false,
 ): ProjectMcpInstallResult {
   const filePath = configPath(projectPath, client)
   const snippet = manualSnippetFor(client, options)
   const original = readBoundedText(filePath)
+  let updated = false
   const root = readJsonRoot(filePath, snippet)
   const name = CLIENT_NAME[client]
 
@@ -364,9 +429,12 @@ function installJsonServer(
     }
     const servers = root.mcpServers
     if (servers[SERVER_NAME] !== undefined) {
-      return sameStdioServer(servers[SERVER_NAME], expected)
-        ? installedResult(client, 'already_configured', filePath, 'already_configured', `${name} project MCP is configured.`)
-        : installedResult(client, 'conflict', filePath, 'server_mismatch', 'A different agent-pets server exists and was left unchanged.', snippet)
+      if (sameStdioServer(servers[SERVER_NAME], expected)) {
+        return installedResult(client, 'already_configured', filePath, 'already_configured', `${name} project MCP is configured.`)
+      }
+      const stale = looksLikeOurs(client, servers[SERVER_NAME])
+      if (!(stale && updateStale)) return mismatchResult(client, filePath, stale, snippet)
+      updated = true
     }
     servers[SERVER_NAME] = expected
   } else {
@@ -376,9 +444,12 @@ function installJsonServer(
     }
     const mcp = root.mcp
     if (mcp[SERVER_NAME] !== undefined) {
-      return sameStdioServer(mcp[SERVER_NAME], expected)
-        ? installedResult(client, 'already_configured', filePath, 'already_configured', `${name} project MCP is configured.`)
-        : installedResult(client, 'conflict', filePath, 'server_mismatch', 'A different agent-pets server exists and was left unchanged.', snippet)
+      if (sameStdioServer(mcp[SERVER_NAME], expected)) {
+        return installedResult(client, 'already_configured', filePath, 'already_configured', `${name} project MCP is configured.`)
+      }
+      const stale = looksLikeOurs(client, mcp[SERVER_NAME])
+      if (!(stale && updateStale)) return mismatchResult(client, filePath, stale, snippet)
+      updated = true
     }
     if (mcp.servers !== undefined) {
       if (!isRecord(mcp.servers)) {
@@ -397,7 +468,7 @@ function installJsonServer(
   }
 
   writeTextAtomic(filePath, serializeLike(root, original))
-  return installedResult(client, 'installed', filePath, 'installed', `${name} project MCP installed.`)
+  return installedResult(client, 'installed', filePath, updated ? 'updated' : 'installed', updated ? `${name} project MCP paths updated.` : `${name} project MCP installed.`)
 }
 
 function jsonServerResult(
@@ -424,15 +495,15 @@ function jsonServerResult(
   }
   return sameStdioServer(parent[SERVER_NAME], expected)
     ? installedResult(client, 'already_configured', filePath, 'already_configured', `${name} project MCP is configured.`)
-    : installedResult(client, 'conflict', filePath, 'server_mismatch', 'A different agent-pets server exists and was left unchanged.', snippet)
+    : mismatchResult(client, filePath, looksLikeOurs(client, parent[SERVER_NAME]), snippet)
 }
 
-function installClaude(projectPath: string, options: ProjectMcpInstallOptions): ProjectMcpInstallResult {
-  return installJsonServer(projectPath, 'claude', expectedForClient('claude', options)!, options)
+function installClaude(projectPath: string, options: ProjectMcpInstallOptions, updateStale = false): ProjectMcpInstallResult {
+  return installJsonServer(projectPath, 'claude', expectedForClient('claude', options)!, options, updateStale)
 }
 
-function installOpenCode(projectPath: string, options: ProjectMcpInstallOptions): ProjectMcpInstallResult {
-  return installJsonServer(projectPath, 'opencode', expectedForClient('opencode', options)!, options)
+function installOpenCode(projectPath: string, options: ProjectMcpInstallOptions, updateStale = false): ProjectMcpInstallResult {
+  return installJsonServer(projectPath, 'opencode', expectedForClient('opencode', options)!, options, updateStale)
 }
 
 function inspectClient(
@@ -512,7 +583,8 @@ function removeCodex(projectPath: string, options: ProjectMcpInstallOptions): Pr
   if (content === null || readTomlSection(content, `mcp_servers.${SERVER_NAME}`) === null) {
     return removalResult('codex', 'already_absent', filePath, 'already_absent', 'Codex project MCP is not present.')
   }
-  if (!isCodexConfigured(content, options.nodeExecutable, options.bridgePath)) {
+  const codexSection = readTomlSection(content, `mcp_servers.${SERVER_NAME}`) ?? ''
+  if (!isCodexConfigured(content, options.nodeExecutable, options.bridgePath) && !codexLooksLikeOurs(codexSection)) {
     return removalResult('codex', 'conflict', filePath, 'entry_changed', 'The Codex entry was changed, so it was not removed.')
   }
 
@@ -562,7 +634,7 @@ function removeJsonServer(
     return removalResult(client, 'already_absent', filePath, 'already_absent', 'Project MCP is not present.')
   }
   const expected = expectedForClient(client, options)
-  if (!expected || !sameStdioServer(parent[SERVER_NAME], expected)) {
+  if (!expected || (!sameStdioServer(parent[SERVER_NAME], expected) && !looksLikeOurs(client, parent[SERVER_NAME]))) {
     return removalResult(client, 'conflict', filePath, 'entry_changed', 'The entry was changed, so it was not removed.')
   }
   delete parent[SERVER_NAME]
@@ -613,9 +685,10 @@ export function installProjectMcp(
 
   const results = clients.map((client): ProjectMcpInstallResult => {
     try {
-      if (client === 'codex') return installCodex(canonicalPath, options)
-      if (client === 'claude') return installClaude(canonicalPath, options)
-      return installOpenCode(canonicalPath, options)
+      const updateStale = selection?.updateStale === true
+      if (client === 'codex') return installCodex(canonicalPath, options, updateStale)
+      if (client === 'claude') return installClaude(canonicalPath, options, updateStale)
+      return installOpenCode(canonicalPath, options, updateStale)
     } catch (error) {
       return errorResult(client, configPath(canonicalPath, client), error, options)
     }

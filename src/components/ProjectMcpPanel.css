@@ -457,3 +457,13 @@
   font-size: var(--font-body-sm);
   line-height: 1.45;
 }
+
+.mcp-client-list > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--organic-space-1);
+}
+
+.mcp-count-chip {
+  font-weight: var(--weight-medium);
+}

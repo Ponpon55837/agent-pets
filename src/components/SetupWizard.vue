@@ -7,7 +7,7 @@ import type {
   InstallErrorCode,
   InstallOutcome,
 } from '@/types/agent-adapter'
-import type { AgentSource } from '@/types/agent'
+import { SOURCE_LABELS, type AgentSource } from '@/types/agent'
 import { locale, t, translateBackendError, type TranslationKey } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
@@ -47,6 +47,9 @@ interface ToolStatus extends AdapterRuntimeStatus {
   diagnosis?: DiagnosticReport
   /** Result of the last install/repair, shown inside the card until the next one. */
   outcome?: InstallOutcome
+  /** A genuine event from the tool itself (not the built-in receiver test). */
+  realEvent?: { source: AgentSource, at: number }
+  realEventTimedOut?: boolean
 }
 
 const tools = ref<ToolStatus[]>([])
@@ -56,6 +59,46 @@ const error = ref('')
 const installing = ref<AgentAdapterId | 'all' | null>(null)
 const testing = ref<AgentSource | null>(null)
 const diagnosing = ref<AgentAdapterId | null>(null)
+
+// "Wait for a real event": listens for an event the tool itself sends, so a broken hook or a wrong
+// Node path cannot be hidden by the receiver test (which never involves the tool).
+const REAL_EVENT_WAIT_MS = 30_000
+const waitingFor = ref<AgentAdapterId | null>(null)
+const waitRemainingMs = ref(0)
+let stopWaiting: (() => void) | null = null
+
+function cancelRealEventWait() {
+  stopWaiting?.()
+  stopWaiting = null
+  waitingFor.value = null
+}
+
+function waitForRealEvent(tool: ToolStatus) {
+  cancelRealEventWait()
+  tool.realEvent = undefined
+  tool.realEventTimedOut = false
+  waitingFor.value = tool.id
+  const deadline = Date.now() + REAL_EVENT_WAIT_MS
+  waitRemainingMs.value = REAL_EVENT_WAIT_MS
+  const tick = setInterval(() => {
+    waitRemainingMs.value = Math.max(0, deadline - Date.now())
+    if (waitRemainingMs.value === 0) {
+      tool.realEventTimedOut = true
+      cancelRealEventWait()
+    }
+  }, 250)
+  const unsubscribe = window.electronAPI?.onAgentStatusEvent((raw: unknown) => {
+    const event = raw as { source?: AgentSource, sessionId?: string, originalEvent?: string }
+    if (!event?.source || !tool.sources.includes(event.source)) return
+    if (event.originalEvent === 'AgentPetsIntegrationTest' || event.sessionId?.startsWith('agent-pets-test-')) return
+    tool.realEvent = { source: event.source, at: Date.now() }
+    cancelRealEventWait()
+  })
+  stopWaiting = () => {
+    clearInterval(tick)
+    unsubscribe?.()
+  }
+}
 const installError = ref('')
 const removing = ref<AgentAdapterId | 'all' | null>(null)
 const pendingRemoval = ref<AgentAdapterId | 'all' | null>(null)
@@ -118,6 +161,8 @@ const INSTALL_ERROR_KEYS: Record<InstallErrorCode, TranslationKey> = {
   permission_denied: 'onboarding.errorPermissionDenied',
   file_busy: 'onboarding.errorFileBusy',
   read_only: 'onboarding.errorReadOnly',
+  node_missing: 'onboarding.errorNodeMissing',
+  node_unsupported: 'onboarding.errorNodeUnsupported',
   unknown: 'onboarding.errorUnknown',
 }
 
@@ -262,6 +307,70 @@ async function diagnoseAdapter(tool: ToolStatus) {
   diagnosing.value = null
 }
 
+const CHECK_KEYS: Readonly<Record<string, TranslationKey>> = {
+  'runtime.warn': 'onboarding.check.runtime.warn',
+  'opencode-cli.pass': 'onboarding.check.opencode-cli.pass',
+  'opencode-cli.warn': 'onboarding.check.opencode-cli.warn',
+  'opencode-desktop.pass': 'onboarding.check.opencode-desktop.pass',
+  'opencode-desktop.warn': 'onboarding.check.opencode-desktop.warn',
+  'plugin-current.pass': 'onboarding.check.plugin-current.pass',
+  'plugin-current.warn': 'onboarding.check.plugin-current.warn',
+  'permission-channel.pass': 'onboarding.check.permission-channel.pass',
+  'hooks-file.pass': 'onboarding.check.hooks-file.pass',
+  'hooks-file.fail': 'onboarding.check.hooks-file.fail',
+  'hooks-enabled.pass': 'onboarding.check.hooks-enabled.pass',
+  'hooks-enabled.fail': 'onboarding.check.hooks-enabled.fail',
+  'settings-file.pass': 'onboarding.check.settings-file.pass',
+  'settings-file.fail': 'onboarding.check.settings-file.fail',
+  'hook-script.pass': 'onboarding.check.hook-script.pass',
+  'hook-script.fail': 'onboarding.check.hook-script.fail',
+  'hook-script-current.pass': 'onboarding.check.hook-script-current.pass',
+  'hook-script-current.warn': 'onboarding.check.hook-script-current.warn',
+  'hook-command.pass': 'onboarding.check.hook-command.pass',
+  'hook-command.fail': 'onboarding.check.hook-command.fail',
+  'node.pass': 'onboarding.check.node.pass',
+  'node.fail': 'onboarding.check.node.fail',
+  'agent-present.pass': 'onboarding.check.agent-present.pass',
+  'agent-present.warn': 'onboarding.check.agent-present.warn',
+  'loopback.pass': 'onboarding.check.loopback.pass',
+  'token.pass': 'onboarding.check.token.pass',
+  'permissions.pass': 'onboarding.check.permissions.pass',
+}
+
+const FIX_KEYS: Readonly<Record<string, TranslationKey>> = {
+  'hooks-file': 'onboarding.fix.hooks-file',
+  'hooks-enabled': 'onboarding.fix.hooks-enabled',
+  'settings-file': 'onboarding.fix.settings-file',
+  'hook-script': 'onboarding.fix.hook-script',
+  'hook-script-current': 'onboarding.fix.hook-script-current',
+  'plugin-current': 'onboarding.fix.plugin-current',
+  'hook-command': 'onboarding.fix.hook-command',
+  'node': 'onboarding.fix.node',
+}
+
+const SUMMARY_KEYS: Readonly<Record<string, TranslationKey>> = {
+  ready: 'onboarding.summary.ready',
+  needs_install: 'onboarding.summary.needs_install',
+  degraded: 'onboarding.summary.degraded',
+  needs_approval: 'onboarding.summary.needs_approval',
+  error: 'onboarding.summary.error',
+}
+
+function checkText(check: { id: string, status: string, code?: string, message: string }): string {
+  const key = check.code ? CHECK_KEYS[check.code] : undefined
+  return key ? t(key) : check.message
+}
+
+function checkFix(check: { id: string, status: string }): string {
+  const key = check.status === 'pass' ? undefined : FIX_KEYS[check.id]
+  return key ? t(key) : ''
+}
+
+function summaryText(tool: ToolStatus): string {
+  const key = SUMMARY_KEYS[tool.health]
+  return key ? t(key) : (tool.message ?? "")
+}
+
 const HEALTH_LABEL_KEYS: Partial<Record<ToolStatus['health'], TranslationKey>> = {
   ready: 'healthReady',
   needs_install: 'healthNeedsInstall',
@@ -273,18 +382,30 @@ function healthLabel(tool: ToolStatus): string {
   return t(HEALTH_LABEL_KEYS[tool.health] ?? 'healthError')
 }
 
-function capabilityLabels(tool: ToolStatus): string[] {
-  const capabilities = tool.capabilities
-  const labels: string[] = []
-  if (capabilities.lifecycle) labels.push(t('capabilityLifecycle'))
-  if (capabilities.sessions) labels.push(t('capabilitySessions'))
-  if (capabilities.projects) labels.push(t('capabilityProjects'))
-  if (capabilities.toolActivity) labels.push(t('capabilityToolActivity'))
-  if (capabilities.waitingInput) labels.push(t('capabilityInput'))
-  if (capabilities.tokenUsage !== 'none') labels.push(`Token: ${capabilities.tokenUsage}`)
-  if (capabilities.quota !== 'none') labels.push(`Quota: ${capabilities.quota}`)
-  labels.push(`Permission: ${capabilities.permissions}`)
-  return labels
+interface CapabilityRow {
+  id: string
+  supported: boolean
+  label: string
+}
+
+// Plain-language capability matrix. Permission distinguishes "answer on the pet" from "shown on the
+// pet, answer in the tool" because that is the difference users actually run into.
+function capabilityRows(tool: ToolStatus): CapabilityRow[] {
+  const c = tool.capabilities
+  const name = tool.displayName
+  const permission = c.permissions === 'respond'
+    ? t('onboarding.capPermissionRespond')
+    : c.permissions === 'observe'
+      ? t('onboarding.capPermissionObserve', { name })
+      : t('onboarding.capPermissionNone')
+  return [
+    { id: 'status', supported: c.lifecycle, label: t('onboarding.capStatus') },
+    { id: 'tools', supported: c.toolActivity, label: t('onboarding.capTools') },
+    { id: 'input', supported: c.waitingInput, label: t('onboarding.capInput') },
+    { id: 'permission', supported: c.permissions !== 'none', label: permission },
+    { id: 'tokens', supported: c.tokenUsage !== 'none', label: t(c.tokenUsage === 'exact' ? 'onboarding.capTokensExact' : 'onboarding.capTokensEstimated') },
+    { id: 'quota', supported: c.quota !== 'none', label: t('onboarding.capQuota') },
+  ]
 }
 
 onMounted(() => {
@@ -292,6 +413,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  cancelRealEventWait()
   stopElapsedTimer()
 })
 </script>
@@ -350,12 +472,23 @@ onUnmounted(() => {
                 variant="secondary"
                 size="sm"
                 class="tool-action test-btn"
+                v-if="tool.installable"
+                :disabled="installing !== null || testing !== null || diagnosing !== null || removing !== null"
+                :title="t('onboarding.waitRealTitle')"
+                @click="waitingFor === tool.id ? cancelRealEventWait() : waitForRealEvent(tool)"
+              >
+                {{ waitingFor === tool.id ? t('cancel') : t('onboarding.waitReal') }}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                class="tool-action test-btn"
                 v-if="tool.testSource"
-                :disabled="!tool.installed || installing !== null || testing !== null || diagnosing !== null"
-                :title="t('testReceiverTitle')"
+                :disabled="installing !== null || testing !== null || diagnosing !== null"
+                :title="t('onboarding.testReceiverTitle')"
                 @click="testIntegration(tool)"
               >
-                {{ testing === tool.testSource ? t('testing') : t('test') }}
+                {{ testing === tool.testSource ? t('testing') : t('onboarding.testReceiver') }}
               </Button>
               <Button
                 variant="secondary"
@@ -388,13 +521,17 @@ onUnmounted(() => {
               </Button>
             </div>
           </div>
-          <div class="tool-desc">{{ tool.message }}</div>
+          <div class="tool-desc">{{ summaryText(tool) }}</div>
           <div class="source-list">
             <span v-for="source in tool.sourceLabels" :key="source" class="source-chip">{{ source }}</span>
           </div>
-          <div class="capability-list">
-            <span v-for="capability in capabilityLabels(tool)" :key="capability" class="capability-chip">{{ capability }}</span>
-          </div>
+          <ul class="capability-list" :aria-label="t('onboarding.capTitle')">
+            <li v-for="row in capabilityRows(tool)" :key="row.id" :class="row.supported ? 'cap-yes' : 'cap-no'">
+              <Icon :name="row.supported ? 'check' : 'close'" :size="13" />
+              <span>{{ row.label }}</span>
+              <span class="visually-hidden">{{ row.supported ? t('onboarding.capSupported') : t('onboarding.capUnsupported') }}</span>
+            </li>
+          </ul>
           <div
             v-if="tool.outcome"
             class="test-result"
@@ -409,6 +546,15 @@ onUnmounted(() => {
               {{ t(RESTART_KEYS[tool.id]) }}
             </template>
           </div>
+          <div v-if="waitingFor === tool.id" class="test-result" role="status">
+            {{ t('onboarding.waitingReal', { name: tool.displayName, seconds: Math.ceil(waitRemainingMs / 1000) }) }}
+          </div>
+          <div v-else-if="tool.realEvent" class="test-result passed" role="status">
+            {{ t('onboarding.realEventOk', { source: SOURCE_LABELS[tool.realEvent.source], time: new Date(tool.realEvent.at).toLocaleTimeString(locale) }) }}
+          </div>
+          <div v-else-if="tool.realEventTimedOut" class="test-result failed" role="alert">
+            {{ t('onboarding.realEventTimeout', { name: tool.displayName }) }}
+          </div>
           <div v-if="tool.verifiedAt" class="test-result passed">
             {{ t('receiverVerifiedAt', { time: new Date(tool.verifiedAt).toLocaleTimeString(locale) }) }}
           </div>
@@ -419,7 +565,7 @@ onUnmounted(() => {
                 :name="check.status === 'pass' ? 'check' : check.status === 'warn' ? 'warning' : 'close'"
                 :size="14"
               />
-              <span>{{ check.message }}</span>
+              <span>{{ checkText(check) }}<template v-if="checkFix(check)"> {{ checkFix(check) }}</template></span>
             </div>
           </div>
         </Card>

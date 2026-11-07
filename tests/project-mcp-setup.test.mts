@@ -366,3 +366,40 @@ test('removal still deletes only Agent Pets entries and preserves other servers'
     assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { mcpServers: { other: { command: 'x' } } })
   } finally { cleanup(projectPath) }
 })
+
+test('moved App/Node paths are reported as stale and repaired only on request', () => {
+  const projectPath = createProject()
+  try {
+    const old = { nodeExecutable: path.join(projectPath, 'old-node'), bridgePath: path.join(projectPath, 'old', 'presentation-mcp.mjs') }
+    install2(projectPath, old)
+    const opts = options(projectPath)
+    const plan = planProjectMcp(projectPath, opts)
+    assert.deepEqual((plan.clients ?? []).map(item => item.status), ['stale', 'stale', 'stale'])
+
+    const refused = install2(projectPath, opts)
+    assert.deepEqual(refused.results.map(item => item.status), ['stale', 'stale', 'stale'])
+    assert.equal(refused.ok, false)
+
+    const fixed = install2(projectPath, opts, { updateStale: true })
+    assert.equal(fixed.ok, true)
+    assert.deepEqual(fixed.results.map(item => item.code), ['updated', 'updated', 'updated'])
+    const claude = JSON.parse(fs.readFileSync(path.join(projectPath, '.mcp.json'), 'utf8'))
+    assert.deepEqual(claude.mcpServers['agent-pets'].args, [opts.bridgePath])
+    const codex = fs.readFileSync(path.join(projectPath, '.codex', 'config.toml'), 'utf8')
+    assert.equal((codex.match(/\[mcp_servers\.agent-pets\]/g) ?? []).length, 1)
+    assert.ok(codex.includes(opts.bridgePath.replace(/\\/g, '\\\\')))
+    assert.equal(install2(projectPath, opts).ok, true)
+  } finally { cleanup(projectPath) }
+})
+
+test('a customized entry is a conflict, never stale, and survives updateStale', () => {
+  const projectPath = createProject()
+  try {
+    const file = path.join(projectPath, '.mcp.json')
+    const custom = { mcpServers: { 'agent-pets': { type: 'stdio', command: 'x', args: ['/a/presentation-mcp.mjs'], env: { K: '1' } } } }
+    fs.writeFileSync(file, JSON.stringify(custom))
+    const result = install2(projectPath, options(projectPath), { clients: ['claude'], updateStale: true }).results[0]!
+    assert.equal(result.status, 'conflict')
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), custom)
+  } finally { cleanup(projectPath) }
+})

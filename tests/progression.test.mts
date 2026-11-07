@@ -195,3 +195,15 @@ test('streak continues across a DST change when days are identified by local dat
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('integration test events from the Setup Wizard never award XP', () => {
+  withStore((store) => {
+    const before = store.getSnapshot('default')
+    const result = store.handleEvent({
+      ...event('success', 1_700_000_000_000, 'agent-pets-test-codex-1'),
+      originalEvent: 'AgentPetsIntegrationTest',
+    } as never)
+    assert.deepEqual(result.awards, [])
+    assert.equal(store.getSnapshot('default').totalXp, before.totalXp)
+  })
+})

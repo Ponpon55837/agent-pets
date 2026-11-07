@@ -25,11 +25,13 @@
 
 ## 支援的工具
 
-| 工具        | CLI | Desktop |
-| ----------- | --- | ------- |
-| OpenCode    | ✅  | ✅      |
-| Codex       | ✅  | ✅      |
-| Claude Code | ✅  | ✅      |
+| 工具 | CLI | Desktop | Permission | 額度 | Token 用量 |
+| ---- | --- | ------- | ---------- | ---- | ---------- |
+| OpenCode | ✅ | ✅ | respond（可在寵物上允許／拒絕） | — | estimated |
+| Codex | ✅ | ⚠️ | observe（需回工具核准） | provider | estimated |
+| Claude Code | ✅ | ✅ | observe（需回工具核准） | provider | estimated |
+
+⚠️ Codex Desktop 與 CLI 共用 `~/.codex`，但沒有獨立的 Desktop 安裝介面，是否支援取決於該版本是否執行相同的 hooks；請在設定精靈用 **等待真實事件** 自行驗證。*Permission*：`respond` 的工具可直接在寵物上允許或拒絕；`observe` 的工具只會顯示「等待 Permission」，必須回工具本身核准。Codex 不會回報「等待輸入」狀態。
 
 **Generic HTTP** Adapter 可供本機整合透過經驗證的 `/v1/events` 使用；它永遠是 observe-only，不具備回覆權限的能力。
 
@@ -44,6 +46,13 @@
 ### 安裝（macOS）
 
 從 [Releases](https://github.com/Ponpon55837/agent-pets/releases) 頁面下載 `AgentPets-<版本>-arm64.dmg`（Apple Silicon）或 `AgentPets-<版本>-x64.dmg`（Intel），打開後把 app 拖到「應用程式」資料夾。
+
+### 開啟未簽章的版本
+
+目前的發行版沒有程式碼簽章，第一次開啟時作業系統會提醒：
+
+- **macOS（Gatekeeper）**——若出現「無法打開，因為無法驗證開發者」，到「應用程式」對 App 按右鍵選 **打開** 並確認；或到 **系統設定 → 隱私權與安全性** 按 **仍要打開**。最後手段：`xattr -dr com.apple.quarantine "/Applications/Agent Pets.app"`。
+- **Windows（SmartScreen）**——選 **其他資訊 → 仍要執行**。
 
 ### 第一次執行
 
@@ -129,7 +138,7 @@
 
 **Advanced 分區**
 
-- **Setup Wizard** — 重新偵測工具，或安裝/重新安裝 hooks。
+- **Setup Wizard** — 檢查每個工具的整合狀態，安裝／修復／移除 hooks，並驗證連線。
 - **Restart Pet** — 寵物或動畫卡住時，完整重新啟動 Agent Pets。
 - **Quit** — 結束 Agent Pets。
 
@@ -166,13 +175,13 @@ macOS/Linux: ~/.desktop-pet/presentation-mcp.mjs
 
 - Codex：`.codex/config.toml`（`mcp_servers.agent-pets`）
 - Claude Code：`.mcp.json`（`mcpServers.agent-pets`）
-- OpenCode：`opencode.json`（`mcp.servers.agent-pets`）
+- OpenCode：`opencode.json`（`mcp.agent-pets`；舊的 `mcp.servers.agent-pets` 包裝格式會自動遷移）
 
 寫入的設定含有**你這台電腦**上 Node.js 與 bridge script 的路徑，對隊友無效，也不應該被 commit。在 Git 專案中，預設開啟的 **僅限本機** 選項會把新檔案加入專案的 `.git/info/exclude`；若目標檔已被 Git 追蹤，確認與結果步驟會提醒你。含有註解或結尾逗號的設定檔（JSONC，`opencode.json` 很常見）或無效 JSON 一律不會被重寫：結果卡片會說明原因，並提供可複製、手動貼上的設定。既有的縮排、換行格式與其他 MCP server 都會保留；結果卡片會顯示每個設定檔路徑（可複製）與下一步：Claude Code 需在 `/mcp` 核准 `agent-pets`、Codex 需信任專案（可用 `codex mcp list` 檢查）、OpenCode 重新啟動即可。
 
 這個操作可重複執行。相同設定會回報「已設定」；同名但內容不同的設定會回報衝突並完全不覆蓋。它只修改選定專案的本機設定，不執行 shell 命令，也不會重新安裝 hooks。設定完成後，請重啟對應的 Agent client，讓它重新載入 MCP 工具目錄。
 
-這個按鈕會開啟獨立的 MCP 完整面板，不會把設定精靈或主設定頁越堆越大。面板會記住所有透過此按鈕設定的專案，重新檢查三個 client，顯示「已連接」、「部分連接」、「有衝突」或「找不到資料夾」，並列出專案路徑與最後檢查時間。**重新檢查**會立即更新清單。**移除 MCP** 只會移除仍符合 Agent Pets 原始設定的項目；如果使用者改過設定，會保留檔案並標示衝突。若專案資料夾已不存在，可以只移除清單記錄，不會碰到其他檔案。按下 **完成** 會回到設定頁。
+這個按鈕會開啟獨立的 MCP 完整面板，不會把設定精靈或主設定頁越堆越大。面板會記住所有透過此按鈕設定的專案，重新檢查三個 client，顯示「已連接」、「部分連接」、「有衝突」或「找不到資料夾」，並列出專案路徑與最後檢查時間。**重新檢查**會立即更新清單。**移除 MCP** 只會移除仍符合 Agent Pets 原始設定的項目；如果使用者改過設定，會保留檔案並標示衝突。若專案資料夾已不存在，可以只移除清單記錄，不會碰到其他檔案。這份清單以明文把專案路徑存放在 Agent Pets 的本機資料夾（與只保存加鹽雜湊的專案寵物不同），不會離開你的電腦。按下 **完成** 會回到設定頁。
 
 ### History HUD（歷史儀表板）
 
@@ -182,7 +191,7 @@ History 上方的 **專案篩選**可以只查看某一個專案的近七日統�
 
 #### 讓目前使用中的 Agent 專案接通
 
-1. 先啟動 Agent Pets，在 **Settings → Attention → Presentation MCP** 保持開啟（預設開啟）。App 必須保持執行，因為 stdio bridge 會連到它的本機 loopback control server。
+1. 先啟動 Agent Pets，在 **Settings → Desktop → Presentation MCP** 保持開啟（預設開啟）。App 必須保持執行，因為 stdio bridge 會連到它的本機 loopback control server。
 2. 確認 `node` 是真正的 Node.js，不要使用 `Agent Pets.exe` 當 interpreter。Windows PowerShell 可先確認：
 
    ```powershell
@@ -207,19 +216,29 @@ History 上方的 **專案篩選**可以只查看某一個專案的近七日統�
    claude mcp list
    ```
 
-   **OpenCode：** 在 `opencode.json` 的 `mcp.servers` 加入（若使用專案設定，也可放在專案自己的設定檔）：
+   **OpenCode：** 在 `opencode.json`（或專案自己的 OpenCode 設定）的 `mcp` 底下加入。請使用 Node.js 的絕對路徑，因為從 Finder／Dock 啟動的 App 常常沒有你的 shell `PATH`：macOS/Linux 用 `command -v node`，PowerShell 用 `(Get-Command node).Source`。只有 client 繼承了你的 `PATH` 時，裸 `node` 才會生效。
 
    ```json
    {
      "mcp": {
-       "servers": {
-         "agent-pets": {
-           "type": "local",
-           "command": ["node", "C:/Users/<你的帳號>/.desktop-pet/presentation-mcp.mjs"]
-         }
+       "agent-pets": {
+         "type": "local",
+         "command": ["/absolute/path/to/node", "/Users/<你的帳號>/.desktop-pet/presentation-mcp.mjs"],
+         "enabled": true
        }
      }
    }
+   ```
+
+   Windows 請寫成 `C:/Users/<你的帳號>/.desktop-pet/presentation-mcp.mjs`。（`~` 在 macOS/Linux 是家目錄，在 Windows 對應 `%USERPROFILE%`。）
+
+   上面 PowerShell 指令在 macOS/Linux 的對應寫法：
+
+   ```sh
+   bridge="$HOME/.desktop-pet/presentation-mcp.mjs"
+   node --version && test -f "$bridge" && echo ok
+   codex mcp add agent-pets -- node "$bridge"
+   claude mcp add --scope user agent-pets -- node "$bridge"
    ```
 
 4. 完全重啟 Agent client，並用它的 MCP 檢視功能確認 `pet_status`、`pet_react`、`pet_say` 三個工具。若只看到 hooks 的事件而看不到這三個工具，請檢查 bridge 路徑、Node executable、Presentation MCP 開關與 Agent Pets 是否仍在執行。
@@ -230,23 +249,35 @@ History 上方的 **專案篩選**可以只查看某一個專案的近七日統�
 
 ## Setup Wizard（設定精靈）
 
-Setup Wizard 會讀取 runtime Agent Adapter registry，並在你點擊按鈕時才安裝對應的 hooks——它本身不會自動安裝任何東西。每個 Adapter 會回報支援的來源、能力、健康狀態與診斷檢查：
+Setup Wizard 會讀取 runtime Agent Adapter registry，並且只在你點擊按鈕時才安裝 hooks，不會自己安裝任何東西。它檢查的是 Agent Pets 寫入的檔案，以及各工具的設定資料夾（不會掃描執行中的程序）。每個 Adapter 會回報支援的來源、能力清單、健康狀態與診斷檢查：
 
-- **OpenCode CLI / Desktop** — 寫入 plugin 到 `~/.config/opencode/plugin/`（注意：是單數 `plugin`，跟 OpenCode 實際掃描的目錄一致）以及對應平台的 OpenCode Desktop plugin 目錄
-- **Codex CLI** — 建立 `~/.codex/hooks.json` 並在 `~/.codex/config.toml` 啟用 hooks
-- **Claude Code CLI & Desktop** — 在 `~/.claude/settings.json` 加入 `hooks` 區塊（CLI 跟 Desktop 共用這份設定，所以裝一次兩邊都算；實際是哪一邊觸發的事件，是透過 Claude Code 的 `CLAUDE_CODE_ENTRYPOINT` 環境變數在執行當下判斷，不是安裝程式決定的）
+- **OpenCode CLI / Desktop** — 寫入 plugin 到 `~/.config/opencode/plugin/`（單數 `plugin`，與 OpenCode 實際掃描的目錄一致）以及對應平台的 OpenCode Desktop plugin 目錄。只裝其中一邊也算已連線。
+- **Codex CLI** — 建立 `~/.codex/hooks.json`，並在 `~/.codex/config.toml` 的 `[features]` 設定 `hooks = true`。
+- **Claude Code CLI & Desktop** — 在 `~/.claude/settings.json` 加入 `hooks` 區塊（CLI 與 Desktop 共用；實際由哪一邊觸發，是執行當下依 Claude Code 的 `CLAUDE_CODE_ENTRYPOINT` 判斷）。
 
-每個 Adapter 會顯示狀態燈與 capability chips：
+狀態：🟢 已連線、🟡 缺少或過期的部分（按 **修復**）、🔴 錯誤。安裝／修復的結果會顯示在該工具的卡片內（已安裝、已修復、沒有變更，或失敗原因，以及原設定備份在哪裡）。**全部安裝** 會逐個獨立執行並彙總成功數量。
 
-- 🟢 **綠燈** — 已安裝且設定完成
-- 🟡 **黃燈** — 有偵測到，但還沒（完全）設定好
-- 🔴 **紅燈** — 發生錯誤或不可用
+驗證連線：
 
-點 Adapter 旁的 **Diagnose** 可以查看有上限的健康檢查。可安裝的 Adapter 點 **Install** 可以單獨（重新）安裝，或點 **Install All** 以 idempotent 方式執行全部安裝器。如果狀態看起來過期，點 **Refresh** 重新偵測。
+- **等待真實事件**——到該工具執行任意提示，精靈會等 30 秒，看是否收到工具本身送來的事件，並告訴你來自 CLI 還是 Desktop。這是唯一能證明 hook 端到端有效的檢查。
+- **測試接收器**——透過目前 App 經 token 驗證的本機 HTTP 接收器送出一筆短暫事件。它證明接收器、Adapter 對應與 renderer 都正常，但不經過工具，所以 hook 壞掉時它仍會通過。
+- **診斷**——列出各項檢查（設定檔、啟用旗標、hook script 版本、Node.js 路徑、工具是否存在），失敗的項目附修復提示。
 
-設定完成的 Adapter 可以點 **Test**，透過目前 app 經 token 驗證的本機 HTTP 接收器送出一筆短暫事件。測試通過會同時驗證 HTTP 204、Adapter 選擇、canonical mapping 與 renderer 收到事件；它不會啟動編程工具，也不代表該工具本身已主動觸發 hook。Generic HTTP 永遠是 observe-only，不能回覆權限。
+Generic HTTP 永遠是 observe-only，不能回覆權限。
 
-> 註：目前沒有獨立的「Codex Desktop」hook 安裝項目——只有 Codex CLI 的 hooks 有接上。
+> 註：目前沒有獨立的「Codex Desktop」hook 安裝項目——只有 Codex CLI 的 hooks 有接上，Codex Desktop 需要執行相同的 hooks 才會有效。
+
+### 疑難排解
+
+| 症狀 | 檢查項目 |
+|------|----------|
+| 寵物一直離線 | 按 **等待真實事件** 並執行提示。沒收到：先重新啟動該工具（hooks 在啟動時才載入），再按 **診斷**。 |
+| 診斷：*找不到 Node.js 執行檔* | 安裝 Node.js 18 以上後按 **修復**（會寫入絕對路徑；從 Finder／Dock 啟動的 App 用裸 `node` 會失敗）。切換 nvm 版本後也要按一次 **修復**。 |
+| 診斷：*hooks 未啟用*（Codex） | **修復** 會在 `~/.codex/config.toml` 的 `[features]` 加上 `hooks = true`。 |
+| 安裝被拒絕：*不是有效的 JSON* | 你的 `settings.json`／`hooks.json` 有註解或語法錯誤。Agent Pets 不會動它；請修正（或先移開）後再安裝。備份檔名為 `*.agent-pets-bak-*`。 |
+| 事件一直沒送達 | `127.0.0.1` 的 `17373` 埠可能被其他程式占用；關閉它後重新啟動 Agent Pets。 |
+| Claude Code：專案 MCP 沒出現 | 第一次要在 `/mcp` 核准 `agent-pets`；Codex 需要先信任該專案。 |
+| hook script 過期 | 按 **修復** 重新部署。 |
 
 ## 插件
 
