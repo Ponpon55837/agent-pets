@@ -1,4 +1,19 @@
 {
   "panel.pin": "Keep panel open",
-  "panel.unpin": "Unpin panel"
+  "panel.unpin": "Unpin panel",
+  "panel.groupGeneral": "General",
+  "panel.groupPets": "Pets",
+  "panel.groupDesktop": "Desktop & alerts",
+  "panel.groupIntegrations": "Integrations",
+  "panel.searchLabel": "Search settings",
+  "panel.searchPlaceholder": "Search settings...",
+  "panel.searchClear": "Clear search",
+  "panel.searchResults": "Settings search results",
+  "panel.searchCount": "{count} results",
+  "panel.searchNoResults": "No settings match \"{query}\".",
+  "panel.notificationsCard": "Notifications & Do Not Disturb",
+  "panel.stateOn": "On",
+  "panel.stateOff": "Off",
+  "panel.pausedByDnd": "Paused by Do Not Disturb",
+  "panel.dndExplain": "Do Not Disturb silences desktop notifications and pet reactions while it is on."
 }
