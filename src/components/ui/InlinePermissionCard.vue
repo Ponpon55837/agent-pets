@@ -6,6 +6,8 @@ import { useAgentStore } from '@/stores/agentStore'
 import { permissionSourceName } from '@/utils/permission-source'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
+import PermissionCountdown from '@/components/permission/PermissionCountdown.vue'
+import { usePermissionClock } from '@/components/permission/usePermissionClock'
 
 const props = defineProps<{
   request: PermissionRequestView
@@ -22,6 +24,7 @@ const emit = defineEmits<{
 }>()
 
 const store = useAgentStore()
+const now = usePermissionClock()
 const deciding = ref<PermissionDecisionValue | null>(null)
 
 // A failed decision leaves the buttons usable again so the user can retry or
@@ -64,7 +67,7 @@ function decide(decision: PermissionDecisionValue): void {
       <div class="inline-permission-copy">
         <strong id="inline-permission-title">{{ title }}</strong>
         <span id="inline-permission-context">
-          {{ projectLabel }} · {{ elapsedLabel }} · <code>{{ request.action }}</code>
+          {{ projectLabel }} · {{ t('permission.waited', { time: elapsedLabel }) }} · <code>{{ request.action }}</code>
         </span>
       </div>
     </div>
@@ -72,6 +75,7 @@ function decide(decision: PermissionDecisionValue): void {
       {{ request.description }}
     </p>
     <p v-if="request.truncated" class="inline-permission-warning">{{ warningLabel }}</p>
+    <PermissionCountdown class="inline-permission-countdown" :request="request" :now="now" />
     <p v-if="decideError" class="inline-permission-warning" role="alert">{{ decideError }}</p>
     <div class="inline-permission-actions">
       <Button
@@ -166,6 +170,10 @@ function decide(decision: PermissionDecisionValue): void {
   -webkit-line-clamp: 1;
   color: var(--accent-bright);
   font-weight: var(--weight-medium);
+}
+
+.inline-permission-countdown {
+  margin: 0;
 }
 
 .inline-permission-actions {

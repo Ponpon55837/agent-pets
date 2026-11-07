@@ -4,8 +4,11 @@ import { useAgentStore } from '@/stores/agentStore'
 import { t, type TranslationKey } from '@/i18n'
 import { permissionSourceName } from '@/utils/permission-source'
 import type { PermissionOutcomeKind } from '@/types/permission'
+import PermissionCountdown from '@/components/permission/PermissionCountdown.vue'
+import { usePermissionClock } from '@/components/permission/usePermissionClock'
 
 const store = useAgentStore()
+const now = usePermissionClock()
 const request = computed(() => store.permissionRequest)
 const outcome = computed(() => store.permissionOutcome)
 
@@ -71,6 +74,7 @@ function decide(decision: 'allow_once' | 'deny'): void {
     <p v-if="request.truncated" class="permission-request-warning">
       {{ t('permissionWarning') }}
     </p>
+    <PermissionCountdown :request="request" :now="now" />
     <p v-if="inlineError" class="permission-request-error" role="alert">{{ inlineError }}</p>
     <div class="permission-request-actions">
       <button

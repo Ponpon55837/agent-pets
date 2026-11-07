@@ -5,5 +5,8 @@
   "permission.outcomeConflict": "這個請求已無法在這裡處理，請回到 {source}",
   "permission.outcomeError": "送出決定時發生錯誤，請再試一次，或回到 {source} 處理",
   "permission.dismiss": "知道了",
-  "permission.viewInPanel": "在面板檢視"
+  "permission.viewInPanel": "在面板檢視",
+  "permission.remaining": "剩餘 {time}",
+  "permission.expiringSoon": "即將逾時",
+  "permission.waited": "已等待 {time}"
 }

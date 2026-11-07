@@ -7,6 +7,8 @@ import type { PluginEventSourceStatusView } from '@/types/plugin'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 import InlinePermissionCard from '@/components/ui/InlinePermissionCard.vue'
+import PermissionOutcomeNotice from '@/components/permission/PermissionOutcomeNotice.vue'
+import { formatDuration } from '@/utils/permission-view'
 import PetAnimation from '@/components/PetAnimation.vue'
 import StatusPanelHistory from '@/components/status-panel/StatusPanelHistory.vue'
 import StatusPanelSessions from '@/components/status-panel/StatusPanelSessions.vue'
@@ -182,12 +184,13 @@ onUnmounted(() => {
         :request="store.permissionRequest"
         :title="`${permissionSourceLabel(store.permissionRequest.agentId)} · ${t('permissionInlineTitle')}`"
         :project-label="store.permissionRequest.projectId || t('projectUnknown')"
-        :elapsed-label="`${Math.max(0, (nowTick - store.permissionRequest.receivedAt) / 1000).toFixed(1)}s`"
+        :elapsed-label="formatDuration(nowTick - store.permissionRequest.receivedAt)"
         :allow-label="t('permissionAllowOnce')"
         :deny-label="t('permissionDeny')"
         :warning-label="t('permissionWarning')"
         @decide="store.decidePermission(store.permissionRequest.requestId, $event)"
       />
+      <PermissionOutcomeNotice v-else-if="store.permissionOutcome" />
       <div v-else-if="store.permissionNotice" class="inline-permission-notice" role="status">
         <Icon name="warning" :size="18" />
         <span><strong>{{ store.permissionNotice.title }}</strong><small>{{ store.permissionNotice.detail }}</small></span>
