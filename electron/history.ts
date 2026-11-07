@@ -48,7 +48,9 @@ const MAX_RETENTION_DAYS = 3650
 const MAX_TEXT_LENGTH = 128
 const MAX_SESSION_ID_LENGTH = 256
 const MAX_TOKEN_COUNT = 1_000_000_000_000
-const MAX_QUOTA_SNAPSHOTS = 100
+const MAX_QUOTA_SNAPSHOTS = 500
+const QUOTA_SNAPSHOT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+const ACHIEVEMENT_RECONCILED_KEY = 'achievement_reconciled_at'
 const MAX_QUOTA_PROVIDERS = 8
 const MAX_QUOTA_WINDOWS = 32
 const MAX_ACTIVE_GAP_MS = 5 * 60 * 1000
@@ -548,11 +550,20 @@ export class HistoryStore {
   recordQuotaSnapshot(value: unknown): boolean {
     const snapshot = normalizeQuotaSnapshot(value)
     if (!snapshot) return false
-    const snapshotId = digest(`${snapshot.updatedAt}:${JSON.stringify(snapshot.providers)}`)
+    // Identity is the readings alone: polling every two minutes must not write
+    // (or broadcast historyUpdated) when nothing about the quota changed.
+    const providersJson = JSON.stringify(snapshot.providers)
+    const latest = parseQuotaSnapshot(this.statement(
+      'SELECT payload_json FROM quota_snapshots ORDER BY updated_at DESC LIMIT 1',
+    ).get()?.payload_json)
+    if (latest && JSON.stringify(latest.providers) === providersJson) return false
+    const snapshotId = digest(`${snapshot.updatedAt}:${providersJson}`)
     this.statement(`
       INSERT OR REPLACE INTO quota_snapshots(snapshot_id, updated_at, payload_json)
       VALUES (?, ?, ?)
     `).run(snapshotId, snapshot.updatedAt, JSON.stringify(snapshot))
+    const oldest = new Date(this.now() - QUOTA_SNAPSHOT_RETENTION_MS).toISOString()
+    this.statement('DELETE FROM quota_snapshots WHERE updated_at < ?').run(oldest)
     this.statement(`
       DELETE FROM quota_snapshots
       WHERE snapshot_id NOT IN (
@@ -650,14 +661,33 @@ export class HistoryStore {
     }
   }
 
-  getAchievementCompletedSessions(): AchievementCompletedSessionFact[] {
+  /** When achievements were last reconciled from history (0 = never). */
+  getAchievementReconciledAt(): number {
+    const value = Number(this.statement('SELECT value FROM history_metadata WHERE key = ?').get(ACHIEVEMENT_RECONCILED_KEY)?.value)
+    return Number.isFinite(value) && value > 0 ? value : 0
+  }
+
+  setAchievementReconciledAt(timestamp: number): void {
+    this.statement(`
+      INSERT INTO history_metadata(key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(ACHIEVEMENT_RECONCILED_KEY, String(Math.max(0, Math.floor(timestamp))))
+  }
+
+  /**
+   * Completed-session facts, optionally only those at/after `sinceMs`. A later
+   * reconcile passes the previous marker so start-up no longer re-reads and
+   * re-hashes the whole history; the achievement store de-duplicates by
+   * session key, so overlap with already-recorded sessions is harmless.
+   */
+  getAchievementCompletedSessions(sinceMs = 0): AchievementCompletedSessionFact[] {
     const rows = this.statement(`
       SELECT event_id, adapter_id, agent_id, session_id, project_id, pet_id, occurred_at, state
       FROM events
-      WHERE state = 'success' AND session_id IS NOT NULL
+      WHERE state = 'success' AND session_id IS NOT NULL AND occurred_at >= ?
       ORDER BY occurred_at ASC, event_id ASC
       LIMIT ?
-    `).all(MAX_ACHIEVEMENT_BACKFILL_EVENTS)
+    `).all(Math.max(0, Math.floor(sinceMs)), MAX_ACHIEVEMENT_BACKFILL_EVENTS)
     const successfulSessions = new Set<string>()
     const completed: AchievementCompletedSessionFact[] = []
     for (const row of rows) {

@@ -2675,10 +2675,15 @@ export function reconcileAchievementsFromHistory(): void {
     || !currentDesktopPreferences().achievementsEnabled
   ) return
   try {
+    // Incremental: only sessions since the last reconcile (minus one day of
+    // overlap for late-arriving events) instead of the whole history.
+    const startedAt = Date.now()
+    const previous = mainState.historyStore.getAchievementReconciledAt()
     const unlocks = mainState.achievementStore.reconcileCompletedSessions(
-      mainState.historyStore.getAchievementCompletedSessions(),
+      mainState.historyStore.getAchievementCompletedSessions(previous > 0 ? previous - 24 * 60 * 60 * 1000 : 0),
       petId => mainState.progressionStore?.getSnapshot(petId),
     )
+    mainState.historyStore.setAchievementReconciledAt(startedAt)
     unlocks.forEach(broadcastAchievementUnlock)
   } catch (error) {
     console.error('Achievement history reconciliation failed', error)
