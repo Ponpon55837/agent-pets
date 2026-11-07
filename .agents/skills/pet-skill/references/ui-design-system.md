@@ -19,6 +19,22 @@ The floor for any user-facing text is `--font-xs` (11px). CJK glyphs lose stroke
 - **Pet layer** (DesktopPet, bubbles) uses the dark base tokens; **panel layer** (StatusPanel, SetupWizard, ProjectMcp, dialogs) uses the semantic aliases. `.status-panel` re-points the base tokens at the organic palette; do not add new component-level overrides of global tokens.
 - Compatibility aliases (`--accent-primary`, `--status-error`, `--text-danger/-success/-warning`, `--surface-secondary`, `--font-2xs`) exist only so legacy references resolve; use the canonical names in new code. Do not delete tokens: `tokens.css` is also served to plugin panels.
 
+## Foreground/background pairs (DS-10)
+
+`scripts/check-contrast.mjs` (and `tests/design-contrast.test.mts`) assert these minimums from `tokens.css`; add a pair there when you add a token that carries text.
+
+| Foreground | Background | Min | Notes |
+| --- | --- | --- | --- |
+| `--organic-text`, `-secondary`, `-muted` | `--organic-bg/surface/surface-2` | 4.5 | body and helper text |
+| `--organic-accent-text` | `--organic-surface` | 4.5 | accent used as text; never `--organic-accent` itself (3.3) |
+| `--organic-accent-contrast` | `--organic-accent-hover` | 4.5 | primary button (`Button` uses `--accent-hover` fill + `--accent-on` label) |
+| `--organic-text-faint` | `--organic-surface` | 3 | decorative only, never text |
+| `--organic-danger/success/warn-text` | surface, surface-2 | 4.5 | exposed as `--text-danger/-success/-warning` in panel scopes |
+| `--text-primary/-secondary/-muted`, `--accent`, `--state-idle` | dark base | 4.5 | pet layer |
+| `--focus-ring-color` / `--focus-ring-color-on-light` | dark base / cream surface | 3 | pick by layer |
+
+State is never conveyed by colour alone: pair status dots with a text label or shape.
+
 ## Rule: reuse the primitive before writing a new element
 
 `src/components/ui/` holds the app's only implementations of these UI patterns. Import them; do not hand-roll a competing version.

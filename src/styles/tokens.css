@@ -33,6 +33,8 @@
   /* ── Accent ───────────────────────────────────────────────────────────── */
   --accent: #8b9cf7;
   --accent-bright: #cdd4ff;
+  /* Text/icon colour on a solid --accent fill (>= 4.5:1). Panel scopes re-point it. */
+  --accent-on: #12121a;
   --accent-wash: rgba(139, 156, 247, 0.08);
   --accent-soft: rgba(139, 156, 247, 0.15);
   --accent-strong: rgba(139, 156, 247, 0.25);
@@ -53,8 +55,8 @@
   --state-warn: #c8b450;
   --state-warn-bright: #ffe37c;
   --state-info: #9dd8ff;
-  --state-idle: #666;
-  --state-offline: #555;
+  --state-idle: #8a8a8a;
+  --state-offline: #757575;
 
   /* ── Text — four levels, nothing in between ───────────────────────────── */
   --text-primary: #e8ecfa;
@@ -109,6 +111,8 @@
      hand-written per component again. */
   --focus-ring-width: 2px;
   --focus-ring-color: var(--state-info);
+  /* The light-blue ring is ~1.5:1 on cream; panel scopes use this one (5.8:1). */
+  --focus-ring-color-on-light: #1b5fb0;
   --focus-ring-offset: 1px;
 
   /* ── Hit target, layering, leading ────────────────────────────────────
@@ -152,7 +156,7 @@
   --organic-surface-sage-soft: #f0fae1;
   --organic-surface-off: #dcd3c4;
   --organic-accent: #c67139;
-  --organic-accent-hover: #b2622d;
+  --organic-accent-hover: #a85a28; /* text-on-accent >= 4.5:1 with --organic-accent-contrast */
   --organic-accent-text: #8c491a;
   --organic-accent-contrast: #fff2eb;
   --organic-sage: #7a8a5e;
@@ -160,8 +164,8 @@
   --organic-sage-dark: #3d472b;
   --organic-text: #201e1d;
   --organic-text-secondary: #645c50;
-  --organic-text-muted: #82796a;
-  --organic-text-faint: #a19786;
+  --organic-text-muted: #6b6354;
+  --organic-text-faint: #8a8070; /* decorative only (>= 3:1); never for text */
   --organic-border: rgba(32, 30, 29, 0.16);
   --organic-border-soft: rgba(32, 30, 29, 0.1);
   --organic-border-on-accent: rgba(255, 242, 235, 0.55);
@@ -262,6 +266,13 @@
   --text-danger: var(--organic-danger-text);
   --text-success: var(--organic-success-text);
   --text-warning: var(--organic-warn-text);
+}
+
+/* Every organic-themed surface: solid accent fills carry light text. */
+.status-panel,
+.setup-overlay,
+.mcp-overlay {
+  --accent-on: var(--organic-accent-contrast);
 }
 
 /* Honour the OS "reduce motion" setting in one place rather than auditing
