@@ -108,5 +108,12 @@
   "onboarding.summary.needs_install": "尚未安裝。",
   "onboarding.summary.degraded": "部分設定缺漏或過期，建議修復。",
   "onboarding.summary.needs_approval": "需要在工具內核准。",
-  "onboarding.summary.error": "檢查時發生錯誤。"
+  "onboarding.summary.error": "檢查時發生錯誤。",
+  "onboarding.waitReal": "等待真實事件",
+  "onboarding.waitRealTitle": "到你的工具裡執行任意提示，這裡會等 30 秒看是否收到它送來的事件。這才是真正的端到端驗證。",
+  "onboarding.testReceiver": "測試接收器",
+  "onboarding.testReceiverTitle": "只檢查這個 Agent Pets 能不能接收本機事件，不會經過你的工具；hook 壞掉時它仍會成功。",
+  "onboarding.waitingReal": "請到 {name} 執行任意提示…（剩 {seconds} 秒）",
+  "onboarding.realEventOk": "已收到來自 {source} 的真實事件（{time}）。連線正常。",
+  "onboarding.realEventTimeout": "30 秒內沒有收到 {name} 的事件。請依序確認：1) 已重新啟動該工具；2) 按「診斷」看 hook 與 Node 路徑；3) 確認本機 17373 埠沒有被其他程式占用。"
 }

@@ -108,5 +108,12 @@
   "onboarding.summary.needs_install": "Not installed yet.",
   "onboarding.summary.degraded": "Some settings are missing or out of date; repair recommended.",
   "onboarding.summary.needs_approval": "Needs approval inside the tool.",
-  "onboarding.summary.error": "An error occurred while checking."
+  "onboarding.summary.error": "An error occurred while checking.",
+  "onboarding.waitReal": "Wait for real event",
+  "onboarding.waitRealTitle": "Run any prompt in your tool; this waits 30 seconds for an event the tool itself sends. This is the true end-to-end check.",
+  "onboarding.testReceiver": "Test receiver",
+  "onboarding.testReceiverTitle": "Only checks that this Agent Pets can receive a local event; it does not involve your tool and still passes when the hook is broken.",
+  "onboarding.waitingReal": "Run any prompt in {name}… ({seconds}s left)",
+  "onboarding.realEventOk": "Received a real event from {source} ({time}). The connection works.",
+  "onboarding.realEventTimeout": "No event from {name} within 30 seconds. Check in order: 1) the tool was restarted; 2) press Diagnose to inspect the hook and Node path; 3) nothing else is using local port 17373."
 }

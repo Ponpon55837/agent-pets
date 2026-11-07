@@ -7,7 +7,7 @@ import type {
   InstallErrorCode,
   InstallOutcome,
 } from '@/types/agent-adapter'
-import type { AgentSource } from '@/types/agent'
+import { SOURCE_LABELS, type AgentSource } from '@/types/agent'
 import { locale, t, translateBackendError, type TranslationKey } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
@@ -47,6 +47,9 @@ interface ToolStatus extends AdapterRuntimeStatus {
   diagnosis?: DiagnosticReport
   /** Result of the last install/repair, shown inside the card until the next one. */
   outcome?: InstallOutcome
+  /** A genuine event from the tool itself (not the built-in receiver test). */
+  realEvent?: { source: AgentSource, at: number }
+  realEventTimedOut?: boolean
 }
 
 const tools = ref<ToolStatus[]>([])
@@ -56,6 +59,46 @@ const error = ref('')
 const installing = ref<AgentAdapterId | 'all' | null>(null)
 const testing = ref<AgentSource | null>(null)
 const diagnosing = ref<AgentAdapterId | null>(null)
+
+// "Wait for a real event": listens for an event the tool itself sends, so a broken hook or a wrong
+// Node path cannot be hidden by the receiver test (which never involves the tool).
+const REAL_EVENT_WAIT_MS = 30_000
+const waitingFor = ref<AgentAdapterId | null>(null)
+const waitRemainingMs = ref(0)
+let stopWaiting: (() => void) | null = null
+
+function cancelRealEventWait() {
+  stopWaiting?.()
+  stopWaiting = null
+  waitingFor.value = null
+}
+
+function waitForRealEvent(tool: ToolStatus) {
+  cancelRealEventWait()
+  tool.realEvent = undefined
+  tool.realEventTimedOut = false
+  waitingFor.value = tool.id
+  const deadline = Date.now() + REAL_EVENT_WAIT_MS
+  waitRemainingMs.value = REAL_EVENT_WAIT_MS
+  const tick = setInterval(() => {
+    waitRemainingMs.value = Math.max(0, deadline - Date.now())
+    if (waitRemainingMs.value === 0) {
+      tool.realEventTimedOut = true
+      cancelRealEventWait()
+    }
+  }, 250)
+  const unsubscribe = window.electronAPI?.onAgentStatusEvent((raw: unknown) => {
+    const event = raw as { source?: AgentSource, sessionId?: string, originalEvent?: string }
+    if (!event?.source || !tool.sources.includes(event.source)) return
+    if (event.originalEvent === 'AgentPetsIntegrationTest' || event.sessionId?.startsWith('agent-pets-test-')) return
+    tool.realEvent = { source: event.source, at: Date.now() }
+    cancelRealEventWait()
+  })
+  stopWaiting = () => {
+    clearInterval(tick)
+    unsubscribe?.()
+  }
+}
 const installError = ref('')
 const removing = ref<AgentAdapterId | 'all' | null>(null)
 const pendingRemoval = ref<AgentAdapterId | 'all' | null>(null)
@@ -355,6 +398,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  cancelRealEventWait()
   stopElapsedTimer()
 })
 </script>
@@ -413,12 +457,23 @@ onUnmounted(() => {
                 variant="secondary"
                 size="sm"
                 class="tool-action test-btn"
+                v-if="tool.installable"
+                :disabled="installing !== null || testing !== null || diagnosing !== null || removing !== null"
+                :title="t('onboarding.waitRealTitle')"
+                @click="waitingFor === tool.id ? cancelRealEventWait() : waitForRealEvent(tool)"
+              >
+                {{ waitingFor === tool.id ? t('cancel') : t('onboarding.waitReal') }}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                class="tool-action test-btn"
                 v-if="tool.testSource"
-                :disabled="!tool.installed || installing !== null || testing !== null || diagnosing !== null"
-                :title="t('testReceiverTitle')"
+                :disabled="installing !== null || testing !== null || diagnosing !== null"
+                :title="t('onboarding.testReceiverTitle')"
                 @click="testIntegration(tool)"
               >
-                {{ testing === tool.testSource ? t('testing') : t('test') }}
+                {{ testing === tool.testSource ? t('testing') : t('onboarding.testReceiver') }}
               </Button>
               <Button
                 variant="secondary"
@@ -471,6 +526,15 @@ onUnmounted(() => {
             <template v-if="tool.outcome.action === 'installed' || tool.outcome.action === 'repaired'">
               {{ t(RESTART_KEYS[tool.id]) }}
             </template>
+          </div>
+          <div v-if="waitingFor === tool.id" class="test-result" role="status">
+            {{ t('onboarding.waitingReal', { name: tool.displayName, seconds: Math.ceil(waitRemainingMs / 1000) }) }}
+          </div>
+          <div v-else-if="tool.realEvent" class="test-result passed" role="status">
+            {{ t('onboarding.realEventOk', { source: SOURCE_LABELS[tool.realEvent.source], time: new Date(tool.realEvent.at).toLocaleTimeString(locale) }) }}
+          </div>
+          <div v-else-if="tool.realEventTimedOut" class="test-result failed" role="alert">
+            {{ t('onboarding.realEventTimeout', { name: tool.displayName }) }}
           </div>
           <div v-if="tool.verifiedAt" class="test-result passed">
             {{ t('receiverVerifiedAt', { time: new Date(tool.verifiedAt).toLocaleTimeString(locale) }) }}
