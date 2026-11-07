@@ -14,3 +14,9 @@ test('a budget-limited scan catches up soon on AC and waits for the regular tick
   assert.equal(localUsageCatchUpDelayMs(true, true), null)
   assert.equal(localUsageCatchUpDelayMs(false, false), null)
 })
+
+test('catch-up stops after consecutive scans that read nothing', async () => {
+  const { localUsageCatchUpDelayMs, LOCAL_USAGE_MAX_STALLED_CATCH_UPS } = await import('../electron/main/scan-schedule.ts')
+  assert.notEqual(localUsageCatchUpDelayMs(true, false, LOCAL_USAGE_MAX_STALLED_CATCH_UPS - 1), null)
+  assert.equal(localUsageCatchUpDelayMs(true, false, LOCAL_USAGE_MAX_STALLED_CATCH_UPS), null)
+})
