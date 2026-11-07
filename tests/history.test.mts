@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import test from 'node:test'
-import { HistoryStore } from '../electron/history.ts'
+import { HistoryStore, trimQueuedEvents } from '../electron/history.ts'
 import type { AgentStatusEvent } from '../src/types/agent.ts'
 
 function databasePath(): { filePath: string; directory: string } {
@@ -682,4 +682,35 @@ test('v6 migration is set-based: 50k events rebuild identically to the legacy ro
   assert.deepEqual(nonEmpty(actual), nonEmpty(expected as Map<string, Record<string, unknown>>))
   assert.ok(actual.size > 50, 'synthetic data produced a meaningful aggregate')
   raw.close()
+})
+
+test('a failed batch commit re-queues events in order, sheds heartbeats first and retries', async (t) => {
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => 2_000_000 })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  const priv = store as unknown as { transaction: (work: () => unknown) => unknown, queuedEvents: unknown[] }
+  const original = priv.transaction.bind(store)
+  let failures = 1
+  priv.transaction = (work) => {
+    if (failures > 0) { failures -= 1; throw new Error('SQLITE_BUSY') }
+    return original(work)
+  }
+  const base = { source: 'codex', sessionId: 's1', project: 'p', projectId: 'a'.repeat(32) } as const
+  const originalError = console.error
+  console.error = () => {}
+  t.after(() => { console.error = originalError })
+  store.queueEvent({ ...base, state: 'thinking', timestamp: 1_000_000 } as never)
+  store.queueEvent({ ...base, state: 'success', timestamp: 1_001_000 } as never)
+  assert.equal(store.flushQueued(), 0)
+  assert.equal(priv.queuedEvents.length, 2, 'events survive the failed commit')
+  assert.equal(store.flushQueued(), 2, 'retry persists them')
+  assert.equal(store.getSummary('aang-airbender', undefined, 7).totals.sessionsCompleted, 1)
+})
+
+test('trimQueuedEvents drops oldest heartbeats and never terminal events while heartbeats remain', () => {
+  const mk = (state: string, n: number) => ({ event: { source: 'codex', sessionId: 's', state, timestamp: n } as never, petId: 'p', receivedAt: n })
+  const items = [mk('thinking', 1), mk('success', 2), mk('thinking', 3), mk('error', 4), mk('thinking', 5)]
+  const trimmed = trimQueuedEvents(items, 3)
+  assert.deepEqual(trimmed.map(item => item.receivedAt), [2, 4, 5])
+  assert.equal(trimQueuedEvents(items, 10).length, 5)
 })

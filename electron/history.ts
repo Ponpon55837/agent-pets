@@ -19,6 +19,7 @@ import {
 import { dateOffset, localDateKey } from '../src/utils/local-date.ts'
 import { applyWalPragmas, type SqlitePragmaState } from './sqlite-pragmas.ts'
 import { StatementCache } from './sqlite-statements.ts'
+import { eventPipelineStats } from './event-stats.ts'
 import { isValidPetId } from '../src/utils/pet-id.ts'
 
 type SqliteRow = Record<string, unknown>
@@ -56,6 +57,8 @@ const ACHIEVEMENT_RECONCILED_KEY = 'achievement_reconciled_at'
 const MAX_QUOTA_PROVIDERS = 8
 const MAX_QUOTA_WINDOWS = 32
 const MAX_QUEUED_EVENTS = 500
+const FLUSH_RETRY_BASE_MS = 250
+const FLUSH_RETRY_MAX_MS = 5000
 const PRUNE_BATCH_ROWS = 5000
 const ACTIVE_ROLLUP_STATE = 'active-rollup'
 const MAX_ACTIVE_GAP_MS = 5 * 60 * 1000
@@ -205,6 +208,35 @@ function readSession(row: SqliteRow | undefined): SessionRow | null {
   }
 }
 
+interface HistoryQueuedEvent { event: AgentStatusEvent, petId: string, receivedAt: number, onRecorded?: () => void }
+
+/** A pure "still active" heartbeat: no token usage and no adapter-supplied identity. */
+function isQueuedHeartbeat(item: HistoryQueuedEvent): boolean {
+  const { event } = item
+  return isActiveState(event.state)
+    && tokenUsage(event).quality === 'none'
+    && !SAFE_ID.test(event.eventId ?? '')
+    && !event.sourceEventId
+}
+
+/** Bounds a queue to `limit`, shedding oldest heartbeats first, then oldest others as a last resort. */
+export function trimQueuedEvents(items: HistoryQueuedEvent[], limit: number): HistoryQueuedEvent[] {
+  let excess = items.length - limit
+  if (excess <= 0) return items
+  const drop = new Set<number>()
+  for (let i = 0; i < items.length && excess > 0; i += 1) {
+    if (isQueuedHeartbeat(items[i]!)) { drop.add(i); excess -= 1 }
+  }
+  eventPipelineStats.historyDroppedHeartbeats += drop.size
+  if (excess > 0) {
+    // Only reachable when more than `limit` terminal/token events are pending.
+    for (let i = 0; i < items.length && excess > 0; i += 1) {
+      if (!drop.has(i)) { drop.add(i); excess -= 1; eventPipelineStats.historyDroppedEvents += 1 }
+    }
+  }
+  return items.filter((_, i) => !drop.has(i))
+}
+
 export class HistoryStore {
   private readonly database: SqliteDatabase
   private readonly now: () => number
@@ -214,8 +246,10 @@ export class HistoryStore {
   private pragmas: SqlitePragmaState = { journalMode: '', synchronous: -1 }
   private transactionDepth = 0
   private dailyBatch: Map<string, DailyBatchEntry> | null = null
-  private queuedEvents: Array<{ event: AgentStatusEvent, petId: string, receivedAt: number, onRecorded?: () => void }> = []
+  private queuedEvents: HistoryQueuedEvent[] = []
   private flushHandle: ReturnType<typeof setImmediate> | null = null
+  private retryHandle: ReturnType<typeof setTimeout> | null = null
+  private flushFailures = 0
   private closed = false
 
   constructor(filePath: string, options: HistoryStoreOptions = {}) {
@@ -847,6 +881,7 @@ export class HistoryStore {
 
   clear(): void {
     this.queuedEvents = []
+    if (this.retryHandle) { clearTimeout(this.retryHandle); this.retryHandle = null }
     this.transaction(() => {
       this.database.exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM daily_stats; DELETE FROM quota_snapshots;')
       this.statement(`
@@ -1366,6 +1401,7 @@ export class HistoryStore {
   /** Writes every queued event in one transaction. Returns how many were new. */
   flushQueued(): number {
     if (this.flushHandle) { clearImmediate(this.flushHandle); this.flushHandle = null }
+    if (this.retryHandle) { clearTimeout(this.retryHandle); this.retryHandle = null }
     if (this.queuedEvents.length === 0 || this.closed) return 0
     const queued = this.queuedEvents
     this.queuedEvents = []
@@ -1386,12 +1422,31 @@ export class HistoryStore {
       })
     } catch (error) {
       console.error('History batch commit failed', error)
+      this.requeueFailedBatch(queued)
       return 0
     }
+    this.flushFailures = 0
     for (const callback of callbacks) {
       try { callback() } catch {}
     }
     return recorded
+  }
+
+  /**
+   * A failed batch commit (busy / locked / disk full) rolled everything back, so
+   * the swapped-out events go back to the FRONT of the queue and a backoff retry
+   * is scheduled. The queue stays bounded: oldest heartbeats are shed first and
+   * terminal / token / identified events are only dropped if nothing else is left.
+   */
+  private requeueFailedBatch(failed: HistoryQueuedEvent[]): void {
+    eventPipelineStats.historyFlushFailures += 1
+    eventPipelineStats.historyRequeuedEvents += failed.length
+    this.queuedEvents = trimQueuedEvents([...failed, ...this.queuedEvents], MAX_QUEUED_EVENTS)
+    this.flushFailures += 1
+    if (this.closed || this.retryHandle) return
+    const delay = Math.min(FLUSH_RETRY_MAX_MS, FLUSH_RETRY_BASE_MS * 2 ** Math.min(this.flushFailures - 1, 8))
+    this.retryHandle = setTimeout(() => { this.retryHandle = null; this.flushQueued() }, delay)
+    this.retryHandle.unref?.()
   }
 
   private statement(sql: string): SqliteStatement {
