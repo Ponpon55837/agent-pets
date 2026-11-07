@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { t } from '@/i18n'
+import Button from '@/components/ui/Button.vue'
 
 // Read-only reminder for agents (Codex / Claude) whose permission prompts can
 // only be answered in their own tool. There is deliberately no allow / deny
@@ -22,8 +23,9 @@ const helpOpen = ref(false)
   >
     <header class="permission-notice-header">
       <strong>{{ store.permissionNotice.title }}</strong>
-      <button
-        type="button"
+      <Button
+        icon-only
+        variant="ghost"
         class="permission-notice-help"
         :aria-expanded="helpOpen"
         :aria-label="t('permission.noticeHelpLabel')"
@@ -32,7 +34,7 @@ const helpOpen = ref(false)
         @click.stop="helpOpen = !helpOpen"
       >
         ?
-      </button>
+      </Button>
     </header>
     <p class="permission-notice-detail">{{ store.permissionNotice.detail }}</p>
     <ul v-if="store.permissionNotice.items.length > 1" class="permission-notice-list">
@@ -43,9 +45,9 @@ const helpOpen = ref(false)
     <p v-if="helpOpen" class="permission-notice-explain">{{ t('permission.noticeExplain') }}</p>
     <p class="permission-notice-hint">{{ t('permission.noticeExternalOnly') }}</p>
     <div class="permission-notice-actions">
-      <button type="button" class="permission-notice-button" @mousedown.stop @click.stop="store.dismissPermissionNotice()">
+      <Button class="permission-notice-button" @mousedown.stop @click.stop="store.dismissPermissionNotice()">
         {{ t('permission.dismiss') }}
-      </button>
+      </Button>
     </div>
   </section>
 </template>
@@ -55,7 +57,7 @@ const helpOpen = ref(false)
   position: absolute;
   top: 2px;
   left: 50%;
-  z-index: 8;
+  z-index: calc(var(--z-base) + 8);
   display: flex;
   width: min(248px, calc(var(--pet-w, 260px) - 8px));
   flex-direction: column;
@@ -92,7 +94,7 @@ const helpOpen = ref(false)
 .permission-notice-explain {
   margin: 0;
   font-size: var(--font-sm);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .permission-notice-hint,
@@ -106,7 +108,7 @@ const helpOpen = ref(false)
   padding-left: var(--space-4);
   color: var(--text-primary);
   font-size: var(--font-xs);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .permission-notice-actions {
@@ -115,8 +117,8 @@ const helpOpen = ref(false)
   margin-top: var(--space-1);
 }
 
-.permission-notice-help,
-.permission-notice-button {
+.permission-notice-card .permission-notice-help,
+.permission-notice-card .permission-notice-button {
   min-height: 28px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
@@ -126,23 +128,23 @@ const helpOpen = ref(false)
   font: var(--weight-bold) var(--font-sm) / 1 var(--font-ui);
 }
 
-.permission-notice-help {
+.permission-notice-card .permission-notice-help {
   flex: 0 0 28px;
   width: 28px;
   border-radius: var(--radius-pill);
 }
 
-.permission-notice-button {
+.permission-notice-card .permission-notice-button {
   padding: 0 var(--space-4);
 }
 
-.permission-notice-help:hover,
-.permission-notice-button:hover {
+.permission-notice-card .permission-notice-help:hover,
+.permission-notice-card .permission-notice-button:hover {
   background: var(--surface-raised-hover);
 }
 
-.permission-notice-help:focus-visible,
-.permission-notice-button:focus-visible {
+.permission-notice-card .permission-notice-help:focus-visible,
+.permission-notice-card .permission-notice-button:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
 }

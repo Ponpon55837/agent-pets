@@ -101,7 +101,7 @@ code {
   margin: 0;
   color: var(--text-muted);
   font-size: var(--font-xs);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .sr-only {

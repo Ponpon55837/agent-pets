@@ -58,7 +58,7 @@ withDefaults(defineProps<{
   margin: 0;
   max-width: 28em;
   font-size: var(--font-sm);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .growth-empty-actions {

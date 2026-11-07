@@ -49,12 +49,12 @@ jobs:
       - name: Check plugin panel tokens bundle
         run: pnpm check:bundle
 
-      # 設計守門：對比度檢查會失敗；token／字面值報告僅輸出（加 --strict 才會失敗）
+      # 設計守門：對比度與 token／字面值檢查皆為嚴格模式
       - name: Check design token contrast
         run: pnpm check:contrast
 
-      - name: Report design token violations
-        run: pnpm check:design
+      - name: Check design token violations
+        run: pnpm check:design:strict
 
       # 依賴漏洞：網路或公告來源異常時不擋合併，只留下警示
       - name: Audit production dependencies

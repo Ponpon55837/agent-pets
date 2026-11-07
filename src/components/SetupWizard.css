@@ -62,13 +62,14 @@
   --focus-ring-offset: 2px;
 
   position: fixed;
-  z-index: 20000;
+  z-index: var(--z-system);
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--surface-scrim);
-  backdrop-filter: blur(4px);
+  backdrop-filter: var(--blur-scrim);
+  -webkit-backdrop-filter: var(--blur-scrim);
 }
 
 .setup-wizard {
@@ -106,7 +107,7 @@
   margin: 0;
   color: var(--organic-text);
   font-family: var(--organic-font-heading);
-  font-size: 24px;
+  font-size: var(--font-2xl);
   line-height: 1.1;
 }
 
@@ -114,7 +115,7 @@
   margin: 0;
   color: var(--organic-text-muted);
   font-size: var(--font-md);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .loading {
@@ -296,7 +297,7 @@
   margin-left: 18px;
   color: inherit;
   font-size: var(--font-body-sm);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
   opacity: 0.9;
 }
 
@@ -313,7 +314,7 @@
   background: var(--organic-accent-on-hover);
   color: inherit;
   font-size: var(--font-label);
-  line-height: 1.25;
+  line-height: var(--leading-tight);
 }
 
 .capability-list {
@@ -330,7 +331,7 @@
   align-items: flex-start;
   gap: 6px;
   font-size: var(--font-body-sm);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .capability-list .icon {
@@ -354,7 +355,7 @@
 .test-result {
   margin-left: 18px;
   font-size: var(--font-body-sm);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .test-result.passed {
@@ -378,7 +379,7 @@
   align-items: flex-start;
   gap: 6px;
   font-size: var(--font-body-sm);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .diagnosis-pass {
@@ -394,7 +395,7 @@
   margin: 0;
   color: var(--organic-text-muted);
   font-size: var(--font-body-sm);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .wizard-actions {
@@ -420,6 +421,7 @@
 @media (prefers-reduced-transparency: reduce) {
   .setup-overlay {
     backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 
@@ -459,5 +461,5 @@
   margin: 0;
   color: var(--organic-text-secondary);
   font-size: var(--font-body-sm);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }

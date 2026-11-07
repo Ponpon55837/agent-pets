@@ -879,9 +879,9 @@ watch(() => store.levelUpEvent, (event) => {
             <span v-if="store.toast.meta" class="timed-toast-meta">{{ store.toast.meta }}</span>
           </span>
           <span v-if="store.toast.detail" class="timed-toast-detail">{{ store.toast.detail }}</span>
-          <button type="button" class="timed-toast-action" @mousedown.stop @click.stop="openFromToast">
+          <Button variant="ghost" size="sm" class="timed-toast-action" @mousedown.stop @click.stop="openFromToast">
             {{ t('pet.toastOpen') }}
-          </button>
+          </Button>
           <span
             class="toast-countdown-track"
             aria-hidden="true"
@@ -929,25 +929,28 @@ watch(() => store.levelUpEvent, (event) => {
               <strong>{{ store.pluginFeedItem.title }}</strong>
               <span>{{ store.pluginFeedItem.body }}</span>
             </div>
-            <button
+            <Button
               v-if="store.pluginFeedItem.panelViewAvailable"
-              type="button"
+              variant="secondary"
+              size="sm"
               class="plugin-feed-open-panel"
               @mousedown.stop
               @click.stop="openPluginPanelFromFeed(store.pluginFeedItem.pluginId)"
             >
               {{ t('pluginOpenPanel') }}
-            </button>
+            </Button>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
+            icon-only
             class="plugin-feed-close"
             :aria-label="t('close')"
             @mousedown.stop
             @click.stop="store.completePluginFeed(store.pluginFeedItem.id)"
           >
-            ×
-          </button>
+            <Icon name="close" :size="12" />
+          </Button>
         </article>
       </Transition>
 

@@ -13,7 +13,7 @@
 .pet-aura-canvas {
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: var(--z-base);
   display: block;
   image-rendering: pixelated;
   transform-origin: 50% 72%;
@@ -46,7 +46,7 @@
 
 .pet-canvas {
   position: relative;
-  z-index: 2;
+  z-index: calc(var(--z-base) + 2);
   display: block;
   pointer-events: auto;
   image-rendering: pixelated;
@@ -58,7 +58,7 @@
 .pet-ghost-canvas {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: calc(var(--z-base) + 3);
   display: block;
   image-rendering: pixelated;
   opacity: 0;
@@ -173,7 +173,7 @@
   position: absolute;
   top: 6%;
   right: 12%;
-  z-index: 4;
+  z-index: calc(var(--z-base) + 4);
   color: var(--state-warn-bright);
   pointer-events: none;
   animation: pet-mark-float 1.4s ease-out forwards;

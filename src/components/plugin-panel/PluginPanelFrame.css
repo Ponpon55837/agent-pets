@@ -133,7 +133,7 @@
   max-width: 36ch;
   margin: 0;
   font-size: var(--font-sm);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
 }
 
 .state-actions {

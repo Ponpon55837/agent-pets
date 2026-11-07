@@ -289,7 +289,7 @@ function sizeLabel(bytes: number): string {
   overflow: hidden;
   color: var(--text-secondary);
   font-size: var(--font-sm);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
