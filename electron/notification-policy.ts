@@ -9,6 +9,11 @@ export interface NotificationCandidate {
   title: string
   body: string
   terminal: boolean
+  /**
+   * Only for waiting-permission / waiting-input: the one session that is waiting for the user, so a
+   * click on that notification may switch to its app. Completions and errors never switch apps.
+   */
+  session?: { source: string; sessionId: string }
 }
 
 const SOURCE_NAMES: Record<string, string> = {
@@ -35,6 +40,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
   const project = displayText(event.project)
   const body = project || t('agentTask')
   const keyBase = `${event.source}:${event.sessionId}`
+  const session = { source: event.source, sessionId: event.sessionId }
 
   switch (event.state) {
     case 'waiting-permission':
@@ -48,6 +54,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
           : t('notificationNeedsPermission', { source }),
         body,
         terminal: false,
+        session,
       }
     case 'waiting-input':
       return {
@@ -56,6 +63,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
         title: t('notificationWaitingInput', { source }),
         body,
         terminal: false,
+        session,
       }
     case 'success':
       return {

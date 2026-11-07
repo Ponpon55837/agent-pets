@@ -59,5 +59,9 @@
   "pet.importInstall": "匯入",
   "pet.importReplace": "取代",
   "pet.importKeepBoth": "保留兩者",
-  "pet.importStateChanged": "寵物清單在預覽後有變動，請確認新的狀態後再選擇一次。"
+  "pet.importStateChanged": "寵物清單在預覽後有變動，請確認新的狀態後再選擇一次。",
+  "pet.switchApp": "切換到 {app}",
+  "pet.switchAppAria": "切換到 {app}（{project}）",
+  "pet.switchAppHint": "把該 App 帶到最前面；不會指定視窗或分頁。",
+  "pet.switchAppFailed": "無法切換到該 App。"
 }

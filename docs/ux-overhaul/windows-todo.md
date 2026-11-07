@@ -21,6 +21,7 @@ UX 翻修（PR #25）和之後的 PR 5（跨平台實測與打包）中，需要
 - [ ] **PM-13 全螢幕偵測**：目前只看前景視窗，補上多螢幕與無邊框全螢幕遊戲／影片的判斷，並在偵測失敗時顯示原因。
 - [ ] **PM-10 系統匣圖示**：Windows 數字徽章與高 DPI 圖示素材。
 - [ ] **簽章**：Windows 程式碼簽章，消除 SmartScreen 警告。
+- [ ] **回到工作階段：切換到 App**：macOS 以 `open -b`（LaunchServices）把終端機／IDE 帶到最前面；Windows 目前隱藏這個動作。需要找出不需額外權限、不會被前景鎖定（`SetForegroundWindow` 限制）擋下的方式，並驗證 Windows Terminal（`WT_SESSION`）與 VS Code 的辨識。「顯示專案資料夾」（`shell.showItemInFolder`；拒絕 UNC 與 `name.{CLSID}` 路徑）與「複製專案路徑」也需在 Windows 實機確認。
 - [ ] **CI**：在 Windows runner 跑 Electron 冒煙測試（目前 `ci-platforms.yml` 每週只跑型別檢查與單元測試）。
 
 驗證完成後，請把對應項目打勾，並更新該問題的工作記錄狀態。

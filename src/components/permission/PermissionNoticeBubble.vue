@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { t } from '@/i18n'
+import { hostAppLabel } from '@/types/host-app'
 import Button from '@/components/ui/Button.vue'
 
 // Read-only reminder for agents (Codex / Claude) whose permission prompts can
@@ -9,6 +10,25 @@ import Button from '@/components/ui/Button.vue'
 // here: the broker has no response channel for these sessions.
 const store = useAgentStore()
 const helpOpen = ref(false)
+const switchFailed = ref(false)
+
+// The most urgent waiting session (items are already in attention order) can be jumped back to
+// directly: this activates its app, it does not pick a window or tab.
+const switchTarget = computed(() => {
+  const first = store.permissionNotice?.items[0]
+  if (!first) return null
+  const session = store.sessionByKey(first.sessionKey)
+  if (!store.canSwitchToSessionApp(session)) return null
+  const app = hostAppLabel(session?.host?.app)
+  return app ? { key: first.sessionKey, app, project: first.project } : null
+})
+
+async function switchToApp(): Promise<void> {
+  const target = switchTarget.value
+  if (!target) return
+  const result = await store.runSessionJump(target.key, 'switch-app')
+  switchFailed.value = !result.ok
+}
 </script>
 
 <template>
@@ -44,7 +64,18 @@ const helpOpen = ref(false)
     </ul>
     <p v-if="helpOpen" class="permission-notice-explain">{{ t('permission.noticeExplain') }}</p>
     <p class="permission-notice-hint">{{ t('permission.noticeExternalOnly') }}</p>
+    <p v-if="switchFailed" class="permission-notice-hint" role="alert">{{ t('pet.switchAppFailed') }}</p>
     <div class="permission-notice-actions">
+      <Button
+        v-if="switchTarget"
+        class="permission-notice-button"
+        :title="t('pet.switchAppHint')"
+        :aria-label="t('pet.switchAppAria', { app: switchTarget.app, project: switchTarget.project || t('projectUnknown') })"
+        @mousedown.stop
+        @click.stop="switchToApp()"
+      >
+        {{ t('pet.switchApp', { app: switchTarget.app }) }}
+      </Button>
       <Button class="permission-notice-button" @mousedown.stop @click.stop="store.dismissPermissionNotice()">
         {{ t('permission.dismiss') }}
       </Button>
@@ -113,7 +144,9 @@ const helpOpen = ref(false)
 
 .permission-notice-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: var(--space-2);
   margin-top: var(--space-1);
 }
 

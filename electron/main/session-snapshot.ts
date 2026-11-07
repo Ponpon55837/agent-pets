@@ -1,4 +1,5 @@
 import type { AgentSource, AgentState, AgentStatusEvent } from '../../src/types/agent.ts'
+import type { AgentHost } from '../../src/types/host-app.ts'
 
 export interface SessionSnapshotEntry {
   source: AgentSource
@@ -8,7 +9,9 @@ export interface SessionSnapshotEntry {
   routedPetId?: string
   state: AgentState
   lastSeenAt: number
+  firstSeenAt?: number
   toolName?: string
+  host?: AgentHost
 }
 
 const MAX_ENTRIES = 200
@@ -33,6 +36,8 @@ export class SessionSnapshotStore {
       return
     }
     // Re-insert so Map order tracks recency for eviction.
+    const previous = this.entries.get(key)
+    const host = event.host ?? previous?.host
     this.entries.delete(key)
     this.entries.set(key, {
       source: event.source,
@@ -42,7 +47,9 @@ export class SessionSnapshotStore {
       routedPetId: event.routedPetId,
       state: event.state,
       lastSeenAt: event.timestamp,
+      firstSeenAt: previous?.firstSeenAt ?? event.timestamp,
       toolName: event.toolName,
+      ...(host ? { host: { ...host } } : {}),
     })
     while (this.entries.size > MAX_ENTRIES) {
       this.entries.delete(this.entries.keys().next().value as string)
@@ -52,7 +59,7 @@ export class SessionSnapshotStore {
   list(): SessionSnapshotEntry[] {
     const cutoff = this.now() - MAX_AGE_MS
     for (const [key, entry] of this.entries) if (entry.lastSeenAt < cutoff) this.entries.delete(key)
-    return [...this.entries.values()].map(entry => ({ ...entry }))
+    return [...this.entries.values()].map(entry => ({ ...entry, ...(entry.host ? { host: { ...entry.host } } : {}) }))
   }
 
   clear(): void {

@@ -2,6 +2,7 @@
 
 import type { OnboardingAction, OnboardingState } from './onboarding'
 import type { DesktopPreferences, DesktopPreferencesPatch } from './desktop'
+import type { SessionJumpRequest, SessionJumpResult } from './session-jump'
 import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView, PermissionAuditEntry } from './permission'
 import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from './progression'
 import type { AchievementSnapshot, AchievementUnlock } from './achievement'
@@ -52,6 +53,7 @@ export interface ElectronAPI {
       reloadRenderer: () => void
       exportDiagnostics: () => Promise<{ ok: boolean; canceled?: boolean }>
       getSessionSnapshot: () => Promise<Array<Omit<AgentSession, 'key' | 'permissionNotice'>>>
+      runSessionJump: (request: SessionJumpRequest) => Promise<SessionJumpResult>
       getServerHealth: () => Promise<LocalServerHealthSnapshot>
       retryServerHealth: (id?: LocalServerId) => Promise<LocalServerHealthSnapshot>
       onServerHealthChanged: (callback: (snapshot: LocalServerHealthSnapshot) => void) => () => void

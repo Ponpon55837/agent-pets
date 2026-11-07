@@ -123,9 +123,13 @@ async function harness(options: {
   }
 }
 
-function runHook(h: Harness, payload: Record<string, unknown>): Promise<{ stdout: string; code: number | null; ms: number }> {
+// Host-detection variables are cleared so the runner's own terminal never leaks into a payload.
+const HOST_ENV_KEYS = ['TERM_PROGRAM', '__CFBundleIdentifier', 'CLAUDE_CODE_ENTRYPOINT', 'WT_SESSION', 'VSCODE_INJECTION', 'VSCODE_GIT_IPC_HANDLE', 'CURSOR_TRACE_ID']
+
+function runHook(h: Harness, payload: Record<string, unknown>, extraEnv: NodeJS.ProcessEnv = {}): Promise<{ stdout: string; code: number | null; ms: number }> {
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: h.home, USERPROFILE: h.home }
-  delete env.CLAUDE_CODE_ENTRYPOINT
+  for (const key of HOST_ENV_KEYS) delete env[key]
+  Object.assign(env, extraEnv)
   const startedAt = Date.now()
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [h.hookPath, 'claude'], { env, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -377,6 +381,31 @@ test('the bubble detail falls back to the arguments without the model descriptio
     h.permissionCalls.length = 0
     await runHook(h, permissionRequest({ tool_input: { command: 'x'.repeat(5000) } }))
     assert.equal(String(h.permissionCalls[0]!.body.detail).length, 1000)
+  } finally {
+    await h.close()
+  }
+})
+
+test('the status event names the host app from a few env values only', async () => {
+  const h = await harness({ optIn: null })
+  try {
+    await runHook(h, { ...permissionRequest(), hook_event_name: 'UserPromptSubmit' }, {
+      TERM_PROGRAM: 'iTerm.app',
+      __CFBundleIdentifier: 'com.googlecode.iterm2',
+      VSCODE_GIT_IPC_HANDLE: '/private/secret/ipc.sock',
+      WT_SESSION: 'aaaa-bbbb',
+      SECRET_TOKEN: 'do-not-send',
+    })
+    const body = h.eventCalls[0]!.body
+    const expected: Record<string, unknown> = { termProgram: 'iTerm.app', windowsTerminal: true, vscode: true }
+    if (process.platform === 'darwin') expected.bundleId = 'com.googlecode.iterm2'
+    assert.deepEqual(body.host, expected)
+    const raw = JSON.stringify(body)
+    for (const secret of ['do-not-send', '/private/secret', 'aaaa-bbbb']) assert.ok(!raw.includes(secret), secret)
+
+    h.eventCalls.length = 0
+    await runHook(h, { ...permissionRequest(), hook_event_name: 'UserPromptSubmit' }, { TERM_PROGRAM: 'bad value; rm -rf /' })
+    assert.equal(h.eventCalls[0]!.body.host, undefined)
   } finally {
     await h.close()
   }

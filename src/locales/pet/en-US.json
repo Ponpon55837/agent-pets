@@ -59,5 +59,9 @@
   "pet.importInstall": "Import",
   "pet.importReplace": "Replace",
   "pet.importKeepBoth": "Keep both",
-  "pet.importStateChanged": "The pet list changed after the preview. Review the new state and choose again."
+  "pet.importStateChanged": "The pet list changed after the preview. Review the new state and choose again.",
+  "pet.switchApp": "Switch to {app}",
+  "pet.switchAppAria": "Switch to {app} ({project})",
+  "pet.switchAppHint": "Brings the app to the front; it does not pick a specific window or tab.",
+  "pet.switchAppFailed": "Couldn't switch to the app."
 }

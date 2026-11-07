@@ -42,10 +42,13 @@ test('migrates legacy sound once and persists desktop preferences', (t) => {
   assert.equal(store.get().captureExclusionEnabled, false)
   assert.equal(store.get().fullscreenAutoHideEnabled, false)
   assert.equal(store.get().rightClickHideEnabled, false)
+  assert.equal(store.get().sessionJumpEnabled, true)
+  assert.equal(store.get().sessionJumpSwitchAppEnabled, true)
   assert.equal(store.get().locale, 'zh-TW')
   assert.equal(store.initializeLegacySound(true).soundEnabled, true)
 
   const updated = store.update({
+    sessionJumpSwitchAppEnabled: false,
     dndEnabled: true,
     permissionBubbleEnabled: false,
     presentationMcpEnabled: false,
@@ -67,6 +70,8 @@ test('migrates legacy sound once and persists desktop preferences', (t) => {
   assert.equal(updated.captureExclusionEnabled, true)
   assert.equal(updated.fullscreenAutoHideEnabled, true)
   assert.equal(updated.rightClickHideEnabled, true)
+  assert.equal(updated.sessionJumpSwitchAppEnabled, false)
+  assert.throws(() => store.update({ sessionJumpEnabled: 'yes' }), /must be boolean/)
   assert.equal(updated.launchAtStartup, true)
   assert.equal(updated.locale, 'en-US')
 
@@ -84,6 +89,8 @@ test('migrates legacy sound once and persists desktop preferences', (t) => {
   assert.equal(reloaded.get().captureExclusionEnabled, true)
   assert.equal(reloaded.get().fullscreenAutoHideEnabled, true)
   assert.equal(reloaded.get().rightClickHideEnabled, true)
+  assert.equal(reloaded.get().sessionJumpSwitchAppEnabled, false)
+  assert.equal(reloaded.get().sessionJumpEnabled, true)
   assert.equal(reloaded.get().shimejiEnabled, true)
   assert.equal(reloaded.get().launchAtStartup, true)
   assert.equal(reloaded.get().locale, 'en-US')

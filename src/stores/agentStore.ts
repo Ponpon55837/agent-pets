@@ -37,6 +37,9 @@ import type {
 import { PRESENTATION_REACTIONS } from '@/types/presentation'
 import { formatProject } from '@/utils/format'
 import { AgentSessionIndex } from '@/utils/agent-session-index'
+import { compareAttention, mostUrgentSession, summarizeFamilies } from '@/utils/session-attention'
+import { isHostAppId, type AgentHost } from '@/types/host-app'
+import type { SessionJumpAction, SessionJumpResult } from '@/types/session-jump'
 import {
   UNREAD_AWAY_MS,
   WAITING_INPUT_DELAY_MS,
@@ -221,6 +224,14 @@ function isQuotaCapableSource(source: AgentSource): boolean {
     || source === 'codex-desktop'
     || source === 'claude'
     || source === 'claude-desktop'
+}
+
+function sanitizeHost(value: unknown): AgentHost | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const raw = value as Record<string, unknown>
+  if (!isHostAppId(raw.app)) return undefined
+  if (raw.kind !== 'terminal' && raw.kind !== 'ide' && raw.kind !== 'desktop' && raw.kind !== 'unknown') return undefined
+  return { kind: raw.kind, app: raw.app, switchable: raw.switchable === true }
 }
 
 interface MoodTaskProgress {
@@ -442,6 +453,8 @@ export const useAgentStore = defineStore('agent', () => {
   const captureExclusionEnabled = ref(false)
   const fullscreenAutoHideEnabled = ref(false)
   const rightClickHideEnabled = ref(false)
+  const sessionJumpEnabled = ref(true)
+  const sessionJumpSwitchAppEnabled = ref(true)
   const desktopVisibilityCapabilities = ref<DesktopVisibilityCapabilities>({
     captureExclusion: { supported: false, mode: 'unsupported' },
     fullscreenAutoHide: { supported: false, mode: 'unsupported' },
@@ -899,6 +912,8 @@ export const useAgentStore = defineStore('agent', () => {
     captureExclusionEnabled.value = preferences.captureExclusionEnabled
     fullscreenAutoHideEnabled.value = preferences.fullscreenAutoHideEnabled
     rightClickHideEnabled.value = preferences.rightClickHideEnabled
+    sessionJumpEnabled.value = preferences.sessionJumpEnabled !== false
+    sessionJumpSwitchAppEnabled.value = preferences.sessionJumpSwitchAppEnabled !== false
     desktopVisibilityCapabilities.value = preferences.visibilityCapabilities
     soundEnabled.value = preferences.soundEnabled
     soundVolume.value = preferences.soundVolume
@@ -999,6 +1014,38 @@ export const useAgentStore = defineStore('agent', () => {
   function setRightClickHideEnabled(enabled: boolean) {
     rightClickHideEnabled.value = enabled
     updateDesktopPreferences({ rightClickHideEnabled: enabled })
+  }
+
+  function setSessionJumpEnabled(enabled: boolean) {
+    sessionJumpEnabled.value = enabled
+    updateDesktopPreferences({ sessionJumpEnabled: enabled })
+  }
+
+  function setSessionJumpSwitchAppEnabled(enabled: boolean) {
+    sessionJumpSwitchAppEnabled.value = enabled
+    updateDesktopPreferences({ sessionJumpSwitchAppEnabled: enabled })
+  }
+
+  // "Switch to app" is offered only when main said this session's app can be activated
+  // (macOS, allowlisted app, not an explicit generic-http event) and the user has it turned on.
+  function canSwitchToSessionApp(session: Pick<AgentSession, 'host'> | undefined): boolean {
+    return Boolean(sessionJumpEnabled.value && sessionJumpSwitchAppEnabled.value && session?.host?.switchable)
+  }
+
+  function sessionByKey(key: string): AgentSession | undefined {
+    return sessionsByKey.get(key)
+  }
+
+  /** Runs a jump-back action for one session; the main process holds the path and app id. */
+  async function runSessionJump(key: string, action: SessionJumpAction): Promise<SessionJumpResult> {
+    const session = sessionIndex.get(key)
+    const run = window.electronAPI?.runSessionJump
+    if (!session || !run) return { ok: false, error: 'unknown_session' }
+    try {
+      return await run({ action, source: session.source, sessionId: session.sessionId })
+    } catch {
+      return { ok: false, error: 'failed' }
+    }
   }
 
   function setLocalePreference(next: AppLocale) {
@@ -1330,6 +1377,8 @@ export const useAgentStore = defineStore('agent', () => {
       existing.routedPetId = event.routedPetId
       existing.toolName = event.toolName
       existing.permissionNotice = event.permissionNotice
+      const host = sanitizeHost(event.host)
+      if (host) existing.host = host
       sessionIndex.updatePriority(key, event.state, event.timestamp)
     } else {
       const evicted = sessionIndex.upsert({
@@ -1341,8 +1390,10 @@ export const useAgentStore = defineStore('agent', () => {
         routedPetId: event.routedPetId,
         state: event.state,
         lastSeenAt: event.timestamp,
+        firstSeenAt: event.timestamp,
         toolName: event.toolName,
         permissionNotice: event.permissionNotice,
+        ...(sanitizeHost(event.host) ? { host: sanitizeHost(event.host) } : {}),
       }, MAX_SESSION_COUNT)
       if (evicted) moodTaskProgress.delete(evicted.key)
     }
@@ -1436,7 +1487,9 @@ export const useAgentStore = defineStore('agent', () => {
         routedPetId: typeof entry.routedPetId === 'string' ? entry.routedPetId : undefined,
         state: entry.state,
         lastSeenAt: entry.lastSeenAt,
+        firstSeenAt: typeof entry.firstSeenAt === 'number' && Number.isFinite(entry.firstSeenAt) ? entry.firstSeenAt : entry.lastSeenAt,
         toolName: typeof entry.toolName === 'string' ? entry.toolName : undefined,
+        ...(sanitizeHost(entry.host) ? { host: sanitizeHost(entry.host) } : {}),
       }, MAX_SESSION_COUNT)
       restored += 1
     }
@@ -1472,7 +1525,9 @@ export const useAgentStore = defineStore('agent', () => {
 
   // --- Quota 與工作階段衍生狀態（computed） -----------------------------------
 
-  const activeSessions = computed(() => sessionList.value.filter(session => session.state !== 'offline'))
+  // Unsorted on purpose: the pet only needs counts and the per-family winner (summarizeFamilies),
+  // so the hot path never pays for sessionList's full sort. The panel sorts its own view.
+  const activeSessions = computed(() => [...sessionsByKey.values()].filter(session => session.state !== 'offline'))
 
   const hasQuotaCapableSessions = computed(
     () => activeSessions.value.some((session) => isQuotaCapableSource(session.source)),
@@ -1540,33 +1595,25 @@ export const useAgentStore = defineStore('agent', () => {
   // family has an active session — up to SOURCE_FAMILIES.length lines total.
   // `variants` records which of CLI/Desktop are actually active so the line
   // can still say which one, even though they share a row.
-  const familyLines = computed(() => {
-    return SOURCE_FAMILIES.map((family) => {
-      const familySessions = activeSessions.value.filter((s) => family.sources.includes(s.source))
-      if (familySessions.length === 0) return null
-
-      const top = familySessions.reduce((highest, current) => {
-        const highestPriority = STATE_PRIORITY[highest.state] ?? 0
-        const currentPriority = STATE_PRIORITY[current.state] ?? 0
-        return currentPriority > highestPriority ? current : highest
-      })
-
-      const variants = family.sources
-        .filter((source) => familySessions.some((s) => s.source === source))
-        .map((source) => (source.includes('desktop') ? 'Desktop' : 'CLI'))
-
-      return {
-        key: family.key,
-        label: family.label,
-        variants,
-        state: top.state,
-        project: familySessions.length === 1 ? top.project : undefined,
-        count: familySessions.length,
-        since: top.lastSeenAt,
-        petId: top.routedPetId ?? getPetForFamily(family.key),
-      }
-    }).filter((line): line is NonNullable<typeof line> => line !== null)
-  })
+  const familyLines = computed(() => summarizeFamilies(sessionsByKey.values()).map((family) => {
+    const top = family.top
+    const sources = SOURCE_FAMILIES.find(candidate => candidate.key === family.key)?.sources ?? []
+    const variants = sources
+      .filter((source) => family.sources.has(source))
+      .map((source) => (source.includes('desktop') ? 'Desktop' : 'CLI'))
+    return {
+      key: family.key,
+      label: family.label,
+      variants,
+      state: top.state,
+      // With several sessions the line names the one that needs you (priority, then most recent).
+      project: top.project,
+      count: family.count,
+      since: top.lastSeenAt,
+      petId: top.routedPetId ?? getPetForFamily(family.key),
+      sessionKey: top.key,
+    }
+  }))
 
   // When more than one tool family is active at once and the user has opted
   // in, the pet window shows one small pet per family side by side instead
@@ -1603,16 +1650,7 @@ export const useAgentStore = defineStore('agent', () => {
     return Math.round((PET_BASE_H + extra) * petScale.value) + QUOTA_TOOLTIP_HEADROOM_H
   })
 
-  const highestPrioritySession = computed<AgentSession | null>(() => {
-    const active = activeSessions.value
-    if (active.length === 0) return null
-
-    return active.reduce((highest, current) => {
-      const highestPriority = STATE_PRIORITY[highest.state] ?? 0
-      const currentPriority = STATE_PRIORITY[current.state] ?? 0
-      return currentPriority > highestPriority ? current : highest
-    })
-  })
+  const highestPrioritySession = computed<AgentSession | null>(() => mostUrgentSession(sessionsByKey.values()))
 
   const currentState = computed<AgentState>(() => {
     return highestPrioritySession.value?.state ?? 'offline'
@@ -1653,18 +1691,21 @@ export const useAgentStore = defineStore('agent', () => {
   const dismissedPermissionNotices = shallowRef<ReadonlySet<string>>(new Set())
 
   const permissionNoticeItems = computed(() => (
-    sessionList.value
+    [...sessionsByKey.values()]
       .filter(session => (
         session.state === 'waiting-permission'
         && session.permissionNotice?.responseMode === 'external_only'
         && !dismissedPermissionNotices.value.has(session.key)
       ))
+      // Only the (few) waiting sessions are sorted, not the whole list.
+      .sort(compareAttention)
       .map(session => ({
         key: session.key,
         source: SOURCE_FAMILIES.find(family => family.sources.includes(session.source))?.label
           ?? SOURCE_LABELS[session.source] ?? session.source,
         project: session.project ?? '',
         desktop: session.source.endsWith('-desktop'),
+        sessionKey: session.key,
       }))
   ))
 
@@ -2135,6 +2176,8 @@ export const useAgentStore = defineStore('agent', () => {
     captureExclusionEnabled,
     fullscreenAutoHideEnabled,
     rightClickHideEnabled,
+    sessionJumpEnabled,
+    sessionJumpSwitchAppEnabled,
     desktopVisibilityCapabilities,
     launchAtStartup,
     launchAtStartupSupported,
@@ -2229,6 +2272,11 @@ export const useAgentStore = defineStore('agent', () => {
     setCaptureExclusionEnabled,
     setFullscreenAutoHideEnabled,
     setRightClickHideEnabled,
+    setSessionJumpEnabled,
+    setSessionJumpSwitchAppEnabled,
+    canSwitchToSessionApp,
+    sessionByKey,
+    runSessionJump,
     setLocalePreference,
     setLaunchAtStartup,
     setMultiPetEnabled,

@@ -61,5 +61,17 @@
   "panel.dndActive": "Do Not Disturb is on",
   "panel.sizeReset": "Panel size",
   "panel.sizeResetAction": "Reset panel size",
-  "panel.sizeResetHelp": "Drag the panel edges to resize it; every view shares the same size. Reset returns to the default size."
+  "panel.sizeResetHelp": "Drag the panel edges to resize it; every view shares the same size. Reset returns to the default size.",
+  "panel.jumpActionsLabel": "Jump back",
+  "panel.jumpShowFolder": "Show project folder",
+  "panel.jumpCopyPath": "Copy project path",
+  "panel.jumpCopied": "Path copied",
+  "panel.jumpUnavailable": "No project folder is available for this session.",
+  "panel.jumpFailed": "That didn't work. Try again in a moment.",
+  "panel.jumpRateLimited": "Too many tries. Wait a moment.",
+  "panel.jumpSettingsHeading": "Jump back to a session",
+  "panel.jumpSetting": "Show jump-back actions",
+  "panel.jumpSettingHelp": "Adds Show project folder (selects it in Finder or File Explorer, never opens it) and Copy project path to session rows. The full path stays in the app's main process.",
+  "panel.jumpSwitchSetting": "Switch to app",
+  "panel.jumpSwitchSettingHelp": "macOS: brings the session's terminal or IDE to the front (not a specific window or tab); clicking a waiting-permission or waiting-input notification about one session does the same. Only apps on a known list can be activated; needs no system permission."
 }
