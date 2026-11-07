@@ -71,3 +71,33 @@ test('run marker flags an unclean previous exit', () => {
   assert.equal(acquireRunMarker(d).previousRunUnclean, false)
   void readFileSync; void writeFileSync
 })
+
+test('a flooding plugin is capped per source and cannot evict crash evidence', () => {
+  const d = dir()
+  let clock = Date.parse('2026-01-01T00:00:00Z')
+  const logger = createLogger({ directory: d, maxBytes: 600, maxFiles: 2, now: () => clock })
+  logger.log('error', 'main', 'FATAL uncaught exception: boom')
+  for (let i = 0; i < 500; i += 1) logger.log('info', 'plugin:spam', `flood ${i} padding padding padding padding`)
+  logger.flush()
+  const flood = logger.readRecent(1000).filter(line => line.includes('flood '))
+  assert.equal(flood.length, 30, 'quota of 30 lines per minute')
+  // Another plugin has its own budget.
+  logger.log('info', 'plugin:other', 'hello')
+  // The next window reports what was dropped.
+  clock += 61_000
+  logger.log('info', 'plugin:spam', 'back')
+  const recent = logger.readRecent(1000)
+  assert.ok(recent.some(line => /470 log lines dropped/.test(line)))
+  assert.ok(recent.some(line => line.includes('hello')))
+  // Even after heavy rotation by trusted sources the crash line survives via the evidence file.
+  for (let i = 0; i < 80; i += 1) logger.log('warn', 'main', `rotation padding padding padding padding ${i}`)
+  logger.flush()
+  assert.ok(logger.readRecent(1000).some(line => line.includes('FATAL uncaught exception: boom')))
+})
+
+test('redactText covers spaced user names, forward-slash Windows homes and emails', () => {
+  const out = redactText('a /Users/Jane Doe/x/y b C:/Users/Bob Smith/z c C:/Users/carol/q mail me@example.com', { home: '/nonexistent' })
+  assert.doesNotMatch(out, /Jane|Doe|Bob|Smith|carol|me@example/)
+  assert.match(out, /~\/x\/y/)
+  assert.match(out, /~\/z/)
+})

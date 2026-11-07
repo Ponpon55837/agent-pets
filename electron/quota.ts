@@ -24,6 +24,10 @@ const FORCE_REFRESH_COOLDOWN_MS = 10_000
 // Failures are not worth holding for the full success TTL: a user who fixes a
 // login and presses Refresh must not keep seeing the same error for 90s.
 const ERROR_CACHE_TTL_MS = 10_000
+// Auth/limit failures (not signed in, expired token, rate limited) will not fix themselves in
+// seconds; hammering the usage endpoint with the user's OAuth token can trigger stricter limits.
+const AUTH_ERROR_CACHE_TTL_MS = 60_000
+const MAX_ERROR_CACHE_TTL_MS = 15 * 60_000
 const MAX_WINDOWS_PER_PROVIDER = 32
 const MAX_DISPLAY_TEXT_LENGTH = 96
 // Claude Code answers /usage itself without asking a model. Running it lets
@@ -802,6 +806,7 @@ async function fetchClaudeQuota(): Promise<QuotaProvider> {
 // error. Only ever holds already-sanitized display data.
 const lastGoodProviders = new Map<QuotaProvider['id'], QuotaProvider>()
 let cachedTtlMs = CACHE_TTL_MS
+let consecutiveFailures = 0
 
 function withRetainedReadings(providers: QuotaProvider[], nowIso: string): QuotaProvider[] {
   return providers.map((provider) => {
@@ -822,11 +827,25 @@ function withRetainedReadings(providers: QuotaProvider[], nowIso: string): Quota
   })
 }
 
+/** Cache lifetime after a fetch: exponential back-off while providers keep failing. */
+export function nextQuotaCacheTtl(fetched: QuotaProvider[]): number {
+  const failed = fetched.filter((provider) => provider.error)
+  if (failed.length === 0) {
+    consecutiveFailures = 0
+    return CACHE_TTL_MS
+  }
+  consecutiveFailures = Math.min(consecutiveFailures + 1, 16)
+  const slow = failed.some((provider) => provider.errorKind !== undefined && provider.errorKind !== 'timeout')
+  const base = slow ? AUTH_ERROR_CACHE_TTL_MS : ERROR_CACHE_TTL_MS
+  return Math.min(MAX_ERROR_CACHE_TTL_MS, base * 2 ** (consecutiveFailures - 1))
+}
+
 export function resetQuotaCacheForTests(): void {
   cachedResult = null
   cachedAt = 0
   lastFetchStartedAt = 0
   cachedTtlMs = CACHE_TTL_MS
+  consecutiveFailures = 0
   lastGoodProviders.clear()
 }
 
@@ -851,7 +870,7 @@ export async function getQuotaUsage(
     const result = { updatedAt, providers }
     cachedResult = result
     cachedAt = Date.now()
-    cachedTtlMs = providers.some((provider) => provider.error) ? ERROR_CACHE_TTL_MS : CACHE_TTL_MS
+    cachedTtlMs = nextQuotaCacheTtl(fetched)
     return result
   })()
   try {

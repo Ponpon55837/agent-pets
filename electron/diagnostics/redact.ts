@@ -18,9 +18,12 @@ export function redactText(input: string, options: RedactOptions = {}): string {
   if (home && home.length > 1) text = text.split(home).join('~')
   return text
     // Home directories on any platform, even if they are not ours.
-    .replace(/\/Users\/[^/\s"'`:]+/g, '~')
-    .replace(/\/home\/[^/\s"'`:]+/g, '~')
-    .replace(/[A-Za-z]:\\Users\\[^\\\s"'`:]+/g, '~')
+    // A user name may contain spaces ("Jane Doe"); when a separator follows within 64 chars the
+    // whole segment is the name, otherwise the first word is.
+    .replace(/\/Users\/(?:[^/\n"'`:]{1,64}(?=\/)|[^/\s"'`:]+)/g, '~')
+    .replace(/\/home\/(?:[^/\n"'`:]{1,64}(?=\/)|[^/\s"'`:]+)/g, '~')
+    .replace(/[A-Za-z]:[\\/]+Users[\\/]+(?:[^\\/\n"'`:]{1,64}(?=[\\/])|[^\\/\s"'`:]+)/gi, '~')
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g, '[email]')
     // Header / assignment style secrets.
     .replace(/(authorization|x-agent-pets-token|x-api-key|api[-_]?key|token|secret|password)(["']?\s*[:=]\s*["']?)(?:Bearer\s+)?[^\s"',;&]+/gi, `$1$2${REDACTED}`)
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]{8,}/g, `Bearer ${REDACTED}`)

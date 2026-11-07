@@ -101,7 +101,7 @@ test('quota errors are classified, failures keep the last good reading, and fail
   assert.equal(throttled.updatedAt, first.updatedAt)
 })
 
-test('a failing provider keeps its previous windows marked stale and failures expire quickly', async (t) => {
+test('a failing provider keeps its previous windows marked stale and failures expire after a back-off', async (t) => {
   const quota = await import('../electron/quota.ts')
   quota.resetQuotaCacheForTests()
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-23T03:00:00Z') })
@@ -121,8 +121,11 @@ test('a failing provider keeps its previous windows marked stale and failures ex
   assert.deepEqual(provider.windows.map(w => w.remainingPercent), [64])
   assert.equal(provider.fetchedAt, good.providers[0].fetchedAt)
 
-  // The failed result is cached for ~10s only, not 90s.
-  t.mock.timers.tick(11_000)
+  // An auth failure is cached for 60s (not 10s, not the 90s success TTL).
+  t.mock.timers.tick(30_000)
+  const stillCached = await quota.getQuotaUsage(false, async () => { throw new Error('should not refetch') })
+  assert.equal(stillCached.providers[0].errorKind, 'expired')
+  t.mock.timers.tick(31_000)
   const recovered = await quota.getQuotaUsage(false, async () => [
     { id: 'codex', name: 'Codex', windows: [{ id: 'm', label: 'Session', usedPercent: 10, remainingPercent: 90 }] },
   ])
@@ -140,4 +143,17 @@ test('quota error kinds are derived from the sanitized failure', async () => {
   assert.equal(kind('Codex usage request failed (500).'), 'unavailable')
   const abort = new Error('x'); abort.name = 'AbortError'
   assert.equal(classifyQuotaError(abort), 'timeout')
+})
+
+test('failing providers back off exponentially and a success resets the ladder', async () => {
+  const quota = await import('../electron/quota.ts')
+  quota.resetQuotaCacheForTests()
+  const provider = (errorKind?: string) => ({ id: 'claude', name: 'Claude', windows: [], ...(errorKind ? { error: 'x', errorKind } : {}) }) as never
+  const ttl = (...providers: unknown[]) => quota.nextQuotaCacheTtl(providers as never)
+  assert.deepEqual([1, 2, 3].map(() => ttl(provider('timeout'))), [10_000, 20_000, 40_000])
+  assert.equal(ttl(provider()), 90_000)
+  assert.deepEqual([1, 2, 3].map(() => ttl(provider('rate-limited'))), [60_000, 120_000, 240_000])
+  for (let i = 0; i < 10; i += 1) ttl(provider('expired'))
+  assert.equal(ttl(provider('not-signed-in')), 15 * 60_000)
+  quota.resetQuotaCacheForTests()
 })
