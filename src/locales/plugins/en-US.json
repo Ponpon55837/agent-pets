@@ -142,5 +142,10 @@
   "plugins.panelLoading": "Loading {name}…",
   "plugins.panelStillLoading": "{name} is still loading. You can keep waiting or cancel.",
   "plugins.cancelLoading": "Cancel",
-  "plugins.panelFailedTitle": "The {name} panel could not be shown"
+  "plugins.panelFailedTitle": "The {name} panel could not be shown",
+  "plugins.removeHelp": "Removing deletes the plugin's files. By default its settings and data are kept so a reinstall picks up where you left off.",
+  "plugins.removeDeleteData": "Also delete its settings and data",
+  "plugins.removeDeleteDataHelp": "This includes saved settings, secrets and permissions. This cannot be undone.",
+  "plugins.hostRevoked": "Revoked access to {host}. The plugin will ask again the next time it connects.",
+  "plugins.globalStopped": "Stopped {count} plugins."
 }

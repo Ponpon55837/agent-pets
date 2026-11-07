@@ -659,6 +659,9 @@ async function confirmSecretConsent(): Promise<void> {
 async function updateGlobalPreferences(patch: PluginGlobalPreferencesPatch): Promise<void> {
   await enqueueSerial('global', async () => {
     const previousCatalogUrl = snapshot.value?.preferences.catalogUrl
+    const stoppedCount = patch.pluginsEnabled === false && enabledGlobally.value
+      ? plugins.value.filter(plugin => plugin.preference.enabled).length
+      : 0
     setBusy('global', true)
     try {
       const result = await window.electronAPI?.setPluginGlobalPreferences(patch)
@@ -668,6 +671,14 @@ async function updateGlobalPreferences(patch: PluginGlobalPreferencesPatch): Pro
       }
       if (snapshot.value) mergePreferencesResult(snapshot.value, result.value)
       catalogUrlDraft.value = result.value.catalogUrl
+      if (patch.pluginsEnabled === false && stoppedCount > 0) {
+        notifier.notify({
+          tone: 'success',
+          text: t('plugins.globalStopped', { count: stoppedCount }),
+          durationMs: 6000,
+          action: { label: t('plugins.undo'), run: () => void updateGlobalPreferences({ pluginsEnabled: true }) },
+        })
+      }
       if (patch.onlineCatalogEnabled === false
         || (patch.catalogUrl !== undefined && patch.catalogUrl !== previousCatalogUrl)) {
         catalogItems.value = []
@@ -851,9 +862,19 @@ async function updatePluginTarget(pluginId: string, targetPetId: string): Promis
   await updatePluginPreference(pluginId, { targetPetId: targetPetId || null })
 }
 
+// 撤銷主機授權：立即生效，並以 5 秒內可復原的 Toast 取代確認對話框；
+// 之後插件再要連線時會重新詢問使用者。
 async function revokeGrantedHost(plugin: PluginPanelPlugin, host: string): Promise<void> {
+  const previous = [...plugin.preference.grantedHosts]
   await updatePluginPreference(plugin.id, {
-    grantedHosts: plugin.preference.grantedHosts.filter(item => item !== host),
+    grantedHosts: previous.filter(item => item !== host),
+  })
+  if (plugin.preference.grantedHosts.includes(host)) return
+  notifier.notify({
+    tone: 'success',
+    text: t('plugins.hostRevoked', { host }),
+    durationMs: 5000,
+    action: { label: t('plugins.undo'), run: () => void updatePluginPreference(plugin.id, { grantedHosts: previous }) },
   })
 }
 
@@ -1018,7 +1039,7 @@ async function enableInstalledPlugin(pluginId: string): Promise<void> {
 
 function requestRemove(plugin: PluginPanelPlugin): void {
   pendingRemove.value = plugin
-  keepData.value = false
+  keepData.value = true
 }
 
 async function confirmRemove(): Promise<void> {

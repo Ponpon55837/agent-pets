@@ -142,5 +142,10 @@
   "plugins.panelLoading": "正在載入 {name}…",
   "plugins.panelStillLoading": "{name} 仍在載入，你可以繼續等待或取消。",
   "plugins.cancelLoading": "取消載入",
-  "plugins.panelFailedTitle": "{name} 的面板無法顯示"
+  "plugins.panelFailedTitle": "{name} 的面板無法顯示",
+  "plugins.removeHelp": "移除後會刪除插件程式檔。預設會保留這個插件的設定與資料，之後重新安裝即可接續使用。",
+  "plugins.removeDeleteData": "同時刪除設定與資料",
+  "plugins.removeDeleteDataHelp": "包含已儲存的設定、密鑰與授權記錄。此操作無法復原。",
+  "plugins.hostRevoked": "已撤銷 {host} 的授權。插件下次要連線時會再次詢問你。",
+  "plugins.globalStopped": "已停止 {count} 個插件。"
 }

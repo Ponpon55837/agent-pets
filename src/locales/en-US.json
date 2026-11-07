@@ -497,7 +497,7 @@
   "pluginSecretSave": "Save secret",
   "pluginSecretSaved": "Secret stored securely.",
   "pluginSecretConsentTitle": "Before saving a secret",
-  "pluginSecretConsentMessage": "Secrets are encrypted with the system keychain. macOS may ask whether Agent Pets can access the keychain. The secret is saved only after you confirm. This notice appears once.",
+  "pluginSecretConsentMessage": "Secrets are encrypted with the system secure store (macOS Keychain / Windows credential protection) and kept on this computer only; they are never uploaded. macOS may ask whether Agent Pets can access the Keychain. Choose Cancel to skip saving a secret. This notice is shown once.",
   "pluginSecretConsentConfirm": "I understand",
   "pluginSecretConsentRequired": "Review and confirm the secret storage notice before saving a secret.",
   "pluginSettingsNone": "This plugin has no editable settings.",
