@@ -1,6 +1,6 @@
 # IPC 安全清單
 
-由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 102 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
+由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 104 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
 
 | 頻道 | 類型 | 允許的寄件者 | 輸入驗證概況 | Preload API | 對應測試 |
 | --- | --- | --- | --- | --- | --- |
@@ -16,6 +16,8 @@
 | `power-save-state` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getPowerSaveState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-summary` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | getHistorySummary (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-usage-blocks` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getUsageBlocks (invoke) | `tests/ipc-history.test.mts` |
+| `history-sessions` | `handle` | 設定面板 main frame | normalizeSessionQuery；無效輸入回安全預設或錯誤 | listHistorySessions (invoke) | `tests/history-sessions.test.mts` |
+| `history-session-detail` | `handle` | 設定面板 main frame | isHistorySessionId；無效輸入回安全預設或錯誤 | getHistorySessionDetail (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-clear` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | clearHistory (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-export` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | exportHistory (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-reveal-export` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | revealHistoryExport (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
