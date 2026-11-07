@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { classifyPermissionRisk, isNetworkPermission, toolBaseName } from '../electron/permission-risk.ts'
+import { classifyClaudeToolRisk, classifyPermissionRisk, isClaudeNetworkTool, isNetworkPermission, toolBaseName } from '../electron/permission-risk.ts'
 import { PermissionBroker } from '../electron/permission-broker.ts'
 
 test('only exact read-only tools are low risk', () => {
@@ -51,4 +51,19 @@ test('unclassified and high-risk requests are never hotkey eligible', () => {
   assert.equal(byId.get('r-medium')?.hotkeyEligible, true)
   assert.equal(byId.get('r-low')?.hotkeyEligible, true)
   broker.shutdown()
+})
+
+test('Claude Code tools map to the Claude risk table; anything unlisted is unknown', () => {
+  const expected: Record<string, string> = {
+    Bash: 'high', Write: 'medium', Edit: 'medium', MultiEdit: 'medium', NotebookEdit: 'medium',
+    WebFetch: 'high', WebSearch: 'high',
+  }
+  for (const [tool, risk] of Object.entries(expected)) assert.equal(classifyClaudeToolRisk(tool), risk, tool)
+  // Case and prefixes matter: a renamed or MCP-wrapped tool never inherits a softer level.
+  for (const tool of ['bash', 'write', 'mcp__fs__Write', 'mcp__github__create_issue', 'Task', 'Read', '', 'constructor', '__proto__', 'toString']) {
+    assert.equal(classifyClaudeToolRisk(tool), 'unknown', tool)
+  }
+  assert.equal(isClaudeNetworkTool('WebFetch'), true)
+  assert.equal(isClaudeNetworkTool('WebSearch'), true)
+  assert.equal(isClaudeNetworkTool('Bash'), false)
 })

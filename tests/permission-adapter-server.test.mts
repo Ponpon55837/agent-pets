@@ -6,6 +6,7 @@ import {
   createPermissionAdapterServer,
   mapOpenCodeDecision,
   PermissionAdapterRelay,
+  type PermissionAdapterSource,
 } from '../electron/permission-adapter-server.ts'
 
 const TOKEN = 'a'.repeat(64)
@@ -16,6 +17,7 @@ async function withServer(
     relay: PermissionAdapterRelay
     post: (path: string, body: unknown, token?: string) => Promise<Response>
   }) => Promise<void>,
+  options: { isSourceEnabled?: (source: PermissionAdapterSource) => boolean, now?: () => number } = {},
 ) {
   const relay = new PermissionAdapterRelay()
   const broker = new PermissionBroker({
@@ -26,10 +28,13 @@ async function withServer(
   })
   broker.registerAdapter(relay.createPort('opencode-cli'))
   broker.registerAdapter(relay.createPort('opencode-desktop'))
+  broker.registerAdapter(relay.createPort('claude'))
+  broker.registerAdapter(relay.createPort('claude-desktop'))
   const server = createPermissionAdapterServer({
     token: TOKEN,
     broker,
     relay,
+    ...options,
     randomId: (() => {
       let id = 100
       return () => `server-${++id}`
@@ -203,5 +208,134 @@ test('create budget is per plugin instance, not shared across the whole host', a
       instanceId: 'plugin-2', permissionId: 'per-other', sessionId: 'ses-other',
     }))
     assert.equal(other.status, 201)
+  })
+})
+
+function claudePermission(overrides: Record<string, unknown> = {}) {
+  return {
+    source: 'claude',
+    instanceId: 'claude-3f1c2a9e-1111-4222-8333-944455556666',
+    permissionId: 'a'.repeat(32),
+    sessionId: '3f1c2a9e-1111-4222-8333-944455556666',
+    project: '/Users/alice/work/agent-pets',
+    permission: 'Bash',
+    detail: 'curl -H "Authorization: Bearer abcdefghijklmnop1234" https://example.com',
+    ttlSeconds: 30,
+    ...overrides,
+  }
+}
+
+test('Claude requests use the Claude risk table, a redacted command and the hook wait as TTL', async () => {
+  await withServer(async ({ broker, post }) => {
+    const created = await post('/v1/permission/request', claudePermission())
+    assert.equal(created.status, 201)
+    const [view] = broker.listRequests()
+    assert.ok(view)
+    assert.equal(view.adapterId, 'claude')
+    assert.equal(view.risk, 'high')
+    assert.equal(view.hotkeyEligible, false)
+    assert.equal(view.projectId, 'agent-pets')
+    assert.ok(view.description.startsWith('curl -H'))
+    assert.ok(!JSON.stringify(view).includes('abcdefghijklmnop1234'))
+    assert.ok(!JSON.stringify(view).includes('alice'))
+    assert.equal(view.expiresAt - view.receivedAt, 30_000)
+    assert.deepEqual(view.allowedDecisions, ['allow_once', 'deny'])
+
+    const cases: Array<[string, string, boolean]> = [
+      ['Write', 'medium', false], ['Edit', 'medium', false], ['MultiEdit', 'medium', false], ['NotebookEdit', 'medium', false],
+      ['WebFetch', 'high', true], ['WebSearch', 'high', true], ['mcp__github__create_issue', 'unknown', false], ['Task', 'unknown', false],
+    ]
+    for (const [index, [tool, risk, network]] of cases.entries()) {
+      const response = await post('/v1/permission/request', claudePermission({ permissionId: `${index}`.padStart(32, 'b'), permission: tool, detail: undefined }))
+      assert.equal(response.status, 201)
+      const { requestId } = await response.json() as { requestId: string }
+      const item = broker.listRequests().find(request => request.requestId === requestId)!
+      assert.equal(item.risk, risk, tool)
+      assert.equal(item.network, network, tool)
+      assert.equal(item.description, `Claude Code requests ${tool} permission.`)
+    }
+  })
+})
+
+test('Claude TTL is clamped and OpenCode cannot borrow the Claude-only fields', async () => {
+  await withServer(async ({ broker, post }) => {
+    await post('/v1/permission/request', claudePermission({ ttlSeconds: 100_000 }))
+    await post('/v1/permission/request', claudePermission({ permissionId: 'c'.repeat(32), ttlSeconds: 1 }))
+    await post('/v1/permission/request', permission({ ttlSeconds: 299, detail: 'forged' }))
+    const [high, low, opencode] = broker.listRequests()
+    assert.equal(high!.expiresAt - high!.receivedAt, 120_000)
+    assert.equal(low!.expiresAt - low!.receivedAt, 15_000)
+    assert.equal(opencode!.expiresAt - opencode!.receivedAt, 60_000)
+    assert.equal(opencode!.description, 'Run a local command')
+  })
+})
+
+test('a disabled source cannot create requests, and an enabled one still needs the token', async () => {
+  let enabled = false
+  await withServer(async ({ broker, post }) => {
+    const refused = await post('/v1/permission/request', claudePermission())
+    assert.equal(refused.status, 503)
+    assert.equal(broker.listRequests().length, 0)
+    assert.equal((await post('/v1/permission/request', permission())).status, 201)
+
+    enabled = true
+    assert.equal((await post('/v1/permission/request', claudePermission(), 'f'.repeat(64))).status, 401)
+    assert.equal((await post('/v1/permission/request', claudePermission({ source: 'claude-cli' }))).status, 400)
+    assert.equal((await post('/v1/permission/request', claudePermission())).status, 201)
+  }, { isSourceEnabled: source => !source.startsWith('claude') || enabled })
+})
+
+test('the same Claude request asked again after it finished becomes a new request', async () => {
+  await withServer(async ({ broker, post }) => {
+    const first = await (await post('/v1/permission/request', claudePermission())).json() as { requestId: string }
+    // Still active: the hook retrying is idempotent.
+    const retry = await post('/v1/permission/request', claudePermission())
+    assert.equal(retry.status, 200)
+    assert.deepEqual(await retry.json(), first)
+
+    const deciding = broker.decide(first.requestId, 'allow_once', 'bubble')
+    const polled = await (await post('/v1/permission/decision', claudePermission())).json() as { decisionId: string }
+    assert.equal((await post('/v1/permission/result', { ...claudePermission(), decisionId: polled.decisionId, result: 'delivered' })).status, 204)
+    assert.deepEqual(await deciding, { ok: true, status: 'allowed' })
+    // A finished request can never hand out its decision again.
+    assert.equal((await post('/v1/permission/decision', claudePermission())).status, 410)
+
+    const again = await post('/v1/permission/request', claudePermission())
+    assert.equal(again.status, 201)
+    const second = await again.json() as { requestId: string }
+    assert.notEqual(second.requestId, first.requestId)
+    assert.equal(broker.listRequests()[0]?.requestId, second.requestId)
+    assert.equal((await post('/v1/permission/decision', claudePermission())).status, 204)
+  })
+})
+
+test('resolved-session takes down only that Claude session, and a late decision poll gets 410', async () => {
+  await withServer(async ({ broker, post }) => {
+    await post('/v1/permission/request', claudePermission())
+    await post('/v1/permission/request', claudePermission({ permissionId: 'd'.repeat(32) }))
+    await post('/v1/permission/request', claudePermission({ instanceId: 'claude-other', sessionId: 'other', permissionId: 'e'.repeat(32) }))
+    await post('/v1/permission/request', permission())
+    assert.equal(broker.listRequests().length, 4)
+
+    assert.equal((await post('/v1/permission/resolved-session', { source: 'claude', instanceId: 'bad id' })).status, 400)
+    assert.equal((await post('/v1/permission/resolved-session', { source: 'claude-desktop', instanceId: 'claude-3f1c2a9e-1111-4222-8333-944455556666' })).status, 204)
+    assert.equal(broker.listRequests().length, 4)
+
+    const resolved = await post('/v1/permission/resolved-session', { source: 'claude', instanceId: 'claude-3f1c2a9e-1111-4222-8333-944455556666' })
+    assert.equal(resolved.status, 204)
+    const left = broker.listRequests()
+    assert.deepEqual(left.map(request => request.sessionId).sort(), ['other', 'ses-1'])
+    assert.equal((await post('/v1/permission/decision', claudePermission())).status, 410)
+    assert.ok(broker.getAuditRecords().every(record => record.terminalReason === 'agent_resolved'))
+  })
+})
+
+test('a Claude request in flight when the broker shuts down is never auto-allowed', async () => {
+  await withServer(async ({ broker, post }) => {
+    const { requestId } = await (await post('/v1/permission/request', claudePermission())).json() as { requestId: string }
+    const deciding = broker.decide(requestId, 'allow_once', 'bubble')
+    broker.shutdown()
+    assert.deepEqual(await deciding, { ok: false, error: 'conflict', status: 'cancelled' })
+    assert.equal((await post('/v1/permission/decision', claudePermission())).status, 410)
   })
 })

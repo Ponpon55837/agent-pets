@@ -42,3 +42,28 @@ export function classifyPermissionRisk(permission: string): PermissionRisk {
 export function isNetworkPermission(permission: string): boolean {
   return NETWORK_TOOLS.has(toolBaseName(permission))
 }
+
+// Claude Code reports its own tool names (PascalCase). File edits stay inside
+// the project and are reviewable afterwards, so they are `medium`; a shell
+// command can do anything, so it is `high`. MCP tools and any tool this table
+// does not know are `unknown`, which (like `high`) is never hotkey-approvable.
+const CLAUDE_TOOL_RISK: Readonly<Record<string, PermissionRisk>> = Object.freeze({
+  Bash: 'high',
+  Write: 'medium',
+  Edit: 'medium',
+  MultiEdit: 'medium',
+  NotebookEdit: 'medium',
+  WebFetch: 'high',
+  WebSearch: 'high',
+})
+
+const CLAUDE_NETWORK_TOOLS: ReadonlySet<string> = new Set(['WebFetch', 'WebSearch'])
+
+export function classifyClaudeToolRisk(toolName: string): PermissionRisk {
+  if (typeof toolName !== 'string') return 'unknown'
+  return Object.hasOwn(CLAUDE_TOOL_RISK, toolName) ? CLAUDE_TOOL_RISK[toolName]! : 'unknown'
+}
+
+export function isClaudeNetworkTool(toolName: string): boolean {
+  return CLAUDE_NETWORK_TOOLS.has(toolName)
+}

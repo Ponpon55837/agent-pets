@@ -1,14 +1,19 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import * as path from 'node:path'
-import type { PermissionDecisionValue } from '../src/types/permission'
+import type { PermissionDecisionValue, PermissionRisk } from '../src/types/permission'
 import {
   PermissionBroker,
   type AdapterPermissionDecision,
   type PermissionAdapterPort,
   type PermissionDeliveryResult,
 } from './permission-broker.ts'
-import { classifyPermissionRisk, isNetworkPermission } from './permission-risk.ts'
+import {
+  classifyClaudeToolRisk,
+  classifyPermissionRisk,
+  isClaudeNetworkTool,
+  isNetworkPermission,
+} from './permission-risk.ts'
 
 export const PERMISSION_ADAPTER_PORT = 17_374
 
@@ -24,7 +29,13 @@ const ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
 // adapter only bounds how much it accepts so memory use stays predictable.
 const MAX_PATTERNS = 20
 const MAX_PATTERN_LENGTH = 1_000
-const SOURCES = new Set(['opencode-cli', 'opencode-desktop'])
+export type PermissionAdapterSource = 'opencode-cli' | 'opencode-desktop' | 'claude' | 'claude-desktop'
+const SOURCES: ReadonlySet<string> = new Set<PermissionAdapterSource>(['opencode-cli', 'opencode-desktop', 'claude', 'claude-desktop'])
+const CLAUDE_SOURCES: ReadonlySet<string> = new Set<PermissionAdapterSource>(['claude', 'claude-desktop'])
+// Claude's hook waits at most this long, so a request must not outlive it.
+const MIN_CLAUDE_TTL_SECONDS = 15
+const MAX_CLAUDE_TTL_SECONDS = 120
+const MAX_CLAUDE_DETAIL_LENGTH = 1_000
 
 interface RelayHandle {
   relayKey: string
@@ -43,7 +54,7 @@ interface ExternalRequestRecord {
 }
 
 interface CreatePayload {
-  source: 'opencode-cli' | 'opencode-desktop'
+  source: PermissionAdapterSource
   instanceId: string
   permissionId: string
   sessionId: string
@@ -51,12 +62,16 @@ interface CreatePayload {
   permission: string
   title?: string
   patterns?: string[]
+  /** Claude only: the command / path / URL being approved (sent by our hook). */
+  detail?: string
+  /** Claude only: how long the hook will wait for an answer. */
+  ttlSeconds?: number
 }
 
 export class PermissionAdapterRelay {
   private readonly pending = new Map<string, PendingDelivery>()
 
-  createPort(id: 'opencode-cli' | 'opencode-desktop'): PermissionAdapterPort {
+  createPort(id: PermissionAdapterSource): PermissionAdapterPort {
     return {
       id,
       capabilities: {
@@ -131,6 +146,11 @@ export interface PermissionAdapterServerOptions {
   relay: PermissionAdapterRelay
   now?: () => number
   randomId?: () => string
+  /**
+   * Main-process off switch per source. A disabled source cannot create new
+   * requests (503, so the agent falls back to its own prompt). Defaults to on.
+   */
+  isSourceEnabled?: (source: PermissionAdapterSource) => boolean
 }
 
 export function createPermissionAdapterServer(options: PermissionAdapterServerOptions): Server {
@@ -176,9 +196,18 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
         return
       }
 
+      if (options.isSourceEnabled && !options.isSourceEnabled(payload.source)) {
+        sendJson(response, 503, { error: 'source_disabled' })
+        return
+      }
+
       const externalKey = toExternalKey(payload.source, payload.instanceId, payload.permissionId)
       const existing = records.get(externalKey)
-      if (existing) {
+      // A Claude ID is derived from the request content, so the same command
+      // asked again after the first one finished maps to the same key. Only a
+      // still-active record is reused; a finished one is replaced by a fresh
+      // request instead of handing back a request that can never be answered.
+      if (existing && (!CLAUDE_SOURCES.has(payload.source) || options.broker.isRequestActive(existing.brokerRequestId))) {
         sendJson(response, 200, { requestId: existing.brokerRequestId })
         return
       }
@@ -195,8 +224,7 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
         action: payload.permission,
         description: describePermission(payload),
         ...(payload.title && payload.patterns?.length ? { details: payload.patterns } : {}),
-        risk: classifyPermissionRisk(payload.permission),
-        network: isNetworkPermission(payload.permission),
+        ...requestPolicy(payload),
         allowedDecisions: ['allow_once', 'deny'],
         responseHandle: { relayKey } satisfies RelayHandle,
       })
@@ -276,6 +304,23 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
       return
     }
 
+    // Claude has no per-request "answered in the terminal" event; when a turn
+    // or session ends, everything still pending for that session is settled.
+    if (route === 'POST /v1/permission/resolved-session') {
+      const lookup = normalizeSessionLookupPayload(await readJsonBody(request))
+      if (!lookup) {
+        sendJson(response, 400, { error: 'invalid_request' })
+        return
+      }
+      const prefix = `${lookup.source}:${lookup.instanceId}:`
+      for (const [key, record] of records) {
+        if (key.startsWith(prefix)) options.broker.resolveExternally(record.brokerRequestId, 'agent_resolved')
+      }
+      response.statusCode = 204
+      response.end()
+      return
+    }
+
     sendJson(response, 404, { error: 'not_found' })
   })
 }
@@ -307,6 +352,11 @@ function normalizeCreatePayload(value: unknown): CreatePayload | null {
     ? data.patterns.slice(0, MAX_PATTERNS).map((item) => sanitizeText(item, MAX_PATTERN_LENGTH)).filter(Boolean)
     : []
   if (data.patterns !== undefined && !Array.isArray(data.patterns)) return null
+  const isClaude = CLAUDE_SOURCES.has(data.source)
+  const detail = isClaude ? sanitizeText(data.detail, MAX_CLAUDE_DETAIL_LENGTH) : ''
+  const ttlSeconds = isClaude && typeof data.ttlSeconds === 'number' && Number.isFinite(data.ttlSeconds)
+    ? Math.min(MAX_CLAUDE_TTL_SECONDS, Math.max(MIN_CLAUDE_TTL_SECONDS, Math.round(data.ttlSeconds)))
+    : undefined
 
   return {
     source: data.source as CreatePayload['source'],
@@ -317,7 +367,16 @@ function normalizeCreatePayload(value: unknown): CreatePayload | null {
     permission,
     ...(title ? { title } : {}),
     ...(patterns.length > 0 ? { patterns } : {}),
+    ...(detail ? { detail } : {}),
+    ...(ttlSeconds !== undefined ? { ttlSeconds } : {}),
   }
+}
+
+function normalizeSessionLookupPayload(value: unknown): Pick<CreatePayload, 'source' | 'instanceId'> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const data = value as Record<string, unknown>
+  if (typeof data.source !== 'string' || !SOURCES.has(data.source) || !isIdentifier(data.instanceId)) return null
+  return { source: data.source as CreatePayload['source'], instanceId: data.instanceId }
 }
 
 function normalizeLookupPayload(value: unknown): Pick<CreatePayload, 'source' | 'instanceId' | 'permissionId'> | null {
@@ -371,9 +430,26 @@ function sanitizeProjectId(project: string | undefined): string | undefined {
 }
 
 function describePermission(payload: CreatePayload): string {
+  if (CLAUDE_SOURCES.has(payload.source)) {
+    return payload.detail || `Claude Code requests ${payload.permission} permission.`
+  }
   if (payload.title) return payload.title
   if (payload.patterns?.length) return payload.patterns.join(', ')
   return `OpenCode requests ${payload.permission} permission.`
+}
+
+function requestPolicy(payload: CreatePayload): { risk: PermissionRisk; network: boolean; ttlMs?: number } {
+  if (CLAUDE_SOURCES.has(payload.source)) {
+    return {
+      risk: classifyClaudeToolRisk(payload.permission),
+      network: isClaudeNetworkTool(payload.permission),
+      ...(payload.ttlSeconds !== undefined ? { ttlMs: payload.ttlSeconds * 1000 } : {}),
+    }
+  }
+  return {
+    risk: classifyPermissionRisk(payload.permission),
+    network: isNetworkPermission(payload.permission),
+  }
 }
 
 function toExternalKey(source: string, instanceId: string, permissionId: string): string {
