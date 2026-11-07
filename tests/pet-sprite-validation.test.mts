@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readImageSize, validateSpriteSheet, SPRITE_MAX_HEIGHT, SPRITE_MAX_WIDTH } from '../electron/pet-sprite-validation.ts'
+import { detectSpriteAtlas, readImageSize, validateSpriteSheet, SPRITE_MAX_HEIGHT, SPRITE_MAX_WIDTH } from '../electron/pet-sprite-validation.ts'
 
 function png(width: number, height: number): Uint8Array {
   const bytes = new Uint8Array(33)
@@ -47,4 +47,20 @@ test('oversized spritesheet dimensions are rejected from the header alone', () =
   assert.deepEqual(validateSpriteSheet(png(SPRITE_MAX_WIDTH + 192, 208 * 9)), { ok: false, code: 'E_SIZE' })
   assert.deepEqual(validateSpriteSheet(png(192, SPRITE_MAX_HEIGHT + 208)), { ok: false, code: 'E_SIZE' })
   assert.deepEqual(validateSpriteSheet(png(SPRITE_MAX_WIDTH, SPRITE_MAX_HEIGHT)), { ok: false, code: 'E_SIZE' })
+})
+
+test('a PNG whose first chunk is not IHDR is not trusted for dimensions', () => {
+  const bytes = png(1536, 1872)
+  bytes[12] = 0x58
+  assert.equal(readImageSize(bytes), null)
+})
+
+test('detects the atlas version from rows, not from the declared version', () => {
+  assert.deepEqual(detectSpriteAtlas({ width: 1536, height: 208 * 9 }), {
+    version: 1, columns: 8, rows: 9, width: 1536, height: 1872, frameWidth: 192, frameHeight: 208, warnings: [],
+  })
+  assert.equal(detectSpriteAtlas({ width: 1536, height: 208 * 11 }).version, 2)
+  assert.deepEqual(detectSpriteAtlas({ width: 1536, height: 208 * 11 }, 1).warnings, ['declared-version-mismatch'])
+  assert.deepEqual(detectSpriteAtlas({ width: 192 * 6, height: 208 * 10 }).warnings, ['unexpected-row-count', 'unexpected-column-count'])
+  assert.equal(detectSpriteAtlas({ width: 1536, height: 208 * 10 }).version, 1)
 })

@@ -1,10 +1,12 @@
+import type { PetImportAtlas, PetImportWarning } from '../src/types/pet-import.ts'
+
 // Structural checks for imported spritesheets: the renderer slices a fixed
 // 192x208 grid, so a sheet with other dimensions renders as blank or garbled
 // cells without any error. These read only the image header.
 
 export const SPRITE_CELL_WIDTH = 192
 export const SPRITE_CELL_HEIGHT = 208
-/** Rows 0-8 are used by the v2 atlas (idle ... review). */
+/** Rows 0-8 (idle ... review) are required by every atlas version. */
 export const SPRITE_MIN_ROWS = 9
 
 export type SpriteValidationError = 'E_TYPE' | 'E_SIZE' | 'E_ROWS'
@@ -29,7 +31,8 @@ function u24le(bytes: Uint8Array, offset: number): number {
 }
 
 function readPngSize(bytes: Uint8Array): ImageSize | null {
-  if (bytes.length < 24) return null
+  // The first chunk must be IHDR; its dimensions are what a decoder allocates.
+  if (bytes.length < 24 || bytes[12] !== 0x49 || bytes[13] !== 0x48 || bytes[14] !== 0x44 || bytes[15] !== 0x52) return null
   return { width: u32be(bytes, 16), height: u32be(bytes, 20) }
 }
 
@@ -90,4 +93,40 @@ export function validateSpriteSheet(bytes: Uint8Array): { ok: true; size: ImageS
   }
   if (size.height / SPRITE_CELL_HEIGHT < SPRITE_MIN_ROWS) return { ok: false, code: 'E_ROWS' }
   return { ok: true, size }
+}
+
+// Codex pet atlas versions, from the bundled fixtures (public/pets/*):
+//   v1: 8 columns x 9 rows   (1536x1872) - idle, running-right, running-left,
+//       waving, jumping, failed, waiting, running, review
+//   v2: 8 columns x 11 rows  (1536x2288) - v1 plus rows 9-10, which are
+//       look-direction rows ("look-000-to-157.5", "look-180-to-337.5" in
+//       public/pets/qitian-dasheng/validation.json), not walk or sleep.
+export const SPRITE_ATLAS_COLUMNS = 8
+export const SPRITE_V1_ROWS = 9
+export const SPRITE_V2_ROWS = 11
+/** Row 1 is "running-right" in both atlas versions. */
+export const SPRITE_ATLAS_WALK_ROW = 1
+
+export type SpriteAtlasWarning = Exclude<PetImportWarning, 'ignored-entries'>
+
+export interface SpriteAtlasInfo extends PetImportAtlas {
+  warnings: SpriteAtlasWarning[]
+}
+
+/**
+ * The image is the source of truth: 11+ rows is v2, 9-10 rows is v1. A
+ * declared `spriteVersionNumber` that disagrees only produces a warning.
+ */
+export function detectSpriteAtlas(size: ImageSize, declaredVersion?: unknown): SpriteAtlasInfo {
+  const columns = Math.floor(size.width / SPRITE_CELL_WIDTH)
+  const rows = Math.floor(size.height / SPRITE_CELL_HEIGHT)
+  const version: PetImportAtlas['version'] = rows >= SPRITE_V2_ROWS ? 2 : 1
+  const warnings: SpriteAtlasWarning[] = []
+  if ((declaredVersion === 1 || declaredVersion === 2) && declaredVersion !== version) warnings.push('declared-version-mismatch')
+  if (rows !== SPRITE_V1_ROWS && rows !== SPRITE_V2_ROWS) warnings.push('unexpected-row-count')
+  if (columns !== SPRITE_ATLAS_COLUMNS) warnings.push('unexpected-column-count')
+  return {
+    version, columns, rows, width: size.width, height: size.height,
+    frameWidth: SPRITE_CELL_WIDTH, frameHeight: SPRITE_CELL_HEIGHT, warnings,
+  }
 }
