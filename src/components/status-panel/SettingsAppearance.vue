@@ -6,9 +6,11 @@ import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import Card from '@/components/ui/Card.vue'
 import Select from '@/components/ui/Select.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
-import { THEME_PREFERENCES, setThemePreference, themePreference } from '@/composables/useTheme'
+import { type PetThemePreference, PET_THEME_PREFERENCES, THEME_PREFERENCES, petThemePreference, setPetThemePreference, setThemePreference, themePreference } from '@/composables/useTheme'
 
 const store = useAgentStore()
+const petLabel = (option: PetThemePreference) =>
+  option === 'light' ? t('design.theme.petLight') : option === 'follow' ? t('design.theme.petFollow') : t('design.theme.petDark')
 const SCALES = [
   { value: 0.6, label: 'panel.sizeSmall' }, { value: 0.8, label: 'panel.sizeMedium' }, { value: 1.0, label: 'panel.sizeLarge' },
   { value: 1.2, label: 'panel.sizeXLarge' }, { value: 1.5, label: 'panel.sizeXXLarge' },
@@ -28,9 +30,18 @@ const scaleModel = computed({
 <template>
   <Card :title="t('design.theme.title')">
     <p class="theme-help">{{ t('design.theme.help') }}</p>
-    <Select :model-value="themePreference" :aria-label="t('design.theme.title')" @update:model-value="setThemePreference($event)">
-      <option v-for="option in THEME_PREFERENCES" :key="option" :value="option">{{ t(`design.theme.${option}`) }}</option>
-    </Select>
+    <div class="theme-row">
+      <span class="theme-row-label">{{ t('design.theme.panelRow') }}</span>
+      <Select :model-value="themePreference" :aria-label="t('design.theme.panelRow')" @update:model-value="setThemePreference($event)">
+        <option v-for="option in THEME_PREFERENCES" :key="option" :value="option">{{ t(`design.theme.${option}`) }}</option>
+      </Select>
+    </div>
+    <div class="theme-row">
+      <span class="theme-row-label">{{ t('design.theme.petRow') }}</span>
+      <Select :model-value="petThemePreference" :aria-label="t('design.theme.petRow')" @update:model-value="setPetThemePreference($event)">
+        <option v-for="option in PET_THEME_PREFERENCES" :key="option" :value="option">{{ petLabel(option) }}</option>
+      </Select>
+    </div>
   </Card>
 
   <Card :title="t('petSize')">
@@ -47,6 +58,19 @@ const scaleModel = computed({
 </template>
 
 <style scoped>
+.theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.theme-row-label {
+  color: var(--text-primary);
+  font-size: var(--font-sm);
+}
+
 .theme-help {
   margin: 0 0 var(--space-2);
   color: var(--text-muted);

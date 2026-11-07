@@ -152,6 +152,22 @@
   gap: var(--organic-space-1);
 }
 
+.status-panel :deep(.header-more-icon) {
+  position: relative;
+  display: inline-flex;
+}
+
+.status-panel :deep(.header-more-dot) {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--surface-panel);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 .status-panel :deep(.panel-pet-avatar) {
   padding: 0;
   border: 0;
