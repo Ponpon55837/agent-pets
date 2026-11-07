@@ -40,6 +40,7 @@ import {
   defaultSettingsDraft, isSettingsDirty, validateSettings, type SettingErrorCode,
 } from '@/utils/plugin-settings-form'
 import { usePluginNotify } from '@/composables/plugin/usePluginNotify'
+import { takePluginDetailRequest } from '@/utils/plugin-detail-request'
 import { formatDateParts, formatDateTime, formatNumber } from '@/utils/intl-format'
 export interface PermissionEntryView {
   unit: string
@@ -1316,6 +1317,9 @@ onMounted(() => {
   void refreshPanel().then(() => {
     if (dailyUpdateCheck.value) void ensureCatalogLoaded()
     consumePanelRequest()
+    // Opened from a dashboard plugin tab: jump straight to that plugin's detail page.
+    const detailRequest = takePluginDetailRequest()
+    if (detailRequest) openPluginDetail(detailRequest.pluginId, detailRequest.section)
   })
   void loadPetOptions()
   window.addEventListener('keydown', onPluginPanelViewKeydown, true)
