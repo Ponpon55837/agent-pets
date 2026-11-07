@@ -1,4 +1,13 @@
 {
   "growth.cacheNote": "Plus {value} cached (not counted)",
-  "growth.tokenBasisTip": "Tokens are fresh input plus output. Prompt-cache reads and writes are listed separately and not counted, so repeated context is not counted again."
+  "growth.tokenBasisTip": "Tokens are fresh input plus output. Prompt-cache reads and writes are listed separately and not counted, so repeated context is not counted again.",
+  "growth.resetSoon": "Resetting soon",
+  "growth.ageNow": "just now",
+  "growth.ageMinutes": "{minutes} min ago",
+  "growth.ageHours": "{hours} h ago",
+  "growth.ageDays": "{days} d ago",
+  "growth.quotaUsedRemaining": "{used} used · {remaining} left",
+  "growth.quotaLow": "Quota running low",
+  "growth.quotaCritical": "Quota almost used up",
+  "growth.quotaOverage": "Over quota"
 }

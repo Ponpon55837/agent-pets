@@ -340,3 +340,19 @@ test('history v6 migration adds cache columns and downgrades legacy exact local-
   assert.equal(repaired.totals.tokenCacheRead, 860)
   assert.equal(repaired.tokenQuality, 'exact')
 })
+
+test('quota snapshots clamp out-of-range remaining percentages instead of dropping the window', (t) => {
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => Date.UTC(2026, 7, 13, 1, 0, 0) })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  assert.equal(store.recordQuotaSnapshot({
+    updatedAt: '2026-08-13T01:00:00.000Z',
+    providers: [{ id: 'claude', name: 'Claude', windows: [
+      { id: 'session', label: 'Session', remainingPercent: -3 },
+      { id: 'weekly', label: 'Weekly', remainingPercent: 105 },
+      { id: 'ok', label: 'Ok', remainingPercent: 40 },
+    ] }],
+  }), true)
+  const windows = store.getSummary().quota?.providers[0].windows ?? []
+  assert.deepEqual(windows.map(w => [w.id, w.remainingPercent]), [['session', 0], ['weekly', 100], ['ok', 40]])
+})

@@ -1147,11 +1147,14 @@ function normalizeQuotaSnapshot(value: unknown): HistoryQuotaSnapshot | null {
       const windowId = safeText(window.id)
       const label = safeText(window.label)
       const remaining = Number(window.remainingPercent)
-      if (!windowId || !label || !Number.isFinite(remaining) || remaining < 0 || remaining > 100) continue
+      if (!windowId || !label || !Number.isFinite(remaining)) continue
+      // Clamp instead of dropping so one out-of-range reading cannot erase a
+      // provider's whole window list from the stored snapshot.
+      const remainingClamped = Math.min(100, Math.max(0, remaining))
       const resetsAt = typeof window.resetsAt === 'string' && Number.isFinite(Date.parse(window.resetsAt))
         ? new Date(window.resetsAt).toISOString()
         : undefined
-      windows.push({ id: windowId, label, remainingPercent: remaining, ...(resetsAt ? { resetsAt } : {}) })
+      windows.push({ id: windowId, label, remainingPercent: remainingClamped, ...(resetsAt ? { resetsAt } : {}) })
     }
     providers.push({
       id,

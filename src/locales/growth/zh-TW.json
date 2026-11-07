@@ -1,4 +1,13 @@
 {
   "growth.cacheNote": "另有快取 {value}（不計入）",
-  "growth.tokenBasisTip": "Token 為「新輸入＋輸出」。提示快取（讀取與寫入）另外列出，不計入總量，避免重複計算整段上下文。"
+  "growth.tokenBasisTip": "Token 為「新輸入＋輸出」。提示快取（讀取與寫入）另外列出，不計入總量，避免重複計算整段上下文。",
+  "growth.resetSoon": "即將重置",
+  "growth.ageNow": "剛剛",
+  "growth.ageMinutes": "{minutes} 分鐘前",
+  "growth.ageHours": "{hours} 小時前",
+  "growth.ageDays": "{days} 天前",
+  "growth.quotaUsedRemaining": "已用 {used} · 剩 {remaining}",
+  "growth.quotaLow": "額度偏低",
+  "growth.quotaCritical": "額度即將用完",
+  "growth.quotaOverage": "已超出額度"
 }

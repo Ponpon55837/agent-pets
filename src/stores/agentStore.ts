@@ -115,15 +115,18 @@ function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
       if (typeof window.id !== 'string' || typeof window.label !== 'string') continue
       if (typeof window.usedPercent !== 'number' || !Number.isFinite(window.usedPercent)) continue
       if (typeof window.remainingPercent !== 'number' || !Number.isFinite(window.remainingPercent)) continue
-      if (window.usedPercent < 0 || window.usedPercent > 100 || window.remainingPercent < 0 || window.remainingPercent > 100) continue
+      // Clamp rather than drop: an over-quota reading must show as exhausted.
+      const usedPercent = Math.min(100, Math.max(0, window.usedPercent))
+      const remainingPercent = Math.min(100, Math.max(0, window.remainingPercent))
       const resetsAt = typeof window.resetsAt === 'string' && Number.isFinite(Date.parse(window.resetsAt))
         ? new Date(window.resetsAt).toISOString()
         : undefined
       windows.push({
         id: window.id.slice(0, MAX_QUOTA_TEXT_LENGTH),
         label: window.label.slice(0, MAX_QUOTA_TEXT_LENGTH),
-        usedPercent: window.usedPercent,
-        remainingPercent: window.remainingPercent,
+        usedPercent,
+        remainingPercent,
+        ...(window.overage === true || window.usedPercent > 100 ? { overage: true } : {}),
         ...(resetsAt ? { resetsAt } : {}),
       })
     }
