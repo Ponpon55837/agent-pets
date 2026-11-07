@@ -120,7 +120,7 @@ function openPetSettings(): void {
 }
 
 function openPluginSettings(): void {
-  settingsGroup.value = 'integrations'
+  settingsGroup.value = 'plugins'
   store.openSettings()
 }
 
@@ -158,7 +158,7 @@ onMounted(() => {
     pluginViewRequestNonce.value += 1
   }) ?? null
   removePluginViewRequestListener = window.electronAPI?.onPanelOpenPluginView(pluginId => {
-    settingsGroup.value = 'integrations'
+    settingsGroup.value = 'plugins'
     requestedPluginViewId.value = pluginId
     pluginViewRequestNonce.value += 1
   }) ?? null

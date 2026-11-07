@@ -44,7 +44,7 @@ let flashTimer: ReturnType<typeof setTimeout> | null = null
 const groupOptions = computed<SegmentedOption[]>(() => SETTINGS_GROUPS.map(item => ({
   value: item.id,
   label: t(item.labelKey),
-  attention: item.id === 'integrations' && store.pluginFeedUnreadCount > 0,
+  attention: item.id === 'plugins' && store.pluginFeedUnreadCount > 0,
 })))
 const activeGroup = computed(() => SETTINGS_GROUPS.find(item => item.id === group.value) ?? SETTINGS_GROUPS[0])
 

@@ -5,7 +5,7 @@ import type { TranslationKey } from '../i18n.ts'
 // The settings pages render sections; search matches entries and jumps to the
 // section that owns them.
 
-export type SettingsGroupId = 'general' | 'pets' | 'desktop' | 'integrations'
+export type SettingsGroupId = 'general' | 'pets' | 'desktop' | 'integrations' | 'plugins'
 export type SettingsSectionId =
   | 'language' | 'appearance' | 'pets' | 'growth'
   | 'notifications' | 'desktop' | 'plugins' | 'advanced'
@@ -21,7 +21,8 @@ export const SETTINGS_GROUPS: readonly SettingsGroupDefinition[] = [
   { id: 'general', icon: 'appearance', labelKey: 'panel.groupGeneral', sections: ['language', 'appearance'] },
   { id: 'pets', icon: 'pets', labelKey: 'panel.groupPets', sections: ['pets', 'growth'] },
   { id: 'desktop', icon: 'desktop', labelKey: 'panel.groupDesktop', sections: ['notifications', 'desktop'] },
-  { id: 'integrations', icon: 'advanced', labelKey: 'panel.groupIntegrations', sections: ['advanced', 'plugins'] },
+  { id: 'integrations', icon: 'advanced', labelKey: 'panel.groupIntegrations', sections: ['advanced'] },
+  { id: 'plugins', icon: 'plugin', labelKey: 'panel.groupPlugins', sections: ['plugins'] },
 ]
 
 export const DEFAULT_SETTINGS_GROUP: SettingsGroupId = 'general'

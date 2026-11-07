@@ -127,7 +127,23 @@
 }
 
 .status-panel :deep(.settings-panel-title) {
+  display: flex;
+  min-width: 0;
   flex: 1;
+  align-items: center;
+  gap: var(--organic-space-1);
+}
+
+.status-panel :deep(.settings-panel-title > *) {
+  flex: 0 0 auto;
+}
+
+.status-panel :deep(.settings-panel-title > .breadcrumb-current) {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-panel :deep(.header-right) {
@@ -1040,7 +1056,6 @@
 }
 
 .status-panel :deep(.breadcrumb-sep) {
-  margin: 0 var(--organic-space-1);
   vertical-align: middle;
   color: var(--text-muted);
 }

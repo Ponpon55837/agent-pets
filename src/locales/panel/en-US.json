@@ -3,8 +3,8 @@
   "panel.unpin": "Unpin panel",
   "panel.groupGeneral": "General",
   "panel.groupPets": "Pets",
-  "panel.groupDesktop": "Desktop & alerts",
-  "panel.groupIntegrations": "Integrations",
+  "panel.groupDesktop": "Desktop",
+  "panel.groupIntegrations": "Advanced",
   "panel.searchLabel": "Search settings",
   "panel.searchPlaceholder": "Search settings...",
   "panel.searchClear": "Clear search",
@@ -55,5 +55,7 @@
   "panel.sizeHelp": "Current size: {percent}% of the original sprite.",
   "panel.changePet": "Change pet",
   "panel.subtitleActive": "{running} running · {attention} need attention",
-  "panel.progressUnavailable": "Growth data unavailable"
+  "panel.progressUnavailable": "Growth data unavailable",
+  "panel.groupPlugins": "Plugins",
+  "panel.setupWizardHelp": "Re-run hook installation and integration checks."
 }

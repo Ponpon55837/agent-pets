@@ -218,5 +218,6 @@
   "plugins.presenceBadgeNone": "寵物旁的徽章：目前沒有內容",
   "plugins.presenceSkins": "提供 {count} 個寵物外觀，可在「寵物」設定中選用",
   "plugins.presenceEventSource": "工作狀態列「{name}」正在顯示",
-  "plugins.presenceEventSourceNone": "工作狀態列：目前沒有回報"
+  "plugins.presenceEventSourceNone": "工作狀態列：目前沒有回報",
+  "plugins.offTitle": "插件目前已停用"
 }
