@@ -1141,7 +1141,10 @@ function normalizeQuotaSnapshot(value: unknown): HistoryQuotaSnapshot | null {
     const name = safeText(provider.name)
     if (!id || !name || !Array.isArray(provider.windows)) continue
     const windows: HistoryQuotaWindow[] = []
-    for (const entry of provider.windows.slice(0, MAX_QUOTA_WINDOWS)) {
+    // Windows kept after a failed refresh are stale readings; never persist
+    // them as if they were measured at this snapshot's time.
+    const retained = provider.stale === true ? [] : provider.windows
+    for (const entry of retained.slice(0, MAX_QUOTA_WINDOWS)) {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
       const window = entry as Record<string, unknown>
       const windowId = safeText(window.id)

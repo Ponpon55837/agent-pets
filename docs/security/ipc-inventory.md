@@ -76,7 +76,7 @@
 | `project-pets-pick` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | pickProjectPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `project-pets-bind` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | setProjectPetBinding (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `project-pets-archive` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | archiveProjectPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `quota-usage` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getQuotaUsage (invoke) | `tests/ipc-quota.test.mts` |
+| `quota-usage` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getQuotaUsage (invoke) | `tests/ipc-quota.test.mts`<br>`tests/quota.test.mts` |
 | `pet-mouse-passthrough` | `on` | 寵物視窗 main frame | 型別；無效輸入回安全預設或錯誤 | setMousePassthrough (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `pet-hide-request` | `on` | 寵物視窗 main frame | handler／controller 驗證 payload；拒絕無效輸入 | requestPetHide (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-toggle` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | togglePanel (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |

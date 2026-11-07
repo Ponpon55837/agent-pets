@@ -94,6 +94,8 @@ const PRESENTATION_MAX_QUEUE = 8
 const PRESENTATION_HIGH_PRIORITY = STATE_PRIORITY['waiting-input']
 
 type QuotaUsage = Awaited<ReturnType<NonNullable<Window['electronAPI']>['getQuotaUsage']>>
+type QuotaProviderErrorKind = NonNullable<QuotaUsage['providers'][number]['errorKind']>
+const QUOTA_ERROR_KINDS = new Set<string>(['not-signed-in', 'expired', 'timeout', 'rate-limited', 'unavailable'])
 
 function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
@@ -137,6 +139,11 @@ function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
       ...(typeof provider.plan === 'string' ? { plan: provider.plan.slice(0, MAX_QUOTA_TEXT_LENGTH) } : {}),
       windows,
       ...(typeof provider.error === 'string' ? { error: provider.error.slice(0, 240) } : {}),
+      ...(QUOTA_ERROR_KINDS.has(provider.errorKind as string) ? { errorKind: provider.errorKind as QuotaProviderErrorKind } : {}),
+      ...(typeof provider.fetchedAt === 'string' && Number.isFinite(Date.parse(provider.fetchedAt))
+        ? { fetchedAt: new Date(provider.fetchedAt).toISOString() }
+        : {}),
+      ...(provider.stale === true ? { stale: true } : {}),
     })
   }
   return { updatedAt: new Date(raw.updatedAt).toISOString(), providers }
@@ -222,6 +229,11 @@ export const useAgentStore = defineStore('agent', () => {
   const quotaUsage = shallowRef<QuotaUsage | null>(null)
   const quotaLoading = ref(false)
   const quotaError = ref('')
+  // Seconds a forced refresh must wait (cooldown answer from the main
+  // process), or null. Lets the UI say "wait N s" instead of silently no-op.
+  const quotaThrottleSec = ref<number | null>(null)
+  // When the last refresh request completed (ms), for "next auto refresh".
+  const quotaCheckedAt = ref(0)
   // Bumped whenever a Codex/Claude session reaches a terminal state, i.e.
   // right after quota was actually spent. App.vue watches this and schedules
   // one settled refresh, so the meter tracks real usage instead of only the
@@ -1203,12 +1215,16 @@ export const useAgentStore = defineStore('agent', () => {
     if (!force && quotaUsage.value && now - quotaRequestedAt < QUOTA_REFRESH_MS) return quotaUsage.value
     quotaLoading.value = true
     quotaError.value = ''
+    quotaThrottleSec.value = null
     quotaRequestedAt = now
     try {
       const usage = await window.electronAPI.getQuotaUsage(force)
+      const throttled = (usage as { throttled?: { retryInSec?: unknown } } | null)?.throttled?.retryInSec
+      if (typeof throttled === 'number' && Number.isFinite(throttled)) quotaThrottleSec.value = Math.max(1, Math.round(throttled))
       if (!setQuotaUsage(usage)) {
         quotaError.value = 'Quota service returned invalid data.'
       }
+      quotaCheckedAt.value = Date.now()
       return quotaUsage.value
     } catch (error) {
       quotaError.value = translateBackendError(error instanceof Error ? error.message : t('quotaLoadFailed'))
@@ -1677,6 +1693,8 @@ export const useAgentStore = defineStore('agent', () => {
     quotaUsage,
     quotaLoading,
     quotaError,
+    quotaThrottleSec,
+    quotaCheckedAt,
     quotaByFamily,
     quotaStaleSignal,
     hasQuotaCapableSessions,

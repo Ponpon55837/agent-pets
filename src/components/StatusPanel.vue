@@ -102,7 +102,9 @@ function onSettingsKeydown(event: KeyboardEvent): void {
 
 function selectDashboardTab(tab: DashboardTab): void {
   dashboardTab.value = tab
-  if ((tab === 'sessions' || tab === 'usage') && !store.quotaUsage) void store.refreshQuota()
+  // refreshQuota() is TTL-gated, so this only reaches the network when the
+  // reading is stale; a first-ever open still loads.
+  if (tab === 'sessions' || tab === 'usage') void store.refreshQuota()
 }
 
 function permissionSourceLabel(agentId: string): string {
@@ -212,7 +214,7 @@ onUnmounted(() => {
         </Button>
       </div>
       <StatusPanelSessions v-show="dashboardTab === 'sessions'" :active="dashboardTab === 'sessions'" :now-tick="nowTick" :plugin-event-source-statuses="pluginEventSourceStatuses" />
-      <StatusPanelUsage v-show="dashboardTab === 'usage'" :now-tick="nowTick" />
+      <StatusPanelUsage v-show="dashboardTab === 'usage'" :active="dashboardTab === 'usage'" :now-tick="nowTick" />
       <StatusPanelHistory v-show="dashboardTab === 'history'" :active="dashboardTab === 'history'" />
     </template>
 

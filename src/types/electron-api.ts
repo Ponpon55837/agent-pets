@@ -141,7 +141,11 @@ export interface ElectronAPI {
             overage?: boolean
           }>
           error?: string
+          errorKind?: 'not-signed-in' | 'expired' | 'timeout' | 'rate-limited' | 'unavailable'
+          fetchedAt?: string
+          stale?: boolean
         }>
+        throttled?: { retryInSec: number }
       }>
       onQuotaUsageUpdated: (callback: (usage: unknown) => void) => () => void
       getHistorySummary: (projectId?: string) => Promise<HistorySummary | null>
