@@ -48,5 +48,7 @@
   "growth.achievementMany": "解鎖 {count} 個成就",
   "growth.xpFloat": "+{amount} XP",
   "growth.nextEvolution": "下一個稱號：Lv {level} · {stage}（還差 {levels} 級）",
-  "growth.finalStage": "已達最高稱號"
+  "growth.finalStage": "已達最高稱號",
+  "growth.badgeNew": "新",
+  "growth.unlockedOn": "{date} 解鎖"
 }

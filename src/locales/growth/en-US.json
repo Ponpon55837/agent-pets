@@ -48,5 +48,7 @@
   "growth.achievementMany": "{count} achievements unlocked",
   "growth.xpFloat": "+{amount} XP",
   "growth.nextEvolution": "Next title: Lv {level} · {stage} ({levels} levels to go)",
-  "growth.finalStage": "Top title reached"
+  "growth.finalStage": "Top title reached",
+  "growth.badgeNew": "New",
+  "growth.unlockedOn": "Unlocked {date}"
 }
