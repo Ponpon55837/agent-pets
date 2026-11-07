@@ -18,6 +18,7 @@ const MAX_BODY_BYTES = 16 * 1024
 const MAX_CREATE_REQUESTS_PER_MINUTE = 60
 const MAX_CREATE_REQUESTS_PER_MINUTE_PER_HOST = 240
 const MAX_BUDGET_WINDOWS = 256
+const MAX_EXTERNAL_RECORDS = 400
 const ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
 // The broker applies the final display limits (and counts what it cuts); the
 // adapter only bounds how much it accepts so memory use stays predictable.
@@ -203,6 +204,13 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
         const status = created.error === 'capacity_exceeded' ? 503 : 400
         sendJson(response, status, { error: created.error })
         return
+      }
+      // Drop index entries whose broker request has been forgotten, so the
+      // external index cannot grow for the lifetime of the app.
+      if (records.size >= MAX_EXTERNAL_RECORDS) {
+        for (const [key, record] of records) {
+          if (!options.broker.hasRecord(record.brokerRequestId)) records.delete(key)
+        }
       }
       records.set(externalKey, { brokerRequestId, relayKey })
       sendJson(response, 201, { requestId: brokerRequestId })

@@ -18,7 +18,11 @@ const MAX_DESCRIPTION_LENGTH = 280
 const MAX_DETAIL_ITEMS = 5
 const MAX_DETAIL_LENGTH = 120
 const MAX_AUDIT_RECORDS = 500
+// Cap on *active* requests. Finished requests are kept only briefly (replay
+// protection + late polls) and then dropped, so a long-running app never fills up.
 const DEFAULT_MAX_REQUEST_RECORDS = 5_000
+const TERMINAL_RETENTION_MS = 10 * 60_000
+const MAX_TERMINAL_RECORDS = 200
 const MAX_ACTIVE_PER_SESSION = 20
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
 
@@ -98,6 +102,9 @@ export interface PermissionAuditRecord {
   decision?: PermissionDecisionValue
   decidedBy?: PermissionDecisionSource
   terminalReason: string
+  /** Tool name and risk only; never the description or arguments. */
+  action?: string
+  risk?: PermissionRisk
 }
 
 interface RegisteredAdapter {
@@ -128,6 +135,7 @@ interface InternalPermissionRequest {
   responseHandle: unknown
   adapter: RegisteredAdapter
   order: number
+  finishedAt?: number
   deliveryAbort?: AbortController
 }
 
@@ -164,7 +172,7 @@ function isDecision(value: unknown): value is PermissionDecisionValue {
 }
 
 function isDecisionSource(value: unknown): value is PermissionDecisionSource {
-  return value === 'bubble' || value === 'hotkey'
+  return value === 'bubble' || value === 'hotkey' || value === 'panel'
 }
 
 function isRisk(value: unknown): value is PermissionRisk {
@@ -274,7 +282,8 @@ export class PermissionBroker {
     if (this.countActiveForSession(adapterId, candidate.sessionId) >= MAX_ACTIVE_PER_SESSION) {
       return { ok: false, error: 'capacity_exceeded' }
     }
-    if (this.requests.size >= this.maxRequestRecords) {
+    this.pruneTerminal()
+    if (this.activeRequests().length >= this.maxRequestRecords) {
       return { ok: false, error: 'capacity_exceeded' }
     }
 
@@ -519,6 +528,7 @@ export class PermissionBroker {
     request.deliveryAbort?.abort()
     request.deliveryAbort = undefined
     request.status = status
+    request.finishedAt = this.readNow() ?? request.expiresAt
     const auditRecord: PermissionAuditRecord = {
       requestId: request.requestId,
       adapterId: request.adapterId,
@@ -531,6 +541,8 @@ export class PermissionBroker {
       ...(decision ? { decision } : {}),
       ...(decidedBy ? { decidedBy } : {}),
       terminalReason,
+      action: request.action,
+      risk: request.risk,
     }
     this.audit.push(auditRecord)
     if (this.audit.length > MAX_AUDIT_RECORDS) this.audit.shift()
@@ -547,6 +559,26 @@ export class PermissionBroker {
     } catch {
       // Observers cannot interrupt the broker state transition.
     }
+  }
+
+  /** Whether the broker still remembers this request (active or recently finished). */
+  hasRecord(requestId: string): boolean {
+    return this.requests.has(requestId)
+  }
+
+  private pruneTerminal(): void {
+    const now = this.readNow() ?? 0
+    const finished: InternalPermissionRequest[] = []
+    for (const request of this.requests.values()) {
+      if (isTerminal(request.status)) finished.push(request)
+    }
+    if (finished.length === 0) return
+    // `finished` is in insertion order, so the oldest are first.
+    const excess = Math.max(0, finished.length - MAX_TERMINAL_RECORDS)
+    finished.forEach((request, index) => {
+      const expired = now - (request.finishedAt ?? now) >= TERMINAL_RETENTION_MS
+      if (index < excess || expired) this.requests.delete(request.requestId)
+    })
   }
 
   private countActiveForSession(adapterId: string, sessionId: string): number {

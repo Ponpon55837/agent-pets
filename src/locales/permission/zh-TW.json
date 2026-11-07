@@ -60,5 +60,16 @@
   "permission.soundOnSuccess": "工作完成時",
   "permission.soundPreviewPermission": "試聽：權限",
   "permission.soundPreviewError": "試聽：失敗",
-  "permission.soundPreviewSuccess": "試聽：完成"
+  "permission.soundPreviewSuccess": "試聽：完成",
+  "permission.auditHeading": "最近的權限記錄",
+  "permission.auditEmpty": "還沒有權限記錄。",
+  "permission.auditPrivacy": "只記錄時間、工具名稱、來源與結果，不會儲存指令內容或檔案路徑。",
+  "permission.auditClear": "清除記錄",
+  "permission.auditClearTitle": "清除權限記錄？",
+  "permission.auditClearMessage": "清除後無法復原。",
+  "permission.auditAllowed": "已允許",
+  "permission.auditDenied": "已拒絕",
+  "permission.auditExpired": "已逾時",
+  "permission.auditFailed": "傳送失敗",
+  "permission.auditCancelled": "已在他處處理"
 }

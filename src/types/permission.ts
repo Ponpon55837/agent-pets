@@ -1,6 +1,6 @@
 export type PermissionDecisionValue = 'allow_once' | 'deny'
 
-export type PermissionDecisionSource = 'bubble' | 'hotkey'
+export type PermissionDecisionSource = 'bubble' | 'panel' | 'hotkey'
 
 export type PermissionRisk = 'low' | 'medium' | 'high' | 'unknown'
 
@@ -76,3 +76,14 @@ export type PermissionDecideResult =
 
 /** Default lifetime of a permission request; shared so UI copy can quote it. */
 export const PERMISSION_DEFAULT_TTL_SECONDS = 60
+
+/** What the settings page may show about a past request: no ids, no content. */
+export interface PermissionAuditEntry {
+  resolvedAt: number
+  agentId: string
+  action: string
+  risk: PermissionRisk
+  status: PermissionRequestStatus
+  decidedBy?: PermissionDecisionSource
+  terminalReason: string
+}

@@ -22,7 +22,8 @@ import { DesktopTrayController } from '../desktop-tray'
 import type { PluginTrayCommandItem } from '../plugin-tray'
 import { desktopVisibilityCapabilitiesForPlatform, macVisibleOnFullScreen } from '../desktop-visibility'
 import { PermissionBroker } from '../permission-broker'
-import { appendPermissionAudit } from '../permission-audit'
+import { appendPermissionAudit, clearPermissionAudit, readPermissionAudit } from '../permission-audit'
+import type { PermissionAuditEntry } from '../../src/types/permission'
 import { ProgressionStore } from '../progression'
 import { AchievementStore } from '../achievements'
 import { HistoryStore } from '../history'
@@ -2718,6 +2719,28 @@ export function cancelPermissionRequests(
   }
 }
 
+function permissionAuditPath(): string {
+  return join(app.getPath('userData'), 'permission-audit.jsonl')
+}
+
+export function listPermissionAuditEntries(limit: number): PermissionAuditEntry[] {
+  return readPermissionAudit(permissionAuditPath(), limit)
+    .filter(record => typeof record.action === 'string' && record.risk)
+    .map(record => ({
+      resolvedAt: record.resolvedAt,
+      agentId: record.agentId,
+      action: record.action as string,
+      risk: record.risk as PermissionAuditEntry['risk'],
+      status: record.status,
+      ...(record.decidedBy ? { decidedBy: record.decidedBy } : {}),
+      terminalReason: record.terminalReason,
+    }))
+}
+
+export function clearPermissionAuditLog(): void {
+  clearPermissionAudit(permissionAuditPath())
+}
+
 export function createPermissionServices(permissionToken: string): void {
   if (mainState.permissionBroker || mainState.permissionRelay || mainState.permissionAdapterServer) return
 
@@ -2726,7 +2749,7 @@ export function createPermissionServices(permissionToken: string): void {
     onChanged: schedulePermissionUiSync,
     onAudit: record => {
       try {
-        appendPermissionAudit(join(app.getPath('userData'), 'permission-audit.json'), record)
+        appendPermissionAudit(permissionAuditPath(), record)
       } catch (error) {
         console.error('Failed to persist permission audit record', error)
       }

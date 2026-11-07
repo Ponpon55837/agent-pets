@@ -60,5 +60,16 @@
   "permission.soundOnSuccess": "When a task completes",
   "permission.soundPreviewPermission": "Preview: permission",
   "permission.soundPreviewError": "Preview: failure",
-  "permission.soundPreviewSuccess": "Preview: done"
+  "permission.soundPreviewSuccess": "Preview: done",
+  "permission.auditHeading": "Recent permission log",
+  "permission.auditEmpty": "No permission activity yet.",
+  "permission.auditPrivacy": "Only the time, tool name, source and result are recorded; commands and file paths are never stored.",
+  "permission.auditClear": "Clear log",
+  "permission.auditClearTitle": "Clear the permission log?",
+  "permission.auditClearMessage": "This cannot be undone.",
+  "permission.auditAllowed": "Allowed",
+  "permission.auditDenied": "Denied",
+  "permission.auditExpired": "Timed out",
+  "permission.auditFailed": "Delivery failed",
+  "permission.auditCancelled": "Handled elsewhere"
 }

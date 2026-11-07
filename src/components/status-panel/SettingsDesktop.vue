@@ -1,13 +1,48 @@
 <script setup lang="ts">
-import { t } from '@/i18n'
+import { onMounted, ref } from 'vue'
+import { locale, t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
 import { PERMISSION_DEFAULT_TTL_SECONDS } from '@/types/permission'
 import Card from '@/components/ui/Card.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
 import Button from '@/components/ui/Button.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import type { PermissionAuditEntry } from '@/types/permission'
+import { permissionSourceName } from '@/utils/permission-source'
 import { playCue, type SoundCue } from '@/utils/sound'
 
 const store = useAgentStore()
+
+const auditEntries = ref<PermissionAuditEntry[]>([])
+const confirmClearAudit = ref(false)
+
+async function loadAudit(): Promise<void> {
+  try {
+    auditEntries.value = (await window.electronAPI?.listPermissionAudit?.() ?? []).slice().reverse()
+  } catch {
+    auditEntries.value = []
+  }
+}
+
+async function clearAudit(): Promise<void> {
+  confirmClearAudit.value = false
+  try { await window.electronAPI?.clearPermissionAudit?.() } catch { /* nothing to clear */ }
+  await loadAudit()
+}
+
+function auditResult(entry: PermissionAuditEntry): string {
+  if (entry.status === 'allowed') return t('permission.auditAllowed')
+  if (entry.status === 'denied') return t('permission.auditDenied')
+  if (entry.status === 'expired') return t('permission.auditExpired')
+  if (entry.status === 'delivery_failed') return t('permission.auditFailed')
+  return t('permission.auditCancelled')
+}
+
+function auditTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleString(locale.value, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+onMounted(() => { void loadAudit() })
 
 function setVolume(event: Event): void {
   store.setSoundOption({ soundVolume: Number((event.target as HTMLInputElement).value) })
@@ -85,6 +120,30 @@ function preview(cue: SoundCue): void {
     <p class="permission-settings-intro">{{ t('permission.settingsRiskRules') }}</p>
   </Card>
 
+  <Card :title="t('permission.auditHeading')">
+    <p v-if="auditEntries.length === 0" class="permission-settings-intro">{{ t('permission.auditEmpty') }}</p>
+    <ul v-else class="permission-audit-list">
+      <li v-for="(entry, index) in auditEntries" :key="`${entry.resolvedAt}-${index}`">
+        <span class="permission-audit-time">{{ auditTime(entry.resolvedAt) }}</span>
+        <code>{{ entry.action }}</code>
+        <span>{{ permissionSourceName(entry.agentId) }}</span>
+        <strong>{{ auditResult(entry) }}</strong>
+      </li>
+    </ul>
+    <p class="permission-settings-intro">{{ t('permission.auditPrivacy') }}</p>
+    <Button size="sm" variant="secondary" :disabled="auditEntries.length === 0" @click="confirmClearAudit = true">{{ t('permission.auditClear') }}</Button>
+    <ConfirmDialog
+      :open="confirmClearAudit"
+      :title="t('permission.auditClearTitle')"
+      :message="t('permission.auditClearMessage')"
+      :confirm-label="t('permission.auditClear')"
+      tone="danger"
+      focus-cancel
+      @confirm="clearAudit"
+      @cancel="confirmClearAudit = false"
+    />
+  </Card>
+
   <Card :title="t('system')">
     <ToggleRow :model-value="store.presentationMcpEnabled" :label="t('presentationMcp')" :help="t('presentationMcpHelp')" @update:model-value="store.setPresentationMcpEnabled($event)" />
     <ToggleRow
@@ -98,6 +157,38 @@ function preview(cue: SoundCue): void {
 </template>
 
 <style scoped>
+.permission-audit-list {
+  display: flex;
+  max-height: 180px;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  overflow-y: auto;
+  list-style: none;
+}
+
+.permission-audit-list li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  font-size: var(--font-sm);
+}
+
+.permission-audit-list code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.permission-audit-time {
+  min-width: 9ch;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.permission-audit-list strong {
+  margin-left: auto;
+}
+
 .permission-sound-volume {
   display: flex;
   align-items: center;
