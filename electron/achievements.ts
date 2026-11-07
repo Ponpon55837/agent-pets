@@ -54,6 +54,41 @@ const PROJECT_ID = /^[a-f0-9]{32}$/
 const ADAPTER_ID = /^[A-Za-z0-9._-]{1,128}$/
 const MAX_EVENT_ID_LENGTH = 256
 const MAX_TOKEN_COUNT = 1_000_000_000_000
+const LOCAL_TOKEN_TOTAL_KEY = 'local_token_total'
+const LOCAL_TOKEN_COMPACT_BATCH = 5_000
+// Codex and Claude Code token usage is read exactly from their local session
+// logs (LocalUsageReader). That ledger is the single source of truth for these
+// agents, so token usage on their live events is ignored here; otherwise the
+// same message would count twice. Other agents (OpenCode, generic HTTP) have
+// no local log reader and keep using event-reported usage.
+const LOCAL_LOG_TOKEN_ADAPTERS = new Set(['codex', 'claude-code'])
+const LOCAL_LOG_TOKEN_SOURCES = new Set(['codex', 'codex-desktop', 'claude', 'claude-desktop'])
+
+/** Minimal shape of one exact local-log usage record (see HistoryTokenUsageRecord). */
+export interface LocalTokenUsageFact {
+  adapterId: string
+  sourceEventId: string
+  occurredAt: number
+  input?: number
+  output?: number
+}
+
+export interface LocalTokenSyncOptions {
+  /**
+   * Records older than this are never re-presented by the scanner (its cutoff
+   * is at least now - retention), so their dedupe rows can be dropped while
+   * the running total keeps their tokens. Records older than it are ignored.
+   */
+  compactBefore: number
+  /** Pet to evaluate for unlocks after the sync; null to only update the ledger. */
+  evaluatePetId: string | null
+  progression?: ProgressionSnapshot
+}
+
+export interface LocalTokenSyncResult {
+  changed: boolean
+  unlocks: AchievementUnlock[]
+}
 
 function databaseConstructor(): DatabaseSyncConstructor {
   const moduleRequire = createRequire(import.meta.url)
@@ -149,6 +184,10 @@ function eventTokenKey(event: AgentStatusEvent, petId: string): string {
   ].join(':'))
 }
 
+function isLocalLogTokenEvent(event: AgentStatusEvent): boolean {
+  return LOCAL_LOG_TOKEN_ADAPTERS.has(eventAdapterId(event)) || LOCAL_LOG_TOKEN_SOURCES.has(event.source)
+}
+
 function rowQuality(row: SqliteRow | undefined): AchievementTokenQuality {
   if (!row || asInteger(row.total) <= 0) return 'none'
   return asInteger(row.estimated) > 0 ? 'estimated' : 'exact'
@@ -227,7 +266,7 @@ export class AchievementStore {
       }
 
       let tokenRecorded = false
-      const quality = safeQuality(event.tokenUsage?.quality)
+      const quality = isLocalLogTokenEvent(event) ? null : safeQuality(event.tokenUsage?.quality)
       if (quality) {
         const tokenUsage = event.tokenUsage
         tokenRecorded = changedCount(this.statement(`
@@ -318,6 +357,65 @@ export class AchievementStore {
         ))
       }
       return unlocks
+    })
+  }
+
+  /**
+   * Upserts exact local-log usage into an account-level ledger keyed by the
+   * record's stable source id. A rescan presents the same ids again: unchanged
+   * rows add nothing and a streamed Claude message whose usage grew adds only
+   * the difference, so the running total is idempotent across rescans. The
+   * total is account-level (local logs describe the machine, not a pet), the
+   * same way History shows local token totals for every pet.
+   */
+  syncLocalTokenUsage(records: readonly LocalTokenUsageFact[], options: LocalTokenSyncOptions): LocalTokenSyncResult {
+    const now = this.now()
+    const compactBefore = Number.isFinite(options.compactBefore) ? options.compactBefore : 0
+    return this.transaction(() => {
+      let delta = 0
+      for (const record of records) {
+        const adapterId = safeAdapterId(record.adapterId)
+        const sourceEventId = safeEventId(record.sourceEventId)
+        if (!sourceEventId || !LOCAL_LOG_TOKEN_ADAPTERS.has(adapterId)) continue
+        const occurredAt = Number.isFinite(record.occurredAt) ? Math.min(record.occurredAt, now) : now
+        if (occurredAt < compactBefore) continue
+        const total = Math.min(MAX_TOKEN_COUNT, safeToken(record.input) + safeToken(record.output))
+        const key = digest(`local-token-v1:${adapterId}:${sourceEventId}`)
+        const existing = this.statement(
+          'SELECT total_tokens FROM local_token_usage WHERE token_event_id = ?',
+        ).get(key)
+        if (!existing) {
+          if (total === 0) continue
+          this.statement(`
+            INSERT INTO local_token_usage(token_event_id, adapter_id, occurred_at, total_tokens)
+            VALUES (?, ?, ?, ?)
+          `).run(key, adapterId, occurredAt, total)
+          delta += total
+          continue
+        }
+        const previous = Math.max(0, asInteger(existing.total_tokens))
+        if (previous === total) continue
+        this.statement(
+          'UPDATE local_token_usage SET total_tokens = ?, occurred_at = ? WHERE token_event_id = ?',
+        ).run(total, occurredAt, key)
+        delta += total - previous
+      }
+      if (delta !== 0) {
+        this.statement(`
+          INSERT INTO achievement_metadata(key, value) VALUES (?, ?)
+          ON CONFLICT(key) DO UPDATE SET value = MIN(?, MAX(0, CAST(value AS INTEGER) + ?))
+        `).run(LOCAL_TOKEN_TOTAL_KEY, Math.max(0, Math.min(MAX_TOKEN_COUNT, delta)), MAX_TOKEN_COUNT, delta)
+      }
+      // Bounded compaction: drop dedupe rows the scanner can no longer present.
+      this.statement(`
+        DELETE FROM local_token_usage WHERE rowid IN (
+          SELECT rowid FROM local_token_usage WHERE occurred_at < ? LIMIT ?
+        )
+      `).run(compactBefore, LOCAL_TOKEN_COMPACT_BATCH)
+      const unlocks = options.evaluatePetId
+        ? this.evaluateAndUnlock(safePetId(options.evaluatePetId), now, false, options.progression)
+        : []
+      return { changed: delta !== 0, unlocks }
     })
   }
 
@@ -432,11 +530,18 @@ export class AchievementStore {
     const activeDays = this.statement(
       'SELECT COUNT(*) AS total FROM active_days WHERE pet_id = ?',
     ).get(petId)
+    const localTokens = Math.max(0, asInteger(this.statement(
+      'SELECT value FROM achievement_metadata WHERE key = ?',
+    ).get(LOCAL_TOKEN_TOTAL_KEY)?.value))
+    const petTokens = Math.max(0, asInteger(counters?.token_total))
+    const petQuality = rowQuality({ total: counters?.token_rows, estimated: counters?.token_estimated })
     return {
       completedSessions: Math.max(0, asInteger(counters?.completed_sessions)),
       completedSessionsToday: Math.max(0, asInteger(today?.sessions_completed)),
-      tokenTotal: Math.min(MAX_TOKEN_COUNT, Math.max(0, asInteger(counters?.token_total))),
-      tokenQuality: rowQuality({ total: counters?.token_rows, estimated: counters?.token_estimated }),
+      tokenTotal: Math.min(MAX_TOKEN_COUNT, petTokens + localTokens),
+      // Local-log tokens are exact; any estimated event-reported row keeps the
+      // combined total labelled estimated.
+      tokenQuality: petQuality !== 'none' ? petQuality : localTokens > 0 ? 'exact' : 'none',
       adapterCount: Math.max(0, asInteger(adapters?.total)),
       activeDays: Math.max(0, asInteger(activeDays?.total)),
       nightOwlCompletion,
@@ -529,6 +634,28 @@ export class AchievementStore {
       this.statement(`
         INSERT INTO schema_migrations(version, name, applied_at, checksum)
         VALUES (2, 'achievements-pet-counters', ?, 'achievements-pet-counters')
+      `).run(this.now())
+    })
+    // Additive v3: the exact local-log token ledger. CREATE ... IF NOT EXISTS
+    // keeps it idempotent; the running total starts at 0 and fills on the next scan.
+    this.database.exec(`
+      CREATE TABLE IF NOT EXISTS local_token_usage(
+        token_event_id TEXT PRIMARY KEY,
+        adapter_id TEXT NOT NULL,
+        occurred_at INTEGER NOT NULL,
+        total_tokens INTEGER NOT NULL CHECK(total_tokens >= 0)
+      );
+      CREATE INDEX IF NOT EXISTS idx_local_token_usage_occurred ON local_token_usage(occurred_at);
+      CREATE TABLE IF NOT EXISTS achievement_metadata(
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `)
+    const hasV3 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 3').get())
+    if (!hasV3) this.transaction(() => {
+      this.statement(`
+        INSERT INTO schema_migrations(version, name, applied_at, checksum)
+        VALUES (3, 'achievements-local-token-ledger', ?, 'achievements-local-token-ledger')
       `).run(this.now())
     })
   }
