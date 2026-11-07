@@ -4,6 +4,10 @@ import '@/styles/tokens.css'
 import '@/styles/base.css'
 import App from '@/App.vue'
 import RendererErrorBoundary from '@/components/RendererErrorBoundary.vue'
+import { initTheme } from '@/composables/useTheme'
+
+initTheme()
+if (import.meta.env.MODE === 'gpu-safe') document.documentElement.dataset.gpuSafe = ''
 
 type ErrorKind = 'vue' | 'unhandledrejection' | 'error'
 

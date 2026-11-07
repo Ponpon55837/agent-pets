@@ -29,12 +29,15 @@ import type {
 } from '../src/types/plugin.ts'
 import type { PluginCatalogPanelItem } from '../src/types/plugin-catalog.ts'
 import type {
+  ProjectMcpApplyRequest,
+  ProjectMcpPlan,
   ProjectMcpRegistrySnapshot,
   ProjectMcpRemovalSummary,
   ProjectMcpSetupSummary,
 } from '../src/types/project-mcp'
 import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from '../src/types/project-pet'
 import type { AgentAdapterId } from '../src/types/agent-adapter'
+import type { OnboardingAction, OnboardingState } from '../src/types/onboarding'
 import type { SessionSnapshotEntry } from './main/session-snapshot'
 import type { LocalServerHealthSnapshot, LocalServerId } from '../src/types/reliability'
 
@@ -179,6 +182,12 @@ const electronAPI: ElectronAPI = {
 
   requestPetHide: () => {
     ipcRenderer.send(IPC_CHANNELS.petHideRequest)
+  },
+
+  getOnboardingState: (): Promise<OnboardingState | null> => ipcRenderer.invoke(IPC_CHANNELS.onboardingGet),
+
+  updateOnboardingState: (action: OnboardingAction): Promise<OnboardingState | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.onboardingUpdate, action)
   },
 
   togglePanel: () => {
@@ -419,8 +428,12 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.installIntegrations, target)
   },
 
-  setupProjectMcp: (): Promise<ProjectMcpSetupSummary> => {
+  setupProjectMcp: (): Promise<ProjectMcpPlan> => {
     return ipcRenderer.invoke(IPC_CHANNELS.projectMcpSetup)
+  },
+
+  applyProjectMcp: (request: ProjectMcpApplyRequest): Promise<ProjectMcpSetupSummary> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.projectMcpApply, request)
   },
 
   listProjectMcp: (): Promise<ProjectMcpRegistrySnapshot> => {

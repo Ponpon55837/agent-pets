@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, useId } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 
 // The one text input. Replaces the bare <input> styles (.pet-rename-input and
@@ -27,6 +27,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ enter: []; escape: []; blur: [] }>()
 const model = defineModel<string>({ required: true })
 const input = ref<HTMLInputElement | null>(null)
+const errorId = `text-field-${useId()}-error`
 
 defineExpose({ focus: () => input.value?.focus(), select: () => input.value?.select() })
 
@@ -55,6 +56,7 @@ function clear(): void {
         :maxlength="maxlength"
         :aria-label="ariaLabel || label"
         :aria-invalid="error ? true : undefined"
+        :aria-describedby="error ? errorId : undefined"
         @keydown.enter="emit('enter')"
         @keydown.escape="onEscape"
         @blur="emit('blur')"
@@ -64,7 +66,7 @@ function clear(): void {
       </button>
     </span>
     <span v-if="error || maxlength" class="text-field-meta">
-      <span v-if="error" class="text-field-error" role="alert">{{ error }}</span>
+      <span v-if="error" :id="errorId" class="text-field-error" role="alert">{{ error }}</span>
       <span v-if="maxlength" class="text-field-count">{{ model.length }} / {{ maxlength }}</span>
     </span>
   </label>
@@ -80,7 +82,7 @@ function clear(): void {
 
 .text-field-label {
   color: var(--text-secondary);
-  font-size: var(--font-body-sm, var(--font-xs));
+  font-size: var(--font-sm);
   font-weight: var(--weight-medium);
 }
 
@@ -110,12 +112,12 @@ function clear(): void {
 
 .size-md .text-field-input {
   padding: 8px var(--space-3);
-  font-size: var(--font-body-md, var(--font-sm));
+  font-size: var(--font-sm);
 }
 
 .size-sm .text-field-input {
   padding: 6px var(--space-3);
-  font-size: var(--font-body-sm, var(--font-xs));
+  font-size: var(--font-sm);
 }
 
 .search .text-field-input {
@@ -134,7 +136,7 @@ function clear(): void {
 }
 
 .invalid .text-field-input {
-  border-color: var(--state-error);
+  border-color: var(--text-danger);
 }
 
 .text-field-input::-webkit-search-cancel-button {
@@ -143,8 +145,12 @@ function clear(): void {
 
 .text-field-clear {
   position: absolute;
-  right: var(--space-2);
+  right: 0;
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--hit-min);
+  min-height: var(--hit-min);
   padding: 4px;
   border: 0;
   border-radius: var(--radius-pill);
@@ -166,11 +172,11 @@ function clear(): void {
   display: flex;
   justify-content: space-between;
   gap: var(--space-2);
-  font-size: var(--font-label, var(--font-xs));
+  font-size: var(--font-xs);
 }
 
 .text-field-error {
-  color: var(--accent-text, var(--state-error));
+  color: var(--text-danger);
 }
 
 .text-field-count {
