@@ -20,7 +20,8 @@ import * as path from 'path'
 
 
 
-import { DesktopPreferencesStore, resolveLoginItemExecutable } from '../desktop-preferences'
+import { DesktopPreferencesStore } from '../desktop-preferences'
+import { createLoginItemAdapter } from '../login-item'
 import { DesktopNotificationService } from '../desktop-notifications'
 import { DesktopTrayController } from '../desktop-tray'
 import type { PluginTrayCommandItem } from '../plugin-tray'
@@ -2242,6 +2243,7 @@ export function currentDesktopPreferences(): DesktopPreferences {
       soundOnSuccess: true,
       launchAtStartup: false,
       launchAtStartupSupported: false,
+      launchAtStartupStatus: 'unsupported',
       locale: 'zh-TW',
       visibilityCapabilities: currentDesktopVisibilityCapabilities(),
     }
@@ -2888,30 +2890,14 @@ export function createPermissionServices(permissionToken: string): void {
 export function createDesktopServices(): void {
   if (mainState.desktopPreferences || mainState.desktopTray || mainState.desktopNotifications) return
 
-  // electron-builder's Windows portable target runs the app from a temporary
-  // extraction directory. Register the original launcher path, never that
-  // ephemeral process.execPath. Unsupported/invalid paths fail closed.
-  const loginItemExecutable = resolveLoginItemExecutable(
-    process.platform,
-    app.isPackaged,
-    process.execPath,
-    process.env.PORTABLE_EXECUTABLE_FILE,
-  )
-
   mainState.desktopPreferences = new DesktopPreferencesStore(
     join(app.getPath('userData'), 'desktop-preferences.json'),
-    {
-      supported: loginItemExecutable !== null,
-      getOpenAtLogin: () => {
-        if (!loginItemExecutable) return false
-        return app.getLoginItemSettings({ path: loginItemExecutable }).openAtLogin
-      },
-      setOpenAtLogin: (enabled) => {
-        if (!loginItemExecutable) return false
-        app.setLoginItemSettings({ openAtLogin: enabled, path: loginItemExecutable })
-        return app.getLoginItemSettings({ path: loginItemExecutable }).openAtLogin
-      },
-    },
+    createLoginItemAdapter({
+      platform: process.platform,
+      app,
+      execPath: process.execPath,
+      portableExecutableFile: process.env.PORTABLE_EXECUTABLE_FILE,
+    }),
     currentDesktopVisibilityCapabilities(),
   )
   setLocale(currentDesktopPreferences().locale)

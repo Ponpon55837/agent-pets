@@ -2,7 +2,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { renameSyncWithRetry } from './fs-rename.ts'
 import { dndHasExpired, normalizeDndUntil } from './dnd-schedule.ts'
-import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
+import type { DesktopPreferences, DesktopPreferencesPatch, LaunchAtStartupStatus } from '../src/types/desktop'
 import { DEFAULT_LOCALE, isAppLocale } from '../src/types/locale.ts'
 import {
   UNSUPPORTED_DESKTOP_VISIBILITY_CAPABILITIES,
@@ -43,7 +43,7 @@ export function writeJsonAtomic(filePath: string, value: unknown): void {
   }
 }
 
-type StoredDesktopPreferences = Omit<DesktopPreferences, 'launchAtStartupSupported' | 'visibilityCapabilities'>
+type StoredDesktopPreferences = Omit<DesktopPreferences, 'launchAtStartupSupported' | 'launchAtStartupStatus' | 'visibilityCapabilities'>
 
 function supportedVisibilityPreference(
   enabled: boolean | undefined,
@@ -57,8 +57,10 @@ function supportedVisibilityPreference(
 
 export interface LoginItemAdapter {
   supported: boolean
-  getOpenAtLogin(): boolean
-  setOpenAtLogin(enabled: boolean): boolean
+  /** OS-reported state. Must not throw. */
+  getStatus(): LaunchAtStartupStatus
+  /** Applies the request and returns the resulting OS state. Must not throw. */
+  setLaunchAtStartup(enabled: boolean): LaunchAtStartupStatus
 }
 
 export function resolveLoginItemExecutable(
@@ -78,6 +80,13 @@ export function resolveLoginItemExecutable(
   } catch {
     return null
   }
+}
+
+/** OS truth wins when it is definitive; otherwise the stored intent stands. */
+export function resolveLaunchIntent(status: LaunchAtStartupStatus, storedIntent: boolean): boolean {
+  if (status === 'enabled') return true
+  if (status === 'disabled' || status === 'unsupported') return false
+  return storedIntent
 }
 
 const BOOLEAN_KEYS = [
@@ -223,13 +232,14 @@ export class DesktopPreferencesStore {
     return this.stored
   }
 
-  private currentLaunchAtStartup(stored: Partial<StoredDesktopPreferences>): boolean {
-    if (!this.loginItem.supported) return false
-    try {
-      return this.loginItem.getOpenAtLogin()
-    } catch {
-      return stored.launchAtStartup ?? false
-    }
+  private currentLaunchAtStartup(stored: Partial<StoredDesktopPreferences>): {
+    launchAtStartup: boolean
+    launchAtStartupStatus: LaunchAtStartupStatus
+  } {
+    if (!this.loginItem.supported) return { launchAtStartup: false, launchAtStartupStatus: 'unsupported' }
+    let status: LaunchAtStartupStatus
+    try { status = this.loginItem.getStatus() } catch { status = 'error' }
+    return { launchAtStartup: resolveLaunchIntent(status, stored.launchAtStartup ?? false), launchAtStartupStatus: status }
   }
 
   get(): DesktopPreferences {
@@ -249,7 +259,7 @@ export class DesktopPreferencesStore {
         stored.fullscreenAutoHideEnabled,
         this.visibilityCapabilities.fullscreenAutoHide.supported,
       ),
-      launchAtStartup: this.currentLaunchAtStartup(stored),
+      ...this.currentLaunchAtStartup(stored),
       launchAtStartupSupported: this.loginItem.supported,
       visibilityCapabilities: this.visibilityCapabilities,
     }
@@ -287,9 +297,15 @@ export class DesktopPreferencesStore {
 
     if (typeof patch.launchAtStartup === 'boolean') {
       if (this.loginItem.supported) {
-        next.launchAtStartup = this.loginItem.setOpenAtLogin(patch.launchAtStartup)
+        let status: LaunchAtStartupStatus
+        try { status = this.loginItem.setLaunchAtStartup(patch.launchAtStartup) } catch { status = 'error' }
+        next.launchAtStartupStatus = status
+        // Keep the user's intent when the OS needs approval or refuses, so the
+        // toggle does not silently snap back.
+        next.launchAtStartup = patch.launchAtStartup ? resolveLaunchIntent(status, true) : false
       } else {
         next.launchAtStartup = false
+        next.launchAtStartupStatus = 'unsupported'
       }
     }
 

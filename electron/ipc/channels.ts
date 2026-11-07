@@ -12,6 +12,7 @@ export const IPC_CHANNELS = {
   desktopPreferencesInit: 'desktop-preferences-init',
   desktopPreferencesSet: 'desktop-preferences-set',
   desktopPreferencesUpdated: 'desktop-preferences-updated',
+  desktopOpenLoginItemsSettings: 'desktop-open-login-items-settings',
   getCustomPetSprite: 'get-custom-pet-sprite',
   historyClear: 'history-clear',
   historyExport: 'history-export',
