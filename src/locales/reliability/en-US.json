@@ -4,5 +4,8 @@
   "reliability.startup.failedTitle": "Agent Pets failed to start",
   "reliability.startup.failedMessage": "Some services could not start. You can restart Agent Pets or quit for now.",
   "reliability.startup.retry": "Restart",
-  "reliability.startup.quit": "Quit"
+  "reliability.startup.quit": "Quit",
+  "reliability.renderer.gaveUpTitle": "The pet view could not recover",
+  "reliability.renderer.gaveUpBody": "Automatic reloads kept failing. Choose \"Reload pet\" from the menu or restart Agent Pets.",
+  "reliability.tray.reloadPet": "Reload pet"
 }

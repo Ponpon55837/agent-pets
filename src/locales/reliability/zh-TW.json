@@ -4,5 +4,8 @@
   "reliability.startup.failedTitle": "Agent Pets 啟動失敗",
   "reliability.startup.failedMessage": "部分服務無法啟動。你可以重新啟動 Agent Pets，或先結束程式。",
   "reliability.startup.retry": "重新啟動",
-  "reliability.startup.quit": "結束"
+  "reliability.startup.quit": "結束",
+  "reliability.renderer.gaveUpTitle": "寵物畫面無法復原",
+  "reliability.renderer.gaveUpBody": "自動重新載入多次仍失敗。請從選單選擇「重新載入寵物」，或重新啟動 Agent Pets。",
+  "reliability.tray.reloadPet": "重新載入寵物"
 }

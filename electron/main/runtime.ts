@@ -1,6 +1,7 @@
 import { IPC_CHANNELS } from '../ipc/channels'
-import { app, BrowserWindow, WebContentsView, screen, ipcMain, dialog, net, session, protocol, globalShortcut, powerMonitor, shell, safeStorage } from 'electron'
+import { app, BrowserWindow, WebContentsView, screen, ipcMain, dialog, net, session, protocol, globalShortcut, powerMonitor, shell, safeStorage, Notification } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
+import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
 import { join, resolve } from 'path'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
@@ -1612,6 +1613,54 @@ export function applyMacFullscreenVisibilityPolicy(): void {
   }
 }
 
+const rendererRecoveries = new Map<'pet' | 'panel', RendererRecovery>()
+
+// Re-pushes main-owned state after a renderer crash/reload. Initial load
+// broadcasts only run once, so a recovered renderer would otherwise sit with
+// stale defaults (power-save, window mode, badges, progression, permissions).
+function resyncRendererState(): void {
+  broadcastPetWindowMode()
+  broadcastPowerSaveState()
+  broadcastPluginBadges()
+  broadcastPluginFeedUnreadCount()
+  broadcastProgression()
+  broadcastAchievements()
+  broadcastHistoryUpdated()
+  schedulePermissionUiSync()
+  try { broadcastDesktopPreferences(currentDesktopPreferences()) } catch {}
+}
+
+function attachWindowRecovery(label: 'pet' | 'panel', window: BrowserWindow): void {
+  rendererRecoveries.get(label)?.dispose()
+  const contents = window.webContents
+  const recovery = attachRendererRecovery(contents, {
+    label,
+    reload: () => { if (!contents.isDestroyed()) contents.reload() },
+    log: (level, message) => (level === 'error' ? console.error(message) : console.warn(message)),
+    onRecovered: resyncRendererState,
+    onGaveUp: () => {
+      try {
+        if (!Notification.isSupported()) return
+        new Notification({
+          title: t('reliability.renderer.gaveUpTitle'),
+          body: t('reliability.renderer.gaveUpBody'),
+        }).show()
+      } catch {}
+    },
+  })
+  rendererRecoveries.set(label, recovery)
+  window.once('closed', () => {
+    recovery.dispose()
+    if (rendererRecoveries.get(label) === recovery) rendererRecoveries.delete(label)
+  })
+}
+
+/** Tray / error-boundary rescue: reloads pet and panel renderers, rebuilding a window that is gone. */
+export function reloadPetRenderers(): void {
+  if (!ensureDesktopWindows()) return
+  for (const recovery of rendererRecoveries.values()) recovery.manualReload()
+}
+
 export function createPetWindow() {
   const primaryWorkArea = screen.getPrimaryDisplay().workArea
   const rawScale = parseFloat(process.env.PET_SCALE || '1')
@@ -1707,11 +1756,11 @@ export function createPetWindow() {
   applyPetCaptureProtection()
   applyMacFullscreenVisibilityPolicy()
 
-  if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) {
-    mainState.petWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
-  } else {
-    mainState.petWindow.loadURL('agent-pets://app/index.html')
-  }
+  attachWindowRecovery('pet', mainState.petWindow)
+  const petLoad = process.env.VITE_DEV_SERVER_URL && !app.isPackaged
+    ? mainState.petWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
+    : mainState.petWindow.loadURL('agent-pets://app/index.html')
+  petLoad.catch(error => console.error('Pet renderer load failed', error))
 
   mainState.petWindow.webContents.once('did-finish-load', () => {
     broadcastPetWindowMode()
@@ -1815,11 +1864,11 @@ export function createPanelWindow() {
 
   applyMacFullscreenVisibilityPolicy()
 
-  if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) {
-    mainState.panelWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#panel`)
-  } else {
-    mainState.panelWindow.loadURL('agent-pets://app/index.html#panel')
-  }
+  attachWindowRecovery('panel', mainState.panelWindow)
+  const panelLoad = process.env.VITE_DEV_SERVER_URL && !app.isPackaged
+    ? mainState.panelWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#panel`)
+    : mainState.panelWindow.loadURL('agent-pets://app/index.html#panel')
+  panelLoad.catch(error => console.error('Panel renderer load failed', error))
 
   mainState.panelWindow.on('blur', () => {
     if (mainState.dialogOpen) return
@@ -2032,6 +2081,15 @@ function revealPanelWindowAfterFirstFrame(panelWindow: BrowserWindow): void {
 // 其他 view 是明確導向，會先關閉暫停中的插件畫面再切換。
 export function showPanelWindow(view: 'sessions' | 'settings' | 'restore' = 'sessions', pluginViewPluginId?: string): void {
   if (!ensureDesktopWindows() || !mainState.panelWindow) return
+  if (rendererRecoveries.get('panel')?.state().gaveUp) {
+    // The panel renderer is dead and out of retries; show a fresh window
+    // rather than a broken one.
+    const broken = mainState.panelWindow
+    mainState.panelWindow = null
+    try { broken.destroy() } catch {}
+    createPanelWindow()
+    if (!mainState.panelWindow) return
+  }
   const restore = view === 'restore'
   if (!restore) mainState.pluginPanelViewController?.close(mainState.panelWindow.isVisible() ? 'closed' : 'hidden')
   if (mainState.panelBlurHideHandle) clearTimeout(mainState.panelBlurHideHandle)
@@ -2652,6 +2710,7 @@ export function createDesktopServices(): void {
         }
       },
       toggleMiniMode,
+      reloadPet: reloadPetRenderers,
       quit: () => app.quit(),
     },
   )
