@@ -20,7 +20,7 @@ import { DesktopPreferencesStore, resolveLoginItemExecutable } from '../desktop-
 import { DesktopNotificationService } from '../desktop-notifications'
 import { DesktopTrayController } from '../desktop-tray'
 import type { PluginTrayCommandItem } from '../plugin-tray'
-import { desktopVisibilityCapabilitiesForPlatform } from '../desktop-visibility'
+import { desktopVisibilityCapabilitiesForPlatform, macVisibleOnFullScreen } from '../desktop-visibility'
 import { PermissionBroker } from '../permission-broker'
 import { appendPermissionAudit } from '../permission-audit'
 import { ProgressionStore } from '../progression'
@@ -1614,7 +1614,10 @@ export function applyMacFullscreenVisibilityPolicy(): void {
   if (!IS_MAC) return
   const preferences = currentDesktopPreferences()
   if (!preferences.visibilityCapabilities.fullscreenAutoHide.supported) return
-  const visibleOnFullScreen = !preferences.fullscreenAutoHideEnabled
+  const visibleOnFullScreen = macVisibleOnFullScreen(
+    preferences.fullscreenAutoHideEnabled,
+    mainState.permissionAttentionCount > 0,
+  )
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
     if (!window || window.isDestroyed()) continue
     try {
@@ -2398,7 +2401,9 @@ export function broadcastPermissionRequests(): void {
   if (listed.length > 0 && mainState.petWindowMode !== 'normal') {
     applyNormalPetBounds()
   }
+  const hadPermissionRequests = mainState.permissionAttentionCount > 0
   mainState.permissionAttentionCount = listed.length
+  if (hadPermissionRequests !== listed.length > 0) applyMacFullscreenVisibilityPolicy()
   if (mainState.desktopNotifications) mainState.desktopNotifications.setPermissionRequests(listed)
   else syncTrayAttention()
 
