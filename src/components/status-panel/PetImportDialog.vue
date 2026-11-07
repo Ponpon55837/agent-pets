@@ -157,6 +157,7 @@ onUnmounted(stopIdle)
 .preview-idle,
 .row-frame {
   flex: none;
+  image-orientation: none;
   border-radius: var(--radius-sm);
   background-color: var(--surface-sunken);
 }

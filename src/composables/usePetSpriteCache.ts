@@ -33,6 +33,9 @@ export function loadPetSprite(key: string, src: string): Promise<HTMLImageElemen
   if (inflight) return inflight
   const promise = new Promise<HTMLImageElement | null>((resolve) => {
     const img = new Image()
+    // Imports reject EXIF rotation; this keeps any other source on the raw
+    // pixel grid too, since a rotated sheet would swap the 192x208 cells.
+    img.style.imageOrientation = 'none'
     img.onload = () => {
       images.set(key, img)
       pending.delete(key)

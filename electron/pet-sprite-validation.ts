@@ -9,12 +9,13 @@ export const SPRITE_CELL_HEIGHT = 208
 /** Rows 0-8 (idle ... review) are required by every atlas version. */
 export const SPRITE_MIN_ROWS = 9
 
-export type SpriteValidationError = 'E_TYPE' | 'E_SIZE' | 'E_ROWS'
+export type SpriteValidationError = 'E_TYPE' | 'E_SIZE' | 'E_ROWS' | 'E_ORIENTATION'
 
 export const SPRITE_ERROR_MESSAGES: Record<SpriteValidationError, string> = {
   E_TYPE: 'Spritesheet dimensions could not be read',
   E_SIZE: 'Spritesheet size must be a multiple of the 192x208 frame grid and within the maximum dimensions',
   E_ROWS: 'Spritesheet needs at least 9 animation rows',
+  E_ORIENTATION: 'Spritesheet has EXIF rotation; save it again without rotation',
 }
 
 export interface ImageSize {
@@ -52,21 +53,137 @@ function readWebpSize(bytes: Uint8Array): ImageSize | null {
   return null
 }
 
-function readJpegSize(bytes: Uint8Array): ImageSize | null {
+const JPEG_SOS = 0xda
+const JPEG_EOI = 0xd9
+const JPEG_SOI = 0xd8
+const JPEG_APP1 = 0xe1
+
+function isJpegSof(marker: number): boolean {
+  return marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
+}
+
+function isStandaloneMarker(marker: number): boolean {
+  return marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)
+}
+
+interface JpegInfo {
+  size: ImageSize
+  orientation: number
+}
+
+/**
+ * Walks every JPEG segment, including the entropy-coded data after each SOS,
+ * so the frame size we cap is the one a decoder uses: 0xFF fill bytes are
+ * skipped (not read as a marker), exactly one SOF is allowed and it must come
+ * before the first SOS, and a segment running past EOF is invalid. O(bytes).
+ */
+function readJpegInfo(bytes: Uint8Array): JpegInfo | null {
   let offset = 2
-  while (offset + 9 < bytes.length) {
-    if (bytes[offset] !== 0xff) { offset += 1; continue }
-    const marker = bytes[offset + 1]
-    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { offset += 2; continue }
-    const length = (bytes[offset + 2] << 8) | bytes[offset + 3]
-    const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
-    if (isSof) {
-      return { height: (bytes[offset + 5] << 8) | bytes[offset + 6], width: (bytes[offset + 7] << 8) | bytes[offset + 8] }
+  let size: ImageSize | null = null
+  let orientation = 1
+  let scanned = false
+  while (offset < bytes.length) {
+    if (bytes[offset] !== 0xff) return null
+    while (offset < bytes.length && bytes[offset] === 0xff) offset += 1
+    if (offset >= bytes.length) return null
+    const marker = bytes[offset]
+    offset += 1
+    if (marker === JPEG_EOI) break
+    if (marker === JPEG_SOI || marker === 0x00) return null
+    if (isStandaloneMarker(marker)) continue
+    if (offset + 2 > bytes.length) return null
+    const length = (bytes[offset] << 8) | bytes[offset + 1]
+    if (length < 2 || offset + length > bytes.length) return null
+    if (isJpegSof(marker)) {
+      if (size || scanned || length < 8) return null
+      size = { height: (bytes[offset + 3] << 8) | bytes[offset + 4], width: (bytes[offset + 5] << 8) | bytes[offset + 6] }
+    } else if (marker === JPEG_APP1 && length >= 8 && String.fromCharCode(...bytes.subarray(offset + 2, offset + 6)) === 'Exif'
+      && bytes[offset + 6] === 0 && bytes[offset + 7] === 0) {
+      orientation = readTiffOrientation(bytes.subarray(offset + 8, offset + length)) ?? orientation
     }
-    if (length < 2) return null
-    offset += 2 + length
+    offset += length
+    if (marker === JPEG_SOS) {
+      if (!size) return null
+      scanned = true
+      // Skip entropy-coded data: FF00 is a stuffed byte, FFD0-FFD7 a restart
+      // marker, FFFF fill; any other FFxx starts the next segment.
+      while (offset < bytes.length) {
+        if (bytes[offset] !== 0xff) { offset += 1; continue }
+        const next = bytes[offset + 1]
+        if (next === 0x00 || (next >= 0xd0 && next <= 0xd7)) { offset += 2; continue }
+        if (next === 0xff) { offset += 1; continue }
+        break
+      }
+    }
+  }
+  return size && scanned ? { size, orientation } : null
+}
+
+function readJpegSize(bytes: Uint8Array): ImageSize | null {
+  return readJpegInfo(bytes)?.size ?? null
+}
+
+/** EXIF (TIFF) Orientation tag 0x0112 from IFD0; null when absent or unreadable. */
+export function readTiffOrientation(tiff: Uint8Array): number | null {
+  if (tiff.length < 8) return null
+  const little = tiff[0] === 0x49 && tiff[1] === 0x49
+  if (!little && !(tiff[0] === 0x4d && tiff[1] === 0x4d)) return null
+  const u16 = (at: number) => (little ? tiff[at] | (tiff[at + 1] << 8) : (tiff[at] << 8) | tiff[at + 1])
+  const u32 = (at: number) => (little
+    ? (tiff[at] | (tiff[at + 1] << 8) | (tiff[at + 2] << 16) | (tiff[at + 3] << 24)) >>> 0
+    : u32be(tiff, at))
+  if (u16(2) !== 42) return null
+  const ifd = u32(4)
+  if (ifd + 2 > tiff.length) return null
+  const count = u16(ifd)
+  for (let index = 0; index < count; index += 1) {
+    const entry = ifd + 2 + index * 12
+    if (entry + 12 > tiff.length) return null
+    if (u16(entry) === 0x0112) return u16(entry + 8)
   }
   return null
+}
+
+function readPngOrientation(bytes: Uint8Array): number {
+  // Chunks before IDAT only; eXIf must precede image data.
+  let offset = 8
+  while (offset + 12 <= bytes.length) {
+    const length = u32be(bytes, offset)
+    const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8))
+    if (type === 'IDAT' || type === 'IEND' || offset + 12 + length > bytes.length) break
+    if (type === 'eXIf') return readTiffOrientation(bytes.subarray(offset + 8, offset + 8 + length)) ?? 1
+    offset += 12 + length
+  }
+  return 1
+}
+
+function readWebpOrientation(bytes: Uint8Array): number {
+  let offset = 12
+  while (offset + 8 <= bytes.length) {
+    const type = String.fromCharCode(...bytes.subarray(offset, offset + 4))
+    const length = (bytes[offset + 4] | (bytes[offset + 5] << 8) | (bytes[offset + 6] << 16) | (bytes[offset + 7] << 24)) >>> 0
+    if (offset + 8 + length > bytes.length) break
+    if (type === 'EXIF') {
+      const exif = bytes.subarray(offset + 8, offset + 8 + length)
+      // Some writers keep the JPEG-style "Exif\0\0" prefix inside the chunk.
+      const tiff = String.fromCharCode(...exif.subarray(0, 4)) === 'Exif' ? exif.subarray(6) : exif
+      return readTiffOrientation(tiff) ?? 1
+    }
+    offset += 8 + length + (length & 1)
+  }
+  return 1
+}
+
+/**
+ * EXIF orientation the renderer would apply (Chromium honours it by default,
+ * including for detached Image objects drawn to a canvas). Anything other
+ * than 1 would swap or mirror the 192x208 grid we validated.
+ */
+export function readImageOrientation(bytes: Uint8Array): number {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50) return readPngOrientation(bytes)
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57) return readWebpOrientation(bytes)
+  if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) return readJpegInfo(bytes)?.orientation ?? 1
+  return 1
 }
 
 export function readImageSize(bytes: Uint8Array): ImageSize | null {
@@ -92,6 +209,7 @@ export function validateSpriteSheet(bytes: Uint8Array): { ok: true; size: ImageS
     return { ok: false, code: 'E_SIZE' }
   }
   if (size.height / SPRITE_CELL_HEIGHT < SPRITE_MIN_ROWS) return { ok: false, code: 'E_ROWS' }
+  if (readImageOrientation(bytes) !== 1) return { ok: false, code: 'E_ORIENTATION' }
   return { ok: true, size }
 }
 
