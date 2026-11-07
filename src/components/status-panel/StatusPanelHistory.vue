@@ -30,6 +30,8 @@ const { formatAge } = useQuotaFormat(() => Date.now())
 
 const historySummary = ref<HistorySummary | null>(null)
 const historyLoading = ref(false)
+const HISTORY_REFRESH_DEBOUNCE_MS = 500
+let historyRefreshTimer: ReturnType<typeof setTimeout> | null = null
 const historyError = ref('')
 const historyAction = ref('')
 const historyProjectFilter = ref('')
@@ -257,11 +259,15 @@ function refreshWhenDayChanges(): void {
 onMounted(() => {
   dayWatchTimer = setInterval(refreshWhenDayChanges, 60_000)
   cleanupHistoryUpdated = window.electronAPI?.onHistoryUpdated(() => {
-    if (props.active) void refreshHistory()
+    if (!props.active) return
+    // Trailing debounce: a burst of updates triggers one refetch.
+    if (historyRefreshTimer) clearTimeout(historyRefreshTimer)
+    historyRefreshTimer = setTimeout(() => { historyRefreshTimer = null; void refreshHistory() }, HISTORY_REFRESH_DEBOUNCE_MS)
   }) ?? null
 })
 onUnmounted(() => {
   cleanupHistoryUpdated?.()
+  if (historyRefreshTimer) clearTimeout(historyRefreshTimer)
   if (actionTimer) clearTimeout(actionTimer)
   if (dayWatchTimer) clearInterval(dayWatchTimer)
 })

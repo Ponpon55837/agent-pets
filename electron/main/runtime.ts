@@ -96,6 +96,7 @@ import { createWindowsFullscreenDetector, nativeWindowHandleToPointer, type Wind
 
 import { registerPluginFeedIpc } from '../ipc/plugin-feed'
 import { createLatestValueCoalescer } from '../ipc/broadcast-coalescer.ts'
+import { createProgressionChangeGate, createVisibleSender } from '../ipc/progression-broadcast-gate.ts'
 
 import { type IntegrationTestSource } from '../ipc/integrations'
 
@@ -1892,6 +1893,7 @@ export function createPetWindow() {
     schedulePermissionUiSync()
   })
 
+  attachBroadcastResync(mainState.petWindow)
   mainState.petWindow.on('closed', () => {
     mainState.petWindow = null
     mainState.windowsFullscreenAutoHiddenPet = false
@@ -1990,6 +1992,7 @@ export function createPanelWindow() {
     schedulePanelBlurHide()
   })
 
+  attachBroadcastResync(mainState.panelWindow)
   mainState.panelWindow.on('closed', () => {
     mainState.pluginPanelViewController?.close()
     if (mainState.panelBlurHideHandle) clearTimeout(mainState.panelBlurHideHandle)
@@ -2498,14 +2501,41 @@ export function broadcastPermissionRequests(): void {
   }
 }
 
+const progressionGate = createProgressionChangeGate()
+const progressionSender = createVisibleSender<BrowserWindow>()
+const historySender = createVisibleSender<BrowserWindow>()
+
+function sendProgressionTo(window: BrowserWindow): void {
+  const snapshot = mainState.progressionStore?.getSnapshot()
+  if (snapshot) window.webContents.send(IPC_CHANNELS.progressionUpdated, snapshot)
+}
+
+function sendHistoryUpdatedTo(window: BrowserWindow): void {
+  window.webContents.send(IPC_CHANNELS.historyUpdated)
+}
+
+// Hidden windows skip progression/history pushes; on show they get exactly one
+// resync so a stale pet or panel never stays behind.
+function attachBroadcastResync(window: BrowserWindow): void {
+  window.on('show', () => {
+    progressionSender.resync(window, sendProgressionTo)
+    historySender.resync(window, sendHistoryUpdatedTo)
+  })
+}
+
 export function broadcastProgression(snapshot?: ProgressionSnapshot): void {
   const next = snapshot ?? mainState.progressionStore?.getSnapshot()
   if (!next) return
+  progressionGate.record(next)
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send(IPC_CHANNELS.progressionUpdated, next)
-    }
+    progressionSender.send(window, w => w.webContents.send(IPC_CHANNELS.progressionUpdated, next))
   }
+}
+
+/** Event hot path: heartbeats leave the snapshot unchanged, so send nothing. */
+export function broadcastProgressionIfChanged(snapshot: ProgressionSnapshot): void {
+  if (!progressionGate.shouldBroadcast(snapshot)) return
+  broadcastProgression(snapshot)
 }
 
 // Tells the pet and panel windows that XP was actually granted (the awards are
@@ -2591,10 +2621,21 @@ export async function refreshLocalUsage(): Promise<void> {
   return mainState.localUsageScanPromise
 }
 
-export function broadcastHistoryUpdated(): void {
+function flushHistoryUpdated(): void {
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
-    if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.historyUpdated)
+    historySender.send(window, sendHistoryUpdatedTo)
   }
+}
+
+const HISTORY_UPDATED_COALESCE_MS = 1000
+const queueHistoryUpdated = createLatestValueCoalescer<void>(
+  flushHistoryUpdated,
+  callback => { setTimeout(callback, HISTORY_UPDATED_COALESCE_MS).unref?.() },
+)
+
+/** At most one historyUpdated per ~1s regardless of event rate. */
+export function broadcastHistoryUpdated(): void {
+  queueHistoryUpdated()
 }
 
 export function broadcastPresentationIntent(intent: PresentationIntent): void {
