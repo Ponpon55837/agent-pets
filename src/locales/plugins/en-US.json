@@ -135,5 +135,12 @@
   "plugins.inboxExpand": "Expand",
   "plugins.openLinkHost": "Open {host}",
   "plugins.notificationsCleared": "Cleared {count} notifications",
-  "plugins.undo": "Undo"
+  "plugins.undo": "Undo",
+  "plugins.backToList": "Back to plugins",
+  "plugins.reloadPanel": "Reload panel",
+  "plugins.panelPermissions": "Permissions and settings for {name}",
+  "plugins.panelLoading": "Loading {name}…",
+  "plugins.panelStillLoading": "{name} is still loading. You can keep waiting or cancel.",
+  "plugins.cancelLoading": "Cancel",
+  "plugins.panelFailedTitle": "The {name} panel could not be shown"
 }

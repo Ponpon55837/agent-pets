@@ -78,7 +78,7 @@ function showTab(tab: PluginTab): void {
     @content="panelViewContent = $event"
   />
 
-  <div v-else ref="shell" class="plugin-panel">
+  <div v-show="!panelViewPlugin" ref="shell" class="plugin-panel">
     <PluginDetail v-if="detailPlugin" />
     <div v-show="!detailPlugin" class="plugin-main">
     <header class="plugin-header">

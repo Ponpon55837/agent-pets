@@ -47,7 +47,7 @@ const toneMap = { success: 'success', error: 'danger', info: 'neutral' } as cons
   right: var(--space-3);
   bottom: var(--space-3);
   left: var(--space-3);
-  z-index: 200;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   align-items: center;

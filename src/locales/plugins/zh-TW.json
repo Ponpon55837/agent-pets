@@ -135,5 +135,12 @@
   "plugins.inboxExpand": "展開",
   "plugins.openLinkHost": "前往 {host}",
   "plugins.notificationsCleared": "已清除 {count} 則通知",
-  "plugins.undo": "復原"
+  "plugins.undo": "復原",
+  "plugins.backToList": "返回插件列表",
+  "plugins.reloadPanel": "重新載入面板",
+  "plugins.panelPermissions": "{name} 的權限與設定",
+  "plugins.panelLoading": "正在載入 {name}…",
+  "plugins.panelStillLoading": "{name} 仍在載入，你可以繼續等待或取消。",
+  "plugins.cancelLoading": "取消載入",
+  "plugins.panelFailedTitle": "{name} 的面板無法顯示"
 }

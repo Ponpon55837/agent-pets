@@ -235,7 +235,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
 .sheet-scrim {
   position: fixed;
   inset: 0;
-  z-index: 150;
+  z-index: var(--z-modal);
   display: flex;
   align-items: flex-end;
   justify-content: center;

@@ -128,7 +128,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 .menu {
   position: absolute;
   top: calc(100% + var(--space-1));
-  z-index: 50;
+  z-index: var(--z-popover);
   display: flex;
   min-width: 180px;
   flex-direction: column;

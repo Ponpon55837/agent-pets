@@ -73,6 +73,9 @@ const panelViewOpenToken = ref(0)
 const panelViewFrame = ref<HTMLElement | null>(null)
 const panelViewContent = ref<HTMLElement | null>(null)
 const panelViewMaximized = ref(false)
+// 面板開啟失敗、崩潰或被關閉時，外框留在畫面上顯示錯誤（原因 + 重新載入/返回/回報），而不是直接跳回列表。
+const panelViewError = ref('')
+let panelViewReturnFocus: HTMLElement | null = null
 // 忙碌狀態依範圍追蹤（global / catalog / install / plugin:{id}），UI 只鎖住相關控制項。
 // `busy` 只代表非單一插件的範圍；各插件卡片請用 pluginBusy(id)。
 const busyCounts = ref(new Map<string, number>())
@@ -259,9 +262,10 @@ function togglePluginPanelViewMaximized(): void {
 }
 
 function onPluginPanelViewKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape' || !panelViewMaximized.value) return
+  if (event.key !== 'Escape' || !panelViewPluginId.value) return
   event.preventDefault()
-  void restorePluginPanelViewMaximized(true)
+  if (panelViewMaximized.value) void restorePluginPanelViewMaximized(true)
+  else closePluginPanelView()
 }
 
 async function openPluginPanelView(pluginId: string): Promise<void> {
@@ -271,6 +275,8 @@ async function openPluginPanelView(pluginId: string): Promise<void> {
     return
   }
   const requestSequence = ++panelViewRequestSequence
+  if (!panelViewPluginId.value && document.activeElement instanceof HTMLElement) panelViewReturnFocus = document.activeElement
+  panelViewError.value = ''
   const previousOpenToken = panelViewOpenToken.value
   panelViewOpenToken.value = 0
   if (previousOpenToken) window.electronAPI?.closePluginPanelView(previousOpenToken)
@@ -297,8 +303,7 @@ async function openPluginPanelView(pluginId: string): Promise<void> {
       return
     }
     if (!result?.ok) {
-      panelViewPluginId.value = ''
-      setError(result && !result.ok ? result.error : 'plugin_service_unavailable')
+      panelViewError.value = result && !result.ok ? result.error : 'plugin_service_unavailable'
       return
     }
     panelViewOpenToken.value = result.value.openToken
@@ -306,8 +311,7 @@ async function openPluginPanelView(pluginId: string): Promise<void> {
     sendPluginPanelViewBounds()
   } catch {
     if (requestSequence !== panelViewRequestSequence) return
-    panelViewPluginId.value = ''
-    setError('plugin_service_unavailable')
+    panelViewError.value = 'plugin_service_unavailable'
   }
 }
 
@@ -317,7 +321,25 @@ function closePluginPanelView(): void {
   const openToken = panelViewOpenToken.value
   panelViewOpenToken.value = 0
   panelViewPluginId.value = ''
+  panelViewError.value = ''
   if (openToken) window.electronAPI?.closePluginPanelView(openToken)
+  const returnTo = panelViewReturnFocus
+  panelViewReturnFocus = null
+  void nextTick(() => {
+    if (returnTo?.isConnected) returnTo.focus()
+  })
+}
+
+function reloadPluginPanelView(): void {
+  const pluginId = panelViewPluginId.value
+  if (pluginId) void openPluginPanelView(pluginId)
+}
+
+// 從面板外框直接跳到該插件的詳情頁（權限、設定、診斷）。
+function openPluginDetailFromPanel(): void {
+  const pluginId = panelViewPluginId.value
+  closePluginPanelView()
+  if (pluginId) openPluginDetail(pluginId)
 }
 
 function handlePluginPanelViewClosed(event: PluginPanelViewClosedEvent): void {
@@ -325,8 +347,11 @@ function handlePluginPanelViewClosed(event: PluginPanelViewClosedEvent): void {
   panelViewRequestSequence += 1
   void restorePluginPanelViewMaximized()
   panelViewOpenToken.value = 0
-  panelViewPluginId.value = ''
-  if (event.reason !== 'hidden') setError(pluginPanelViewCloseError(event.reason))
+  if (event.reason === 'hidden') {
+    panelViewPluginId.value = ''
+    return
+  }
+  panelViewError.value = pluginPanelViewCloseError(event.reason)
 }
 
 // 詳情頁是目前插件唯一的來源；診斷、設定、指令都跟著它走，不再由別處的下拉決定。
@@ -1200,6 +1225,9 @@ onUnmounted(() => {
     panelViewFrame,
     panelViewContent,
     panelViewMaximized,
+    panelViewError,
+    reloadPluginPanelView,
+    openPluginDetailFromPanel,
     busy,
     isBusy,
     pluginBusy,
