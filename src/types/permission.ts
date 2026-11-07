@@ -22,7 +22,13 @@ export interface PermissionRequestView {
   generation: number
   action: string
   description: string
+  /** Sanitized, redacted tool arguments (command / path globs), at most 5 x 120 chars. */
+  details: ReadonlyArray<string>
+  /** Number of characters dropped from description/details; 0 when nothing was cut. */
+  truncatedChars: number
   risk: PermissionRisk
+  /** The tool reaches outside the machine (network or external directory). */
+  network: boolean
   receivedAt: number
   expiresAt: number
   status: PermissionRequestStatus
@@ -32,3 +38,29 @@ export interface PermissionRequestView {
   hotkeyEligible: boolean
   truncated: boolean
 }
+
+/**
+ * Renderer-side result of a request that has left the broker's active queue.
+ * It carries no request content beyond the already-sanitized action label, so
+ * it is safe to keep around for a few seconds after the request is gone.
+ */
+export type PermissionOutcomeKind =
+  | 'expired'
+  | 'cancelled'
+  | 'delivery_failed'
+  | 'conflict'
+  | 'error'
+
+export interface PermissionOutcome {
+  kind: PermissionOutcomeKind
+  requestId: string
+  agentId: string
+  action: string
+  projectId?: string
+  at: number
+}
+
+/** What `decidePermission` reports back to its caller. */
+export type PermissionDecideResult =
+  | { ok: true; status: 'allowed' | 'denied' }
+  | { ok: false; kind: PermissionOutcomeKind }
