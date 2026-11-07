@@ -1770,6 +1770,7 @@ export function reloadPetRenderers(): void {
 }
 
 export function createPetWindow() {
+  if (mainState.petWindow && !mainState.petWindow.isDestroyed()) return
   const primaryWorkArea = screen.getPrimaryDisplay().workArea
   const rawScale = parseFloat(process.env.PET_SCALE || '1')
   const scale = clamp(isNaN(rawScale) ? 1 : rawScale, 0.3, 5)
@@ -1919,7 +1920,12 @@ export function createPetWindow() {
 // window, so opening/closing or resizing it (Sessions <-> Settings) never
 // moves or resizes the pet itself.
 export function createPanelWindow() {
-  mainState.panelWindow = new BrowserWindow({
+  // Idempotent: the first-run wizard or a pet click can create the panel on demand
+  // before the startup step reaches it. A second window would orphan the first
+  // renderer (its IPC would be rejected as untrusted) and its 'closed' event would
+  // then clear the live reference.
+  if (mainState.panelWindow && !mainState.panelWindow.isDestroyed()) return
+  const panelWindow = new BrowserWindow({
     ...currentPanelSize(),
     show: false,
     frame: false,
@@ -1939,6 +1945,7 @@ export function createPanelWindow() {
       devTools: !app.isPackaged,
     },
   })
+  mainState.panelWindow = panelWindow
 
   mainState.panelWindow.on('hide', () => mainState.pluginPanelViewController?.onPanelWindowHidden())
   mainState.panelWindow.on('show', () => {
@@ -1986,6 +1993,8 @@ export function createPanelWindow() {
 
   attachBroadcastResync(mainState.panelWindow)
   mainState.panelWindow.on('closed', () => {
+    // Only the window that is still current may clear shared state.
+    if (mainState.panelWindow !== panelWindow) return
     mainState.pluginPanelViewController?.close()
     if (mainState.panelBlurHideHandle) clearTimeout(mainState.panelBlurHideHandle)
     mainState.panelBlurHideHandle = null

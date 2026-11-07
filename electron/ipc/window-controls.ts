@@ -69,9 +69,10 @@ export function registerWindowControlsIpc(deps: WindowControlsIpcDependencies): 
   })
 
   deps.ipcMain.on(IPC_CHANNELS.panelToggle, event => {
+    if (!deps.isTrustedIpcSender(event, deps.getPetWindow())) return
     const panelWindow = deps.getPanelWindow()
-    if (!panelWindow || !deps.isTrustedIpcSender(event, deps.getPetWindow())) return
-    if (panelWindow.isVisible()) {
+    // No panel (not created yet, or its renderer was lost): showPanelWindow recreates it.
+    if (panelWindow && panelWindow.isDestroyed?.() !== true && panelWindow.isVisible()) {
       deps.setPanelFullscreenAutoHidden(false)
       panelWindow.hide()
       return

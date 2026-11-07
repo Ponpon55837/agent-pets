@@ -91,3 +91,24 @@ test('plugin feed IPC keeps pet and panel sender scopes and bounded payload chec
   assert.deepEqual(trusted[1], { event: {}, window: petWindow })
   assert.deepEqual(trusted[2], { event: {}, window: panelWindow })
 })
+
+test('plugin badges can be read by the pet and by the panel (dashboard plugin tabs), nobody else', async () => {
+  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const panelContents = { id: 'panel-wc' }
+  const petContents = { id: 'pet-wc' }
+  const panelWindow = { webContents: panelContents }
+  const petWindow = { webContents: petContents }
+  registerPluginFeedIpc({
+    ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler) } },
+    assertTrustedIpcSender: (event, window) => {
+      if ((event as { sender: unknown }).sender !== (window as { webContents: unknown } | null)?.webContents) throw new Error('Unauthorized IPC sender')
+    },
+    getPetWindow: () => petWindow,
+    getPanelWindow: () => panelWindow,
+    getPluginBadgeController: () => ({ list: () => [{ id: 'badge' }] }) as never,
+  } as never)
+  const get = handlers.get(IPC_CHANNELS.pluginBadgesGet)!
+  assert.deepEqual(await get({ sender: petContents }), [{ id: 'badge' }])
+  assert.deepEqual(await get({ sender: panelContents }), [{ id: 'badge' }])
+  assert.throws(() => get({ sender: { id: 'plugin-view' } }), /Unauthorized/)
+})

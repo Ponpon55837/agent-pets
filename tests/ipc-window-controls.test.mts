@@ -134,3 +134,19 @@ test('click-through is never enabled on Linux where mouse-move cannot be forward
   handler?.({}, { ignore: false })
   assert.deepEqual(calls, ['passthrough:false'])
 })
+
+test('toggling the panel recreates it when no panel window exists yet or it was lost', () => {
+  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const calls: string[] = []
+  registerWindowControlsIpc({
+    ipcMain: { on: (channel, handler) => { handlers.set(channel, handler) } },
+    isTrustedIpcSender: () => true,
+    assertTrustedIpcSender: () => undefined,
+    getPetWindow: () => ({}) as never,
+    getPanelWindow: () => null,
+    showPanelWindow: (view: string) => calls.push(`show:${view}`),
+    setPanelFullscreenAutoHidden: () => undefined,
+  } as never)
+  handlers.get(IPC_CHANNELS.panelToggle)?.({})
+  assert.deepEqual(calls, ['show:restore'])
+})
