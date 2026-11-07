@@ -34,6 +34,7 @@ import { normalizePresentationStatus, PresentationController } from '../presenta
 
 import { ProjectRoutingStore } from '../project-routing'
 import { PluginRegistry, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES, PLUGIN_ARCHIVE_SKIN_MAX_BYTES } from '../plugin-registry'
+import { PluginPanelSizeStore } from '../plugin-panel-sizes'
 import { PluginPreferencesStore, pluginHostMemoryBudgetMb } from '../plugin-preferences'
 import { PluginHostWindowController, type PluginHostDescriptor } from '../plugin-host-window'
 import { selectEnabledPluginDescriptors } from '../plugin-host-selection'
@@ -911,6 +912,9 @@ export async function createPluginServices(): Promise<void> {
   mainState.pluginRegistry = new PluginRegistry(userDataDirectory)
   mainState.pluginDeveloperModeWatcher = new PluginDeveloperModeWatcher(500)
   mainState.pluginPreferences = new PluginPreferencesStore(userDataDirectory)
+  const panelSizeStore = new PluginPanelSizeStore(join(userDataDirectory, 'plugin-panel-sizes.json'))
+  mainState.pluginPanelWindowSizer.restore(panelSizeStore.load(), sizes => panelSizeStore.save(sizes))
+  app.once('before-quit', () => panelSizeStore.flush())
   mainState.pluginSecretsStore = new PluginSecretsStore(userDataDirectory, safeStorage)
   mainState.pluginSecretConsentStore = new PluginSecretConsentStore(userDataDirectory)
   mainState.pluginSettingsStore = new PluginSettingsStore(userDataDirectory)
