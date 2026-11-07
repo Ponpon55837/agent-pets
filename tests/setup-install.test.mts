@@ -9,6 +9,9 @@ import { fileURLToPath } from 'node:url'
 import { configureSetupEnvironment } from '../electron/setup-environment.ts'
 import {
   claudeCodeSettingsPath,
+  claudePermissionRespondPath,
+  syncClaudePermissionRespondOptIn,
+  upgradeClaudeCodeHooks,
   codexConfigPath,
   codexHooksPath,
   hookScriptPath,
@@ -137,4 +140,73 @@ test('install.mjs is a thin wrapper around the same installer', { skip: process.
   } finally {
     fs.rmSync(home, { recursive: true, force: true })
   }
+})
+
+test('Claude Code install registers PermissionRequest with a timeout above the longest wait', () => {
+  withHome(() => {
+    installIntegration('claudeCode')
+    const hooks = JSON.parse(fs.readFileSync(claudeCodeSettingsPath(), 'utf8')).hooks
+    assert.deepEqual(Object.keys(hooks), [
+      'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PermissionRequest', 'PostToolUse',
+      'PostToolUseFailure', 'Notification', 'Stop', 'StopFailure', 'SessionEnd',
+    ])
+    assert.equal(hooks.PermissionRequest[0].matcher, '*')
+    assert.equal(hooks.PermissionRequest[0].hooks[0].timeout, 135)
+    assert.equal(hooks.PostToolUseFailure[0].matcher, '*')
+    for (const event of Object.keys(hooks).filter(name => name !== 'PermissionRequest')) {
+      assert.equal(hooks[event][0].hooks[0].timeout, undefined, event)
+    }
+  })
+})
+
+test('startup upgrade adds the new Claude handlers to an older install and keeps user hooks', () => {
+  withHome((home) => {
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true })
+    const hook = hookScriptPath()
+    const ours = (matcher?: string) => ({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command: '/old/node', args: [hook, 'claude'] }] })
+    const mine = { type: 'command', command: 'echo mine' }
+    // What 1.10.3 wrote, plus a user handler on the same event.
+    const legacy = {
+      model: 'opus',
+      hooks: {
+        SessionStart: [ours()], UserPromptSubmit: [ours()], PreToolUse: [ours('*')], PostToolUse: [ours('*')],
+        Notification: [ours()], Stop: [{ hooks: [mine] }, ours()], StopFailure: [ours()], SessionEnd: [ours()],
+      },
+    }
+    fs.writeFileSync(claudeCodeSettingsPath(), `${JSON.stringify(legacy, null, 2)}\n`)
+    const result = upgradeClaudeCodeHooks()
+    assert.equal(result?.status, 'written')
+    assert.ok(result?.backupPath)
+    const upgraded = JSON.parse(fs.readFileSync(claudeCodeSettingsPath(), 'utf8'))
+    assert.deepEqual(upgraded.hooks.PermissionRequest, [{ matcher: '*', hooks: [{ type: 'command', command: '/old/node', args: [hook, 'claude'], timeout: 135 }] }])
+    assert.deepEqual(upgraded.hooks.PostToolUseFailure, [ours('*')])
+    assert.deepEqual(upgraded.hooks.Stop, legacy.hooks.Stop)
+    assert.equal(upgraded.model, 'opus')
+    assert.equal(upgradeClaudeCodeHooks()?.status, 'unchanged')
+
+    // Not installed: nothing to upgrade, nothing written.
+    uninstallIntegration('claudeCode')
+    const text = fs.readFileSync(claudeCodeSettingsPath(), 'utf8')
+    assert.equal(upgradeClaudeCodeHooks(), null)
+    assert.equal(fs.readFileSync(claudeCodeSettingsPath(), 'utf8'), text)
+  })
+})
+
+test('the Claude respond opt-in file is private, clamped, removable and cleared by full cleanup', () => {
+  withHome(() => {
+    syncClaudePermissionRespondOptIn(90)
+    const file = claudePermissionRespondPath()
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { enabled: true, waitSeconds: 90 })
+    if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600)
+    syncClaudePermissionRespondOptIn(9_999)
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).waitSeconds, 120)
+    syncClaudePermissionRespondOptIn(null)
+    assert.equal(fs.existsSync(file), false)
+    syncClaudePermissionRespondOptIn(null)
+
+    installIntegration('claudeCode')
+    syncClaudePermissionRespondOptIn(30)
+    uninstallIntegration('all')
+    assert.equal(fs.existsSync(file), false)
+  })
 })

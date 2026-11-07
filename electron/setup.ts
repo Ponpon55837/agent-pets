@@ -7,7 +7,12 @@ import { createNodeResolver, NodeNotFoundError, NodeUnsupportedError, type NodeI
 import type { PetEdge, PetWindowMode } from '../src/types/pet-window'
 import { readConfigText, writeConfigSafely, writeTextAtomic, type ConfigWriteResult } from './safe-config-write.ts'
 import {
+  CLAUDE_PERMISSION_HOOK_TIMEOUT_SECONDS,
+  clampClaudePermissionWaitSeconds,
+} from '../src/types/permission.ts'
+import {
   codexHookCommand,
+  ensureAgentPetsHookEntries,
   escapeCmdQuotedPath,
   disableCodexHooksFeatureText,
   enableCodexHooksFeatureText,
@@ -219,6 +224,29 @@ function permissionTokenPath(): string {
 
 function presentationTokenPath(): string {
   return path.join(hookScriptDeployPath(), 'presentation-token')
+}
+
+// Opt-in marker read by agent-hook.mjs. Present only while the user has turned on
+// answering Claude Code permissions from the pet; the main process still checks
+// its own persisted preference before accepting any request.
+function claudePermissionRespondPath(): string {
+  return path.join(hookScriptDeployPath(), 'claude-permission-respond')
+}
+
+/** Writes (enabled) or removes (null) the hook's opt-in file. */
+function syncClaudePermissionRespondOptIn(waitSeconds: number | null): void {
+  const filePath = claudePermissionRespondPath()
+  if (waitSeconds === null) {
+    fs.rmSync(filePath, { force: true })
+    return
+  }
+  const content = `${JSON.stringify({ enabled: true, waitSeconds: clampClaudePermissionWaitSeconds(waitSeconds) })}\n`
+  if (readFile(filePath) === content) return
+  ensureDir(hookScriptDeployPath())
+  writeTextAtomic(filePath, content, { mode: 0o600 })
+  if (!IS_WIN) {
+    try { fs.chmodSync(filePath, 0o600) } catch {}
+  }
 }
 
 // Tokens created or read by this process are remembered so that a full cleanup followed by a
@@ -753,19 +781,27 @@ const CLAUDE_CODE_HOOK_EVENTS = [
   'SessionStart',
   'UserPromptSubmit',
   'PreToolUse',
+  'PermissionRequest',
   'PostToolUse',
+  'PostToolUseFailure',
   'Notification',
   'Stop',
   'StopFailure',
   'SessionEnd',
 ]
-const CLAUDE_CODE_TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse'])
+const CLAUDE_CODE_TOOL_EVENTS = new Set(['PreToolUse', 'PermissionRequest', 'PostToolUse', 'PostToolUseFailure'])
+// Only the PermissionRequest handler may wait (for a pet answer); every other
+// event keeps Claude Code's default timeout.
+const CLAUDE_CODE_HOOK_TIMEOUTS: Readonly<Record<string, number>> = { PermissionRequest: CLAUDE_PERMISSION_HOOK_TIMEOUT_SECONDS }
 
 function claudeCodeHooksJson(): any {
   const hook = hookScriptPath()
   const nodeBin = requireNodeBin()
   const handler = (event: string) => {
-    const entry: any = { hooks: [{ type: 'command', command: nodeBin, args: [hook, 'claude'] }] }
+    const timeout = CLAUDE_CODE_HOOK_TIMEOUTS[event]
+    const entry: any = {
+      hooks: [{ type: 'command', command: nodeBin, args: [hook, 'claude'], ...(timeout ? { timeout } : {}) }],
+    }
     if (CLAUDE_CODE_TOOL_EVENTS.has(event)) entry.matcher = '*'
     return entry
   }
@@ -779,6 +815,23 @@ function installClaudeCode(): ConfigWriteResult[] {
   const scripts = installHookScript()
   // Throws ConfigRefusedError (and writes nothing) if settings.json is not valid JSON.
   return [...scripts, mergeAgentPetsHooksFile(claudeCodeSettingsPath(), claudeCodeHooksJson().hooks)]
+}
+
+// Events added after the first Claude Code release; older installs are upgraded on startup.
+const CLAUDE_CODE_UPGRADE_EVENTS = ['PermissionRequest', 'PostToolUseFailure']
+
+/**
+ * Brings an install made by an older version up to date (adds the PermissionRequest /
+ * PostToolUseFailure handlers and the PermissionRequest timeout). Touches only Agent Pets'
+ * own handlers and keeps a backup; a missing, unparseable or not-installed settings.json is
+ * left alone, and handlers for the original events are never re-added.
+ */
+function upgradeClaudeCodeHooks(): ConfigWriteResult | null {
+  return ensureAgentPetsHookEntries(claudeCodeSettingsPath(), CLAUDE_CODE_UPGRADE_EVENTS.map(event => ({
+    event,
+    ...(CLAUDE_CODE_TOOL_EVENTS.has(event) ? { matcher: '*' } : {}),
+    ...(CLAUDE_CODE_HOOK_TIMEOUTS[event] ? { timeout: CLAUDE_CODE_HOOK_TIMEOUTS[event] } : {}),
+  })))
 }
 
 function uninstallClaudeCode(): void {
@@ -856,6 +909,11 @@ function refreshInstalledIntegrationScripts(): string {
   } catch (error) {
     console.error('Installed integration refresh skipped', error)
   }
+  try {
+    upgradeClaudeCodeHooks()
+  } catch (error) {
+    console.error('Claude Code hook upgrade skipped', error)
+  }
   return token
 }
 
@@ -910,6 +968,7 @@ function cleanupDeployDirectory(): void {
     hookScriptPath(),
     hookWrapperPath(),
     codexFeatureMarkerPath(),
+    claudePermissionRespondPath(),
   ]) {
     removeFile(filePath)
   }
@@ -969,6 +1028,9 @@ export {
   ensurePresentationToken,
   ensurePresentationMcpScript,
   presentationMcpScriptPath,
+  claudePermissionRespondPath,
+  syncClaudePermissionRespondOptIn,
+  upgradeClaudeCodeHooks,
   ensureDir,
   writeFileEnsured,
   fileExists,

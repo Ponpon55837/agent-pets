@@ -6,6 +6,7 @@ import test from 'node:test'
 
 import {
   disableCodexHooksFeatureText,
+  ensureAgentPetsHookEntries,
   enableCodexHooksFeatureText,
   fileHasAgentPetsHooks,
   isAgentPetsHook,
@@ -317,4 +318,72 @@ test('batch wrapper path escaping doubles percent signs and rejects quotes', () 
   assert.throws(() => escapeCmdQuotedPath('C:\\bad"name\\node.exe'))
   // $-sequences must reach the file literally (function replacer, not a replacement pattern).
   assert.equal('X __N__ Y'.replace('__N__', () => escapeCmdQuotedPath('C:\\a$&b\\node.exe')), 'X C:\\a$&b\\node.exe Y')
+})
+
+test('ensureAgentPetsHookEntries adds missing handlers and timeouts without touching user handlers', () => {
+  const dir = tempDir()
+  try {
+    const file = path.join(dir, 'settings.json')
+    const userStop = { hooks: [{ type: 'command', command: 'echo mine', timeout: 5 }] }
+    const userPermission = { matcher: 'Bash', hooks: [{ type: 'command', command: '/opt/other-tool/hook', timeout: 30 }] }
+    const before = {
+      model: 'opus',
+      hooks: {
+        Stop: [userStop, ours()],
+        PermissionRequest: [userPermission],
+        PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: '/custom/node', args: [HOOK, 'claude'] }] }],
+      },
+    }
+    fs.writeFileSync(file, `${JSON.stringify(before, null, 2)}\n`)
+    const required = [
+      { event: 'Stop' },
+      { event: 'PreToolUse', matcher: '*' },
+      { event: 'PermissionRequest', matcher: '*', timeout: 135 },
+      { event: 'PostToolUseFailure', matcher: '*' },
+    ]
+    const result = ensureAgentPetsHookEntries(file, required)
+    assert.equal(result?.status, 'written')
+    assert.ok(result?.backupPath && fs.existsSync(result.backupPath))
+    const after = JSON.parse(fs.readFileSync(file, 'utf8'))
+    assert.equal(after.model, 'opus')
+    assert.deepEqual(after.hooks.Stop, before.hooks.Stop)
+    assert.deepEqual(after.hooks.PreToolUse, before.hooks.PreToolUse)
+    // The user's own PermissionRequest handler is kept as-is; ours is appended with the timeout,
+    // reusing the command the user already has (never the current Node path).
+    assert.deepEqual(after.hooks.PermissionRequest[0], userPermission)
+    assert.deepEqual(after.hooks.PermissionRequest[1], { matcher: '*', hooks: [{ type: 'command', command: 'node', args: [HOOK, 'claude'], timeout: 135 }] })
+    assert.deepEqual(after.hooks.PostToolUseFailure, [{ matcher: '*', hooks: [{ type: 'command', command: 'node', args: [HOOK, 'claude'] }] }])
+    const userText = JSON.stringify(userStop, null, 2).split('\n').map(line => `      ${line}`).join('\n').trimStart()
+    assert.ok(fs.readFileSync(file, 'utf8').includes(userText), 'user handlers keep their exact text')
+
+    // Idempotent: a second run writes nothing.
+    assert.equal(ensureAgentPetsHookEntries(file, required)?.status, 'unchanged')
+
+    // A wrong timeout on our own handler is corrected; the other tool's timeout is not.
+    after.hooks.PermissionRequest[1].hooks[0].timeout = 20
+    fs.writeFileSync(file, `${JSON.stringify(after, null, 2)}\n`)
+    assert.equal(ensureAgentPetsHookEntries(file, required)?.status, 'written')
+    const fixed = JSON.parse(fs.readFileSync(file, 'utf8'))
+    assert.equal(fixed.hooks.PermissionRequest[1].hooks[0].timeout, 135)
+    assert.equal(fixed.hooks.PermissionRequest[0].hooks[0].timeout, 30)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('ensureAgentPetsHookEntries leaves files without Agent Pets hooks or with invalid JSON alone', () => {
+  const dir = tempDir()
+  try {
+    const file = path.join(dir, 'settings.json')
+    assert.equal(ensureAgentPetsHookEntries(file, [{ event: 'PermissionRequest' }]), null)
+    const userOnly = '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo mine"}]}]}}'
+    fs.writeFileSync(file, userOnly)
+    assert.equal(ensureAgentPetsHookEntries(file, [{ event: 'PermissionRequest' }]), null)
+    assert.equal(fs.readFileSync(file, 'utf8'), userOnly)
+    fs.writeFileSync(file, '{ "hooks": // broken')
+    assert.equal(ensureAgentPetsHookEntries(file, [{ event: 'PermissionRequest' }]), null)
+    assert.equal(fs.readFileSync(file, 'utf8'), '{ "hooks": // broken')
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })
