@@ -301,3 +301,44 @@ test('one session cannot hold more than 20 active requests', () => {
   assert.equal(other.ok, true)
   broker.shutdown()
 })
+
+test('a risky request with cut-off arguments cannot be allowed from Agent Pets', async () => {
+  const broker = new PermissionBroker()
+  broker.registerAdapter({
+    id: 'trunc',
+    capabilities: { permissions: 'respond', permissionModes: ['allow_once', 'deny'] },
+    async respond() { return 'delivered' as const },
+  })
+  const make = (requestId: string, risk: string, description: string) => broker.createRequest('trunc', {
+    requestId, agentId: 'x', sessionId: 's', generation: 1, action: 'Bash', description, risk, responseHandle: {},
+  })
+  const long = `rm -rf ./build && ${'x'.repeat(400)}`
+  assert.deepEqual(make('high-long', 'high', long).ok && broker.listRequests().at(-1)?.allowedDecisions, ['deny'])
+  assert.deepEqual(make('unknown-long', 'unknown', long).ok && broker.listRequests().at(-1)?.allowedDecisions, ['deny'])
+  assert.deepEqual(make('medium-long', 'medium', long).ok && broker.listRequests().at(-1)?.allowedDecisions, ['allow_once', 'deny'])
+  assert.deepEqual(make('high-short', 'high', 'git status').ok && broker.listRequests().at(-1)?.allowedDecisions, ['allow_once', 'deny'])
+  assert.deepEqual(await broker.decide('high-long', 'allow_once', 'bubble'), { ok: false, error: 'invalid_decision', status: 'pending' })
+  assert.deepEqual(await broker.decide('high-long', 'deny', 'bubble'), { ok: true, status: 'denied' })
+  broker.shutdown()
+})
+
+test('hasRecentRequestForSession covers open and just-finished requests only', () => {
+  let now = 1_000_000
+  const broker = new PermissionBroker({ now: () => now })
+  broker.registerAdapter({
+    id: 'claude',
+    capabilities: { permissions: 'respond', permissionModes: ['allow_once', 'deny'] },
+    async respond() { return 'delivered' as const },
+  })
+  assert.equal(broker.hasRecentRequestForSession('claude', 's1', 10_000), false)
+  broker.createRequest('claude', { requestId: 'r1', agentId: 'claude', sessionId: 's1', generation: 1, action: 'Bash', description: 'ls', responseHandle: {} })
+  assert.equal(broker.hasRecentRequestForSession('claude', 's1', 10_000), true)
+  assert.equal(broker.hasRecentRequestForSession('claude', 's2', 10_000), false)
+  assert.equal(broker.hasRecentRequestForSession('claude-desktop', 's1', 10_000), false)
+  broker.resolveExternally('r1', 'agent_resolved')
+  now += 9_000
+  assert.equal(broker.hasRecentRequestForSession('claude', 's1', 10_000), true)
+  now += 2_000
+  assert.equal(broker.hasRecentRequestForSession('claude', 's1', 10_000), false)
+  broker.shutdown()
+})

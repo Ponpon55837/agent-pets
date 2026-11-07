@@ -2,21 +2,31 @@
 import { computed, onMounted, ref } from 'vue'
 import { locale, t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
-import { PERMISSION_DEFAULT_TTL_SECONDS } from '@/types/permission'
+import {
+  CLAUDE_PERMISSION_WAIT_MAX_SECONDS,
+  CLAUDE_PERMISSION_WAIT_MIN_SECONDS,
+  PERMISSION_DEFAULT_TTL_SECONDS,
+} from '@/types/permission'
 import Card from '@/components/ui/Card.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
 import Button from '@/components/ui/Button.vue'
+import NumberField from '@/components/ui/NumberField.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import type { PermissionAuditEntry } from '@/types/permission'
-import { permissionSourceName } from '@/utils/permission-source'
+import { alsoAnswerableKey, permissionSourceName } from '@/utils/permission-source'
 import { playCue, type SoundCue } from '@/utils/sound'
 import { formatDateParts } from '@/utils/intl-format'
 
-// Product names are proper nouns, not translatable copy.
-const APPROVER_AGENTS = 'OpenCode'
-const REMINDER_AGENTS = 'Codex · Claude'
-
 const store = useAgentStore()
+
+// Product names are proper nouns, not translatable copy. Claude Code moves to
+// the approver list only while answering from the pet is turned on.
+const approverAgents = computed(() => (store.claudePermissionRespondEnabled ? 'OpenCode · Claude Code' : 'OpenCode'))
+const reminderAgents = computed(() => (store.claudePermissionRespondEnabled ? 'Codex' : 'Codex · Claude Code'))
+
+function setClaudeWait(seconds: number): void {
+  store.setClaudePermissionWaitSeconds(Math.round(seconds))
+}
 
 const launchHelp = computed(() => {
   if (!store.launchAtStartupSupported) return t('availablePackaged')
@@ -48,8 +58,11 @@ async function clearAudit(): Promise<void> {
 }
 
 function auditResult(entry: PermissionAuditEntry): string {
-  if (entry.status === 'allowed') return t('permission.auditAllowed')
-  if (entry.status === 'denied') return t('permission.auditDenied')
+  // Claude Code keeps its terminal prompt open, so a decision sent from here may have
+  // arrived after the user had already answered there.
+  const maybeTerminal = alsoAnswerableKey(entry.agentId) ? t('permission.auditMaybeTerminal') : ''
+  if (entry.status === 'allowed') return t('permission.auditAllowed') + maybeTerminal
+  if (entry.status === 'denied') return t('permission.auditDenied') + maybeTerminal
   if (entry.status === 'expired') return t('permission.auditExpired')
   if (entry.status === 'delivery_failed') return t('permission.auditFailed')
   return t('permission.auditCancelled')
@@ -126,14 +139,32 @@ function preview(cue: SoundCue): void {
     <p class="permission-settings-intro">{{ t('permission.settingsIntro') }}</p>
     <ul class="permission-settings-list">
       <li>
-        <strong>{{ APPROVER_AGENTS }}</strong>
+        <strong>{{ approverAgents }}</strong>
         <span>{{ t('permission.settingsCanApprove') }}</span>
       </li>
       <li>
-        <strong>{{ REMINDER_AGENTS }}</strong>
+        <strong>{{ reminderAgents }}</strong>
         <span>{{ t('permission.settingsReminderOnly') }}</span>
       </li>
     </ul>
+    <ToggleRow
+      :model-value="store.claudePermissionRespondEnabled"
+      :label="t('permission.claudeRespond')"
+      :help="t('permission.claudeRespondHelp')"
+      @update:model-value="store.setClaudePermissionRespondEnabled($event)"
+    />
+    <div class="claude-wait">
+      <NumberField
+        :model-value="store.claudePermissionWaitSeconds"
+        :label="t('permission.claudeWait')"
+        :help="t('permission.claudeWaitHelp', { min: CLAUDE_PERMISSION_WAIT_MIN_SECONDS, max: CLAUDE_PERMISSION_WAIT_MAX_SECONDS })"
+        :min="CLAUDE_PERMISSION_WAIT_MIN_SECONDS"
+        :max="CLAUDE_PERMISSION_WAIT_MAX_SECONDS"
+        :step="5"
+        :disabled="!store.claudePermissionRespondEnabled"
+        @commit="setClaudeWait"
+      />
+    </div>
     <p class="permission-settings-intro">{{ t('permission.settingsRiskRules') }}</p>
   </Card>
 
@@ -181,6 +212,10 @@ function preview(cue: SoundCue): void {
   padding-bottom: var(--space-2);
 }
 
+.claude-wait {
+  padding: var(--space-2) 0 var(--space-3);
+}
+
 .permission-audit-list {
   display: flex;
   max-height: 180px;
@@ -194,6 +229,7 @@ function preview(cue: SoundCue): void {
 
 .permission-audit-list li {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-3);
   font-size: var(--font-sm);
@@ -210,7 +246,9 @@ function preview(cue: SoundCue): void {
 }
 
 .permission-audit-list strong {
+  min-width: 0;
   margin-left: auto;
+  text-align: right;
 }
 
 .permission-sound-volume {

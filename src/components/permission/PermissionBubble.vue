@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { t, type TranslationKey } from '@/i18n'
-import { permissionSourceName } from '@/utils/permission-source'
+import { alsoAnswerableKey, permissionSourceName } from '@/utils/permission-source'
 import type { PermissionOutcomeKind } from '@/types/permission'
 import Button from '@/components/ui/Button.vue'
 import PermissionRiskBadge from '@/components/permission/PermissionRiskBadge.vue'
@@ -59,6 +59,7 @@ function arm(): void {
 function decide(decision: 'allow_once' | 'deny', viaKeyboard = false): void {
   const current = request.value
   if (!current || current.status !== 'pending') return
+  if (!current.allowedDecisions.includes(decision)) return
   // Denying is always safe, so the keyboard may deny straight away.
   if (!armed.value && !(viaKeyboard && decision === 'deny')) return
   void store.decidePermission(current.requestId, decision)
@@ -123,6 +124,9 @@ function keyCaps(label: string | undefined): string[] {
   return label.includes('+') ? label.split('+').filter(Boolean) : Array.from(label)
 }
 const hotkeyBlocked = computed(() => hotkey.value?.status === 'unavailable')
+const alsoAnswerKey = computed(() => (request.value ? alsoAnswerableKey(request.value.agentId) : null))
+// The broker drops allow_once for a risky request whose arguments were cut off.
+const canAllow = computed(() => request.value?.allowedDecisions.includes('allow_once') ?? false)
 
 // --- In-window keyboard (only while focus is inside the bubble) --------------
 // Never global: Esc / N deny, Y allows. Anything that is not low / medium risk
@@ -259,7 +263,7 @@ onBeforeUnmount(() => {
       </Button>
       <Button
         class="permission-button allow"
-        :disabled="request.status !== 'pending' || !armed"
+        :disabled="request.status !== 'pending' || !armed || !canAllow"
         @mousedown.stop
         @click.stop="decide('allow_once')"
       >
@@ -267,6 +271,8 @@ onBeforeUnmount(() => {
         <span v-if="showHotkeys" class="permission-keycaps"><kbd v-for="key in keyCaps(hotkey?.allowLabel)" :key="key">{{ key }}</kbd></span>
       </Button>
     </div>
+    <p v-if="!canAllow" class="permission-request-hint">{{ t('permission.allowNeedsFullView', { source: permissionSourceName(request.agentId) }) }}</p>
+    <p v-if="alsoAnswerKey" class="permission-request-hint">{{ t(alsoAnswerKey, { source: permissionSourceName(request.agentId) }) }}</p>
     <p v-if="hotkeyBlocked" class="permission-request-hint">{{ t('permission.hotkeyUnavailable') }}</p>
     <p class="permission-request-hint permission-keyboard-hint" :class="{ holding: holdProgress }">
       {{ needsHold ? t('permission.keyboardHint') : t('permission.keyboardHintLow') }}

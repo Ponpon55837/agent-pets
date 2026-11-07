@@ -217,6 +217,68 @@ export function rewriteAgentPetsHookCommands(
   return changed
 }
 
+export interface RequiredHookEntry {
+  event: string
+  matcher?: string
+  /** Seconds; set (or corrected) on Agent Pets' own handler for this event. */
+  timeout?: number
+}
+
+/**
+ * Upgrade path for an existing install: adds missing Agent Pets handlers and corrects their
+ * `timeout`, reusing the command/args the user already has (a changed Node path is never a reason
+ * to rewrite). Other handlers are left exactly as they are. Returns null when the file has no
+ * Agent Pets hook (not installed) or cannot be parsed; nothing is written when nothing differs.
+ */
+export function ensureAgentPetsHookEntries(filePath: string, required: readonly RequiredHookEntry[]): ConfigWriteResult | null {
+  let parsed: ReturnType<typeof readJsonObjectConfig>
+  try {
+    parsed = readJsonObjectConfig(filePath)
+  } catch {
+    return null
+  }
+  if (!parsed.exists || !isJsonObject(parsed.root.hooks)) return null
+  const hooks = parsed.root.hooks
+  let template: HookEntry | null = null
+  for (const groups of Object.values(hooks)) {
+    if (!Array.isArray(groups)) continue
+    for (const group of groups) {
+      if (!isJsonObject(group) || !Array.isArray(group.hooks)) continue
+      const own = group.hooks.find(isAgentPetsHook)
+      if (own) { template = own as HookEntry; break }
+    }
+    if (template) break
+  }
+  if (!template) return null
+
+  let changed = false
+  for (const entry of required) {
+    const current = hooks[entry.event]
+    if (current !== undefined && !Array.isArray(current)) continue
+    const groups = (current ?? []) as unknown[]
+    const owned = groups
+      .filter((group): group is JsonObject => isJsonObject(group) && Array.isArray(group.hooks))
+      .flatMap(group => (group.hooks as unknown[]).filter(isAgentPetsHook) as HookEntry[])
+    if (owned.length === 0) {
+      const handler: HookEntry = { type: 'command', command: template.command }
+      if (Array.isArray(template.args)) handler.args = [...template.args]
+      if (entry.timeout !== undefined) handler.timeout = entry.timeout
+      hooks[entry.event] = [...groups, { ...(entry.matcher ? { matcher: entry.matcher } : {}), hooks: [handler] }]
+      changed = true
+      continue
+    }
+    if (entry.timeout === undefined) continue
+    for (const hook of owned) {
+      if (hook.timeout !== entry.timeout) {
+        hook.timeout = entry.timeout
+        changed = true
+      }
+    }
+  }
+  if (!changed) return { status: 'unchanged', path: filePath, backupPath: null }
+  return writeConfigSafely(filePath, serializeJson(parsed.root))
+}
+
 // ---- Claude Desktop config: single top-level key ----
 
 export function setJsonKeyFile(filePath: string, key: string, value: unknown): ConfigWriteResult {

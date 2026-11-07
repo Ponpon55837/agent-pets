@@ -1,7 +1,7 @@
 import { isAbsolute, join } from 'node:path'
 import type { AgentAdapterId, AdapterInstallTarget, InstallReport } from '../src/types/agent-adapter'
 import { reportFromWrites } from './install-outcome.ts'
-import type { AgentAdapterOperations, AdapterInspection } from './agent-adapter.ts'
+import { projectAdapterCapabilities, type AgentAdapterOperations, type AdapterInspection } from './agent-adapter.ts'
 import { configuredHookExecutable, isCodexHooksFeatureEnabled } from './hook-config.ts'
 import {
   agentPresence,
@@ -143,8 +143,14 @@ function inspectClaudeCode(): AdapterInspection {
   }
 }
 
-export function createAgentAdapterOperations(): AgentAdapterOperations {
+export interface AgentAdapterOperationsOptions {
+  /** Main-process preference: whether Claude Code permissions may be answered from the pet. */
+  claudePermissionRespondEnabled?: () => boolean
+}
+
+export function createAgentAdapterOperations(options: AgentAdapterOperationsOptions = {}): AgentAdapterOperations {
   return {
+    capabilities: (id, base) => projectAdapterCapabilities(id, base, options.claudePermissionRespondEnabled?.() === true),
     inspect(id: AgentAdapterId): AdapterInspection {
       switch (id) {
         case 'opencode': return inspectOpenCode()

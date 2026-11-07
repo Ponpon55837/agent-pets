@@ -12,6 +12,7 @@ UX 翻修（PR #25）和之後的 PR 5（跨平台實測與打包）中，需要
 - [ ] **ON-09 hook 指令**：使用者名稱含空白或非英文字元時，Codex／Claude Code／OpenCode 的 hook 能正常送出事件。
 - [ ] **SEC-04 L-1 Node 解析**：`where.exe` 從 System32 執行，找不到 Node 時顯示在地化錯誤，不會寫入裸 `node`。
 - [ ] **PM-05 權限快捷鍵**：`Ctrl+Shift+Y` / `Ctrl+Shift+N` 只對非高風險請求生效；快捷鍵被其他程式佔用時有提示。
+- [ ] **Claude Code 權限回覆**：開啟「從寵物回覆 Claude Code 權限」後，`node.exe` 直接執行的 `PermissionRequest` hook 能把允許／拒絕寫回 Claude Code；`%USERPROFILE%\.desktop-pet\claude-permission-respond` 的建立與移除正常；舊安裝啟動後補上 `PermissionRequest`（`timeout` 135）與 `PostToolUseFailure` 條目並留下備份。
 - [ ] **PM-10 系統匣**：注意力標記、勿擾與「（需核准）」等狀態在 Windows 系統匣上正確顯示。
 - [ ] **設計**：深色與淺色主題、寵物淺色氣泡、`⋮` 選單在 Windows 字型（微軟正黑體／Segoe UI）下沒有跑版或文字截斷。
 

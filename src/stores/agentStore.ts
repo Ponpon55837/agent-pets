@@ -18,6 +18,7 @@ import type {
   PermissionOutcomeKind,
   PermissionRequestView,
 } from '@/types/permission'
+import { CLAUDE_PERMISSION_WAIT_DEFAULT_SECONDS } from '@/types/permission'
 import { classifyDecideResponse, inferVanishedOutcome, outcomeVisibleMs } from '@/utils/permission-view'
 import type { ProgressionSnapshot } from '@/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
@@ -432,6 +433,8 @@ export const useAgentStore = defineStore('agent', () => {
   const dndEnabled = ref(false)
   const notificationsEnabled = ref(true)
   const permissionBubbleEnabled = ref(true)
+  const claudePermissionRespondEnabled = ref(false)
+  const claudePermissionWaitSeconds = ref(CLAUDE_PERMISSION_WAIT_DEFAULT_SECONDS)
   const presentationMcpEnabled = ref(true)
   const achievementsEnabled = ref(true)
   const edgeModeEnabled = ref(false)
@@ -887,6 +890,8 @@ export const useAgentStore = defineStore('agent', () => {
     dndEnabled.value = preferences.dndEnabled
     notificationsEnabled.value = preferences.notificationsEnabled
     permissionBubbleEnabled.value = preferences.permissionBubbleEnabled
+    claudePermissionRespondEnabled.value = preferences.claudePermissionRespondEnabled
+    claudePermissionWaitSeconds.value = preferences.claudePermissionWaitSeconds
     presentationMcpEnabled.value = preferences.presentationMcpEnabled
     achievementsEnabled.value = preferences.achievementsEnabled
     edgeModeEnabled.value = preferences.edgeModeEnabled
@@ -946,6 +951,16 @@ export const useAgentStore = defineStore('agent', () => {
   function setPermissionBubbleEnabled(enabled: boolean) {
     permissionBubbleEnabled.value = enabled
     updateDesktopPreferences({ permissionBubbleEnabled: enabled })
+  }
+
+  function setClaudePermissionRespondEnabled(enabled: boolean) {
+    claudePermissionRespondEnabled.value = enabled
+    updateDesktopPreferences({ claudePermissionRespondEnabled: enabled })
+  }
+
+  function setClaudePermissionWaitSeconds(seconds: number) {
+    claudePermissionWaitSeconds.value = seconds
+    updateDesktopPreferences({ claudePermissionWaitSeconds: seconds })
   }
 
   function setPresentationMcpEnabled(enabled: boolean) {
@@ -2109,6 +2124,10 @@ export const useAgentStore = defineStore('agent', () => {
     dndEnabled,
     notificationsEnabled,
     permissionBubbleEnabled,
+    claudePermissionRespondEnabled,
+    claudePermissionWaitSeconds,
+    setClaudePermissionRespondEnabled,
+    setClaudePermissionWaitSeconds,
     presentationMcpEnabled,
     achievementsEnabled,
     edgeModeEnabled,

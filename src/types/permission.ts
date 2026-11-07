@@ -87,3 +87,20 @@ export interface PermissionAuditEntry {
   decidedBy?: PermissionDecisionSource
   terminalReason: string
 }
+
+// Claude Code shows its own permission dialog while our hook waits (verified
+// on 2.1.314 in an interactive terminal), so a long wait never blocks the user.
+export const CLAUDE_PERMISSION_WAIT_DEFAULT_SECONDS = 90
+export const CLAUDE_PERMISSION_WAIT_MIN_SECONDS = 15
+export const CLAUDE_PERMISSION_WAIT_MAX_SECONDS = 120
+/**
+ * Claude Code's hook timeout for our PermissionRequest handler. Fixed above the
+ * largest allowed wait, so changing the wait never needs a settings.json rewrite
+ * and the hook can never be cut off before it has answered.
+ */
+export const CLAUDE_PERMISSION_HOOK_TIMEOUT_SECONDS = CLAUDE_PERMISSION_WAIT_MAX_SECONDS + 15
+
+export function clampClaudePermissionWaitSeconds(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return CLAUDE_PERMISSION_WAIT_DEFAULT_SECONDS
+  return Math.min(CLAUDE_PERMISSION_WAIT_MAX_SECONDS, Math.max(CLAUDE_PERMISSION_WAIT_MIN_SECONDS, Math.round(value)))
+}

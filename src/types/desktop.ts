@@ -15,6 +15,10 @@ export interface DesktopPreferences {
   dndUntil: number | null
   notificationsEnabled: boolean
   permissionBubbleEnabled: boolean
+  /** Answer Claude Code permission prompts from the pet (off by default). */
+  claudePermissionRespondEnabled: boolean
+  /** How long Claude Code's hook waits for a pet answer before leaving it to the terminal. */
+  claudePermissionWaitSeconds: number
   presentationMcpEnabled: boolean
   achievementsEnabled: boolean
   edgeModeEnabled: boolean
@@ -42,6 +46,8 @@ export type DesktopPreferencesPatch = Partial<Pick<
   | 'dndUntil'
   | 'notificationsEnabled'
   | 'permissionBubbleEnabled'
+  | 'claudePermissionRespondEnabled'
+  | 'claudePermissionWaitSeconds'
   | 'presentationMcpEnabled'
   | 'achievementsEnabled'
   | 'edgeModeEnabled'
