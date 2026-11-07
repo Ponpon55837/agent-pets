@@ -12,6 +12,7 @@ import type {
   InstallOutcome,
   InstallReport,
 } from '../src/types/agent-adapter'
+import type { AgentCapabilities } from '../src/types/capabilities'
 import { normalizeAgentStatusEvent } from './event-normalizer.ts'
 import { buildOutcome, failedOutcome } from './install-outcome.ts'
 import { AGENT_ADAPTER_REGISTRY } from '../src/types/agent-adapter.ts'
@@ -32,6 +33,11 @@ export interface AgentAdapterOperations {
   prepare?(target: AdapterInstallTarget): Promise<void>
   install(target: AdapterInstallTarget): InstallReport | void
   uninstall(target: AdapterInstallTarget): void
+  /**
+   * Runtime capability projection. Claude Code answers permissions only while the user has
+   * turned that on, so its reported capability follows the main-process preference.
+   */
+  capabilities?(id: AgentAdapterId, base: Readonly<AgentCapabilities>): Readonly<AgentCapabilities>
 }
 
 function check(id: string, status: 'pass' | 'warn' | 'fail', message: string) {
@@ -68,7 +74,7 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
         installed: inspection.installed,
         health: inspection.health,
         message: inspection.message,
-        capabilities: definition.capabilities,
+        capabilities: operations.capabilities?.(definition.id, definition.capabilities) ?? definition.capabilities,
         sources: definition.sources,
         sourceLabels: definition.sourceLabels,
         ...(definition.installTarget ? { installTarget: definition.installTarget } : {}),
@@ -118,6 +124,18 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
       }
     },
   }
+}
+
+const CLAUDE_RESPOND_MODES = Object.freeze(['allow_once', 'deny'] as const)
+
+/** Claude Code's capability while answering from the pet is on; every other adapter is unchanged. */
+export function projectAdapterCapabilities(
+  id: AgentAdapterId,
+  base: Readonly<AgentCapabilities>,
+  claudePermissionRespondEnabled: boolean,
+): Readonly<AgentCapabilities> {
+  if (id !== 'claude-code' || !claudePermissionRespondEnabled) return base
+  return Object.freeze({ ...base, permissions: 'respond', permissionModes: CLAUDE_RESPOND_MODES })
 }
 
 export interface AgentAdapterRegistry {

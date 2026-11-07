@@ -234,3 +234,29 @@ test('reports unsupported status and rejects status in patches', (t) => {
   assert.equal(store.get().launchAtStartupStatus, 'unsupported')
   assert.throws(() => parseDesktopPreferencesPatch({ launchAtStartupStatus: 'enabled' }), /Unsupported desktop preference/)
 })
+
+test('answering Claude Code permissions is off by default and the wait is a bounded integer', (t) => {
+  const filePath = tempPreferencesFile(t)
+  const loginItem = { supported: false, getStatus: () => 'unsupported' as const, setLaunchAtStartup: () => 'unsupported' as const }
+  const store = new DesktopPreferencesStore(filePath, loginItem, TEST_VISIBILITY_CAPABILITIES)
+  assert.equal(store.get().claudePermissionRespondEnabled, false)
+  assert.equal(store.get().claudePermissionWaitSeconds, 90)
+
+  const updated = store.update({ claudePermissionRespondEnabled: true, claudePermissionWaitSeconds: 45 })
+  assert.equal(updated.claudePermissionRespondEnabled, true)
+  assert.equal(updated.claudePermissionWaitSeconds, 45)
+  const reloaded = new DesktopPreferencesStore(filePath, loginItem, TEST_VISIBILITY_CAPABILITIES)
+  assert.equal(reloaded.get().claudePermissionRespondEnabled, true)
+  assert.equal(reloaded.get().claudePermissionWaitSeconds, 45)
+
+  for (const bad of [14, 121, 30.5, '60', null, Number.NaN]) {
+    assert.throws(() => parseDesktopPreferencesPatch({ claudePermissionWaitSeconds: bad }), TypeError, String(bad))
+  }
+  assert.throws(() => parseDesktopPreferencesPatch({ claudePermissionRespondEnabled: 'yes' }), TypeError)
+
+  // A tampered file falls back to safe defaults.
+  fs.writeFileSync(filePath, JSON.stringify({ claudePermissionRespondEnabled: 'true', claudePermissionWaitSeconds: 9_999 }))
+  const tampered = new DesktopPreferencesStore(filePath, loginItem, TEST_VISIBILITY_CAPABILITIES)
+  assert.equal(tampered.get().claudePermissionRespondEnabled, false)
+  assert.equal(tampered.get().claudePermissionWaitSeconds, 90)
+})

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { t, type TranslationKey } from '@/i18n'
-import { permissionSourceName } from '@/utils/permission-source'
+import { alsoAnswerableKey, permissionSourceName } from '@/utils/permission-source'
 import type { PermissionOutcomeKind } from '@/types/permission'
 import Button from '@/components/ui/Button.vue'
 import PermissionRiskBadge from '@/components/permission/PermissionRiskBadge.vue'
@@ -123,6 +123,7 @@ function keyCaps(label: string | undefined): string[] {
   return label.includes('+') ? label.split('+').filter(Boolean) : Array.from(label)
 }
 const hotkeyBlocked = computed(() => hotkey.value?.status === 'unavailable')
+const alsoAnswerKey = computed(() => (request.value ? alsoAnswerableKey(request.value.agentId) : null))
 
 // --- In-window keyboard (only while focus is inside the bubble) --------------
 // Never global: Esc / N deny, Y allows. Anything that is not low / medium risk
@@ -267,6 +268,7 @@ onBeforeUnmount(() => {
         <span v-if="showHotkeys" class="permission-keycaps"><kbd v-for="key in keyCaps(hotkey?.allowLabel)" :key="key">{{ key }}</kbd></span>
       </Button>
     </div>
+    <p v-if="alsoAnswerKey" class="permission-request-hint">{{ t(alsoAnswerKey, { source: permissionSourceName(request.agentId) }) }}</p>
     <p v-if="hotkeyBlocked" class="permission-request-hint">{{ t('permission.hotkeyUnavailable') }}</p>
     <p class="permission-request-hint permission-keyboard-hint" :class="{ holding: holdProgress }">
       {{ needsHold ? t('permission.keyboardHint') : t('permission.keyboardHintLow') }}

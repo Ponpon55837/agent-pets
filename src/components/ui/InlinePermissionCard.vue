@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { PermissionDecisionValue, PermissionRequestView } from '@/types/permission'
 import { t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
-import { permissionSourceName } from '@/utils/permission-source'
+import { alsoAnswerableKey, permissionSourceName } from '@/utils/permission-source'
 import { formatDuration } from '@/utils/permission-view'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
@@ -26,6 +26,7 @@ const deciding = ref<PermissionDecisionValue | null>(null)
 
 const title = computed(() => `${permissionSourceName(props.request.agentId)} · ${t('permissionInlineTitle')}`)
 const waited = computed(() => formatDuration(now.value - props.request.receivedAt))
+const alsoAnswerKey = computed(() => alsoAnswerableKey(props.request.agentId))
 
 // A failed decision leaves the buttons usable again so the user can retry or
 // go back to the agent; the card says why instead of silently resetting.
@@ -74,6 +75,7 @@ function decide(decision: PermissionDecisionValue): void {
     <PermissionRiskBadge class="inline-permission-risk" :risk="request.risk" :network="request.network" />
     <PermissionDetails :request="request" id-prefix="inline-permission" />
     <PermissionCountdown class="inline-permission-countdown" :request="request" :now="now" />
+    <p v-if="alsoAnswerKey" class="inline-permission-hint">{{ t(alsoAnswerKey, { source: permissionSourceName(request.agentId) }) }}</p>
     <p v-if="decideError" class="inline-permission-warning" role="alert">{{ decideError }}</p>
     <div class="inline-permission-actions">
       <Button
@@ -144,6 +146,13 @@ function decide(decision: PermissionDecisionValue): void {
 
 .inline-permission-copy code {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.inline-permission-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-body-sm, var(--font-sm));
+  line-height: 1.45;
 }
 
 .inline-permission-warning {

@@ -29,6 +29,7 @@ import { desktopVisibilityCapabilitiesForPlatform, macVisibleOnFullScreen } from
 import { PermissionBroker } from '../permission-broker'
 import { appendPermissionAudit, clearPermissionAudit, readPermissionAudit, trimPermissionAuditOnStartup } from '../permission-audit'
 import type { PermissionAuditEntry } from '../../src/types/permission'
+import { CLAUDE_PERMISSION_WAIT_DEFAULT_SECONDS } from '../../src/types/permission'
 import { ProgressionStore } from '../progression'
 import { AchievementStore } from '../achievements'
 import { HistoryStore } from '../history'
@@ -84,7 +85,7 @@ import type { PetEdge, PetWindowMode, PetWindowModeState } from '../../src/types
 import { createPluginSkinPetId, isPluginSkinPetId, isValidPetId, isValidRegularPetId } from '../../src/utils/pet-id.ts'
 import { availablePluginSkinPetIds } from '../plugin-skins.ts'
 import { EDGE_DWELL_MS, EDGE_REDOCK_AFTER_MS, EDGE_TRIGGER_DISTANCE_PX, clampWindowBounds, edgeWindowBounds, miniWindowBounds, nearestEdge, type WindowBounds } from '../pet-window-mode'
-import { IS_MAC, hookScriptDeployPath, readWindowState, writeWindowState } from '../setup'
+import { IS_MAC, hookScriptDeployPath, readWindowState, syncClaudePermissionRespondOptIn, writeWindowState } from '../setup'
 
 
 import { createWindowsFullscreenDetector, nativeWindowHandleToPointer, type WindowsFullscreenState } from '../windows-fullscreen-detector'
@@ -2283,6 +2284,8 @@ export function currentDesktopPreferences(): DesktopPreferences {
       dndUntil: null,
       notificationsEnabled: true,
       permissionBubbleEnabled: true,
+      claudePermissionRespondEnabled: false,
+      claudePermissionWaitSeconds: CLAUDE_PERMISSION_WAIT_DEFAULT_SECONDS,
       presentationMcpEnabled: true,
       achievementsEnabled: true,
       edgeModeEnabled: false,
@@ -2495,6 +2498,10 @@ export function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   const achievementsWereEnabled = previousPreferences.achievementsEnabled
   const preferences = mainState.desktopPreferences.update(patch)
   if (previousPreferences.dndEnabled !== preferences.dndEnabled) mainState.pluginFeedController?.onVisibilityChanged()
+  if (
+    previousPreferences.claudePermissionRespondEnabled !== preferences.claudePermissionRespondEnabled
+    || previousPreferences.claudePermissionWaitSeconds !== preferences.claudePermissionWaitSeconds
+  ) applyClaudePermissionRespond(preferences)
   scheduleDndExpiry(preferences)
   setLocale(preferences.locale)
   if (!preferences.edgeModeEnabled && mainState.petWindowMode === 'edge') applyNormalPetBounds()
@@ -3024,6 +3031,32 @@ export function clearPermissionAuditLog(): void {
   clearPermissionAudit(permissionAuditPath())
 }
 
+// --- Claude Code permission respond (opt-in) --------------------------------
+const CLAUDE_PERMISSION_SOURCES: ReadonlySet<string> = new Set(['claude', 'claude-desktop'])
+// Cached so the permission server never reads preferences (or the OS login item) per request.
+let claudePermissionRespondEnabled = false
+
+export function isClaudePermissionRespondEnabled(): boolean {
+  return claudePermissionRespondEnabled
+}
+
+function applyClaudePermissionRespond(preferences: DesktopPreferences): void {
+  claudePermissionRespondEnabled = preferences.claudePermissionRespondEnabled
+  try {
+    syncClaudePermissionRespondOptIn(preferences.claudePermissionRespondEnabled ? preferences.claudePermissionWaitSeconds : null)
+  } catch (error) {
+    logMain('warn', 'permission', `Claude permission opt-in file sync failed: ${(error as NodeJS.ErrnoException)?.code ?? 'unknown'}`)
+  }
+  if (preferences.claudePermissionRespondEnabled || !mainState.permissionBroker) return
+  // Turning the feature off takes pending Claude requests down; their hooks then get 410
+  // and leave the decision to Claude Code's own prompt.
+  for (const request of mainState.permissionBroker.listRequests()) {
+    if (CLAUDE_PERMISSION_SOURCES.has(request.adapterId)) {
+      mainState.permissionBroker.resolveExternally(request.requestId, 'adapter_disconnected')
+    }
+  }
+}
+
 export function createPermissionServices(permissionToken: string): void {
   if (mainState.permissionBroker || mainState.permissionRelay || mainState.permissionAdapterServer) return
 
@@ -3041,7 +3074,14 @@ export function createPermissionServices(permissionToken: string): void {
   })
   broker.registerAdapter(relay.createPort('opencode-cli'))
   broker.registerAdapter(relay.createPort('opencode-desktop'))
-  const server = createPermissionAdapterServer({ token: permissionToken, broker, relay })
+  broker.registerAdapter(relay.createPort('claude'))
+  broker.registerAdapter(relay.createPort('claude-desktop'))
+  const server = createPermissionAdapterServer({
+    token: permissionToken,
+    broker,
+    relay,
+    isSourceEnabled: source => !CLAUDE_PERMISSION_SOURCES.has(source) || claudePermissionRespondEnabled,
+  })
   const permissionHealth = serverHealthTracker().register('permission', localPorts().permission)
   const permissionHandle = listenOnLocalPort(server, localPorts().permission, {
     label: 'Permission adapter',
@@ -3074,6 +3114,7 @@ export function createDesktopServices(): void {
     currentDesktopVisibilityCapabilities(),
   )
   setLocale(currentDesktopPreferences().locale)
+  applyClaudePermissionRespond(currentDesktopPreferences())
 
   mainState.desktopNotifications = new DesktopNotificationService({
     logFilePath: join(app.getPath('userData'), 'notification-log.json'),

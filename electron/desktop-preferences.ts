@@ -5,6 +5,11 @@ import { dndHasExpired, normalizeDndUntil } from './dnd-schedule.ts'
 import type { DesktopPreferences, DesktopPreferencesPatch, LaunchAtStartupStatus } from '../src/types/desktop'
 import { DEFAULT_LOCALE, isAppLocale } from '../src/types/locale.ts'
 import {
+  CLAUDE_PERMISSION_WAIT_DEFAULT_SECONDS,
+  CLAUDE_PERMISSION_WAIT_MAX_SECONDS,
+  CLAUDE_PERMISSION_WAIT_MIN_SECONDS,
+} from '../src/types/permission.ts'
+import {
   UNSUPPORTED_DESKTOP_VISIBILITY_CAPABILITIES,
   type DesktopVisibilityCapabilities,
 } from '../src/types/desktop-visibility.ts'
@@ -93,6 +98,7 @@ const BOOLEAN_KEYS = [
   'dndEnabled',
   'notificationsEnabled',
   'permissionBubbleEnabled',
+  'claudePermissionRespondEnabled',
   'presentationMcpEnabled',
   'achievementsEnabled',
   'edgeModeEnabled',
@@ -112,6 +118,8 @@ const DEFAULTS: StoredDesktopPreferences = {
   dndUntil: null,
   notificationsEnabled: true,
   permissionBubbleEnabled: true,
+  claudePermissionRespondEnabled: false,
+  claudePermissionWaitSeconds: CLAUDE_PERMISSION_WAIT_DEFAULT_SECONDS,
   presentationMcpEnabled: true,
   achievementsEnabled: true,
   edgeModeEnabled: false,
@@ -132,6 +140,13 @@ function isVolume(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
 }
 
+function isWaitSeconds(value: unknown): value is number {
+  return typeof value === 'number'
+    && Number.isInteger(value)
+    && value >= CLAUDE_PERMISSION_WAIT_MIN_SECONDS
+    && value <= CLAUDE_PERMISSION_WAIT_MAX_SECONDS
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -144,6 +159,7 @@ function sanitizeStored(value: unknown): Partial<StoredDesktopPreferences> {
   }
   if (isAppLocale(value.locale)) result.locale = value.locale
   if (isVolume(value.soundVolume)) result.soundVolume = Math.round(value.soundVolume)
+  if (isWaitSeconds(value.claudePermissionWaitSeconds)) result.claudePermissionWaitSeconds = value.claudePermissionWaitSeconds
   if (value.dndUntil === null) result.dndUntil = null
   else if (typeof value.dndUntil === 'number' && Number.isFinite(value.dndUntil) && value.dndUntil > 0) {
     result.dndUntil = Math.floor(value.dndUntil)
@@ -154,7 +170,7 @@ function sanitizeStored(value: unknown): Partial<StoredDesktopPreferences> {
 export function parseDesktopPreferencesPatch(value: unknown): DesktopPreferencesPatch {
   if (!isRecord(value)) throw new TypeError('Desktop preferences patch must be an object')
 
-  const allowed = new Set<string>([...BOOLEAN_KEYS, 'locale', 'dndUntil', 'soundVolume'])
+  const allowed = new Set<string>([...BOOLEAN_KEYS, 'locale', 'dndUntil', 'soundVolume', 'claudePermissionWaitSeconds'])
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) throw new TypeError(`Unsupported desktop preference: ${key}`)
     if (key === 'locale') {
@@ -163,6 +179,12 @@ export function parseDesktopPreferencesPatch(value: unknown): DesktopPreferences
     }
     if (key === 'soundVolume') {
       if (!isVolume(value[key])) throw new TypeError('Desktop preference soundVolume must be a number from 0 to 100')
+      continue
+    }
+    if (key === 'claudePermissionWaitSeconds') {
+      if (!isWaitSeconds(value[key])) {
+        throw new TypeError(`Desktop preference claudePermissionWaitSeconds must be an integer from ${CLAUDE_PERMISSION_WAIT_MIN_SECONDS} to ${CLAUDE_PERMISSION_WAIT_MAX_SECONDS}`)
+      }
       continue
     }
     if (key === 'dndUntil') {
@@ -314,6 +336,8 @@ export class DesktopPreferencesStore {
       dndUntil: next.dndUntil,
       notificationsEnabled: next.notificationsEnabled,
       permissionBubbleEnabled: next.permissionBubbleEnabled,
+      claudePermissionRespondEnabled: next.claudePermissionRespondEnabled,
+      claudePermissionWaitSeconds: next.claudePermissionWaitSeconds,
       presentationMcpEnabled: next.presentationMcpEnabled,
       achievementsEnabled: next.achievementsEnabled,
       edgeModeEnabled: next.edgeModeEnabled,
@@ -339,6 +363,8 @@ export class DesktopPreferencesStore {
       dndUntil: preferences.dndUntil,
       notificationsEnabled: preferences.notificationsEnabled,
       permissionBubbleEnabled: preferences.permissionBubbleEnabled,
+      claudePermissionRespondEnabled: preferences.claudePermissionRespondEnabled,
+      claudePermissionWaitSeconds: preferences.claudePermissionWaitSeconds,
       presentationMcpEnabled: preferences.presentationMcpEnabled,
       achievementsEnabled: preferences.achievementsEnabled,
       edgeModeEnabled: preferences.edgeModeEnabled,

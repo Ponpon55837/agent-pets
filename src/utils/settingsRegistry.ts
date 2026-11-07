@@ -67,6 +67,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   { id: 'fullscreenAutoHide', section: 'desktop', labelKey: 'fullscreenAutoHide', helpKey: 'fullscreenAutoHideHelp', keywords: ['fullscreen', '全螢幕', '簡報'] },
   { id: 'rightClickHide', section: 'desktop', labelKey: 'rightClickHide', helpKey: 'rightClickHideHelp', keywords: ['right click', 'context', '右鍵', '隱藏'] },
   { id: 'permissionBubble', section: 'desktop', labelKey: 'permissionBubble', helpKey: 'permissionBubbleHelp', keywords: ['permission', '權限', '批准', '氣泡'] },
+  { id: 'claudePermissionRespond', section: 'desktop', labelKey: 'permission.claudeRespond', helpKey: 'permission.claudeRespondHelp', keywords: ['claude', 'permission', 'approve', 'terminal', '權限', '核准', '終端機', '回覆'] },
   { id: 'presentationMcp', section: 'desktop', labelKey: 'presentationMcp', helpKey: 'presentationMcpHelp', keywords: ['mcp', '簡報', 'presentation'] },
   { id: 'launchAtStartup', section: 'desktop', labelKey: 'launchAtStartup', keywords: ['startup', 'login', 'autostart', '開機', '登入', '自動啟動'] },
   { id: 'projectMcp', section: 'advanced', labelKey: 'projectMcpPanelTitle', helpKey: 'presentationMcpSetupHelp', keywords: ['mcp', '專案', 'project'] },
