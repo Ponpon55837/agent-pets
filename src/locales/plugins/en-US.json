@@ -125,5 +125,15 @@
   "plugins.filterEnabled": "Enabled",
   "plugins.filterUpdates": "Updates available",
   "plugins.filterIssues": "Needs attention",
-  "plugins.noMatches": "No plugins match."
+  "plugins.noMatches": "No plugins match.",
+  "plugins.inboxEmptyHelp": "Plugins can send notifications here. To hear less from one, mute it on its details page.",
+  "plugins.inboxFilter": "Filter notifications by plugin",
+  "plugins.inboxAllPlugins": "All plugins",
+  "plugins.markAllRead": "Mark all as read",
+  "plugins.clearThisPlugin": "Clear this plugin's notifications",
+  "plugins.unread": "Unread",
+  "plugins.inboxExpand": "Expand",
+  "plugins.openLinkHost": "Open {host}",
+  "plugins.notificationsCleared": "Cleared {count} notifications",
+  "plugins.undo": "Undo"
 }

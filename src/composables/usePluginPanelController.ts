@@ -57,6 +57,8 @@ export function usePluginPanelController(props: { requestedPluginId?: string }) 
 
 const snapshot = ref<PluginPanelSnapshot | null>(null)
 const notifications = ref<PluginNotificationRecord[]>([])
+const hiddenNotificationIds = ref(new Set<string>())
+const visibleNotifications = computed(() => notifications.value.filter(record => !hiddenNotificationIds.value.has(record.item.id)))
 const logs = ref<PluginBrokerLogEntry[]>([])
 const diagnostics = ref<PluginBrokerDiagnostic[]>([])
 const petOptions = ref<Array<{ id: string; displayName: string }>>([])
@@ -1037,17 +1039,52 @@ async function openNotificationLink(itemId: string): Promise<void> {
   }
 }
 
-async function clearNotifications(pluginId?: string): Promise<void> {
+// 清除通知採「延遲提交」：先從畫面隱藏並顯示可復原的 Toast，5 秒後才真正呼叫主行程清除；
+// 復原即取消提交。離開頁面或再次清除時，會先提交前一批。
+const CLEAR_UNDO_MS = 5000
+let pendingClear: { ids: Set<string>; pluginId?: string; timer: ReturnType<typeof setTimeout> } | null = null
+
+async function commitPendingClear(): Promise<void> {
+  const pending = pendingClear
+  if (!pending) return
+  pendingClear = null
+  clearTimeout(pending.timer)
   try {
-    const result = await window.electronAPI?.clearPluginNotifications(pluginId)
-    if (!result?.ok) {
-      if (result && !result.ok) setError(result.error)
-      return
-    }
-    await refreshNotifications()
+    const result = await window.electronAPI?.clearPluginNotifications(pending.pluginId)
+    if (result && !result.ok) setError(result.error)
   } catch {
     setError('plugin_action_failed')
+  } finally {
+    hiddenNotificationIds.value = new Set()
+    await refreshNotifications()
   }
+}
+
+async function clearNotifications(pluginId?: string): Promise<void> {
+  await commitPendingClear()
+  const ids = new Set(notifications.value.filter(record => !pluginId || record.item.pluginId === pluginId).map(record => record.item.id))
+  if (ids.size === 0) return
+  hiddenNotificationIds.value = ids
+  pendingClear = { ids, pluginId, timer: setTimeout(() => void commitPendingClear(), CLEAR_UNDO_MS) }
+  notifier.notify({
+    tone: 'success',
+    text: t('plugins.notificationsCleared', { count: ids.size }),
+    durationMs: CLEAR_UNDO_MS,
+    action: {
+      label: t('plugins.undo'),
+      run: () => {
+        if (pendingClear) clearTimeout(pendingClear.timer)
+        pendingClear = null
+        hiddenNotificationIds.value = new Set()
+      },
+    },
+  })
+}
+
+async function markAllNotificationsRead(pluginId?: string): Promise<void> {
+  const unread = visibleNotifications.value.filter(record => !record.read && (!pluginId || record.item.pluginId === pluginId))
+  await Promise.all(unread.map(record => window.electronAPI?.markPluginNotificationRead(record.item.id)))
+  await refreshNotifications()
 }
 
 function notificationSource(item: PluginNotificationRecord): string {
@@ -1129,6 +1166,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  void commitPendingClear()
   notifier.dispose()
   window.removeEventListener('keydown', onPluginPanelViewKeydown)
   removeNotificationsListener?.()
@@ -1143,6 +1181,8 @@ onUnmounted(() => {
   return {
     snapshot,
     notifications,
+    visibleNotifications,
+    markAllNotificationsRead,
     logs,
     diagnostics,
     petOptions,

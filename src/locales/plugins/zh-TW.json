@@ -125,5 +125,15 @@
   "plugins.filterEnabled": "已啟用",
   "plugins.filterUpdates": "可更新",
   "plugins.filterIssues": "有問題",
-  "plugins.noMatches": "沒有符合條件的插件。"
+  "plugins.noMatches": "沒有符合條件的插件。",
+  "plugins.inboxEmptyHelp": "插件可在此傳送通知。想少收到某個插件的通知，可到該插件的詳情頁將它靜音。",
+  "plugins.inboxFilter": "依插件篩選通知",
+  "plugins.inboxAllPlugins": "全部插件",
+  "plugins.markAllRead": "全部標為已讀",
+  "plugins.clearThisPlugin": "清除此插件的通知",
+  "plugins.unread": "未讀",
+  "plugins.inboxExpand": "展開",
+  "plugins.openLinkHost": "前往 {host}",
+  "plugins.notificationsCleared": "已清除 {count} 則通知",
+  "plugins.undo": "復原"
 }

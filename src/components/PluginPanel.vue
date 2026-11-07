@@ -22,7 +22,7 @@ const props = defineProps<{ requestedPluginId?: string }>()
 const controller = usePluginPanelController(props)
 provide(PLUGIN_PANEL_CONTROLLER, controller)
 const {
-  snapshot, notifications, plugins, catalogItems, busy, loading, toasts, dismissToast, runToastAction,
+  snapshot, visibleNotifications, plugins, catalogItems, busy, loading, toasts, dismissToast, runToastAction,
   detailPlugin, panelViewPlugin, panelViewFrame, panelViewContent, pendingRemove, pendingSecretConsentKey,
   keepData, enabledGlobally, pluginName, refreshPanel, selectArchive, selectDeveloperFolder,
   updateGlobalPreferences, confirmRemove, confirmSecretConsent,
@@ -33,7 +33,7 @@ const activeTab = ref<PluginTab>('installed')
 
 const enabledCount = computed(() => plugins.value.filter(plugin => plugin.preference.enabled).length)
 const updateCount = computed(() => catalogItems.value.filter(item => item.updateAvailable).length)
-const unreadCount = computed(() => notifications.value.filter(record => !record.read).length)
+const unreadCount = computed(() => visibleNotifications.value.filter(record => !record.read).length)
 const developerMode = computed(() => snapshot.value?.preferences.developerMode ?? false)
 const tabs = computed(() => [
   { id: 'installed', label: t('plugins.tabInstalled'), badge: plugins.value.length },
