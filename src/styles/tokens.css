@@ -277,6 +277,76 @@
   --focus-ring-color: var(--focus-ring-color-on-light);
 }
 
+/* ── Dark theme (panel layer) ───────────────────────────────────────────
+   Re-points the organic palette; semantic --color-* aliases and every
+   component follow. Applied by composables/useTheme.ts as
+   <html data-theme="dark"> (the pet/bubble layer is always dark). Each
+   pair is verified by scripts/check-contrast.mjs. */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --organic-bg: #1f1b16;
+  --organic-surface: #292420;
+  --organic-surface-2: #342e28;
+  --organic-surface-warm: #4a3022;
+  --organic-surface-sage: #2e3622;
+  --organic-surface-sage-soft: #263019;
+  --organic-surface-off: #3f372e;
+  --organic-accent: #d98652;
+  --organic-accent-hover: #e39a6b;
+  --organic-accent-text: #f0b48a;
+  --organic-accent-contrast: #201e1d;
+  --organic-sage: #9db07b;
+  --organic-sage-deep: #aebf8c;
+  --organic-sage-dark: #c9d6ad;
+  --organic-text: #f3ede4;
+  --organic-text-secondary: #cfc5b6;
+  --organic-text-muted: #b0a592;
+  --organic-text-faint: #8d8374;
+  --organic-border: rgba(243, 237, 228, 0.18);
+  --organic-border-soft: rgba(243, 237, 228, 0.1);
+  --organic-border-on-accent: rgba(32, 30, 29, 0.4);
+  --organic-sage-track: rgba(201, 214, 173, 0.18);
+  --organic-accent-track: rgba(243, 237, 228, 0.1);
+  --organic-accent-glow: rgba(217, 134, 82, 0.28);
+  --organic-accent-on-hover: rgba(243, 237, 228, 0.06);
+  --organic-scrim: rgba(0, 0, 0, 0.55);
+  --organic-panel-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --organic-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --organic-hero-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+  --organic-thumb-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --organic-danger-text: #ff9a8a;
+  --organic-success-text: #b6d48a;
+  --organic-warn-text: #f0c866;
+  --focus-ring-color-on-light: #9dd8ff;
+}
+
+/* More contrast: stronger borders in both themes. */
+@media (prefers-contrast: more) {
+  :root {
+    --organic-border: rgba(32, 30, 29, 0.6);
+    --organic-border-soft: rgba(32, 30, 29, 0.4);
+    --border-strong: rgba(255, 255, 255, 0.5);
+    --border-subtle: rgba(255, 255, 255, 0.3);
+  }
+
+  :root[data-theme='dark'] {
+    --organic-border: rgba(243, 237, 228, 0.65);
+    --organic-border-soft: rgba(243, 237, 228, 0.45);
+  }
+}
+
+/* Reduced transparency: no blur anywhere; one place instead of per component. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --surface-blur: none;
+    --blur-scrim: none;
+  }
+}
+
 /* Windows high-contrast / forced colours: the ring must use a system colour. */
 @media (forced-colors: active) {
   :root,

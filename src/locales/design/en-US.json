@@ -1,1 +1,7 @@
-{}
+{
+  "design.theme.title": "Theme",
+  "design.theme.help": "Colors for the panel and settings. Pet bubbles always stay dark.",
+  "design.theme.system": "Match system",
+  "design.theme.light": "Light",
+  "design.theme.dark": "Dark"
+}
