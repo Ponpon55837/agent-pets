@@ -614,6 +614,7 @@ async function bootstrapApp(): Promise<void> {
     ipcMain,
     assertTrustedIpcSender,
     getPanelWindow: () => mainState.panelWindow,
+    getPetWindow: () => mainState.petWindow,
     getAgentAdapterRegistry: () => mainState.agentAdapterRegistry,
   })
 
