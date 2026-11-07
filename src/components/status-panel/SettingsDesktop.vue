@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
+import { PERMISSION_DEFAULT_TTL_SECONDS } from '@/types/permission'
 import Card from '@/components/ui/Card.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
 
@@ -30,7 +31,7 @@ const store = useAgentStore()
       @update:model-value="store.setFullscreenAutoHideEnabled($event)"
     />
     <ToggleRow :model-value="store.rightClickHideEnabled" :label="t('rightClickHide')" :help="t('rightClickHideHelp')" @update:model-value="store.setRightClickHideEnabled($event)" />
-    <ToggleRow :model-value="store.permissionBubbleEnabled" :label="t('permissionBubble')" :help="t('permissionBubbleHelp')" @update:model-value="store.setPermissionBubbleEnabled($event)" />
+    <ToggleRow :model-value="store.permissionBubbleEnabled" :label="t('permissionBubble')" :help="t('permissionBubbleHelp', { seconds: PERMISSION_DEFAULT_TTL_SECONDS })" @update:model-value="store.setPermissionBubbleEnabled($event)" />
   </Card>
 
   <Card :title="t('permission.settingsHeading')">

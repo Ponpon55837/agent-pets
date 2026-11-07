@@ -7,9 +7,10 @@ import type {
   PermissionRequestView,
   PermissionRisk,
 } from '../src/types/permission'
+import { PERMISSION_DEFAULT_TTL_SECONDS } from '../src/types/permission.ts'
 import { redactSensitiveText } from './permission-redact.ts'
 
-const DEFAULT_TTL_MS = 60_000
+const DEFAULT_TTL_MS = PERMISSION_DEFAULT_TTL_SECONDS * 1000
 const MIN_TTL_MS = 15_000
 const MAX_TTL_MS = 300_000
 const MAX_ACTION_LENGTH = 80

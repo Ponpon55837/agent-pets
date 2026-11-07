@@ -73,3 +73,6 @@ export interface PermissionOutcome {
 export type PermissionDecideResult =
   | { ok: true; status: 'allowed' | 'denied' }
   | { ok: false; kind: PermissionOutcomeKind }
+
+/** Default lifetime of a permission request; shared so UI copy can quote it. */
+export const PERMISSION_DEFAULT_TTL_SECONDS = 60
