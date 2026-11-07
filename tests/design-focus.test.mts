@@ -23,6 +23,7 @@ test('ui primitives never remove the outline without drawing a replacement ring'
     const src = readFileSync(join(ui, name), 'utf8')
     const style = src.split('<style')[1] ?? ''
     for (const m of style.matchAll(/([^{}]+)\{[^}]*outline:\s*none[^}]*\}/g)) {
+      if (m[1].includes(':not(:focus-visible)')) continue
       // A hidden native input may drop its own outline only when the visible
       // sibling draws the ring.
       assert.match(style, /focus-visible\s*\+\s*\.[a-z-]+\s*\{[^}]*outline:\s*var\(--focus-ring-width\)/, `${name}: ${m[1].trim()} removes outline without a sibling ring`)

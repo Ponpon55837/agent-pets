@@ -19,6 +19,7 @@
   --surface-overlay: rgba(25, 25, 35, 0.98);
   --surface-scrim: rgba(0, 0, 0, 0.5);
   --surface-blur: blur(24px) saturate(165%);
+  --blur-scrim: blur(4px);
 
   /* Native <option> popups are painted by the OS, not by us — they need an
      opaque colour or Windows/macOS fall back to their own light palette. */
