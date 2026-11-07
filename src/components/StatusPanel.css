@@ -1265,11 +1265,31 @@
   max-height: 260px;
 }
 
-.status-panel :deep(.pet-option) {
+.status-panel :deep(.pet-row) {
   display: flex;
   align-items: center;
+  gap: var(--organic-space-1);
+}
+
+.status-panel :deep(.pet-group-heading) {
+  padding: var(--organic-space-2) var(--organic-space-1) 0;
+  color: var(--text-muted);
+  font-size: var(--font-label);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.status-panel :deep(.pet-rename-field) {
+  flex: 1;
+}
+
+.status-panel :deep(.pet-option) {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
   justify-content: space-between;
-  width: 100%;
   gap: var(--organic-space-2);
   padding: var(--organic-space-2) var(--organic-space-3);
   border: 1px solid transparent;
@@ -1280,7 +1300,11 @@
   font-size: var(--font-body-md);
   text-align: left;
   cursor: pointer;
-  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.status-panel :deep(.pet-option:focus-visible) {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .status-panel :deep(.pet-option:hover) {
@@ -1321,18 +1345,6 @@
   display: flex;
   flex: 0 0 auto;
   gap: 2px;
-}
-
-.status-panel :deep(.pet-rename-input) {
-  width: 100%;
-  padding: var(--organic-space-2) var(--organic-space-3);
-  border: 1px solid var(--organic-accent);
-  border-radius: var(--organic-radius-sm);
-  outline: none;
-  background: var(--organic-surface);
-  color: var(--organic-text);
-  font: inherit;
-  font-size: var(--font-body-md);
 }
 
 .status-panel :deep(.family-pet-name) {

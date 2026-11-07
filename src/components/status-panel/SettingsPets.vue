@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { t, translateBackendError, type TranslationKey } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
 import { SOURCE_FAMILIES } from '@/types/agent'
+import { useRovingTabs } from '@/composables/useRovingTabs'
+import { PET_NAME_MAX_LENGTH, groupPets, validatePetName } from '@/utils/pet-groups'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import Icon from '@/components/ui/Icon.vue'
 import Select from '@/components/ui/Select.vue'
+import TextField from '@/components/ui/TextField.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
 
 const store = useAgentStore()
@@ -17,12 +20,30 @@ const importingZip = ref(false)
 const importZipError = ref('')
 const editingPetId = ref<string | null>(null)
 const editName = ref('')
+const petQuery = ref('')
+const renameError = ref('')
+const PET_SEARCH_THRESHOLD = 8
+const showPetSearch = computed(() => store.visiblePets.length > PET_SEARCH_THRESHOLD)
+const petGroups = computed(() => groupPets(store.visiblePets, store.selectedPet, showPetSearch.value ? petQuery.value : ''))
+const flatPetIds = computed(() => petGroups.value.flatMap(group => group.pets.map(pet => pet.id)))
+const { onKeydown: onPetKeydown } = useRovingTabs({
+  ids: () => flatPetIds.value,
+  current: () => store.selectedPet,
+  select: id => store.setPet(id),
+  elementId: id => `pet-radio-${id}`,
+  orientation: 'vertical',
+})
+const PET_GROUP_LABELS = {
+  current: 'panel.petGroupCurrent', builtIn: 'panel.petGroupBuiltIn', imported: 'panel.petGroupImported', plugin: 'panel.petGroupPlugin',
+} as const
 const confirmDialog = ref<{
   title: string
   message?: string
   tone: 'default' | 'danger'
   onConfirm: () => void | Promise<void>
 } | null>(null)
+const confirmDialogOpen = computed(() => confirmDialog.value !== null)
+watch(confirmDialogOpen, open => store.setPanelModalLock('pets-confirm', open))
 const PROJECT_PET_STATUS_LABEL_KEYS: Record<'unbound' | 'bound' | 'missing-pet', TranslationKey> = {
   unbound: 'projectPetUnbound', bound: 'projectPetBound', 'missing-pet': 'projectPetMissing',
 }
@@ -66,20 +87,34 @@ async function importPetZip(): Promise<void> {
 function startRename(pet: { id: string; displayName: string }): void {
   editingPetId.value = pet.id
   editName.value = pet.displayName
+  renameError.value = ''
 }
 
+const RENAME_ERROR_KEYS = {
+  empty: 'panel.renameEmpty', duplicate: 'panel.renameDuplicate', tooLong: 'panel.renameTooLong',
+} as const
+
 async function confirmRename(): Promise<void> {
-  if (!editingPetId.value || !editName.value.trim()) {
-    editingPetId.value = null
+  const petId = editingPetId.value
+  if (!petId) return
+  const problem = validatePetName(editName.value, petId, store.visiblePets)
+  if (problem) {
+    renameError.value = t(RENAME_ERROR_KEYS[problem])
     return
   }
-  await store.renamePet(editingPetId.value, editName.value.trim())
   editingPetId.value = null
+  await store.renamePet(petId, editName.value.trim())
 }
 
 function cancelRename(): void {
   editingPetId.value = null
   editName.value = ''
+  renameError.value = ''
+}
+
+// Losing window focus (e.g. the panel hiding) must not commit a half-typed name.
+function onRenameBlur(): void {
+  if (editingPetId.value && document.hasFocus()) void confirmRename()
 }
 
 function confirmRemovePet(pet: { id: string; displayName: string; builtIn: boolean }): void {
@@ -107,43 +142,53 @@ function projectPetStatusLabel(status: 'unbound' | 'bound' | 'missing-pet'): str
 
 <template>
   <Card :title="t('pets')">
-    <div class="pet-list">
-      <template v-for="pet in store.visiblePets" :key="pet.id">
-        <input
-          v-if="editingPetId === pet.id"
-          v-model="editName"
-          class="pet-rename-input"
-          maxlength="64"
-          @keyup.enter="confirmRename"
-          @keyup.escape="cancelRename"
-          @blur="confirmRename"
-        />
-        <!-- This container has nested actions, so use a keyboard-reachable role instead of a button. -->
-        <div
-          v-else
-          class="pet-option"
-          :class="{ active: store.selectedPet === pet.id }"
-          role="button"
-          tabindex="0"
-          :aria-pressed="store.selectedPet === pet.id"
-          @click="store.setPet(pet.id)"
-          @keydown.enter="store.setPet(pet.id)"
-          @keydown.space.prevent="store.setPet(pet.id)"
-        >
-          <span class="pet-copy">
-            <span class="pet-name">{{ pet.displayName }}</span>
-            <small v-if="pet.pluginSkin" class="pet-plugin-source">{{ t('pluginPetFromPlugin', { name: pet.pluginSkin.pluginName }) }}</small>
-          </span>
-          <span class="pet-actions">
-            <Button v-if="!pet.builtIn && !pet.pluginSkin" variant="ghost" size="sm" :title="t('rename')" :aria-label="t('rename')" @click.stop="startRename(pet)">
-              <Icon name="edit" :size="13" />
-            </Button>
-            <Button v-if="pet.id !== store.defaultPetId && !pet.pluginSkin" variant="ghost" size="sm" :title="pet.builtIn ? t('hide') : t('remove')" :aria-label="pet.builtIn ? t('hide') : t('remove')" @click.stop="confirmRemovePet(pet)">
-              <Icon name="close" :size="13" />
-            </Button>
-          </span>
+    <TextField v-if="showPetSearch" v-model="petQuery" type="search" search size="sm" :aria-label="t('panel.petSearchLabel')" :placeholder="t('panel.petSearchLabel')" :clear-label="t('panel.searchClear')" />
+    <div class="pet-list" role="radiogroup" :aria-label="t('pets')">
+      <template v-for="group in petGroups" :key="group.id">
+        <div class="pet-group-heading">{{ t(PET_GROUP_LABELS[group.id]) }}</div>
+        <div v-for="pet in group.pets" :key="pet.id" class="pet-row" role="presentation">
+          <TextField
+            v-if="editingPetId === pet.id"
+            v-model="editName"
+            class="pet-rename-field"
+            :aria-label="t('rename')"
+            :maxlength="PET_NAME_MAX_LENGTH"
+            :error="renameError"
+            size="sm"
+            consume-escape
+            @enter="confirmRename"
+            @escape="cancelRename"
+            @blur="onRenameBlur"
+          />
+          <template v-else>
+            <button
+              :id="`pet-radio-${pet.id}`"
+              type="button"
+              class="pet-option"
+              :class="{ active: store.selectedPet === pet.id }"
+              role="radio"
+              :aria-checked="store.selectedPet === pet.id"
+              :tabindex="store.selectedPet === pet.id || (!flatPetIds.includes(store.selectedPet) && flatPetIds[0] === pet.id) ? 0 : -1"
+              @click="store.setPet(pet.id)"
+              @keydown="onPetKeydown"
+            >
+              <span class="pet-copy">
+                <span class="pet-name">{{ pet.displayName }}</span>
+                <small v-if="pet.pluginSkin" class="pet-plugin-source">{{ t('pluginPetFromPlugin', { name: pet.pluginSkin.pluginName }) }}</small>
+              </span>
+            </button>
+            <span class="pet-actions">
+              <Button v-if="!pet.builtIn && !pet.pluginSkin" variant="ghost" size="sm" :title="t('rename')" :aria-label="`${t('rename')} ${pet.displayName}`" @click="startRename(pet)">
+                <Icon name="edit" :size="13" />
+              </Button>
+              <Button v-if="pet.id !== store.defaultPetId && !pet.pluginSkin" variant="ghost" size="sm" :title="pet.builtIn ? t('hide') : t('remove')" :aria-label="`${pet.builtIn ? t('hide') : t('remove')} ${pet.displayName}`" @click="confirmRemovePet(pet)">
+                <Icon name="close" :size="13" />
+              </Button>
+            </span>
+          </template>
         </div>
       </template>
+      <EmptyState v-if="petGroups.length === 0" compact :title="t('panel.petSearchEmpty')" />
     </div>
     <div class="import-row">
       <Button variant="primary" size="sm" :disabled="importing" @click="importPet">{{ importing ? t('importing') : t('importSprite') }}</Button>

@@ -37,5 +37,14 @@
   "panel.managePlugins": "管理插件",
   "panel.noSessionsHint": "在終端機或桌面版 Agent 開始工作後，工作階段會顯示在這裡。",
   "panel.projectPetsEmptyHint": "按「加入專案」選擇專案資料夾，就能為它指定專屬寵物。",
-  "panel.loading": "載入中…"
+  "panel.loading": "載入中…",
+  "panel.petGroupCurrent": "目前使用",
+  "panel.petGroupBuiltIn": "內建",
+  "panel.petGroupImported": "匯入",
+  "panel.petGroupPlugin": "插件提供",
+  "panel.petSearchLabel": "搜尋寵物",
+  "panel.petSearchEmpty": "沒有符合搜尋的寵物。",
+  "panel.renameEmpty": "名稱不能是空白。",
+  "panel.renameDuplicate": "已有其他寵物使用這個名稱。",
+  "panel.renameTooLong": "名稱太長。"
 }
