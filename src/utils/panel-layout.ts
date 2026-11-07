@@ -16,9 +16,12 @@ export type PanelSizeKey = 'sessions' | 'settings' | 'wizard' | 'mcp'
 
 // Single source of truth for the size every panel route asks for. The main
 // process still shrinks the height to fit the display's work area.
+// The dashboard and Settings share one size on purpose: switching between them
+// must not resize or move the window (the old 560 -> 720 jump read as jitter).
+export const PANEL_HEIGHT = 720
 export const PANEL_SIZES: Record<PanelSizeKey, PanelSize> = {
-  sessions: { width: PANEL_WIDTH, height: 560 },
-  settings: { width: PANEL_WIDTH, height: 720 },
+  sessions: { width: PANEL_WIDTH, height: PANEL_HEIGHT },
+  settings: { width: PANEL_WIDTH, height: PANEL_HEIGHT },
   wizard: { width: 680, height: 520 },
   mcp: { width: 720, height: 560 },
 }
