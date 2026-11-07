@@ -3,7 +3,9 @@ import { t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
+import Select from '@/components/ui/Select.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
+import { THEME_PREFERENCES, setThemePreference, themePreference } from '@/composables/useTheme'
 
 const store = useAgentStore()
 const scaleOptions = [
@@ -13,6 +15,13 @@ const scaleOptions = [
 </script>
 
 <template>
+  <Card :title="t('design.theme.title')">
+    <p class="theme-help">{{ t('design.theme.help') }}</p>
+    <Select :model-value="themePreference" :aria-label="t('design.theme.title')" @update:model-value="setThemePreference($event)">
+      <option v-for="option in THEME_PREFERENCES" :key="option" :value="option">{{ t(`design.theme.${option}`) }}</option>
+    </Select>
+  </Card>
+
   <Card :title="t('petSize')">
     <div class="scale-options" role="group" :aria-label="t('petSize')">
       <Button
@@ -33,3 +42,12 @@ const scaleOptions = [
     <ToggleRow :model-value="store.bubbleEnabled" :label="t('statusBubble')" :help="t('showCompletionError')" @update:model-value="store.setBubbleEnabled($event)" />
   </Card>
 </template>
+
+<style scoped>
+.theme-help {
+  margin: 0 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  line-height: var(--leading-relaxed);
+}
+</style>

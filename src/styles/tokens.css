@@ -19,6 +19,11 @@
   --surface-overlay: rgba(25, 25, 35, 0.98);
   --surface-scrim: rgba(0, 0, 0, 0.5);
   --surface-blur: blur(24px) saturate(165%);
+  /* Three blur strengths app-wide. Components must use these, never a literal
+     blur(). `html[data-gpu-safe]` (dev:safe) and reduced-transparency turn
+     them all off through base.css / the media query below. */
+  --blur-chip: blur(8px) saturate(140%);
+  --blur-bubble: blur(14px) saturate(160%);
   --blur-scrim: blur(4px);
 
   /* Native <option> popups are painted by the OS, not by us — they need an
@@ -74,6 +79,8 @@
   --font-md: 13px;
   --font-lg: 15px;
   --font-xl: 18px;
+  --font-2xl: 22px; /* dialog / wizard display titles */
+  --font-floor: 11px; /* use in max(var(--font-floor), calc(11px * var(--pet-scale))) so scaled pet text never drops below 11px */
 
   --weight-normal: 400;
   --weight-medium: 600;
@@ -205,8 +212,8 @@
   --organic-danger-text: #a62f1e;
   --organic-success-text: #3f5a1c;
   --organic-warn-text: #7a5200;
-  --organic-font-heading: 'Caprasimo', Georgia, serif;
-  --organic-font-body: 'Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --organic-font-heading: Georgia, 'Times New Roman', serif; /* Caprasimo was never bundled */
+  --organic-font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
   --organic-space-1: 4px;
   --organic-space-2: 8px;
@@ -275,6 +282,78 @@
 .mcp-overlay {
   --accent-on: var(--organic-accent-contrast);
   --focus-ring-color: var(--focus-ring-color-on-light);
+}
+
+/* ── Dark theme (panel layer) ───────────────────────────────────────────
+   Re-points the organic palette; semantic --color-* aliases and every
+   component follow. Applied by composables/useTheme.ts as
+   <html data-theme="dark"> (the pet/bubble layer is always dark). Each
+   pair is verified by scripts/check-contrast.mjs. */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --organic-bg: #1f1b16;
+  --organic-surface: #292420;
+  --organic-surface-2: #342e28;
+  --organic-surface-warm: #4a3022;
+  --organic-surface-sage: #2e3622;
+  --organic-surface-sage-soft: #263019;
+  --organic-surface-off: #3f372e;
+  --organic-accent: #d98652;
+  --organic-accent-hover: #e39a6b;
+  --organic-accent-text: #f0b48a;
+  --organic-accent-contrast: #201e1d;
+  --organic-sage: #9db07b;
+  --organic-sage-deep: #aebf8c;
+  --organic-sage-dark: #c9d6ad;
+  --organic-text: #f3ede4;
+  --organic-text-secondary: #cfc5b6;
+  --organic-text-muted: #b0a592;
+  --organic-text-faint: #8d8374;
+  --organic-border: rgba(243, 237, 228, 0.18);
+  --organic-border-soft: rgba(243, 237, 228, 0.1);
+  --organic-border-on-accent: rgba(32, 30, 29, 0.4);
+  --organic-sage-track: rgba(201, 214, 173, 0.18);
+  --organic-accent-track: rgba(243, 237, 228, 0.1);
+  --organic-accent-glow: rgba(217, 134, 82, 0.28);
+  --organic-accent-on-hover: rgba(243, 237, 228, 0.06);
+  --organic-scrim: rgba(0, 0, 0, 0.55);
+  --organic-panel-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --organic-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --organic-hero-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+  --organic-thumb-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --organic-danger-text: #ff9a8a;
+  --organic-success-text: #b6d48a;
+  --organic-warn-text: #f0c866;
+  --focus-ring-color-on-light: #9dd8ff;
+}
+
+/* More contrast: stronger borders in both themes. */
+@media (prefers-contrast: more) {
+  :root {
+    --organic-border: rgba(32, 30, 29, 0.6);
+    --organic-border-soft: rgba(32, 30, 29, 0.4);
+    --border-strong: rgba(255, 255, 255, 0.5);
+    --border-subtle: rgba(255, 255, 255, 0.3);
+  }
+
+  :root[data-theme='dark'] {
+    --organic-border: rgba(243, 237, 228, 0.65);
+    --organic-border-soft: rgba(243, 237, 228, 0.45);
+  }
+}
+
+/* Reduced transparency: no blur anywhere; one place instead of per component. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --surface-blur: none;
+    --blur-chip: none;
+    --blur-bubble: none;
+    --blur-scrim: none;
+  }
 }
 
 /* Windows high-contrast / forced colours: the ring must use a system colour. */

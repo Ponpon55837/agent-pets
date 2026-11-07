@@ -98,7 +98,7 @@
   "notifications": "通知",
   "notificationsHelp": "顯示等待與完成的原生通知。",
   "permissionBubble": "Permission 泡泡",
-  "permissionBubbleHelp": "顯示 Allow once / Deny 請求；隱藏後請求仍會保留待處理。",
+  "permissionBubbleHelp": "顯示「允許一次／拒絕」請求；隱藏後請求仍會保留待處理。",
   "presentationMcp": "Presentation MCP",
   "presentationMcpHelp": "允許本機 MCP client 只傳送簡短反應與語音文字。",
   "sound": "音效",
