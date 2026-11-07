@@ -39,7 +39,7 @@ import { normalizePresentationStatus, PresentationController } from '../presenta
 
 import { ProjectRoutingStore } from '../project-routing'
 import { PluginRegistry, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES, PLUGIN_ARCHIVE_SKIN_MAX_BYTES } from '../plugin-registry'
-import { PluginPanelSizeStore } from '../plugin-panel-sizes'
+import { PanelSizeStore } from '../panel-size-store'
 import { PluginPreferencesStore, pluginHostMemoryBudgetMb } from '../plugin-preferences'
 import { PluginHostWindowController, type PluginHostDescriptor } from '../plugin-host-window'
 import { selectEnabledPluginDescriptors } from '../plugin-host-selection'
@@ -110,7 +110,7 @@ import { registerPluginInstallIpc } from '../ipc/plugin-install'
 import { mainState, type PluginSkinFallbackInfo } from './state'
 import { EMPTY_ATTENTION } from '../attention-tracker'
 import { attachHotkeyInfo, PermissionHotkeys } from '../permission-hotkeys'
-import { PANEL_GAP, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_WIDTH, PANEL_SIZES, PANEL_BLUR_HIDE_DELAY_MS, computePanelPlacement, fitPanelHeight, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
+import { PANEL_GAP, PANEL_WIDTH, PANEL_BLUR_HIDE_DELAY_MS, clampPanelSize, clampRectToWorkArea, computePanelPlacement, effectivePanelSize, panelMaxSize, panelMinSize, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
 
 let permissionHotkeys: PermissionHotkeys | null = null
 
@@ -129,7 +129,7 @@ function getPermissionHotkeys(): PermissionHotkeys {
   return permissionHotkeys
 }
 
-export { PANEL_GAP, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_WIDTH }
+export { PANEL_GAP, PANEL_WIDTH }
 // petWindow's actual bounds include a fixed, unscaled band of transparent
 // space reserved above the visible sprite for the quota tooltip to pop
 // into (see QUOTA_TOOLTIP_HEADROOM_H in agentStore.ts — keep in sync).
@@ -945,9 +945,6 @@ export async function createPluginServices(): Promise<void> {
     mainState.pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
   })
   mainState.pluginPreferences = new PluginPreferencesStore(userDataDirectory)
-  const panelSizeStore = new PluginPanelSizeStore(join(userDataDirectory, 'plugin-panel-sizes.json'))
-  mainState.pluginPanelWindowSizer.restore(panelSizeStore.load(), sizes => panelSizeStore.save(sizes))
-  app.once('before-quit', () => panelSizeStore.flush())
   mainState.pluginSecretsStore = new PluginSecretsStore(userDataDirectory, safeStorage)
   mainState.pluginSecretConsentStore = new PluginSecretConsentStore(userDataDirectory)
   mainState.pluginSettingsStore = new PluginSettingsStore(userDataDirectory)
@@ -1240,7 +1237,6 @@ export async function createPluginServices(): Promise<void> {
       return mainState.pluginBroker?.handle(pluginId, request) ?? { ok: false, error: 'disabled' }
     },
     onClosed: event => {
-      restorePluginPanelWindowSize(event.pluginId)
       if (mainState.panelWindow && !mainState.panelWindow.isDestroyed()) {
         mainState.panelWindow.webContents.send(IPC_CHANNELS.pluginPanelViewClosed, event)
       }
@@ -1921,13 +1917,13 @@ export function createPetWindow() {
 // moves or resizes the pet itself.
 export function createPanelWindow() {
   mainState.panelWindow = new BrowserWindow({
-    width: PANEL_SIZES.sessions.width,
-    height: PANEL_SIZES.sessions.height,
+    ...currentPanelSize(),
     show: false,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
-    resizable: false,
+    // Always user-resizable (every view); limits come from applyPanelWindowLimits.
+    resizable: true,
     skipTaskbar: true,
     hasShadow: false,
     webPreferences: {
@@ -1952,22 +1948,16 @@ export function createPanelWindow() {
     if (!mainState.panelWindow || mainState.panelWindow.isDestroyed()) return
     const contentBounds = mainState.panelWindow.getContentBounds()
     mainState.pluginPanelViewController?.relayout({ width: contentBounds.width, height: contentBounds.height })
-    const pluginId = mainState.pluginPanelWindowSizer.activePluginId()
-    if (!pluginId) return
     const [width, height] = mainState.panelWindow.getSize()
     if (mainState.programmaticPluginPanelSize) {
-      if (matchesProgrammaticPluginPanelSize(mainState.programmaticPluginPanelSize, { width, height })) {
-        mainState.programmaticPluginPanelSize = null
-        if (mainState.pluginPanelResizeResetTimer) clearTimeout(mainState.pluginPanelResizeResetTimer)
-        mainState.pluginPanelResizeResetTimer = null
-        return
-      }
+      const programmatic = matchesProgrammaticPluginPanelSize(mainState.programmaticPluginPanelSize, { width, height })
       mainState.programmaticPluginPanelSize = null
       if (mainState.pluginPanelResizeResetTimer) clearTimeout(mainState.pluginPanelResizeResetTimer)
       mainState.pluginPanelResizeResetTimer = null
+      if (programmatic) return
     }
-    const workArea = screen.getDisplayMatching(mainState.panelWindow.getBounds()).workArea
-    mainState.pluginPanelWindowSizer.recordManualSize(pluginId, { width, height }, workArea)
+    if (!mainState.panelWindow.isVisible()) return
+    recordUserPanelSize({ width, height })
   })
 
   secureRendererWindow(mainState.panelWindow)
@@ -2006,8 +1996,7 @@ export function createPanelWindow() {
 export function computePanelBounds(height: number, width = PANEL_WIDTH) {
   if (!mainState.petWindow) {
     const { workArea } = screen.getPrimaryDisplay()
-    const panelWidth = Math.round(clamp(width, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH))
-    return { x: workArea.x, y: workArea.y, width: panelWidth, height: fitPanelHeight(height, workArea.height) }
+    return { x: workArea.x, y: workArea.y, ...clampPanelSize({ width, height }, workArea) }
   }
   const petBounds = mainState.petWindow.getBounds()
   // The window's horizontal center still matches the visible sprite's (the
@@ -2024,8 +2013,47 @@ export function computePanelBounds(height: number, width = PANEL_WIDTH) {
   })
 }
 
+// ── Panel size: one user-owned size for every view ───────────────────────────
+// The window is always resizable. Its size is the user's own (persisted) size, or the
+// first-run default; the route (dashboard / Settings / plugin tabs) never changes it.
+// Wizard / MCP pages may raise it temporarily, which is never saved.
+
+function panelSizeStore(): PanelSizeStore {
+  if (!mainState.panelSizeStore) {
+    const store = new PanelSizeStore(join(app.getPath('userData'), 'panel-size.json'))
+    mainState.panelUserSize = store.load()
+    app.once('before-quit', () => store.flush())
+    mainState.panelSizeStore = store
+  }
+  return mainState.panelSizeStore
+}
+
+export function currentPanelSize(): { width: number; height: number } {
+  panelSizeStore()
+  return effectivePanelSize(mainState.panelUserSize, mainState.panelMinimumSize)
+}
+
+function panelWorkArea(bounds?: Electron.Rectangle) {
+  if (bounds) return screen.getDisplayMatching(bounds).workArea
+  if (mainState.petWindow && !mainState.petWindow.isDestroyed()) return screen.getDisplayMatching(mainState.petWindow.getBounds()).workArea
+  return screen.getPrimaryDisplay().workArea
+}
+
+// Min / max follow the display the panel sits on: the user can drag up to the work
+// area minus the gap, and never below the readable minimum.
+export function applyPanelWindowLimits(workArea = panelWorkArea()): void {
+  const panel = mainState.panelWindow
+  if (!panel || panel.isDestroyed()) return
+  const min = panelMinSize(workArea)
+  const max = panelMaxSize(workArea)
+  panel.setResizable(true)
+  panel.setMinimumSize(min.width, min.height)
+  panel.setMaximumSize(max.width, max.height)
+}
+
 export function setPluginPanelWindowBounds(bounds: ReturnType<typeof computePanelBounds>): void {
   if (!mainState.panelWindow || mainState.panelWindow.isDestroyed()) return
+  applyPanelWindowLimits(panelWorkArea(bounds))
   mainState.programmaticPluginPanelSize = { width: bounds.width, height: bounds.height }
   if (mainState.pluginPanelResizeResetTimer) clearTimeout(mainState.pluginPanelResizeResetTimer)
   mainState.pluginPanelResizeResetTimer = setTimeout(() => {
@@ -2035,14 +2063,46 @@ export function setPluginPanelWindowBounds(bounds: ReturnType<typeof computePane
   mainState.panelWindow.setBounds(bounds)
 }
 
-export function restorePluginPanelWindowSize(pluginId: string): void {
-  if (mainState.pluginPanelWindowSizer.activePluginId() !== pluginId) return
-  const baseSize = mainState.pluginPanelWindowSizer.finish()
-  if (!baseSize || !mainState.panelWindow || mainState.panelWindow.isDestroyed()) return
-  mainState.panelWindow.setResizable(false)
-  mainState.panelWindow.setMinimumSize(0, 0)
-  mainState.panelWindow.setMaximumSize(0, 0)
-  setPluginPanelWindowBounds(computePanelBounds(baseSize.height, baseSize.width))
+function applyCurrentPanelSize(): void {
+  const { width, height } = currentPanelSize()
+  setPluginPanelWindowBounds(computePanelBounds(height, width))
+}
+
+// A drag by the user: remember it (debounced on disk), drop any wizard minimum, and
+// once the drag settles slide the window back inside the work area.
+function recordUserPanelSize(size: { width: number; height: number }): void {
+  const panel = mainState.panelWindow
+  if (!panel || panel.isDestroyed()) return
+  const clamped = clampPanelSize(size, panelWorkArea(panel.getBounds()))
+  mainState.panelUserSize = clamped
+  mainState.panelMinimumSize = null
+  panelSizeStore().save(clamped)
+  if (mainState.panelSettleTimer) clearTimeout(mainState.panelSettleTimer)
+  mainState.panelSettleTimer = setTimeout(() => {
+    mainState.panelSettleTimer = null
+    const window = mainState.panelWindow
+    if (!window || window.isDestroyed() || !window.isVisible()) return
+    const bounds = window.getBounds()
+    const inside = clampRectToWorkArea(bounds, screen.getDisplayMatching(bounds).workArea)
+    if (inside.x !== bounds.x || inside.y !== bounds.y || inside.width !== bounds.width || inside.height !== bounds.height) {
+      setPluginPanelWindowBounds(inside)
+    }
+  }, 250)
+}
+
+// Wizard / MCP pages ask for a minimum size (null releases it). It never changes or
+// persists the user's own size.
+export function requestPanelMinimum(size: { width: number; height: number } | null): void {
+  panelSizeStore()
+  mainState.panelMinimumSize = size && size.height > 0 ? { width: size.width, height: size.height } : null
+  if (mainState.panelWindow?.isVisible()) applyCurrentPanelSize()
+}
+
+export function resetPanelSize(): void {
+  panelSizeStore().save(null)
+  mainState.panelUserSize = null
+  mainState.panelMinimumSize = null
+  if (mainState.panelWindow?.isVisible()) applyCurrentPanelSize()
 }
 
 export async function openPluginPanelViewForPlugin(
@@ -2067,16 +2127,7 @@ export async function openPluginPanelViewForPlugin(
   )
   if (!bounds) return { ok: false as const, error: 'panel_unavailable' }
   mainState.pluginPanelViewController.close('replaced')
-  const [currentWidth, currentHeight] = mainState.panelWindow.getSize()
-  const workArea = screen.getDisplayMatching(mainState.panelWindow.getBounds()).workArea
-  const size = mainState.pluginPanelWindowSizer.begin(pluginId, { width: currentWidth, height: currentHeight }, panelView.preferredSize, workArea)
-  mainState.panelWindow.setResizable(true)
-  mainState.panelWindow.setMinimumSize(Math.min(320, workArea.width), Math.min(240, workArea.height))
-  mainState.panelWindow.setMaximumSize(Math.min(960, workArea.width), Math.min(800, workArea.height))
-  setPluginPanelWindowBounds(computePanelBounds(size.height, size.width))
-  const result = await mainState.pluginPanelViewController.open({ pluginId, entry: panelView.entry, openToken, bounds })
-  if (!result.ok) restorePluginPanelWindowSize(pluginId)
-  return result
+  return mainState.pluginPanelViewController.open({ pluginId, entry: panelView.entry, openToken, bounds })
 }
 
 // Status-line count can flap as agents come and go, so coalesce the writes
@@ -2095,8 +2146,7 @@ export function persistPetBounds(x: number, y: number, width: number, height: nu
 
 export function repositionVisiblePanel() {
   if (!mainState.panelWindow?.isVisible()) return
-  const [width, height] = mainState.panelWindow.getSize()
-  mainState.panelWindow.setBounds(computePanelBounds(height, width))
+  applyCurrentPanelSize()
 }
 
 export function ensureDesktopWindows(): boolean {
@@ -2187,12 +2237,8 @@ export function showPanelWindow(view: 'sessions' | 'settings' | 'restore' = 'ses
   mainState.windowsFullscreenAutoHiddenPanel = false
   if (mainState.petWindowMode === 'edge') applyNormalPetBounds()
   showPetWindow()
-  if (restore) {
-    const [width, height] = mainState.panelWindow.getSize()
-    setPluginPanelWindowBounds(computePanelBounds(height, width))
-  } else {
-    mainState.panelWindow.setBounds(computePanelBounds(PANEL_SIZES[view === 'settings' ? 'settings' : 'sessions'].height))
-  }
+  // The same user-owned size for every view; only the anchor (the pet) can move it.
+  applyCurrentPanelSize()
   const wasHidden = !mainState.panelWindow.isVisible()
   if (wasHidden) {
     mainState.panelWindow.setOpacity(0)

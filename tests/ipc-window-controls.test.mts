@@ -43,10 +43,8 @@ test('window control IPC keeps sender scopes, bounds clamps, and hidden-pet pref
     setPanelBlurLock: lock => calls.push(`blur-lock:${JSON.stringify(lock)}`),
     finiteNumber: value => typeof value === 'number' && Number.isFinite(value) ? value : null,
     clamp: (value, min, max) => Math.min(max, Math.max(min, value)),
-    computePanelBounds: (height, width = 460) => ({ x: 1, y: 2, width, height }),
-    setPanelBounds: bounds => calls.push(`panel-bounds:${JSON.stringify(bounds)}`),
-    panelMinWidth: 320,
-    panelMaxWidth: 960,
+    requestPanelMinimum: size => calls.push(`panel-minimum:${JSON.stringify(size)}`),
+    resetPanelSize: () => calls.push('panel-reset-size'),
     getDisplayWorkArea: () => ({ x: 0, y: 0, width: 1_000, height: 800 }),
     animateBounds: bounds => calls.push(`pet-bounds:${JSON.stringify(bounds)}`),
     persistPetBounds: () => undefined,
@@ -61,13 +59,16 @@ test('window control IPC keeps sender scopes, bounds clamps, and hidden-pet pref
     updatePluginAgentStatus: () => calls.push('plugin-status'),
   })
   const send = (channel: string, ...args: unknown[]) => handlers.get(channel)?.({}, ...args)
-  assert.equal(handlers.size, 11)
+  assert.equal(handlers.size, 12)
   send(IPC_CHANNELS.petMousePassthrough, { ignore: true })
   send(IPC_CHANNELS.petHideRequest)
   send(IPC_CHANNELS.panelResize, { width: 960, height: 800 })
   send(IPC_CHANNELS.panelResize, { width: 460, height: 720 })
   send(IPC_CHANNELS.panelResize, { width: 9_999, height: -1 })
   send(IPC_CHANNELS.panelResize, { width: 460, height: Number.NaN })
+  send(IPC_CHANNELS.panelResize, { release: true })
+  send(IPC_CHANNELS.panelResize, { release: 'yes' })
+  send(IPC_CHANNELS.panelResetSize)
   send(IPC_CHANNELS.panelBlurLock, { pinned: true, modal: 'yes', extra: 1 })
   send(IPC_CHANNELS.panelBlurLock, { modal: false })
   send(IPC_CHANNELS.panelBlurLock, { pinned: 'x' })
@@ -80,9 +81,11 @@ test('window control IPC keeps sender scopes, bounds clamps, and hidden-pet pref
   assert.deepEqual(calls, [
     'passthrough:true',
     'hide-pet',
-    'panel-bounds:{"x":1,"y":2,"width":960,"height":800}',
-    'panel-bounds:{"x":1,"y":2,"width":460,"height":720}',
-    'panel-bounds:{"x":1,"y":2,"width":960,"height":160}',
+    'panel-minimum:{"width":960,"height":800}',
+    'panel-minimum:{"width":460,"height":720}',
+    'panel-minimum:{"width":9999,"height":0}',
+    'panel-minimum:null',
+    'panel-reset-size',
     'blur-lock:{"pinned":true}',
     'blur-lock:{"modal":false}',
     'panel-auto-hidden:false',
@@ -101,6 +104,7 @@ test('window control IPC keeps sender scopes, bounds clamps, and hidden-pet pref
     IPC_CHANNELS.petHideRequest,
     IPC_CHANNELS.panelToggle,
     IPC_CHANNELS.panelResize,
+    IPC_CHANNELS.panelResetSize,
     IPC_CHANNELS.panelBlurLock,
     IPC_CHANNELS.panelHide,
     IPC_CHANNELS.petResize,

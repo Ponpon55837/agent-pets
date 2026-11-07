@@ -244,15 +244,15 @@ function sendPluginPanelViewBounds(): void {
   )
 }
 
-// resizePanel 走主行程的程式化縮放路徑，不覆寫插件的手動尺寸；
-// 還原、Esc、關閉或切換插件時送回放大前的視窗尺寸。
+// resizePanel 只送出「暫時的最小尺寸」，不覆寫使用者自己調整的面板大小；
+// 還原、Esc、關閉或切換插件時釋放這個最小尺寸，視窗回到使用者的大小。
 // 插件頁已被主行程關閉（隱藏、崩潰等）時主行程自己會還原尺寸，這裡不再調整。
 async function restorePluginPanelViewMaximized(restoreWindowSize = false): Promise<void> {
   if (!panelViewMaximized.value) return
   panelViewMaximized.value = false
   const previousSize = panelViewWindowSizeBeforeMaximize
   panelViewWindowSizeBeforeMaximize = null
-  if (restoreWindowSize && previousSize) window.electronAPI?.resizePanel(previousSize.height, previousSize.width)
+  if (restoreWindowSize && previousSize) window.electronAPI?.resizePanel({ release: true })
   const scrollContainer = panelViewScrollContainer
   const scrollTop = panelViewScrollTop
   panelViewScrollContainer = null

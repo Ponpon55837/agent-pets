@@ -29,10 +29,10 @@ export interface WindowControlsIpcDependencies {
   setPanelBlurLock(lock: { pinned?: boolean; modal?: boolean }): void
   finiteNumber(value: unknown): number | null
   clamp(value: number, min: number, max: number): number
-  computePanelBounds(height: number, width?: number): Bounds
-  setPanelBounds(bounds: Bounds): void
-  panelMinWidth: number
-  panelMaxWidth: number
+  /** A transient minimum size (wizard / MCP page), or null to release it. Never changes the user's own size. */
+  requestPanelMinimum(size: { width: number; height: number } | null): void
+  /** Forget the user's panel size and go back to the first-run default. */
+  resetPanelSize(): void
   getDisplayWorkArea(bounds: Bounds): Bounds
   animateBounds(bounds: Bounds): void
   persistPetBounds(x: number, y: number, width: number, height: number): void
@@ -83,13 +83,22 @@ export function registerWindowControlsIpc(deps: WindowControlsIpcDependencies): 
     const panelWindow = deps.getPanelWindow()
     if (!panelWindow || !deps.isTrustedIpcSender(event, panelWindow)) return
     const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    if (data.release === true) {
+      deps.requestPanelMinimum(null)
+      return
+    }
     const height = deps.finiteNumber(data.height)
     if (height === null) return
     const requestedWidth = deps.finiteNumber(data.width)
-    const width = requestedWidth === null
-      ? panelWindow.getBounds().width
-      : Math.round(deps.clamp(requestedWidth, deps.panelMinWidth, deps.panelMaxWidth))
-    deps.setPanelBounds(deps.computePanelBounds(Math.round(deps.clamp(height, 160, 900)), width))
+    deps.requestPanelMinimum({
+      width: requestedWidth === null ? 0 : Math.round(deps.clamp(requestedWidth, 0, 20_000)),
+      height: Math.round(deps.clamp(height, 0, 20_000)),
+    })
+  })
+
+  deps.ipcMain.on(IPC_CHANNELS.panelResetSize, event => {
+    if (!deps.isTrustedIpcSender(event, deps.getPanelWindow())) return
+    deps.resetPanelSize()
   })
 
   deps.ipcMain.on(IPC_CHANNELS.panelBlurLock, (event, payload: unknown) => {

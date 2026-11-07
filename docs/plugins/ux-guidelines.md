@@ -27,7 +27,7 @@ Before anything is installed, a sheet shows the source (catalog, local file or d
 
 Toasts are drawn by the app to confirm the user's own actions (for example command sent, access to a host revoked, notifications cleared). A plugin cannot create one. Your notifications use the pet bubble and the inbox.
 
-A panel page is shown inside a frame the host draws: a back button (Esc), your icon, your `panelView.title` with "plugin name · version" below it, the signature state, **Reload panel**, a link to the plugin's permissions and settings, and **Maximize** (double-click the header; Esc restores). While loading it shows "Loading …" and offers Cancel after 5 seconds; a failed load shows reload, back and report buttons. The frame position and the "Plugin content" marker are not yours to change. The user's own resize of your panel is remembered per plugin across restarts, so treat `preferredSize` as a first-open default and make the layout responsive.
+A panel page is shown inside a frame the host draws: a back button (Esc), your icon, your `panelView.title` with "plugin name · version" below it, the signature state, **Reload panel**, a link to the plugin's permissions and settings, and **Maximize** (double-click the header; Esc restores). While loading it shows "Loading …" and offers Cancel after 5 seconds; a failed load shows reload, back and report buttons. The frame position and the "Plugin content" marker are not yours to change. The control panel has one user-resizable size shared by every view, so opening your panel never resizes the window and `preferredSize` no longer changes it: make the layout responsive from 360 px wide up to full screen.
 
 ## Writing for people
 

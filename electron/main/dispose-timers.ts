@@ -2,13 +2,13 @@ import type { MainState } from './state'
 
 type TimerKey =
   | 'resizeAnimHandle' | 'dragPollHandle' | 'shimejiPersistHandle' | 'persistBoundsHandle'
-  | 'edgeDwellHandle' | 'pluginPanelResizeResetTimer' | 'panelBlurHideHandle'
+  | 'edgeDwellHandle' | 'pluginPanelResizeResetTimer' | 'panelBlurHideHandle' | 'panelSettleTimer'
   | 'localUsageScanTimer' | 'achievementStoreRetryTimer' | 'pluginCatalogAutoCheckTimer'
 
 /** Every timer handle that lives in mainState; `disposeMainTimers` must leave all of them null. */
 export const MAIN_STATE_TIMER_KEYS: readonly TimerKey[] = [
   'resizeAnimHandle', 'dragPollHandle', 'shimejiPersistHandle', 'persistBoundsHandle',
-  'edgeDwellHandle', 'pluginPanelResizeResetTimer', 'panelBlurHideHandle',
+  'edgeDwellHandle', 'pluginPanelResizeResetTimer', 'panelBlurHideHandle', 'panelSettleTimer',
   'localUsageScanTimer', 'achievementStoreRetryTimer', 'pluginCatalogAutoCheckTimer',
 ]
 
