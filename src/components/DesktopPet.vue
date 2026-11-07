@@ -1164,3 +1164,4 @@ watch(() => store.achievementUnlock, (unlock) => {
 </template>
 
 <style scoped src="@/components/DesktopPet.css"></style>
+<style scoped src="@/components/DesktopPetBubbles.css"></style>
