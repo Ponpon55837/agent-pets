@@ -356,3 +356,74 @@ test('quota snapshots clamp out-of-range remaining percentages instead of droppi
   const windows = store.getSummary().quota?.providers[0].windows ?? []
   assert.deepEqual(windows.map(w => [w.id, w.remainingPercent]), [['session', 0], ['weekly', 100], ['ok', 40]])
 })
+
+test('summary supports 30 and 90 day ranges with a previous-period comparison', (t) => {
+  const day = 24 * 60 * 60 * 1000
+  const now = Date.UTC(2026, 7, 13, 12, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => now })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  const add = (daysAgo: number, id: string) => store.recordEvent(event({
+    state: 'success', sessionId: id, eventId: id, timestamp: now - daysAgo * day, tokenUsage: { input: 10, output: 5, quality: 'exact' },
+  }))
+  add(1, 'recent')
+  add(10, 'previous-week-or-month')
+  add(45, 'older')
+
+  const week = store.getSummary('aang-airbender', undefined, 7)
+  assert.equal(week.days.length, 7)
+  assert.equal(week.rangeDays, 7)
+  assert.equal(week.totals.sessionsCompleted, 1)
+  assert.equal(week.previousTotals.sessionsCompleted, 1)
+
+  const month = store.getSummary('aang-airbender', undefined, 30)
+  assert.equal(month.days.length, 30)
+  assert.equal(month.totals.sessionsCompleted, 2)
+  assert.equal(month.previousTotals.sessionsCompleted, 1)
+  assert.equal(month.agents[0].tokenInput, 20)
+
+  const quarter = store.getSummary('aang-airbender', undefined, 90)
+  assert.equal(quarter.days.length, 90)
+  assert.equal(quarter.totals.sessionsCompleted, 3)
+  // Unsupported ranges fall back to a week.
+  assert.equal(store.getSummary('aang-airbender', undefined, 12).days.length, 7)
+  // The range query is served by the covering index, not a table scan.
+  const plan = (store as unknown as { database: { prepare(sql: string): { all(...p: unknown[]): Array<{ detail: string }> } } })
+    .database.prepare('EXPLAIN QUERY PLAN SELECT local_date FROM daily_stats WHERE pet_id IN (?, ?) AND local_date BETWEEN ? AND ?')
+    .all('a', 'b', '2026-01-01', '2026-02-01').map(row => row.detail).join(' ')
+  assert.match(plan, /idx_daily_stats_summary_cover|sqlite_autoindex_daily_stats/)
+})
+
+test('unchanged quota readings are not rewritten, changed ones are, and old snapshots expire', (t) => {
+  let now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => now })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  const snapshot = (updatedAt: number, remaining: number) => ({
+    updatedAt: new Date(updatedAt).toISOString(),
+    providers: [{ id: 'codex', name: 'Codex', windows: [{ id: 's', label: 'Session', remainingPercent: remaining }] }],
+  })
+  assert.equal(store.recordQuotaSnapshot(snapshot(now, 80)), true)
+  assert.equal(store.recordQuotaSnapshot(snapshot(now + 120_000, 80)), false)
+  assert.equal(store.recordQuotaSnapshot(snapshot(now + 240_000, 79)), true)
+  now += 31 * 24 * 60 * 60 * 1000
+  assert.equal(store.recordQuotaSnapshot(snapshot(now, 50)), true)
+  const rows = (store as unknown as { database: { prepare(s: string): { all(): unknown[] } } }).database
+    .prepare('SELECT snapshot_id FROM quota_snapshots').all()
+  assert.equal(rows.length, 1)
+})
+
+test('achievement completed-session facts can be read incrementally', (t) => {
+  const day = 24 * 60 * 60 * 1000
+  const now = Date.UTC(2026, 7, 13, 12, 0, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => now })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  store.recordEvent(event({ eventId: 'old', sessionId: 'old', state: 'success', timestamp: now - 5 * day }))
+  store.recordEvent(event({ eventId: 'new', sessionId: 'new', state: 'success', timestamp: now - 1000 }))
+  assert.equal(store.getAchievementReconciledAt(), 0)
+  assert.equal(store.getAchievementCompletedSessions().length, 2)
+  store.setAchievementReconciledAt(now - day)
+  assert.equal(store.getAchievementReconciledAt(), now - day)
+  assert.deepEqual(store.getAchievementCompletedSessions(store.getAchievementReconciledAt()).map(f => f.sessionId), ['new'])
+})

@@ -70,7 +70,7 @@ import { createPermissionAdapterServer, PERMISSION_ADAPTER_PORT, PermissionAdapt
 import type { DesktopPreferences } from '../../src/types/desktop'
 import { locale, setLocale, t } from '../../src/i18n'
 import tokensCss from '../../src/styles/tokens.css?raw'
-import type { ProgressionSnapshot } from '../../src/types/progression'
+import type { ProgressionAwardEvent, ProgressionEventResult, ProgressionSnapshot } from '../../src/types/progression'
 import type { AchievementUnlock } from '../../src/types/achievement'
 import type { HistorySummary } from '../../src/types/history'
 import type { PresentationIntent } from '../../src/types/presentation'
@@ -2474,9 +2474,32 @@ export function broadcastProgression(snapshot?: ProgressionSnapshot): void {
   }
 }
 
+// Tells the pet and panel windows that XP was actually granted (the awards are
+// already deduplicated by the ledger, so a replayed event produces none). The
+// renderer derives toasts and level-up celebrations from this, never XP itself.
+export function broadcastProgressionAwards(result: ProgressionEventResult): void {
+  if (result.awards.length === 0) return
+  const payload: ProgressionAwardEvent = {
+    petId: result.snapshot.petId,
+    awards: result.awards.map(award => ({ ruleId: award.ruleId, amount: award.amount })),
+    at: Date.now(),
+    levelBefore: result.levelBefore,
+    levelAfter: result.snapshot.level,
+    stageBefore: result.stageBefore,
+    stageAfter: result.snapshot.evolutionStage,
+  }
+  for (const window of [mainState.petWindow, mainState.panelWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send(IPC_CHANNELS.progressionAwarded, payload)
+    }
+  }
+}
+
 export function broadcastAchievements(petId?: string): void {
+  const targetPet = petId ?? mainState.progressionStore?.getActivePetId() ?? 'aang-airbender'
   const snapshot = mainState.achievementStore?.getSnapshot(
-    petId ?? mainState.progressionStore?.getActivePetId() ?? 'aang-airbender',
+    targetPet,
+    mainState.progressionStore?.getSnapshot(targetPet),
   )
   if (!snapshot) return
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
@@ -2495,9 +2518,9 @@ export function broadcastAchievementUnlock(unlock: AchievementUnlock): void {
   broadcastAchievements()
 }
 
-export function currentHistorySummary(projectId?: string): HistorySummary | null {
+export function currentHistorySummary(projectId?: string, rangeDays = 7): HistorySummary | null {
   if (!mainState.historyStore) return null
-  const summary = mainState.historyStore.getSummary(mainState.progressionStore?.getActivePetId() ?? 'aang-airbender', projectId)
+  const summary = mainState.historyStore.getSummary(mainState.progressionStore?.getActivePetId() ?? 'aang-airbender', projectId, rangeDays)
   const scan = mainState.localUsageReader?.getDiagnostics()
   return scan
     ? {
@@ -2713,10 +2736,15 @@ export function reconcileAchievementsFromHistory(): void {
     || !currentDesktopPreferences().achievementsEnabled
   ) return
   try {
+    // Incremental: only sessions since the last reconcile (minus one day of
+    // overlap for late-arriving events) instead of the whole history.
+    const startedAt = Date.now()
+    const previous = mainState.historyStore.getAchievementReconciledAt()
     const unlocks = mainState.achievementStore.reconcileCompletedSessions(
-      mainState.historyStore.getAchievementCompletedSessions(),
+      mainState.historyStore.getAchievementCompletedSessions(previous > 0 ? previous - 24 * 60 * 60 * 1000 : 0),
       petId => mainState.progressionStore?.getSnapshot(petId),
     )
+    mainState.historyStore.setAchievementReconciledAt(startedAt)
     unlocks.forEach(broadcastAchievementUnlock)
   } catch (error) {
     console.error('Achievement history reconciliation failed', error)

@@ -52,9 +52,9 @@ function withStore<T>(work: (store: AchievementStore, path: string) => T): T {
   }
 }
 
-test('registry exposes the ten versioned, presentation-only rules', () => {
-  assert.equal(ACHIEVEMENT_DEFINITIONS.length, 10)
-  assert.equal(new Set(ACHIEVEMENT_DEFINITIONS.map(definition => definition.id)).size, 10)
+test('registry exposes the fourteen versioned, presentation-only rules', () => {
+  assert.equal(ACHIEVEMENT_DEFINITIONS.length, 14)
+  assert.equal(new Set(ACHIEVEMENT_DEFINITIONS.map(definition => definition.id)).size, 14)
 
   const base: AchievementEvaluationContext = {
     completedSessions: 0,
@@ -80,7 +80,8 @@ test('registry exposes the ten versioned, presentation-only rules', () => {
     currentStreak: 7,
     level: 20,
   })
-  assert.equal(unlocked.length, 10)
+  // The ten originals plus the 10-session and 3-day-streak ladder steps.
+  assert.equal(unlocked.length, 12)
   assert.equal(unlocked.find(item => item.id === 'one_million')?.tokenQuality, 'estimated')
 })
 
@@ -188,7 +189,7 @@ test('adapter, busy-day, streak, and active-day rules use pet-scoped aggregates'
     }
     assert.equal(activeDayUnlocks.some(unlock => unlock.achievementId === 'old_friend'), true)
     assert.equal(store.getSnapshot('wolf').totalUnlocked >= 2, true)
-    assert.equal(store.getSnapshot('busy-pet').totalUnlocked, 2)
+    assert.equal(store.getSnapshot('busy-pet').totalUnlocked, 3) // hello_world, sessions_10, busy_day
   })
 })
 
@@ -209,4 +210,24 @@ test('history reconciliation backfills unique sessions without duplicate unlocks
     assert.equal(store.getSnapshot('wolf').achievements.find(item => item.id === 'getting_serious')?.unlocked, true)
     assert.equal(store.reconcileCompletedSessions(facts).length, 0)
   })
+})
+
+test('progress comes from the same facts as the unlock rules and never exceeds the target', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'agent-pets-achievements-progress-'))
+  const store = new AchievementStore(join(directory, 'achievements.sqlite'), { localDate, localHour })
+  try {
+    store.recordEvent(event('success', BASE_TIME, 'one'), 'wolf')
+    store.recordEvent(event('success', BASE_TIME + 1_000, 'two'), 'wolf')
+    const snapshot = store.getSnapshot('wolf', { petId: 'wolf', level: 7 } as never)
+    const byId = new Map(snapshot.achievements.map(item => [item.id, item]))
+    assert.deepEqual(byId.get('getting_serious')?.progress, { current: 2, target: 100 })
+    assert.deepEqual(byId.get('sessions_10')?.progress, { current: 2, target: 10 })
+    assert.deepEqual(byId.get('level_10')?.progress, { current: 7, target: 10 })
+    assert.equal(byId.get('hello_world')?.unlocked, true)
+    assert.equal(byId.get('night_owl')?.hidden, true)
+    for (const item of snapshot.achievements) assert.ok(item.progress.current <= item.progress.target)
+  } finally {
+    store.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
 })

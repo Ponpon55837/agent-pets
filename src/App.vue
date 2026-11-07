@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import DesktopPet from '@/components/DesktopPet.vue'
+import GrowthCelebration from '@/components/growth/GrowthCelebration.vue'
 import StatusPanel from '@/components/StatusPanel.vue'
 import SetupWizard from '@/components/SetupWizard.vue'
 import ProjectMcpPanel from '@/components/ProjectMcpPanel.vue'
@@ -47,6 +48,7 @@ let cleanupPanelOpenSettings: (() => void) | null = null
 let cleanupDesktopPreferences: (() => void) | null = null
 let cleanupPetWindowMode: (() => void) | null = null
 let cleanupProgression: (() => void) | null = null
+let cleanupProgressionAwarded: (() => void) | null = null
 let cleanupAchievements: (() => void) | null = null
 let cleanupAchievementUnlock: (() => void) | null = null
 let cleanupQuotaUpdated: (() => void) | null = null
@@ -352,6 +354,11 @@ onMounted(() => {
       store.setProgressionSnapshot(snapshot)
     })
   }
+  if (electronAPI?.onProgressionAwarded) {
+    cleanupProgressionAwarded = electronAPI.onProgressionAwarded((event: unknown) => {
+      store.handleProgressionAwarded(event)
+    })
+  }
   if (electronAPI?.onAchievementsUpdated) {
     cleanupAchievements = electronAPI.onAchievementsUpdated((snapshot: AchievementSnapshot) => {
       store.setAchievementsSnapshot(snapshot)
@@ -459,6 +466,7 @@ onUnmounted(() => {
   cleanupDesktopPreferences?.()
   cleanupPetWindowMode?.()
   cleanupProgression?.()
+  cleanupProgressionAwarded?.()
   cleanupAchievements?.()
   cleanupAchievementUnlock?.()
   cleanupQuotaUpdated?.()
@@ -489,7 +497,10 @@ onUnmounted(() => {
         <ProjectMcpPanel v-if="store.showProjectMcpPanel" @close="store.closeProjectMcpPanel()" />
       </Transition>
     </template>
-    <DesktopPet v-else />
+    <template v-else>
+      <DesktopPet />
+      <GrowthCelebration />
+    </template>
   </div>
 </template>
 

@@ -1,5 +1,5 @@
 
-import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol, powerMonitor, Notification } from 'electron'
+import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol, powerMonitor, Notification, shell } from 'electron'
 
 import { join } from 'path'
 
@@ -104,7 +104,7 @@ import { flushMainLog, logMain, teeConsoleToLog } from './diagnostics/main-log'
 import { acquireRunMarker } from './diagnostics/session-marker'
 import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
 import { setPluginPanelWindowBounds } from './main/runtime'
-import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, cancelHistoryStoreRetry, localPorts, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock } from './main/runtime'
+import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, cancelHistoryStoreRetry, localPorts, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards } from './main/runtime'
 
 
 
@@ -371,7 +371,10 @@ async function bootstrapApp(): Promise<void> {
       let progressionResult: ReturnType<ProgressionStore['handleEvent']> | undefined
       try {
         progressionResult = mainState.progressionStore?.handleEvent(event, event.routedPetId)
-        if (progressionResult) broadcastProgression(progressionResult.snapshot)
+        if (progressionResult) {
+          broadcastProgression(progressionResult.snapshot)
+          broadcastProgressionAwards(progressionResult)
+        }
       } catch (error) {
         console.error('Progression event handling failed', error)
       }
@@ -562,6 +565,13 @@ async function bootstrapApp(): Promise<void> {
       ? dialog.showSaveDialog(window, options)
       : dialog.showSaveDialog(options),
     writeJsonAtomic,
+    writeTextFile: (filePath, text) => fs.writeFileSync(filePath, text, { encoding: 'utf8', mode: 0o600 }),
+    revealPath: filePath => shell.showItemInFolder(filePath),
+    growthExport: petId => ({
+      progression: mainState.progressionStore?.getSnapshot(petId) ?? null,
+      achievements: (mainState.achievementStore?.getSnapshot(petId, mainState.progressionStore?.getSnapshot(petId))
+        .achievements ?? []).filter(item => item.unlocked).map(item => ({ id: item.id, unlockedAt: item.unlockedAt ?? null })),
+    }),
     activePetId: () => mainState.progressionStore?.getActivePetId() ?? null,
   })
 

@@ -82,3 +82,62 @@ test('over-quota readings are clamped to [0, 100] with an overage flag instead o
     [[100, 0, true]],
   )
 })
+
+test('quota errors are classified, failures keep the last good reading, and failures are not cached for long', async () => {
+  const quota = await import('../electron/quota.ts')
+  quota.resetQuotaCacheForTests()
+  const ok = (): Promise<import('../electron/quota.ts').QuotaProvider[]> => Promise.resolve([
+    { id: 'codex', name: 'Codex', windows: [{ id: 'main-0', label: 'Session', usedPercent: 36, remainingPercent: 64 }] },
+    { id: 'claude', name: 'Claude Code', windows: [] , error: 'x', errorKind: 'not-signed-in' },
+  ])
+  const first = await quota.getQuotaUsage(false, ok)
+  const codexFirst = first.providers.find(p => p.id === 'codex')!
+  assert.ok(codexFirst.fetchedAt && !codexFirst.stale)
+  assert.equal(first.providers.find(p => p.id === 'claude')!.fetchedAt, undefined)
+
+  // A forced refresh inside the cooldown is answered from cache and says so.
+  const throttled = await quota.getQuotaUsage(true, ok)
+  assert.ok(throttled.throttled && throttled.throttled.retryInSec >= 1 && throttled.throttled.retryInSec <= 10)
+  assert.equal(throttled.updatedAt, first.updatedAt)
+})
+
+test('a failing provider keeps its previous windows marked stale and failures expire quickly', async (t) => {
+  const quota = await import('../electron/quota.ts')
+  quota.resetQuotaCacheForTests()
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-23T03:00:00Z') })
+  const good = await quota.getQuotaUsage(false, async () => [
+    { id: 'codex', name: 'Codex', plan: 'Plus', windows: [{ id: 'm', label: 'Session', usedPercent: 36, remainingPercent: 64 }] },
+  ])
+  assert.equal(good.providers[0].stale, undefined)
+
+  t.mock.timers.tick(100_000) // past the 90s success TTL
+  const failed = await quota.getQuotaUsage(false, async () => [
+    { id: 'codex', name: 'Codex', windows: [], error: 'Expired', errorKind: 'expired' },
+  ])
+  const provider = failed.providers[0]
+  assert.equal(provider.stale, true)
+  assert.equal(provider.errorKind, 'expired')
+  assert.equal(provider.plan, 'Plus')
+  assert.deepEqual(provider.windows.map(w => w.remainingPercent), [64])
+  assert.equal(provider.fetchedAt, good.providers[0].fetchedAt)
+
+  // The failed result is cached for ~10s only, not 90s.
+  t.mock.timers.tick(11_000)
+  const recovered = await quota.getQuotaUsage(false, async () => [
+    { id: 'codex', name: 'Codex', windows: [{ id: 'm', label: 'Session', usedPercent: 10, remainingPercent: 90 }] },
+  ])
+  assert.equal(recovered.providers[0].stale, undefined)
+  assert.equal(recovered.providers[0].windows[0].remainingPercent, 90)
+})
+
+test('quota error kinds are derived from the sanitized failure', async () => {
+  const { classifyQuotaError, QuotaDisplayError } = await import('../electron/quota.ts')
+  const kind = (message: string) => classifyQuotaError(new QuotaDisplayError(message))
+  assert.equal(kind('No existing Codex CLI subscription session was found. Agent Pets never asks for credentials.'), 'not-signed-in')
+  assert.equal(kind('The existing Codex CLI session expired. Re-authenticate in Codex CLI.'), 'expired')
+  assert.equal(kind('Claude quota is rate limited. Wait a minute and retry.'), 'rate-limited')
+  assert.equal(kind('Request timed out. Try again.'), 'timeout')
+  assert.equal(kind('Codex usage request failed (500).'), 'unavailable')
+  const abort = new Error('x'); abort.name = 'AbortError'
+  assert.equal(classifyQuotaError(abort), 'timeout')
+})
