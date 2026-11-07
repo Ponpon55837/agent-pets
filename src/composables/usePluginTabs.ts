@@ -26,7 +26,7 @@ export interface PluginDashboardTab {
 // Read-only view of the plugin list for the dashboard tab bar. It only reads the
 // snapshot / feed IPC the plugin panel already uses; the plugin panel controller
 // (settings, install, remove) stays the single writer, so this refreshes whenever
-// the dashboard is shown again or a feed / badge event arrives.
+// the dashboard is shown again or gains focus (full snapshot); feed events refetch only notifications.
 export function usePluginTabs() {
   const snapshot = ref<PluginPanelSnapshot | null>(null)
   const notifications = ref<PluginNotificationRecord[]>([])
@@ -55,6 +55,25 @@ export function usePluginTabs() {
       inFlight = false
       loading.value = false
       if (queued && !disposed) { queued = false; void refresh() }
+    }
+  }
+
+  // A notifications-changed event only changes the feed; skip the (heavier) plugin snapshot.
+  let feedInFlight = false
+  let feedQueued = false
+  async function refreshNotifications(): Promise<void> {
+    const api = window.electronAPI
+    if (!api?.listPluginNotifications) return
+    if (feedInFlight) { feedQueued = true; return }
+    feedInFlight = true
+    try {
+      const feed = await api.listPluginNotifications()
+      if (!disposed && feed?.ok) notifications.value = feed.value
+    } catch {
+      // Keep the last known feed.
+    } finally {
+      feedInFlight = false
+      if (feedQueued && !disposed) { feedQueued = false; void refreshNotifications() }
     }
   }
 
@@ -92,7 +111,7 @@ export function usePluginTabs() {
   onMounted(() => {
     void refresh()
     const api = window.electronAPI
-    const off1 = api?.onPluginNotificationsChanged?.(() => { void refresh() })
+    const off1 = api?.onPluginNotificationsChanged?.(() => { void refreshNotifications() })
     const off2 = api?.onPluginBadgesChanged?.(badges => { liveBadges.value = badges })
     if (off1) cleanups.push(off1)
     if (off2) cleanups.push(off2)
