@@ -5,10 +5,12 @@ import DesktopPet from '@/components/DesktopPet.vue'
 import StatusPanel from '@/components/StatusPanel.vue'
 import SetupWizard from '@/components/SetupWizard.vue'
 import ProjectMcpPanel from '@/components/ProjectMcpPanel.vue'
-import { playCue } from '@/utils/sound'
+import { playCue, type SoundCue } from '@/utils/sound'
 import type { DesktopPreferences } from '@/types/desktop'
 import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
 import { setLocale as applyLocale } from '@/i18n'
+import { EDGE_HOVER_EXPAND_MS } from '@/utils/pet-edge'
+import { HIT_DILATE_PX, decidePassthrough, hasOpaquePixel } from '@/utils/pet-hit-test'
 
 const store = useAgentStore()
 const isPanelWindow = window.location.hash === '#panel'
@@ -107,7 +109,16 @@ function isOpaqueCanvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY
   if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return false
 
   try {
-    return (canvas.getContext('2d')?.getImageData(x, y, 1, 1).data[3] ?? 0) > 16
+    // Sample a small neighbourhood rather than one pixel so gaps between legs
+    // and arms do not make the pet impossible to grab.
+    // The backing store is denser than CSS pixels; keep the tolerance in CSS px.
+    const radius = Math.max(1, Math.round(HIT_DILATE_PX * canvas.width / rect.width))
+    const left = Math.max(0, x - radius)
+    const top = Math.max(0, y - radius)
+    const right = Math.min(canvas.width, x + radius + 1)
+    const bottom = Math.min(canvas.height, y + radius + 1)
+    const block = canvas.getContext('2d')?.getImageData(left, top, right - left, bottom - top).data
+    return block ? hasOpaquePixel(block) : false
   } catch {
     // A custom file URL can make a canvas unreadable on some platforms.
     // Keep that canvas usable rather than making the whole pet click-through.
@@ -124,19 +135,89 @@ function isPetHitTarget(clientX: number, clientY: number): boolean {
   return canvas instanceof HTMLCanvasElement && isOpaqueCanvasPoint(canvas, clientX, clientY)
 }
 
-function handlePetMouseMove(event: MouseEvent) {
+// The last cursor position inside the window, so the decision can be redone
+// when something moves under a motionless cursor (bubble appears, pet walks).
+let lastPointer: { x: number; y: number } | null = null
+let lastPointerAt = 0
+let passthroughSentAt = 0
+let reevaluateFrame: number | null = null
+let layoutObserver: ResizeObserver | null = null
+let layoutMutationObserver: MutationObserver | null = null
+const POINTER_FRESH_MS = 4_000
+
+function sendPassthrough(ignore: boolean): void {
+  const decision = decidePassthrough(ignore, petMousePassthrough, passthroughSentAt, performance.now())
+  if (!decision.send) return
+  petMousePassthrough = decision.next
+  passthroughSentAt = performance.now()
+  window.electronAPI?.setMousePassthrough(ignore)
+}
+
+function evaluatePointer(clientX: number, clientY: number): void {
   if (store.petWindowMode.mode === 'edge') {
-    window.electronAPI?.notifyPetHover()
-    if (petMousePassthrough) {
-      petMousePassthrough = false
-      window.electronAPI?.setMousePassthrough(false)
-    }
+    sendPassthrough(false)
     return
   }
-  const ignore = !store.isDragging && !isPetHitTarget(event.clientX, event.clientY)
-  if (ignore === petMousePassthrough) return
-  petMousePassthrough = ignore
-  window.electronAPI?.setMousePassthrough(ignore)
+  sendPassthrough(!store.isDragging && !isPetHitTarget(clientX, clientY))
+}
+
+function handlePetMouseMove(event: MouseEvent) {
+  lastPointer = { x: event.clientX, y: event.clientY }
+  lastPointerAt = performance.now()
+  evaluatePointer(event.clientX, event.clientY)
+}
+
+// Edge handle: expand only when the cursor lingers, so sweeping past on the way
+// elsewhere does not pop the pet out.
+let edgeHoverTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelEdgeHover(): void {
+  if (edgeHoverTimer) clearTimeout(edgeHoverTimer)
+  edgeHoverTimer = null
+}
+
+function handleEdgeHoverEnter(): void {
+  if (store.petWindowMode.mode !== 'edge' || edgeHoverTimer) return
+  edgeHoverTimer = setTimeout(() => {
+    edgeHoverTimer = null
+    if (store.petWindowMode.mode === 'edge') window.electronAPI?.notifyPetHover()
+  }, EDGE_HOVER_EXPAND_MS)
+}
+
+function scheduleReevaluate(): void {
+  if (reevaluateFrame !== null || !lastPointer) return
+  if (performance.now() - lastPointerAt > POINTER_FRESH_MS) return
+  reevaluateFrame = requestAnimationFrame(() => {
+    reevaluateFrame = null
+    if (!lastPointer || store.petWindowMode.mode === 'edge') return
+    evaluatePointer(lastPointer.x, lastPointer.y)
+  })
+}
+
+// Mode changes re-apply native window bounds in main, which also resets mouse
+// handling to "interactive"; forget what we think we sent.
+watch(() => store.petWindowMode.mode, () => {
+  petMousePassthrough = false
+  passthroughSentAt = 0
+  scheduleReevaluate()
+})
+
+function startLayoutWatch(): void {
+  const root = document.querySelector('.app-container')
+  if (!root) return
+  layoutObserver = new ResizeObserver(scheduleReevaluate)
+  layoutObserver.observe(root)
+  layoutMutationObserver = new MutationObserver(scheduleReevaluate)
+  layoutMutationObserver.observe(root, { childList: true, subtree: true })
+}
+
+function stopLayoutWatch(): void {
+  layoutObserver?.disconnect()
+  layoutMutationObserver?.disconnect()
+  layoutObserver = null
+  layoutMutationObserver = null
+  if (reevaluateFrame !== null) cancelAnimationFrame(reevaluateFrame)
+  reevaluateFrame = null
 }
 
 // Pet and panel are separate windows/renderer processes, each with its own
@@ -165,9 +246,13 @@ function handleStorage(e: StorageEvent) {
   } else if (e.key === 'agent-pet-multi') {
     store.multiPetEnabled = e.newValue === '1'
   } else if (e.key === 'agent-pet-fx') {
-    store.reactionsEnabled = e.newValue === '1'
+    store.reactionsEnabled = e.newValue !== '0'
   } else if (e.key === 'agent-pet-bubble') {
-    store.bubbleEnabled = e.newValue === '1'
+    store.bubbleEnabled = e.newValue !== '0'
+  } else if (e.key === 'agent-pet-ambient') {
+    store.ambientEnabled = e.newValue === '1'
+  } else if (e.key === 'agent-pet-activity') {
+    store.activityBubbleEnabled = e.newValue === '1'
   } else if (e.key === 'agent-pet-mood' && e.newValue) {
     store.mood = parseFloat(e.newValue)
   } else if (e.key === 'agent-pet-mood-visuals') {
@@ -177,7 +262,21 @@ function handleStorage(e: StorageEvent) {
   }
 }
 
+// Both windows' stores process every event identically, so only the pet
+// window actually plays audio — otherwise it'd sound twice.
+function playCueIfAllowed(cue: SoundCue): void {
+  if (
+    !isPanelWindow
+    && store.desktopPreferencesReady
+    && store.soundEnabled
+    && !store.dndEnabled
+  ) {
+    playCue(cue)
+  }
+}
+
 onMounted(() => {
+  store.setCueSink(playCueIfAllowed)
   document.documentElement.style.setProperty('--pet-scale', String(store.petScale))
   document.documentElement.style.setProperty('--pet-w', store.scaledW + 'px')
 
@@ -185,17 +284,7 @@ onMounted(() => {
   if (electronAPI?.onAgentStatusEvent) {
     cleanupListener = electronAPI.onAgentStatusEvent((event: unknown) => {
       const cue = store.handleEvent(event as any)
-      // Both windows' stores process every event identically, so only the
-      // pet window actually plays audio — otherwise it'd sound twice.
-      if (
-        cue
-        && !isPanelWindow
-        && store.desktopPreferencesReady
-        && store.soundEnabled
-        && !store.dndEnabled
-      ) {
-        playCue(cue)
-      }
+      if (cue) playCueIfAllowed(cue)
     })
   }
   void electronAPI?.getSessionSnapshot?.()
@@ -290,6 +379,9 @@ onMounted(() => {
   }
   if (!isPanelWindow && electronAPI?.setMousePassthrough) {
     window.addEventListener('mousemove', handlePetMouseMove, true)
+    startLayoutWatch()
+    document.documentElement.addEventListener('mouseenter', handleEdgeHoverEnter)
+    document.documentElement.addEventListener('mouseleave', cancelEdgeHover)
   }
 
   window.addEventListener('storage', handleStorage)
@@ -360,6 +452,7 @@ watch(() => store.hasSuccessSessions, (active) => {
 }, { immediate: true })
 
 onUnmounted(() => {
+  store.setCueSink(null)
   cleanupListener?.()
   cleanupPanelOpened?.()
   cleanupPanelOpenSettings?.()
@@ -375,6 +468,10 @@ onUnmounted(() => {
   cleanupPluginFeedUnreadCount?.()
   cleanupPluginSkinsChanged?.()
   window.removeEventListener('mousemove', handlePetMouseMove, true)
+  stopLayoutWatch()
+  cancelEdgeHover()
+  document.documentElement.removeEventListener('mouseenter', handleEdgeHoverEnter)
+  document.documentElement.removeEventListener('mouseleave', cancelEdgeHover)
   window.removeEventListener('storage', handleStorage)
   document.removeEventListener('visibilitychange', onDocumentVisibilityChange)
   stopRecurringTimers()

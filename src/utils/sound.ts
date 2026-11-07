@@ -28,7 +28,7 @@ function beep(freq: number, startAt: number, duration: number, gain: number, typ
   osc.stop(audio.currentTime + startAt + duration + 0.02)
 }
 
-export type SoundCue = 'success' | 'error' | 'waiting-permission'
+export type SoundCue = 'success' | 'error' | 'waiting-permission' | 'waiting-input'
 
 export function playCue(cue: SoundCue) {
   const audio = getContext()
@@ -41,7 +41,14 @@ export function playCue(cue: SoundCue) {
       beep(880, 0.09, 0.13, 0.12)
       break
     case 'error':
-      beep(220, 0, 0.18, 0.12, 'sawtooth')
+      // Two falling notes read as "oh no" rather than a single harsh buzz.
+      beep(330, 0, 0.12, 0.1, 'triangle')
+      beep(220, 0.13, 0.2, 0.1, 'triangle')
+      break
+    case 'waiting-input':
+      // A soft rising pair: the agent is asking, not alarming.
+      beep(440, 0, 0.08, 0.08)
+      beep(587, 0.1, 0.12, 0.08)
       break
     case 'waiting-permission':
       beep(520, 0, 0.08, 0.1)
