@@ -8,3 +8,11 @@
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
 }
+
+/* GPU-safe mode (pnpm dev:safe): drop every backdrop blur in one place. */
+html[data-gpu-safe] *,
+html[data-gpu-safe] *::before,
+html[data-gpu-safe] *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}

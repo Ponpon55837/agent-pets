@@ -36,13 +36,30 @@ import type {
 import { PRESENTATION_REACTIONS } from '@/types/presentation'
 import { formatProject } from '@/utils/format'
 import { AgentSessionIndex } from '@/utils/agent-session-index'
+import {
+  UNREAD_AWAY_MS,
+  WAITING_INPUT_DELAY_MS,
+  formatElapsedShort,
+  shouldPlaySuccessSound,
+  toastDurationFor,
+  type ToastTone,
+} from '@/utils/pet-toast'
+import type { SoundCue } from '@/utils/sound'
+import { SUCCESS_DISPLAY_MS } from '@/utils/pet-motion-plan'
+import { readPetFeedbackDefaults } from '@/utils/pet-defaults'
 import { SESSION_REMOVE_MS, sessionLifecycleAction } from '@/utils/session-lifecycle'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
-import { PANEL_SIZES } from '@/utils/panel-layout'
+import {
+  INITIAL_PANEL_ROUTE,
+  panelSizeFor,
+  panelSizeKey,
+  reducePanelRoute,
+  type PanelRouteAction,
+  type PanelRouteState,
+} from '@/utils/panel-route'
 import {
   createToastCountdown,
-  getToastRemainingMs,
   type ToastCountdown,
 } from '@/utils/toast-countdown'
 
@@ -55,7 +72,6 @@ export interface PetEntry {
   pluginSkin?: PluginSkinPetSource
 }
 
-const SUCCESS_DISPLAY_MS = 4_000
 const MAX_SESSION_COUNT = 200
 const ACHIEVEMENT_DEFINITION_BY_ID = new Map(ACHIEVEMENT_DEFINITIONS.map(entry => [entry.id, entry]))
 // Kept at/below the main process' quota cache TTL so a poll that arrives on
@@ -215,7 +231,11 @@ export const useAgentStore = defineStore('agent', () => {
   const sessions = computed(() => Object.fromEntries(sessionsByKey))
   const isDragging = ref(false)
   const petWindowMode = ref<PetWindowModeState>({ mode: 'normal' })
-  const panelView = ref<'sessions' | 'settings'>('sessions')
+  // Panel navigation: one state machine (utils/panel-route.ts) replaces three flags.
+  const panelRoute = ref<PanelRouteState>(INITIAL_PANEL_ROUTE)
+  const panelView = computed(() => panelRoute.value.view)
+  const showWizard = computed(() => panelRoute.value.overlay === 'wizard')
+  const showProjectMcpPanel = computed(() => panelRoute.value.overlay === 'mcp')
   const selectedPet = ref<string>(localStorage.getItem('agent-pet-id') || 'aang-airbender')
   const petScale = ref(parseFloat(localStorage.getItem('agent-pet-scale') || '1'))
   const pets = ref<PetEntry[]>([])
@@ -293,14 +313,21 @@ export const useAgentStore = defineStore('agent', () => {
     return selectedPet.value
   }
 
-  const showWizard = ref(false)
-  const showProjectMcpPanel = ref(false)
   const toast = ref<{
     id: number
-    text: string
-    tone: 'success' | 'error'
+    tone: ToastTone
+    /** Semantic headline, e.g. "Done" / "Failed" / "3 tasks done". */
+    title: string
+    /** Source and project, e.g. "Claude · my-repo". */
+    meta: string
+    /** Optional second line (elapsed time). */
+    detail?: string
+    /** How many finished results this bubble stands for. */
+    count: number
     countdown: ToastCountdown
   } | null>(null)
+  const toastPaused = ref(false)
+  let toastPausedRemainingMs: number | null = null
   const toastRemainingMs = ref(0)
   let toastTimer: ReturnType<typeof setTimeout> | null = null
   let toastProgressTimer: ReturnType<typeof setTimeout> | null = null
@@ -344,10 +371,16 @@ export const useAgentStore = defineStore('agent', () => {
   // Off by default — the click/state-change bounce, idle fidget sway, and
   // waiting-permission shake found it distracting. Off leaves the core
   // sprite state animation (and frame speed-up / mood glow) untouched.
-  const reactionsEnabled = ref(localStorage.getItem('agent-pet-fx') === '1')
+  // On by default (key-event feedback: reaction bounce, urgency shake, reward
+  // glow). Decorative ambient motion is a separate, opt-in switch below.
+  const feedbackDefaults = readPetFeedbackDefaults(localStorage)
+  const reactionsEnabled = ref(feedbackDefaults.reactions)
 
-  // Off by default — the completion toast / "what's it doing" bubble.
-  const bubbleEnabled = ref(localStorage.getItem('agent-pet-bubble') === '1')
+  // On by default — completion / failure / waiting bubbles. The noisier
+  // "what's it doing" tool-activity bubble is its own opt-in switch.
+  const bubbleEnabled = ref(feedbackDefaults.bubble)
+  const ambientEnabled = ref(feedbackDefaults.ambient)
+  const activityBubbleEnabled = ref(feedbackDefaults.activity)
   // shallowRef: all three are always replaced wholesale (setPermissionRequests,
   // setProgressionSnapshot, setAchievementsSnapshot each assign a fresh value),
   // never mutated in place — see the comment on quotaUsage above.
@@ -394,6 +427,12 @@ export const useAgentStore = defineStore('agent', () => {
     dndEnabled.value,
     bubbleEnabled.value,
   ))
+  const ambientActive = computed(() => isDesktopEffectActive(
+    desktopPreferencesReady.value,
+    dndEnabled.value,
+    ambientEnabled.value,
+  ))
+  const activityBubbleActive = computed(() => bubbleActive.value && activityBubbleEnabled.value)
   // Presentation-only preference; it never changes Broker or adapter state.
   const permissionBubbleActive = computed(() => (
     desktopPreferencesReady.value && permissionBubbleEnabled.value
@@ -436,46 +475,140 @@ export const useAgentStore = defineStore('agent', () => {
 
   // --- Toast 提示 ----------------------------------------------------------
 
-  function showToast(source: AgentSource, project: string | undefined, tone: 'success' | 'error') {
+  function clearToastTimers() {
+    if (toastTimer) clearTimeout(toastTimer)
+    if (toastProgressTimer) clearTimeout(toastProgressTimer)
+    toastTimer = null
+    toastProgressTimer = null
+  }
+
+  function armToastTimers(toastId: number, remainingMs: number) {
+    clearToastTimers()
+    toastRemainingMs.value = remainingMs
+    const startedAt = Date.now()
+    const tick = () => {
+      if (toast.value?.id !== toastId) return
+      const remaining = Math.max(0, remainingMs - (Date.now() - startedAt))
+      toastRemainingMs.value = remaining
+      toastProgressTimer = remaining > 0 ? setTimeout(tick, Math.min(100, remaining)) : null
+    }
+    toastProgressTimer = setTimeout(tick, 100)
+    toastTimer = setTimeout(() => {
+      if (toast.value?.id !== toastId) return
+      dismissToast()
+    }, remainingMs)
+  }
+
+  // --- 不在場時的未讀結果 / 等待輸入提醒 ----------------------------------------
+
+  const unreadResults = ref({ count: 0, hasError: false })
+  let lastPetInteractionAt = Date.now()
+  let cueSink: ((cue: SoundCue) => void) | null = null
+  const waitingInputTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  function markPetInteraction() {
+    lastPetInteractionAt = Date.now()
+  }
+
+  function clearUnreadResults() {
+    if (unreadResults.value.count === 0) return
+    unreadResults.value = { count: 0, hasError: false }
+  }
+
+  function noteUnreadResult(tone: 'success' | 'error') {
+    if (Date.now() - lastPetInteractionAt < UNREAD_AWAY_MS) return
+    unreadResults.value = {
+      count: Math.min(99, unreadResults.value.count + 1),
+      hasError: unreadResults.value.hasError || tone === 'error',
+    }
+  }
+
+  // App.vue decides whether this window may actually make sound.
+  function setCueSink(sink: ((cue: SoundCue) => void) | null) {
+    cueSink = sink
+  }
+
+  function cancelWaitingInputReminder(key: string) {
+    const timer = waitingInputTimers.get(key)
+    if (timer) clearTimeout(timer)
+    waitingInputTimers.delete(key)
+  }
+
+  // The prompt must still be unanswered after a short grace period before the
+  // pet speaks up, so a question answered at once never flashes a bubble.
+  function scheduleWaitingInputReminder(key: string) {
+    cancelWaitingInputReminder(key)
+    waitingInputTimers.set(key, setTimeout(() => {
+      waitingInputTimers.delete(key)
+      const session = sessionsByKey.get(key)
+      if (!session || session.state !== 'waiting-input') return
+      showToast(session.source, session.project, 'waiting')
+      cueSink?.('waiting-input')
+    }, WAITING_INPUT_DELAY_MS))
+  }
+
+  function dismissToast() {
+    clearToastTimers()
+    toast.value = null
+    toastRemainingMs.value = 0
+    toastPaused.value = false
+    toastPausedRemainingMs = null
+  }
+
+  // Hovering the bubble freezes its countdown so a slow reader never loses it.
+  function pauseToast() {
+    const current = toast.value
+    if (!current || toastPaused.value) return
+    toastPausedRemainingMs = toastRemainingMs.value
+    toastPaused.value = true
+    clearToastTimers()
+  }
+
+  function resumeToast() {
+    const current = toast.value
+    if (!current || !toastPaused.value) return
+    const remaining = toastPausedRemainingMs ?? 0
+    toastPaused.value = false
+    toastPausedRemainingMs = null
+    if (remaining <= 0) dismissToast()
+    else armToastTimers(current.id, remaining)
+  }
+
+  function showToast(
+    source: AgentSource,
+    project: string | undefined,
+    tone: ToastTone,
+    elapsedMs?: number,
+  ) {
     const label = SOURCE_LABELS[source]
     const proj = formatProject(project)
     const startedAt = Date.now()
-    const countdown = createToastCountdown(tone, startedAt)
+    const durationMs = toastDurationFor(tone)
+    const countdown = createToastCountdown(tone, startedAt, durationMs)
     if (!countdown) return
+
+    // Several tasks finishing back to back collapse into one count instead of
+    // each bubble overwriting the previous one.
+    const previous = toast.value
+    const merge = tone === 'success' && previous?.tone === 'success'
+    const count = merge ? previous.count + 1 : 1
+    const elapsed = formatElapsedShort(elapsedMs)
     const nextToast = {
       id: ++toastSequence,
-      text: proj ? `${label} · ${proj}` : label,
       tone,
+      title: count > 1
+        ? t('pet.toastManyDone', { count })
+        : t(tone === 'success' ? 'pet.toastDone' : tone === 'error' ? 'pet.toastFailed' : 'pet.toastWaiting'),
+      meta: count > 1 ? '' : proj ? `${label} · ${proj}` : label,
+      ...(count === 1 && elapsed ? { detail: t('pet.toastElapsed', { time: elapsed }) } : {}),
+      count,
       countdown,
     }
 
-    if (toastTimer) clearTimeout(toastTimer)
-    if (toastProgressTimer) clearTimeout(toastProgressTimer)
-
     toast.value = nextToast
-    toastRemainingMs.value = getToastRemainingMs(countdown, startedAt)
-
-    const updateRemainingTime = () => {
-      if (toast.value?.id !== nextToast.id) return
-
-      const remaining = getToastRemainingMs(countdown, Date.now())
-      toastRemainingMs.value = remaining
-      if (remaining > 0) {
-        toastProgressTimer = setTimeout(updateRemainingTime, Math.min(100, remaining))
-      } else {
-        toastProgressTimer = null
-      }
-    }
-
-    toastProgressTimer = setTimeout(updateRemainingTime, 100)
-    toastTimer = setTimeout(() => {
-      if (toast.value?.id !== nextToast.id) return
-      toast.value = null
-      toastRemainingMs.value = 0
-      if (toastProgressTimer) clearTimeout(toastProgressTimer)
-      toastProgressTimer = null
-      toastTimer = null
-    }, getToastRemainingMs(countdown, startedAt))
+    toastPaused.value = false
+    toastPausedRemainingMs = null
+    armToastTimers(nextToast.id, durationMs)
   }
 
   // --- Presentation MCP（本機 MCP client 的簡短反應/語音佇列） -----------------
@@ -823,6 +956,16 @@ export const useAgentStore = defineStore('agent', () => {
     localStorage.setItem('agent-pet-bubble', enabled ? '1' : '0')
   }
 
+  function setAmbientEnabled(enabled: boolean) {
+    ambientEnabled.value = enabled
+    localStorage.setItem('agent-pet-ambient', enabled ? '1' : '0')
+  }
+
+  function setActivityBubbleEnabled(enabled: boolean) {
+    activityBubbleEnabled.value = enabled
+    localStorage.setItem('agent-pet-activity', enabled ? '1' : '0')
+  }
+
   // --- 寵物選擇與視窗模式 -----------------------------------------------------
 
   function setPet(petId: string) {
@@ -1112,12 +1255,30 @@ export const useAgentStore = defineStore('agent', () => {
       clearPresentation()
     }
 
+    // Read before awardMoodProgress clears it on a terminal state.
+    const taskStartedAt = moodTaskProgress.get(key)?.startedAt
+
     awardMoodProgress(event, key, prevState)
+
+    if (event.state === 'waiting-input') {
+      if (prevState !== 'waiting-input') scheduleWaitingInputReminder(key)
+    } else {
+      cancelWaitingInputReminder(key)
+    }
 
     if ((event.state === 'success' || event.state === 'error') && prevState !== event.state) {
       if (isQuotaCapableSource(event.source)) quotaStaleSignal.value += 1
-      showToast(event.source, event.project, event.state)
+      showToast(
+        event.source,
+        event.project,
+        event.state,
+        taskStartedAt === undefined ? undefined : Date.now() - taskStartedAt,
+      )
+      noteUnreadResult(event.state)
       adjustMood(event.state === 'success' ? MOOD_SUCCESS_REWARD : -MOOD_ERROR_PENALTY)
+      if (event.state === 'success' && !shouldPlaySuccessSound(
+        taskStartedAt === undefined ? undefined : Date.now() - taskStartedAt,
+      )) return null
       return event.state
     }
 
@@ -1193,6 +1354,7 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   function removeSession(key: string) {
+    cancelWaitingInputReminder(key)
     sessionIndex.delete(key)
     moodTaskProgress.delete(key)
   }
@@ -1564,56 +1726,52 @@ export const useAgentStore = defineStore('agent', () => {
     else panelModalLocks.delete(key)
   }
 
+  // Every transition goes through here so the window size always follows the route.
+  function navigatePanel(action: PanelRouteAction, options: { resize?: boolean } = {}) {
+    const next = reducePanelRoute(panelRoute.value, action)
+    const resized = panelSizeKey(next) !== panelSizeKey(panelRoute.value)
+    panelRoute.value = next
+    if (options.resize !== false && resized) window.electronAPI?.resizePanel(panelSizeFor(next))
+  }
+
   function closePanel() {
-    showWizard.value = false
-    showProjectMcpPanel.value = false
+    navigatePanel({ type: 'close-overlay' }, { resize: false })
     window.electronAPI?.hidePanel()
   }
 
   function openSettings() {
-    panelView.value = 'settings'
-    showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(PANEL_SIZES.settings)
+    navigatePanel({ type: 'open-settings' })
   }
 
   function openSetupWizard() {
-    showWizard.value = true
-    showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(PANEL_SIZES.wizard)
+    navigatePanel({ type: 'open-overlay', overlay: 'wizard' })
   }
 
   function closeSetupWizard() {
-    showWizard.value = false
-    window.electronAPI?.resizePanel(panelView.value === 'settings' ? PANEL_SIZES.settings : PANEL_SIZES.sessions)
+    navigatePanel({ type: 'close-overlay' })
   }
 
   function openProjectMcpPanel() {
-    panelView.value = 'settings'
-    showWizard.value = false
-    showProjectMcpPanel.value = true
-    window.electronAPI?.resizePanel(PANEL_SIZES.mcp)
+    navigatePanel({ type: 'open-overlay', overlay: 'mcp' })
   }
 
   function closeProjectMcpPanel() {
-    showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(PANEL_SIZES.settings)
+    navigatePanel({ type: 'close-overlay' })
   }
 
   function backToSessions() {
-    panelView.value = 'sessions'
-    showWizard.value = false
-    showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(PANEL_SIZES.sessions)
+    navigatePanel({ type: 'back-to-sessions' })
   }
 
   // Called by electron/main.ts whenever the panel window transitions from
   // hidden to visible. A restore keeps the previous screen (including a
-  // suspended plugin panel); any other open goes back to the Sessions view.
+  // suspended plugin panel); any other open goes back to the Sessions view
+  // (the main process already sized the window for it).
+  const panelOpenCount = ref(0)
   function handlePanelOpened(options?: { restore?: boolean }) {
+    panelOpenCount.value += 1
     if (options?.restore) return
-    panelView.value = 'sessions'
-    showWizard.value = false
-    showProjectMcpPanel.value = false
+    navigatePanel({ type: 'reset' }, { resize: false })
   }
 
   // --- 寵物視窗尺寸同步 -----------------------------------------------------
@@ -1771,6 +1929,7 @@ export const useAgentStore = defineStore('agent', () => {
     sessionList,
     isDragging,
     petWindowMode,
+    panelRoute,
     panelView,
     selectedPet,
     petScale,
@@ -1798,6 +1957,14 @@ export const useAgentStore = defineStore('agent', () => {
     showProjectMcpPanel,
     toast,
     toastRemainingMs,
+    toastPaused,
+    unreadResults,
+    markPetInteraction,
+    clearUnreadResults,
+    setCueSink,
+    pauseToast,
+    resumeToast,
+    dismissToast,
     pluginFeedItem,
     pluginFeedUnreadCount,
     mood,
@@ -1820,8 +1987,12 @@ export const useAgentStore = defineStore('agent', () => {
     multiPetEnabled,
     reactionsEnabled,
     bubbleEnabled,
+    ambientEnabled,
+    activityBubbleEnabled,
     reactionsActive,
     bubbleActive,
+    ambientActive,
+    activityBubbleActive,
     permissionBubbleActive,
     isMultiPet,
     activeSessions,
@@ -1876,6 +2047,7 @@ export const useAgentStore = defineStore('agent', () => {
     backToSessions,
     handlePanelOpened,
     panelPinned,
+    panelOpenCount,
     setPanelPinned,
     setPanelModalLock,
     setPet,
@@ -1901,6 +2073,8 @@ export const useAgentStore = defineStore('agent', () => {
     setMultiPetEnabled,
     setReactionsEnabled,
     setBubbleEnabled,
+    setAmbientEnabled,
+    setActivityBubbleEnabled,
     setFamilyPet,
     getPetForFamily,
     resetMood,

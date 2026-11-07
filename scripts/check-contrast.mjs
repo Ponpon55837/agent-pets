@@ -47,11 +47,17 @@ export const PAIRS = [
 // colour of the reduced-transparency fallback (rgba(18,18,26) fully opaque).
 const EXTRA = { '--dark-base': '#12121a' }
 
-export function parseTokens(css = readFileSync(tokensPath, 'utf8')) {
+export function parseTokens(css = readFileSync(tokensPath, 'utf8'), theme = 'light') {
   const map = { ...EXTRA }
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '')
-  for (const m of stripped.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/gi)) {
+  // Base declarations: the first :root block only (theme blocks follow it).
+  const baseEnd = stripped.indexOf('\n}')
+  for (const m of stripped.slice(0, baseEnd).matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/gi)) {
     if (!(m[1] in map)) map[m[1]] = m[2].trim()
+  }
+  if (theme === 'dark') {
+    const block = stripped.match(/:root\[data-theme='dark'\]\s*\{([^}]*)\}/)
+    for (const m of (block?.[1] ?? '').matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/gi)) map[m[1]] = m[2].trim()
   }
   return map
 }
@@ -89,12 +95,14 @@ export function evaluate(map = parseTokens()) {
 }
 
 function main() {
-  const results = evaluate()
   let failed = 0
-  for (const r of results) {
-    const shown = r.ratio === null ? 'unresolved' : r.ratio.toFixed(2)
-    if (!r.ok) failed++
-    console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${shown.padStart(6)} (min ${r.min})  ${r.fg} on ${r.bg}  — ${r.note}`)
+  for (const theme of ['light', 'dark']) {
+    console.log(`# ${theme} theme`)
+    for (const r of evaluate(parseTokens(undefined, theme))) {
+      const shown = r.ratio === null ? 'unresolved' : r.ratio.toFixed(2)
+      if (!r.ok) failed++
+      console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${shown.padStart(6)} (min ${r.min})  ${r.fg} on ${r.bg}  — ${r.note}`)
+    }
   }
   if (failed) {
     console.error(`${failed} contrast pair(s) below threshold`)
