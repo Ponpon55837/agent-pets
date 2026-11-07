@@ -421,7 +421,7 @@ test('local-only mode skips and reports a .git pointer outside the project', () 
     fs.mkdirSync(projectPath)
     fs.writeFileSync(path.join(projectPath, '.git'), `gitdir: ${outside}\n`)
     const summary = install2(projectPath, options(projectPath), { localOnly: true })
-    assert.match(summary.warnings?.[0] ?? '', /outside the project/)
+    assert.deepEqual(summary.warnings, ['git_outside_project'])
     assert.equal(summary.excluded, undefined)
     assert.equal(fs.existsSync(path.join(outside, 'info', 'exclude')), false)
   } finally { cleanup(base) }

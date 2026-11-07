@@ -710,7 +710,7 @@ export function installProjectMcp(
   if (selection?.localOnly) {
     const location = findGitLocation(canonicalPath)
     if (location?.outside) {
-      summary.warnings = ['.git points outside the project folder; skipped editing its info/exclude.']
+      summary.warnings = ['git_outside_project']
     } else if (location) {
       const tracked = readTrackedPaths(location)
       const relativePaths = results
@@ -721,7 +721,7 @@ export function installProjectMcp(
       try {
         summary.excluded = addLocalExcludes(location, excludable)
       } catch (error) {
-        summary.warnings = [error instanceof Error ? error.message : String(error)]
+        summary.warnings = ['exclude_write_failed']
       }
       if (trackedFiles.length > 0) summary.trackedFiles = trackedFiles
     }
