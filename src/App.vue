@@ -1,12 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import DesktopPet from '@/components/DesktopPet.vue'
 import GrowthCelebration from '@/components/growth/GrowthCelebration.vue'
-import StatusPanel from '@/components/StatusPanel.vue'
 import ToastHost from '@/components/ui/ToastHost.vue'
-import SetupWizard from '@/components/SetupWizard.vue'
-import ProjectMcpPanel from '@/components/ProjectMcpPanel.vue'
 import { playCue, setSoundVolume, type SoundCue } from '@/utils/sound'
 import { shouldPlayCue } from '@/utils/sound-policy'
 import type { DesktopPreferences } from '@/types/desktop'
@@ -14,6 +11,12 @@ import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement
 import { setLocale as applyLocale } from '@/i18n'
 import { EDGE_HOVER_EXPAND_MS } from '@/utils/pet-edge'
 import { HIT_DILATE_PX, decidePassthrough, hasOpaquePixel } from '@/utils/pet-hit-test'
+
+// Panel-only surfaces load on demand so the pet window, which shares this
+// bundle, starts without them.
+const StatusPanel = defineAsyncComponent(() => import('@/components/StatusPanel.vue'))
+const SetupWizard = defineAsyncComponent(() => import('@/components/SetupWizard.vue'))
+const ProjectMcpPanel = defineAsyncComponent(() => import('@/components/ProjectMcpPanel.vue'))
 
 const store = useAgentStore()
 const isPanelWindow = window.location.hash === '#panel'
