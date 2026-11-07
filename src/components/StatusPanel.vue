@@ -38,6 +38,8 @@ const dashboardTab = ref<DashboardTab>('sessions')
 // Usage and History mount on first visit, then stay mounted so their state survives tab switches.
 const visitedTabs = ref(new Set<DashboardTab>(['sessions']))
 const requestedPluginViewId = ref('')
+// 每次請求遞增，取代「先清空再 nextTick 設定」的時序 hack，讓相同 id 的重複請求也會觸發。
+const pluginViewRequestNonce = ref(0)
 const pluginEventSourceStatuses = ref<PluginEventSourceStatusView[]>([])
 const nowTick = ref(Date.now())
 let tickTimer: ReturnType<typeof setInterval> | null = null
@@ -152,11 +154,12 @@ onMounted(() => {
   syncTickTimer()
   removePanelSettingsListener = window.electronAPI?.onPanelOpenSettings(() => {
     requestedPluginViewId.value = ''
+    pluginViewRequestNonce.value += 1
   }) ?? null
   removePluginViewRequestListener = window.electronAPI?.onPanelOpenPluginView(pluginId => {
     settingsGroup.value = 'integrations'
-    requestedPluginViewId.value = ''
-    void nextTick(() => { requestedPluginViewId.value = pluginId })
+    requestedPluginViewId.value = pluginId
+    pluginViewRequestNonce.value += 1
   }) ?? null
   store.loadPets()
   void store.refreshProjectPets()
@@ -244,7 +247,7 @@ onUnmounted(() => {
       <StatusPanelHistory v-if="visitedTabs.has('history')" v-show="dashboardTab === 'history'" :active="dashboardTab === 'history'" />
     </template>
 
-    <SettingsPage v-else v-model:group="settingsGroup" :requested-plugin-id="requestedPluginViewId" />
+    <SettingsPage v-else v-model:group="settingsGroup" :requested-plugin-id="requestedPluginViewId" :requested-plugin-nonce="pluginViewRequestNonce" />
   </div>
 </template>
 

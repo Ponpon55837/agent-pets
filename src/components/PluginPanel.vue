@@ -18,7 +18,7 @@ import PluginPanelFrame from '@/components/plugin-panel/PluginPanelFrame.vue'
 import { PLUGIN_PANEL_CONTROLLER } from '@/composables/plugin/context'
 import { usePluginPanelController } from '@/composables/usePluginPanelController'
 
-const props = defineProps<{ requestedPluginId?: string }>()
+const props = defineProps<{ requestedPluginId?: string; requestNonce?: number }>()
 const controller = usePluginPanelController(props)
 provide(PLUGIN_PANEL_CONTROLLER, controller)
 const {

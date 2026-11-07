@@ -52,11 +52,14 @@ export interface PermissionGroupView {
   entries: PermissionEntryView[]
 }
 
+// 跨元件重新掛載保留：已處理過的最後一個面板開啟請求序號。
+let consumedPanelRequestNonce = 0
+
 export type PluginInstalledFilter = 'all' | 'enabled' | 'updates' | 'issues'
 
 export type PluginDetailSection = 'overview' | 'settings' | 'commands' | 'diagnostics'
 
-export function usePluginPanelController(props: { requestedPluginId?: string }) {
+export function usePluginPanelController(props: { requestedPluginId?: string; requestNonce?: number }) {
 
 const snapshot = ref<PluginPanelSnapshot | null>(null)
 const notifications = ref<PluginNotificationRecord[]>([])
@@ -274,8 +277,11 @@ function togglePluginPanelViewMaximized(): void {
 }
 
 function onPluginPanelViewKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape' || !panelViewPluginId.value) return
+  if (event.key !== 'Escape' || event.defaultPrevented || !panelViewPluginId.value) return
+  // 確認對話框或安裝 Sheet 開啟時，Esc 先留給它們關閉。
+  if (document.querySelector('[aria-modal="true"]')) return
   event.preventDefault()
+  event.stopPropagation()
   if (panelViewMaximized.value) void restorePluginPanelViewMaximized(true)
   else closePluginPanelView()
 }
@@ -1272,19 +1278,28 @@ watch(panelViewPlugin, plugin => {
   if (!plugin) void restorePluginPanelViewMaximized()
 })
 
-watch(() => props.requestedPluginId, pluginId => {
-  if (!pluginId && panelViewPluginId.value) closePluginPanelView()
-  else if (pluginId && plugins.value.some(plugin => plugin.id === pluginId)) void openPluginPanelView(pluginId)
-})
+// 面板開啟請求只消費一次：以請求序號判斷，重新掛載或重新整理都不會把已關閉的面板再開一次。
+function consumePanelRequest(): void {
+  const nonce = props.requestNonce ?? 0
+  if (nonce <= consumedPanelRequestNonce) return
+  consumedPanelRequestNonce = nonce
+  const pluginId = props.requestedPluginId
+  if (!pluginId) {
+    if (panelViewPluginId.value) closePluginPanelView()
+    return
+  }
+  if (plugins.value.some(plugin => plugin.id === pluginId)) void openPluginPanelView(pluginId)
+}
+
+watch(() => [props.requestedPluginId, props.requestNonce] as const, consumePanelRequest)
 
 onMounted(() => {
   void refreshPanel().then(() => {
     if (dailyUpdateCheck.value) void ensureCatalogLoaded()
-    const requested = props.requestedPluginId
-    if (requested && plugins.value.some(plugin => plugin.id === requested)) void openPluginPanelView(requested)
+    consumePanelRequest()
   })
   void loadPetOptions()
-  window.addEventListener('keydown', onPluginPanelViewKeydown)
+  window.addEventListener('keydown', onPluginPanelViewKeydown, true)
   removePanelClosedListener = window.electronAPI?.onPluginPanelViewClosed(handlePluginPanelViewClosed) ?? null
   removeNotificationsListener = window.electronAPI?.onPluginNotificationsChanged(() => {
     void refreshNotifications()
@@ -1294,7 +1309,7 @@ onMounted(() => {
 onUnmounted(() => {
   void commitPendingClear()
   notifier.dispose()
-  window.removeEventListener('keydown', onPluginPanelViewKeydown)
+  window.removeEventListener('keydown', onPluginPanelViewKeydown, true)
   removeNotificationsListener?.()
   removePanelClosedListener?.()
   panelViewBoundsObserver?.disconnect()
