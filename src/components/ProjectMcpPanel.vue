@@ -14,6 +14,7 @@ import type {
 import { t, translateBackendError, type TranslationKey } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
+import Checkbox from '@/components/ui/Checkbox.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Icon from '@/components/ui/Icon.vue'
 
@@ -353,16 +354,15 @@ onMounted(() => {
         <div class="mcp-result-title" :title="plan.projectPath">{{ plan.projectPath }}</div>
         <p class="mcp-review-help">{{ t('onboarding.mcpReviewHelp') }}</p>
         <div v-for="item in plan.clients" :key="item.client" class="mcp-review-row" :class="`mcp-${item.status}`">
-          <label class="mcp-review-check">
-            <input
-              type="checkbox"
-              :checked="selected.includes(item.client)"
+          <div class="mcp-review-check">
+            <Checkbox
+              :model-value="selected.includes(item.client)"
+              :label="projectMcpClientLabel(item.client)"
               :disabled="!isSelectable(item) || settingUp"
-              @change="toggleClient(item.client, ($event.target as HTMLInputElement).checked)"
+              @update:model-value="toggleClient(item.client, $event)"
             />
-            <span class="mcp-client">{{ projectMcpClientLabel(item.client) }}</span>
             <span v-if="item.suggested" class="mcp-tag">{{ t('onboarding.mcpDetected') }}</span>
-          </label>
+          </div>
           <div class="mcp-review-file">
             <code>{{ item.relativePath }}</code>
             <span>
@@ -379,13 +379,14 @@ onMounted(() => {
             <pre>{{ item.preview }}</pre>
           </details>
         </div>
-        <label v-if="plan.isGitRepo" class="mcp-local-only">
-          <input v-model="localOnly" type="checkbox" :disabled="settingUp" />
-          <span>
-            <strong>{{ t('onboarding.mcpLocalOnly') }}</strong>
-            <span>{{ t('onboarding.mcpLocalOnlyHelp') }}</span>
-          </span>
-        </label>
+        <Checkbox
+          v-if="plan.isGitRepo"
+          v-model="localOnly"
+          class="mcp-local-only"
+          :label="t('onboarding.mcpLocalOnly')"
+          :help="t('onboarding.mcpLocalOnlyHelp')"
+          :disabled="settingUp"
+        />
         <p v-else class="mcp-review-help">{{ t('onboarding.mcpNotGitRepo') }}</p>
         <div v-if="selectedTracked.length" class="mcp-inline-error">{{ t('onboarding.mcpTrackedSelected') }}</div>
         <div class="mcp-review-actions">

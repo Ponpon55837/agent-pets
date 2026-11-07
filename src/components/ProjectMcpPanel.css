@@ -365,28 +365,10 @@
   border-top: 1px solid var(--organic-border-soft);
 }
 
-.mcp-review-check,
-.mcp-local-only {
+.mcp-review-check {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--organic-space-2);
-  cursor: pointer;
-}
-
-.mcp-review-check input,
-.mcp-local-only input {
-  flex: 0 0 auto;
-  margin-top: 3px;
-  accent-color: var(--organic-accent);
-}
-
-.mcp-local-only > span {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  color: var(--organic-text-secondary);
-  font-size: var(--font-body-sm);
-  line-height: 1.45;
 }
 
 .mcp-tag {

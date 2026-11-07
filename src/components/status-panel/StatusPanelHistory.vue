@@ -275,15 +275,13 @@ onUnmounted(() => {
       </div>
       <div class="history-controls">
         <div class="history-range" role="group" :aria-label="t('growth.rangeLabel')">
-          <button
+          <Button
             v-for="days in HISTORY_RANGE_OPTIONS"
             :key="days"
-            type="button"
-            class="history-range-button"
-            :class="{ active: historyRange === days }"
-            :aria-pressed="historyRange === days"
+            size="sm"
+            :active="historyRange === days"
             @click="selectRange(days)"
-          >{{ t(RANGE_LABEL_KEYS[days]) }}</button>
+          >{{ t(RANGE_LABEL_KEYS[days]) }}</Button>
         </div>
         <Select
           :model-value="historyProjectFilter"
@@ -363,8 +361,8 @@ onUnmounted(() => {
           <div v-if="historySummary.agents.length === 0" class="history-muted">{{ t('historyNoData') }}</div>
           <template v-else>
             <div class="history-metric" role="group" :aria-label="t('growth.agentMetric')">
-              <button type="button" class="history-range-button" :class="{ active: agentMetric === 'tokens' }" :aria-pressed="agentMetric === 'tokens'" @click="agentMetric = 'tokens'">{{ t('growth.agentByTokens') }}</button>
-              <button type="button" class="history-range-button" :class="{ active: agentMetric === 'time' }" :aria-pressed="agentMetric === 'time'" @click="agentMetric = 'time'">{{ t('growth.agentByTime') }}</button>
+              <Button size="sm" :active="agentMetric === 'tokens'" @click="agentMetric = 'tokens'">{{ t('growth.agentByTokens') }}</Button>
+              <Button size="sm" :active="agentMetric === 'time'" @click="agentMetric = 'time'">{{ t('growth.agentByTime') }}</Button>
             </div>
             <div class="history-agent-list">
               <div v-for="agent in historySummary.agents" :key="agent.adapterId" class="history-agent-row">
@@ -430,24 +428,6 @@ onUnmounted(() => {
   margin-bottom: var(--space-3);
 }
 
-.history-range-button {
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pill);
-  background: var(--surface-raised);
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: var(--font-sm);
-  cursor: pointer;
-}
-
-.history-range-button.active {
-  border-color: var(--border-accent);
-  background: var(--accent-wash);
-  color: var(--text-primary);
-}
-
-.history-range-button:focus-visible,
 .history-section > summary:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);

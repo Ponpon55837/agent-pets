@@ -4,6 +4,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { t, type TranslationKey } from '@/i18n'
 import { permissionSourceName } from '@/utils/permission-source'
 import type { PermissionOutcomeKind } from '@/types/permission'
+import Button from '@/components/ui/Button.vue'
 import PermissionRiskBadge from '@/components/permission/PermissionRiskBadge.vue'
 import PermissionDetails from '@/components/permission/PermissionDetails.vue'
 import PermissionCountdown from '@/components/permission/PermissionCountdown.vue'
@@ -51,7 +52,7 @@ function arm(): void {
   armTimer = setTimeout(() => {
     armTimer = null
     armed.value = true
-    if (document.hasFocus()) denyButton.value?.focus({ preventScroll: true })
+    if (document.hasFocus()) (denyButton.value?.$el as HTMLButtonElement | undefined)?.focus({ preventScroll: true })
   }, PERMISSION_CLICK_GUARD_MS)
 }
 
@@ -167,7 +168,7 @@ onBeforeUnmount(cancelHold)
 // Move focus to the safe choice (Deny) when a request appears, but only if
 // this window already has focus: stealing focus from another app's text field
 // would be worse than not focusing at all.
-const denyButton = ref<HTMLButtonElement | null>(null)
+const denyButton = ref<InstanceType<typeof Button> | null>(null)
 watch(() => request.value?.requestId, (id) => {
   cancelHold()
   resetDenyAll()
@@ -200,9 +201,10 @@ onBeforeUnmount(() => {
     <header class="permission-request-header">
       <span class="permission-request-source">{{ permissionSourceName(request.agentId) }}</span>
       <span class="permission-request-project" :title="request.projectId">{{ request.projectId || t('projectUnknown') }}</span>
-      <button
+      <Button
         v-if="hasQueue"
-        type="button"
+        variant="ghost"
+        size="sm"
         class="permission-request-queue permission-queue-toggle"
         :aria-expanded="queueOpen"
         :aria-label="t('permission.queueToggle', { count: request.queueSize })"
@@ -213,7 +215,7 @@ onBeforeUnmount(() => {
         <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path :d="queueOpen ? 'M3 10.5 8 5.5l5 5' : 'M3 5.5l5 5 5-5'" />
         </svg>
-      </button>
+      </Button>
       <span v-else class="permission-request-queue">{{ request.queuePosition }}/{{ request.queueSize }}</span>
     </header>
     <div v-if="queueOpen && hasQueue" class="permission-queue" role="group" :aria-label="t('permission.queueLabel')">
@@ -223,14 +225,14 @@ onBeforeUnmount(() => {
           <span class="permission-queue-meta">
             {{ permissionSourceName(group.first.agentId) }} · {{ group.first.projectId || t('projectUnknown') }}
           </span>
-          <span v-if="group.count > 1" class="permission-queue-count">×{{ group.count }}</span>
+          <span v-if="group.count > 1" class="permission-queue-count">x{{ group.count }}</span>
           <span class="permission-queue-time">{{ formatDuration(permissionRemainingMs(group.first, now)) }}</span>
           <span v-if="group.first.risk === 'high'" class="permission-queue-risk">{{ t('permissionRiskHigh') }}</span>
         </li>
       </ol>
-      <button type="button" class="permission-button deny permission-queue-deny" :class="{ confirming: confirmDenyAll }" @mousedown.stop @click.stop="denyAll">
+      <Button class="permission-button deny permission-queue-deny" :class="{ confirming: confirmDenyAll }" @mousedown.stop @click.stop="denyAll">
         {{ confirmDenyAll ? t('permission.denyAllConfirm', { count: queue.length }) : t('permission.denyAll') }}
-      </button>
+      </Button>
     </div>
     <p class="permission-request-heading">
       <strong id="permission-request-title">{{ request.action }}</strong>
@@ -240,8 +242,7 @@ onBeforeUnmount(() => {
     <PermissionCountdown :request="request" :now="now" />
     <p v-if="inlineError" class="permission-request-error" role="alert">{{ inlineError }}</p>
     <div class="permission-request-actions">
-      <button
-        type="button"
+      <Button
         ref="denyButton"
         class="permission-button deny"
         :disabled="request.status !== 'pending' || !armed"
@@ -250,9 +251,8 @@ onBeforeUnmount(() => {
       >
         {{ t('permissionDeny') }}
         <kbd v-if="showHotkeys">{{ hotkey?.denyLabel }}</kbd>
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
         class="permission-button allow"
         :disabled="request.status !== 'pending' || !armed"
         @mousedown.stop
@@ -260,7 +260,7 @@ onBeforeUnmount(() => {
       >
         {{ request.status === 'deciding' ? t('sending') : t('permissionAllowOnce') }}
         <kbd v-if="showHotkeys">{{ hotkey?.allowLabel }}</kbd>
-      </button>
+      </Button>
     </div>
     <p v-if="hotkeyBlocked" class="permission-request-hint">{{ t('permission.hotkeyUnavailable') }}</p>
     <p class="permission-request-hint permission-keyboard-hint" :class="{ holding: holdProgress }">
@@ -280,12 +280,12 @@ onBeforeUnmount(() => {
   >
     <p class="permission-outcome-text">{{ outcomeText(outcome.kind, outcome.agentId) }}</p>
     <div class="permission-request-actions">
-      <button type="button" class="permission-button deny" @mousedown.stop @click.stop="store.dismissPermissionOutcome()">
+      <Button class="permission-button deny" @mousedown.stop @click.stop="store.dismissPermissionOutcome()">
         {{ t('permission.dismiss') }}
-      </button>
-      <button type="button" class="permission-button allow" @mousedown.stop @click.stop="store.togglePanel()">
+      </Button>
+      <Button class="permission-button allow" @mousedown.stop @click.stop="store.togglePanel()">
         {{ t('permission.viewInPanel') }}
-      </button>
+      </Button>
     </div>
   </section>
 </template>
@@ -393,7 +393,7 @@ onBeforeUnmount(() => {
   line-height: 1.3;
 }
 
-.permission-queue-toggle {
+.permission-request .permission-queue-toggle {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
@@ -406,7 +406,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-ui);
 }
 
-.permission-queue-toggle:focus-visible {
+.permission-request .permission-queue-toggle:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
 }
@@ -513,7 +513,7 @@ onBeforeUnmount(() => {
   gap: var(--space-2);
 }
 
-.permission-button {
+.permission-request .permission-button {
   display: flex;
   min-width: 0;
   min-height: 32px;
@@ -529,38 +529,38 @@ onBeforeUnmount(() => {
   transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
-.permission-button.allow {
+.permission-request .permission-button.allow {
   border-color: var(--state-success);
   color: var(--state-success);
 }
 
-.permission-button.deny {
+.permission-request .permission-button.deny {
   color: var(--text-primary);
 }
 
-.permission-button:hover:not(:disabled) {
+.permission-request .permission-button:hover:not(:disabled) {
   border-color: var(--text-secondary);
   background: var(--surface-raised-hover);
 }
 
-.permission-button:focus-visible {
+.permission-request .permission-button:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
 }
 
-.permission-button:disabled {
+.permission-request .permission-button:disabled {
   cursor: wait;
   opacity: 0.56;
 }
 
-.permission-button kbd {
+.permission-request .permission-button kbd {
   color: var(--text-secondary);
   font: var(--weight-medium) var(--font-xs) / 1 var(--font-ui);
   white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .permission-button {
+  .permission-request .permission-button {
     transition: none;
   }
 }
@@ -572,7 +572,7 @@ onBeforeUnmount(() => {
     background: var(--surface-overlay);
   }
 
-  .permission-button {
+  .permission-request .permission-button {
     border-color: currentColor;
   }
 }
