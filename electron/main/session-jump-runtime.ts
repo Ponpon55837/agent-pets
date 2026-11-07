@@ -26,4 +26,3 @@ export function createSessionJumpService(getPreferences: () => DesktopPreference
     },
   })
 }
-
