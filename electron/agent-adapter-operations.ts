@@ -1,5 +1,6 @@
 import { join } from 'node:path'
-import type { AgentAdapterId, AdapterInstallTarget } from '../src/types/agent-adapter'
+import type { AgentAdapterId, AdapterInstallTarget, InstallReport } from '../src/types/agent-adapter'
+import { reportFromWrites } from './install-outcome.ts'
 import type { AgentAdapterOperations, AdapterInspection } from './agent-adapter.ts'
 import {
   claudeCodeSettingsPath,
@@ -132,8 +133,8 @@ export function createAgentAdapterOperations(): AgentAdapterOperations {
           }
       }
     },
-    install(target: AdapterInstallTarget): void {
-      installIntegration(target)
+    install(target: AdapterInstallTarget): InstallReport {
+      return reportFromWrites(installIntegration(target))
     },
     uninstall(target: AdapterInstallTarget): void {
       uninstallIntegration(target)

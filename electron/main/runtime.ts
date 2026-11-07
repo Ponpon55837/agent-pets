@@ -76,7 +76,7 @@ import type { IpcErrorCode } from '../../src/types/ipc'
 import type { PetEdge, PetWindowMode, PetWindowModeState } from '../../src/types/pet-window'
 import { createPluginSkinPetId, isPluginSkinPetId, isValidPetId, isValidRegularPetId } from '../../src/utils/pet-id.ts'
 import { availablePluginSkinPetIds } from '../plugin-skins.ts'
-import { EDGE_DWELL_MS, EDGE_TRIGGER_DISTANCE_PX, clampWindowBounds, edgeWindowBounds, miniWindowBounds, nearestEdge, type WindowBounds } from '../pet-window-mode'
+import { EDGE_DWELL_MS, EDGE_REDOCK_AFTER_MS, EDGE_TRIGGER_DISTANCE_PX, clampWindowBounds, edgeWindowBounds, miniWindowBounds, nearestEdge, type WindowBounds } from '../pet-window-mode'
 import { IS_MAC, hookScriptDeployPath, readWindowState, writeWindowState } from '../setup'
 
 
@@ -1383,6 +1383,7 @@ export async function createPluginServices(): Promise<void> {
 }
 
 export function clearEdgeDwell(): void {
+  cancelEdgeRedock()
   if (mainState.edgeDwellHandle) clearTimeout(mainState.edgeDwellHandle)
   mainState.edgeDwellHandle = null
   mainState.edgeDwellCandidate = null
@@ -1535,6 +1536,46 @@ export function setPetWindowMode(mode: PetWindowMode): void {
 
 export function toggleMiniMode(): void {
   setPetWindowMode(mainState.petWindowMode === 'mini' ? 'normal' : 'mini')
+}
+
+let edgeRedockHandle: ReturnType<typeof setInterval> | null = null
+
+export function cancelEdgeRedock(): void {
+  if (edgeRedockHandle) clearInterval(edgeRedockHandle)
+  edgeRedockHandle = null
+}
+
+// After a hover-expand from the edge, tuck the pet back once the cursor has
+// stayed away and the pet is still resting against that edge.
+export function scheduleEdgeRedock(): void {
+  cancelEdgeRedock()
+  if (!currentDesktopPreferences().edgeModeEnabled) return
+  let outsideSince: number | null = null
+  edgeRedockHandle = setInterval(() => {
+    const window = mainState.petWindow
+    if (!window || window.isDestroyed() || mainState.petWindowMode !== 'normal' || mainState.dragPollHandle) {
+      cancelEdgeRedock()
+      return
+    }
+    const bounds = window.getBounds()
+    const display = displayForBounds(bounds)
+    if (!nearestEdge(bounds, display.workArea, EDGE_TRIGGER_DISTANCE_PX)) {
+      cancelEdgeRedock()
+      return
+    }
+    const cursor = screen.getCursorScreenPoint()
+    const inside = cursor.x >= bounds.x && cursor.x <= bounds.x + bounds.width
+      && cursor.y >= bounds.y && cursor.y <= bounds.y + bounds.height
+    if (inside || mainState.permissionBroker?.hasActiveRequests()) {
+      outsideSince = null
+      return
+    }
+    outsideSince ??= Date.now()
+    if (Date.now() - outsideSince >= EDGE_REDOCK_AFTER_MS) {
+      cancelEdgeRedock()
+      scheduleEdgeDwell()
+    }
+  }, 400)
 }
 
 export function scheduleEdgeDwell(): void {
@@ -2124,7 +2165,7 @@ export function showPanelWindow(view: 'sessions' | 'settings' | 'restore' = 'ses
     const [width, height] = mainState.panelWindow.getSize()
     setPluginPanelWindowBounds(computePanelBounds(height, width))
   } else {
-    mainState.panelWindow.setBounds(computePanelBounds(view === 'settings' ? 720 : 560))
+    mainState.panelWindow.setBounds(computePanelBounds(PANEL_SIZES[view === 'settings' ? 'settings' : 'sessions'].height))
   }
   const wasHidden = !mainState.panelWindow.isVisible()
   if (wasHidden) {

@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 
+import type { OnboardingAction, OnboardingState } from './onboarding'
 import type { DesktopPreferences, DesktopPreferencesPatch } from './desktop'
 import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView } from './permission'
 import type { ProgressionSnapshot } from './progression'
@@ -30,6 +31,8 @@ import type {
 } from './plugin'
 import type { PluginCatalogPanelItem } from './plugin-catalog'
 import type {
+  ProjectMcpApplyRequest,
+  ProjectMcpPlan,
   ProjectMcpRegistrySnapshot,
   ProjectMcpRemovalSummary,
   ProjectMcpSetupSummary,
@@ -100,6 +103,8 @@ export interface ElectronAPI {
       reportContentHeight: (height: number) => void
       setMousePassthrough: (ignore: boolean) => void
       requestPetHide: () => void
+      getOnboardingState: () => Promise<OnboardingState | null>
+      updateOnboardingState: (action: OnboardingAction) => Promise<OnboardingState | null>
       togglePanel: () => void
       resizePanel: ((size: { height: number; width?: number }) => void) & ((height: number, width?: number) => void)
       setPanelBlurLock: (lock: { pinned?: boolean; modal?: boolean }) => void
@@ -168,7 +173,8 @@ export interface ElectronAPI {
         error?: string
       }>
       installIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => Promise<{ ok: boolean; error?: string }>
-      setupProjectMcp: () => Promise<ProjectMcpSetupSummary>
+      setupProjectMcp: () => Promise<ProjectMcpPlan>
+      applyProjectMcp: (request: ProjectMcpApplyRequest) => Promise<ProjectMcpSetupSummary>
       listProjectMcp: () => Promise<ProjectMcpRegistrySnapshot>
       removeProjectMcp: (projectPath: string) => Promise<ProjectMcpRemovalSummary>
       forgetProjectMcp: (projectPath: string) => Promise<{ ok: boolean; removed: boolean; error?: string }>

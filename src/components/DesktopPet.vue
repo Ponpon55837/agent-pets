@@ -2,13 +2,14 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { STATE_LABELS_SHORT, STATE_COLORS } from '@/types/agent'
-import { locale, t } from '@/i18n'
+import { locale, t, type TranslationKey } from '@/i18n'
 import type { AchievementUnlock } from '@/types/achievement'
 import type { PluginBadgeView } from '@/types/plugin'
 import {
   canRunAutonomousBehavior,
   ShimejiScheduler,
   SHIMEJI_IDLE_DELAY_MS,
+  SHIMEJI_IDLE_DELAY_MIN_MS,
   type PetAutonomousBehavior,
   type ShimejiContext,
 } from '@/types/pet'
@@ -16,16 +17,30 @@ import { quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
 import { selectBubble } from '@/utils/feed-arbiter'
 import { summarizePluginBadgesForPet } from '@/utils/plugin-badges'
 import PetAnimation from '@/components/PetAnimation.vue'
+import { useKeyedRefs, usePetBubbleAnchor } from '@/composables/usePetBubbleAnchor'
+import Button from '@/components/ui/Button.vue'
+import Icon from '@/components/ui/Icon.vue'
+import { describeTool } from '@/utils/pet-toast'
 import PermissionBubble from '@/components/permission/PermissionBubble.vue'
 import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
 
 const store = useAgentStore()
+const clickAreaRef = ref<HTMLElement | null>(null)
 const dragOffset = ref({ x: 0, y: 0 })
 const hasMoved = ref(false)
 let mouseDownTime = 0
 const petAnimRef = ref<InstanceType<typeof PetAnimation> | null>(null)
-const multiPetRefs = ref<InstanceType<typeof PetAnimation>[]>([])
-const multiPetItemElements = ref<HTMLElement[]>([])
+const { items: multiPetInstances, setRef: setMultiPetRef } = useKeyedRefs<InstanceType<typeof PetAnimation>>()
+const { items: multiPetItemElements, setRef: setMultiPetItem } = useKeyedRefs<HTMLElement>()
+
+function multiPetAnimations(): InstanceType<typeof PetAnimation>[] {
+  return [...multiPetInstances.values()]
+}
+
+function multiPetAnimationForPet(petId: string): InstanceType<typeof PetAnimation> | undefined {
+  const line = store.familyLines.find(candidate => candidate.petId === petId)
+  return line ? multiPetInstances.get(line.key) : undefined
+}
 const pluginBadges = ref<PluginBadgeView[]>([])
 const petDocumentVisible = ref(true)
 let cleanupPluginBadgeListener: (() => void) | null = null
@@ -34,6 +49,8 @@ let pluginBadgeRevision = 0
 // --- Shimeji 行為排程 -------------------------------------------------------
 
 const shimejiBehavior = ref<PetAutonomousBehavior>('idle')
+const shimejiFacing = ref<-1 | 1>(1)
+const pointerOverPet = ref(false)
 const shimejiScheduler = new ShimejiScheduler()
 const shimejiReducedMotion = ref(false)
 const shimejiPowerSave = ref(false)
@@ -91,6 +108,12 @@ function shimejiContext(random?: number): ShimejiContext {
   }
 }
 
+// The cursor arriving wakes a sleeping pet and holds it in place.
+function onPetPointerEnter(): void {
+  pointerOverPet.value = true
+  if (shimejiScheduler.isSleeping) restartShimeji()
+}
+
 function stopShimejiTimer(): void {
   if (shimejiTimer) clearTimeout(shimejiTimer)
   shimejiTimer = null
@@ -102,12 +125,30 @@ function scheduleShimeji(delayMs: number = SHIMEJI_IDLE_DELAY_MS): void {
   shimejiTimer = setTimeout(runShimejiTick, Math.max(1_500, delayMs))
 }
 
+// Would the next step run into the edge of the current display? Then the pet
+// turns around instead of marching on the spot against the wall.
+function walkDeltaAwayFromWall(deltaX: number): number {
+  const margin = 4
+  const left = (window.screen as Screen & { availLeft?: number }).availLeft ?? 0
+  const right = left + window.screen.availWidth
+  const nextLeft = window.screenX + deltaX
+  const nextRight = window.screenX + window.outerWidth + deltaX
+  return nextLeft < left + margin || nextRight > right - margin ? -deltaX : deltaX
+}
+
 function runShimejiTick(): void {
   shimejiTimer = null
+  // A pet under the cursor stays put rather than walking away from it.
+  if (pointerOverPet.value) {
+    scheduleShimeji(SHIMEJI_IDLE_DELAY_MIN_MS)
+    return
+  }
   const tick = shimejiScheduler.next(shimejiContext(Math.random()))
   shimejiBehavior.value = tick.behavior
   if (tick.walkDeltaX !== undefined && tick.behavior === 'walk') {
-    window.electronAPI?.shimejiWalkStep(tick.walkDeltaX)
+    const deltaX = walkDeltaAwayFromWall(tick.walkDeltaX)
+    shimejiFacing.value = deltaX < 0 ? -1 : 1
+    window.electronAPI?.shimejiWalkStep(deltaX)
   }
   scheduleShimeji(tick.delayMs)
 }
@@ -201,7 +242,24 @@ const displayLines = computed(() => {
 // toggle on — showing a single pet forces picking a "winner", so instead
 // show one small pet per family, side by side.
 const isMultiPet = computed(() => store.isMultiPet)
-const petAnimationFrozen = computed(() => shimejiReducedMotion.value || store.petWindowMode.mode === 'mini')
+const petAnimationFrozen = computed(() => shimejiReducedMotion.value)
+const petLowFps = computed(() => store.petWindowMode.mode === 'mini')
+
+// Mini mode shrinks the sprite to fit the fixed small window, whatever the pet size.
+const MINI_FIT_PX = 88
+const miniScale = computed(() => Math.min(0.42, MINI_FIT_PX / (208 * store.petScale)))
+const miniStatus = computed(() => {
+  const state = store.currentState
+  switch (state) {
+    case 'error': return { icon: 'warning', label: t('pet.miniError') }
+    case 'waiting-permission': return { icon: 'lock', label: t('pet.miniPermission') }
+    case 'waiting-input': return { icon: 'bell', label: t('pet.miniWaiting') }
+    case 'success': return { icon: 'check', label: t('pet.miniSuccess') }
+    case 'thinking':
+    case 'tool-running': return { icon: null, label: t('pet.miniWorking') }
+    default: return { icon: null, label: t('pet.miniIdle') }
+  }
+})
 
 const bubbleSelection = computed(() => {
   const permissionRequest = Boolean(store.permissionBubbleActive && (store.permissionRequest || store.permissionOutcome))
@@ -214,7 +272,7 @@ const bubbleSelection = computed(() => {
     permissionNotice,
     agentToast: Boolean(agentBubbleEnabled && store.toast),
     presentationSay: Boolean(store.presentationSay),
-    activity: Boolean(agentBubbleEnabled && !store.toast && !isMultiPet.value && store.activityText),
+    activity: Boolean(store.activityBubbleActive && agentBubbleEnabled && !store.toast && !isMultiPet.value && store.activityText),
     pluginFeed: pluginFeed ? {
       priority: pluginFeed.priority,
       controls: {
@@ -227,6 +285,71 @@ const bubbleSelection = computed(() => {
     } : null,
   })
 })
+
+// --- 首次啟動引導（coach mark）-----------------------------------------------
+
+const COACH_STORAGE_KEY = 'agent-pet-coach-v1'
+const COACH_VISIBLE_MS = 20_000
+const coachArmed = ref(false)
+let coachTimer: ReturnType<typeof setTimeout> | null = null
+
+function coachAlreadySeen(): boolean {
+  try {
+    return localStorage.getItem(COACH_STORAGE_KEY) === '1'
+  } catch {
+    return true
+  }
+}
+
+function dismissCoach(): void {
+  if (coachTimer) clearTimeout(coachTimer)
+  coachTimer = null
+  if (!coachArmed.value) return
+  coachArmed.value = false
+  try {
+    localStorage.setItem(COACH_STORAGE_KEY, '1')
+  } catch {}
+}
+
+function armCoach(): void {
+  if (coachAlreadySeen()) return
+  coachArmed.value = true
+  coachTimer = setTimeout(dismissCoach, COACH_VISIBLE_MS)
+}
+
+const coachShown = computed(() => (
+  coachArmed.value
+  && bubbleSelection.value === null
+  && store.petWindowMode.mode === 'normal'
+  && store.desktopPreferencesReady
+  && !store.dndEnabled
+))
+
+const activityLabel = computed(() => {
+  const raw = store.activityText
+  if (!raw) return ''
+  const description = describeTool(raw)
+  return t(description.key as TranslationKey, description.params)
+})
+
+const toastIconName = computed(() => {
+  switch (store.toast?.tone) {
+    case 'error': return 'warning'
+    case 'waiting': return 'bell'
+    default: return 'check'
+  }
+})
+
+const toastAutoCloseSeconds = computed(() => (
+  store.toast ? Math.max(1, Math.round(store.toast.countdown.durationMs / 1000)) : 0
+))
+
+function openFromToast(): void {
+  store.markPetInteraction()
+  store.clearUnreadResults()
+  store.dismissToast()
+  store.togglePanel()
+}
 
 function openPluginFeedLink(itemId: string): void {
   store.openPluginFeedLink(itemId)
@@ -257,17 +380,22 @@ function onPetDocumentVisibilityChange(): void {
   petDocumentVisible.value = document.visibilityState === 'visible'
 }
 
-const pluginFeedTargetStyle = computed<Record<string, string>>(() => {
-  if (!isMultiPet.value || !store.pluginFeedItem) return {} as Record<string, string>
-  const clickArea = clickAreaRef.value
-  if (!clickArea) return {} as Record<string, string>
-  const targetIndex = store.familyLines.findIndex(line => line.petId === pluginFeedTargetPetId.value)
-  const target = targetIndex >= 0 ? multiPetItemElements.value[targetIndex] : undefined
-  if (!target) return {} as Record<string, string>
-  const targetBounds = target.getBoundingClientRect()
-  const areaBounds = clickArea.getBoundingClientRect()
-  return { left: `${targetBounds.left - areaBounds.left + targetBounds.width / 2}px` }
-})
+const pluginFeedTargetStyle = usePetBubbleAnchor(
+  clickAreaRef,
+  multiPetItemElements,
+  () => store.familyLines,
+  () => isMultiPet.value && Boolean(store.pluginFeedItem),
+  () => pluginFeedTargetPetId.value,
+)
+
+// pet_say bubbles follow the pet they were addressed to when several are shown.
+const sayTargetStyle = usePetBubbleAnchor(
+  clickAreaRef,
+  multiPetItemElements,
+  () => store.familyLines,
+  () => isMultiPet.value && Boolean(store.presentationSay?.petId),
+  () => store.presentationSay?.petId,
+)
 
 function quotaColor(familyKey: string): string {
   const quota = store.quotaByFamily[familyKey]
@@ -380,10 +508,10 @@ function quotaTitle(familyKey: string): string | undefined {
 // window is actually painted varies with pet size and status-line count.
 // Main can't derive that, and it's what the status panel anchors to, so
 // measure it here and report every change.
-const clickAreaRef = ref<HTMLElement | null>(null)
 let contentObserver: ResizeObserver | null = null
 
 onMounted(() => {
+  armCoach()
   store.loadPets()
   void initializeShimejiEnvironment()
   petDocumentVisible.value = document.visibilityState === 'visible'
@@ -408,6 +536,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (coachTimer) clearTimeout(coachTimer)
   contentObserver?.disconnect()
   contentObserver = null
   cleanupPluginBadgeListener?.()
@@ -421,6 +550,7 @@ onBeforeUnmount(() => {
 let lastCursorLookAt = 0
 let lastCursorLookDirection: -1 | 0 | 1 = 0
 function onPetMouseMove(e: MouseEvent): void {
+  store.markPetInteraction()
   if (!store.shimejiEnabled || !store.reactionsActive || store.currentState !== 'idle') return
   if (store.petWindowMode.mode !== 'normal' || store.isDragging) return
   const area = clickAreaRef.value
@@ -434,53 +564,64 @@ function onPetMouseMove(e: MouseEvent): void {
   lastCursorLookAt = now
   lastCursorLookDirection = direction
   if (isMultiPet.value) {
-    multiPetRefs.value.forEach(anim => anim?.playCursorLook(direction))
+    multiPetAnimations().forEach(anim => anim.playCursorLook(direction))
   } else {
     petAnimRef.value?.playCursorLook(direction)
   }
 }
 
+// A press only becomes a drag after the pointer travels this far; a shaky
+// click on a trackpad must still open the panel.
+const DRAG_START_DISTANCE_PX = 4
+const dragLift = ref(false)
+
 function onMouseDown(e: MouseEvent) {
   if (e.button !== 0) return
+  dismissCoach()
+  store.markPetInteraction()
   hasMoved.value = false
   mouseDownTime = Date.now()
+  // Keeps the window catching events while the button is held, even before a
+  // drag has actually begun.
   store.isDragging = true
   dragOffset.value = { x: e.screenX, y: e.screenY }
+  let dragStarted = false
 
   // Actual window movement is driven entirely by the main process polling
-  // screen.getCursorScreenPoint() (see electron/main.ts's 'pet-drag-start'
-  // handler) rather than by accumulating deltas between renderer mousemove
-  // events. On Windows, moving a frameless window under the cursor makes
-  // the OS resend a synthetic mousemove for the new window position; a
-  // delta-from-previous-event approach picks that up as extra "movement"
-  // and re-moves the window again, which re-triggers another synthetic
-  // event — a feedback loop that reads as the pet continuously drifting
-  // down for as long as the button is held, even with the mouse stationary.
-  // Polling the OS cursor position directly sidesteps that loop entirely.
-  window.electronAPI?.startDrag()
-
+  // screen.getCursorScreenPoint() (see electron/ipc/pet-motion.ts) rather than
+  // by accumulating deltas between renderer mousemove events. On Windows,
+  // moving a frameless window under the cursor makes the OS resend a
+  // synthetic mousemove for the new window position; a delta-from-previous
+  // approach picks that up as extra "movement" and re-moves the window again —
+  // a feedback loop that reads as the pet drifting for as long as the button
+  // is held. Polling the OS cursor position directly sidesteps that loop.
   const onMove = (moveEvent: MouseEvent) => {
+    if (dragStarted) return
     const dx = moveEvent.screenX - dragOffset.value.x
     const dy = moveEvent.screenY - dragOffset.value.y
-
-    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+    if (Math.abs(dx) > DRAG_START_DISTANCE_PX || Math.abs(dy) > DRAG_START_DISTANCE_PX) {
+      dragStarted = true
       hasMoved.value = true
+      dragLift.value = true
+      window.electronAPI?.startDrag()
     }
   }
 
   const onUp = () => {
     store.isDragging = false
+    dragLift.value = false
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
-    // Must fire unconditionally, even on a plain click with no movement:
-    // 'pet-drag-start' unconditionally started a cursor-poll loop in the
-    // main process (see electron/main.ts), and this is the only signal
-    // that tells it to stop. Gating it on hasMoved (as the old "did we
-    // actually move, so is there anything worth writing to disk" check
-    // did) left that poll loop running after a plain click, so the pet
-    // kept chasing the cursor around indefinitely after the button was
-    // released, right up until the next mousedown replaced it.
+    // Must fire unconditionally, even on a plain click with no movement: it is
+    // the only signal that stops the main process' cursor-poll loop, and
+    // gating it on hasMoved left that loop running after a plain click so the
+    // pet kept chasing the cursor until the next mousedown replaced it.
     window.electronAPI?.notifyDragEnd(hasMoved.value)
+    if (dragStarted) {
+      // Landing squash: the pet settles where it was dropped.
+      if (isMultiPet.value) multiPetAnimations().forEach(anim => anim.playReaction())
+      else petAnimRef.value?.playReaction()
+    }
   }
 
   window.addEventListener('mousemove', onMove)
@@ -499,8 +640,9 @@ function onEdgeMouseDown(e: MouseEvent): void {
 function onClick(e: MouseEvent) {
   if (e.button !== 0) return
   if (hasMoved.value) return
+  store.clearUnreadResults()
   if (isMultiPet.value) {
-    multiPetRefs.value.forEach((anim) => anim?.playReaction())
+    multiPetAnimations().forEach(anim => anim.playReaction())
   } else {
     petAnimRef.value?.playReaction()
   }
@@ -525,10 +667,9 @@ watch(() => store.presentationReaction, (reaction) => {
   if (!reaction || !store.reactionsActive) return
   if (isMultiPet.value) {
     if (reaction.petId) {
-      const index = store.familyLines.findIndex(line => line.petId === reaction.petId)
-      if (index >= 0) multiPetRefs.value[index]?.playReaction()
+      multiPetAnimationForPet(reaction.petId)?.playReaction()
     } else {
-      multiPetRefs.value.forEach(anim => anim?.playReaction())
+      multiPetAnimations().forEach(anim => anim.playReaction())
     }
     return
   }
@@ -540,12 +681,12 @@ watch(() => store.presentationReaction, (reaction) => {
 function playAchievementReward(unlock: AchievementUnlock): void {
   if (!store.reactionsActive) return
   if (isMultiPet.value) {
-    const index = store.familyLines.findIndex(line => line.petId === unlock.petId)
-    if (index >= 0) {
-      multiPetRefs.value[index]?.playReward()
+    const target = multiPetAnimationForPet(unlock.petId)
+    if (target) {
+      target.playReward()
       return
     }
-    multiPetRefs.value.forEach(anim => anim?.playReward())
+    multiPetAnimations().forEach(anim => anim.playReward())
     return
   }
   if (unlock.petId === store.activePetId) petAnimRef.value?.playReward()
@@ -560,13 +701,16 @@ watch(() => store.achievementUnlock, (unlock) => {
   <div
     class="desktop-pet"
     :class="[`mode-${store.petWindowMode.mode}`, store.petWindowMode.edge ? `edge-${store.petWindowMode.edge}` : '']"
-    :data-pet-mode="store.petWindowMode.mode"
+:data-pet-mode="store.petWindowMode.mode"
+    :style="{ '--mini-scale': miniScale }"
   >
     <div
       ref="clickAreaRef"
       class="pet-click-area"
-      :class="{ dragging: store.isDragging }"
+      :class="{ dragging: dragLift }"
       @mousedown="onMouseDown"
+      @mouseenter="onPetPointerEnter"
+      @mouseleave="pointerOverPet = false"
       @mousemove="onPetMouseMove"
       @click="onClick"
       @contextmenu.prevent="onPetContextMenu"
@@ -595,9 +739,19 @@ watch(() => store.achievementUnlock, (unlock) => {
             :since="store.highestPrioritySession?.lastSeenAt"
             autonomous-behavior="idle"
             :freeze="petAnimationFrozen"
+          :low-fps="petLowFps"
+          :facing="shimejiFacing"
           />
         </span>
         <span class="edge-peek-grip" aria-hidden="true" />
+        <span
+          v-if="store.unreadResults.count > 0"
+          class="edge-peek-result-badge"
+          :class="{ error: store.unreadResults.hasError }"
+          :aria-label="t('pet.unreadResultsAria', { count: store.unreadResults.count })"
+        >
+          {{ store.unreadResults.count }}
+        </span>
         <span
           v-if="store.pluginFeedUnreadCount > 0"
           class="edge-peek-unread-badge"
@@ -620,12 +774,13 @@ watch(() => store.achievementUnlock, (unlock) => {
         <div
           key="presentation-say"
           class="pet-toast presentation-say"
+          :style="sayTargetStyle"
           role="status"
           aria-live="polite"
           data-pet-hit-target="solid"
         >
-          <span class="presentation-say-icon" aria-hidden="true">✦</span>
-          <span>{{ store.presentationSay.message }}</span>
+          <Icon class="presentation-say-icon" name="pets" :size="14" />
+          <span class="presentation-say-text">{{ store.presentationSay.message }}</span>
         </div>
       </Transition>
 
@@ -634,12 +789,26 @@ watch(() => store.achievementUnlock, (unlock) => {
           v-if="store.toast"
           :key="`toast-${store.toast.id}`"
           class="pet-toast timed-toast"
-          :class="store.toast.tone"
+          :class="[store.toast.tone, { paused: store.toastPaused }]"
           role="status"
           aria-live="polite"
           data-pet-hit-target="solid"
+          @mousedown.stop
+          @mouseenter="store.pauseToast()"
+          @mouseleave="store.resumeToast()"
+          @focusin="store.pauseToast()"
+          @focusout="store.resumeToast()"
+          @click.stop="openFromToast"
         >
-          <span class="timed-toast-copy">{{ store.toast.text }}</span>
+          <span class="timed-toast-head">
+            <Icon class="timed-toast-icon" :name="toastIconName" :size="14" />
+            <strong class="timed-toast-title">{{ store.toast.title }}</strong>
+            <span v-if="store.toast.meta" class="timed-toast-meta">{{ store.toast.meta }}</span>
+          </span>
+          <span v-if="store.toast.detail" class="timed-toast-detail">{{ store.toast.detail }}</span>
+          <button type="button" class="timed-toast-action" @mousedown.stop @click.stop="openFromToast">
+            {{ t('pet.toastOpen') }}
+          </button>
           <span
             class="toast-countdown-track"
             aria-hidden="true"
@@ -649,10 +818,11 @@ watch(() => store.achievementUnlock, (unlock) => {
               :style="{ '--toast-duration': `${store.toast.countdown.durationMs}ms` }"
             />
           </span>
-          <span class="sr-only">{{ t('permissionCountdown') }}</span>
+          <span class="sr-only">{{ t('pet.toastAutoClose', { seconds: toastAutoCloseSeconds }) }}</span>
         </div>
         <div v-else-if="!isMultiPet && store.activityText" key="activity" class="pet-toast activity" data-pet-hit-target="solid">
-          🔧 {{ store.activityText }}
+          <Icon class="activity-icon" name="settings" :size="14" />
+          <span class="activity-text">{{ activityLabel }}</span>
         </div>
       </Transition>
 
@@ -708,17 +878,63 @@ watch(() => store.achievementUnlock, (unlock) => {
         </article>
       </Transition>
 
+      <Transition v-else-if="coachShown" name="toast">
+        <div
+          key="coach"
+          class="pet-toast coach-mark"
+          role="status"
+          aria-live="polite"
+          data-pet-hit-target="solid"
+          @mousedown.stop
+          @click.stop
+        >
+          <span class="coach-copy">{{ t('pet.coachText') }}</span>
+          <Button size="sm" variant="secondary" @mousedown.stop @click.stop="dismissCoach">{{ t('pet.coachDismiss') }}</Button>
+        </div>
+      </Transition>
+
+      <span
+        v-if="store.petWindowMode.mode === 'mini'"
+        class="mini-status"
+        role="status"
+        :aria-label="miniStatus.label"
+        :title="miniStatus.label"
+        :style="{ '--mini-ring': STATE_COLORS[store.currentState] }"
+      >
+        <span class="mini-status-badge" :class="{ pulse: store.currentState !== 'idle' && store.currentState !== 'offline' }">
+          <Icon v-if="miniStatus.icon" :name="miniStatus.icon" :size="11" />
+          <span v-else class="mini-status-dot" />
+        </span>
+        <span v-if="store.unreadResults.count > 0" class="mini-status-count">{{ store.unreadResults.count }}</span>
+      </span>
+
+      <span
+        v-if="store.unreadResults.count > 0"
+        class="unread-badge"
+        :class="{ error: store.unreadResults.hasError }"
+        role="status"
+        :aria-label="t('pet.unreadResultsAria', { count: store.unreadResults.count })"
+        data-pet-hit-target="solid"
+        @mousedown.stop
+        @click.stop="store.clearUnreadResults()"
+      >
+        <Icon :name="store.unreadResults.hasError ? 'warning' : 'check'" :size="11" />
+        {{ store.unreadResults.count }}
+      </span>
+
       <template v-if="isMultiPet">
         <div class="multi-pet-row">
-          <div v-for="line in store.familyLines" :key="line.key" ref="multiPetItemElements" class="multi-pet-item">
+          <div v-for="line in store.familyLines" :key="line.key" :ref="(el) => setMultiPetItem(line.key, el)" class="multi-pet-item">
             <PetAnimation
-              ref="multiPetRefs"
+              :ref="(el) => setMultiPetRef(line.key, el)"
               :state="line.state"
               :pet-id="line.petId"
               :since="line.since"
               :mood="store.moodVisualsEnabled ? store.mood : undefined"
               :autonomous-behavior="shimejiBehavior"
               :freeze="petAnimationFrozen"
+          :low-fps="petLowFps"
+          :facing="shimejiFacing"
             />
             <div
               class="status-line multi-pet-status-line"
@@ -792,6 +1008,8 @@ watch(() => store.achievementUnlock, (unlock) => {
           :mood="store.moodVisualsEnabled ? store.mood : undefined"
           :autonomous-behavior="shimejiBehavior"
           :freeze="petAnimationFrozen"
+          :low-fps="petLowFps"
+          :facing="shimejiFacing"
         />
         <TransitionGroup tag="div" name="status-line" class="status-lines">
           <div

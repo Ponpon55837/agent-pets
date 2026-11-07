@@ -2,6 +2,8 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
+import Button from '@/components/ui/Button.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import Icon from '@/components/ui/Icon.vue'
 import SegmentedControl, { type SegmentedOption } from '@/components/ui/SegmentedControl.vue'
 import TextField from '@/components/ui/TextField.vue'
@@ -166,7 +168,9 @@ defineExpose({ scrollToSection })
             </button>
           </li>
         </ul>
-        <div v-else class="panel-empty">{{ t('panel.searchNoResults', { query: query.trim() }) }}</div>
+        <EmptyState v-else icon="search" :title="t('panel.searchNoResults', { query: query.trim() })">
+          <Button variant="secondary" size="sm" @click="query = ''">{{ t('panel.searchClear') }}</Button>
+        </EmptyState>
       </div>
 
       <div

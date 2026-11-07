@@ -6,8 +6,11 @@
 //   undefined-var   var(--x) with no declaration anywhere in src/
 //   bare-color      hex / rgb()/rgba()/hsl() literal outside tokens.css
 //   small-font      font-size below 11px (or a non-token px size under 11)
+//   literal-blur    backdrop-filter blur(<n>px) instead of a --blur-* token
 //   unused-token    --token declared in tokens.css but never referenced
 //                   (informational; never fails --strict)
+//   glyph-icon     arrow/dingbat/emoji/× glyph in a .vue template (use ui/Icon.vue)
+//   english-literal  untranslated [A-Za-z]{4,} text node in a .vue template (use t())
 //   raw-control     <button|select|input> outside src/components/ui (informational)
 //
 // Dependency-free so it can run before `pnpm install` finishes in CI.
@@ -78,7 +81,10 @@ export function analyze(root = defaultRoot) {
       } else if (/\b(?:rgba?|hsla?)\(/i.test(line)) {
         findings.push({ rule: 'bare-color', file: rel(file), line: i + 1, text: line.trim() })
       }
-      const fs = line.match(/font-size:\s*([\d.]+)px/i)
+      if (/backdrop-filter:\s*blur\(\s*[\d.]+px/i.test(line)) {
+        findings.push({ rule: 'literal-blur', file: rel(file), line: i + 1, text: line.trim() })
+      }
+      const fs = line.match(/font-size:\s*(?:max\(\s*)?([\d.]+)px/i)
       if (fs && Number(fs[1]) < 11) {
         findings.push({ rule: 'small-font', file: rel(file), line: i + 1, text: line.trim() })
       }
@@ -99,6 +105,26 @@ export function analyze(root = defaultRoot) {
   const unused = []
   for (const m of stripComments(tokenText).matchAll(/^\s*(--[a-z0-9-]+)\s*:/gim)) {
     if (!used.has(m[1])) unused.push(m[1])
+  }
+
+  const glyph = /[\u00D7\u2190-\u27BF\u2B00-\u2BFF]|\p{Extended_Pictographic}/u
+  for (const [file, text] of allText) {
+    if (!file.endsWith('.vue') || file.endsWith(`${sep}Icon.vue`)) continue
+    const tpl = text.split('<style')[0].replace(/<script[\s\S]*?<\/script>/g, (m) => m.replace(/[^\n]/g, ' '))
+    tpl.split('\n').forEach((line, i) => {
+      const visible = line.replace(/<!--[\s\S]*?-->/g, '')
+      if (glyph.test(visible)) findings.push({ rule: 'glyph-icon', file: rel(file), line: i + 1, text: visible.trim() })
+    })
+  }
+
+  for (const [file, text] of allText) {
+    if (!file.endsWith('.vue')) continue
+    const tpl = text.split('<style')[0].replace(/<script[\s\S]*?<\/script>/g, (m) => m.replace(/[^\n]/g, ' '))
+    tpl.split('\n').forEach((line, i) => {
+      for (const m of line.replace(/<!--[\s\S]*?-->/g, '').matchAll(/>([^<>{}]*[A-Za-z]{4,}[^<>{}]*)</g)) {
+        findings.push({ rule: 'english-literal', file: rel(file), line: i + 1, text: m[1].trim() })
+      }
+    })
   }
 
   const info = { unused }

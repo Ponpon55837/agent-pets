@@ -17,5 +17,7 @@ export function shouldPlayCue(cue: SoundCue, gate: SoundGate): boolean {
     case 'waiting-permission': return gate.soundOnPermission
     case 'error': return gate.soundOnError
     case 'success': return gate.soundOnSuccess
+    // Cues added by other features only follow the master gates above.
+    default: return true
   }
 }

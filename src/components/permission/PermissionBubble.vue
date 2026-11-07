@@ -291,14 +291,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* Overlays the top of the canvas rather than sitting in flex flow above it —
-   there's no spare window height reserved for it, and deliberately so: on
-   show/hide it must never trigger a pet-window resize (that was previously
-   causing a slow position drift, since every resize re-anchors the window). */
+/* Sits ABOVE the sprite in the reserved headroom so the pet stays visible and
+   showing/hiding never resizes the pet window. */
 .permission-request {
   position: absolute;
-  top: 2px;
+  bottom: calc(100% - 2px);
   left: 50%;
+  transform-origin: 50% 100%;
   z-index: 8;
   width: min(248px, calc(var(--pet-w, 260px) - 8px));
   padding: var(--space-3);
