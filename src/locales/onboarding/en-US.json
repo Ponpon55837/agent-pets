@@ -129,5 +129,12 @@
   "onboarding.capTokensExact": "Exact token usage",
   "onboarding.capQuota": "Shows subscription quota",
   "onboarding.errorNodeMissing": "Node.js was not found. Install Node.js 18 or newer (nodejs.org) and press Install again; the hook needs it to reach the pet.",
-  "onboarding.errorNodeUnsupported": "The detected Node.js is too old. Upgrade to 18 or newer and try again."
+  "onboarding.errorNodeUnsupported": "The detected Node.js is too old. Upgrade to 18 or newer and try again.",
+  "onboarding.mcpStale": "Outdated paths",
+  "onboarding.mcpPlanNone": "Not set up",
+  "onboarding.mcpUpdatePaths": "Update paths",
+  "onboarding.mcpConnectedCount": "{ok}/{total} connected",
+  "onboarding.mcpRecovered": "The project list file was unreadable; it was set aside as a backup and the list restarted. Add your projects again with Choose project folder.",
+  "onboarding.mcpCode.stale_paths": "Agent Pets wrote this entry but its paths are outdated (App moved or Node upgraded). Press Update paths to repair it.",
+  "onboarding.mcpCode.updated": "Updated to the current paths"
 }

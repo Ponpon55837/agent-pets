@@ -43,5 +43,6 @@
   "The existing Claude Code session cannot access quota. Re-authenticate in Claude Code.": "既有的 Claude Code 工作階段無法存取 Quota，請在 Claude Code 重新驗證。",
   "Claude quota is rate limited. Wait a minute and retry.": "Claude Quota 受到速率限制，請稍候一分鐘再試。",
   "Claude returned no quota windows.": "Claude 沒有回傳 Quota 視窗。",
-  "Could not load Claude usage.": "Claude 用量載入失敗。"
+  "Could not load Claude usage.": "Claude 用量載入失敗。",
+  "Project MCP registry supports at most 128 projects": "專案 MCP 清單最多支援 128 個專案。請先移除不再使用的專案。"
 }

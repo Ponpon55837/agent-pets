@@ -129,5 +129,12 @@
   "onboarding.capTokensExact": "精確 Token 用量",
   "onboarding.capQuota": "顯示訂閱額度",
   "onboarding.errorNodeMissing": "找不到 Node.js。請先安裝 Node.js 18 以上版本（nodejs.org），再按「安裝」。hook 需要它才能把事件送到寵物。",
-  "onboarding.errorNodeUnsupported": "偵測到的 Node.js 版本太舊。請升級到 18 以上後再試。"
+  "onboarding.errorNodeUnsupported": "偵測到的 Node.js 版本太舊。請升級到 18 以上後再試。",
+  "onboarding.mcpStale": "路徑已過期",
+  "onboarding.mcpPlanNone": "尚未設定",
+  "onboarding.mcpUpdatePaths": "更新路徑",
+  "onboarding.mcpConnectedCount": "已連接 {ok}/{total}",
+  "onboarding.mcpRecovered": "專案清單檔案無法讀取，已另存備份並重新開始；請用「選擇專案資料夾」重新加入專案。",
+  "onboarding.mcpCode.stale_paths": "這是 Agent Pets 寫入的設定，但路徑已過期（App 搬移或 Node 升級）。按「更新路徑」即可修復。",
+  "onboarding.mcpCode.updated": "已更新為目前的路徑"
 }

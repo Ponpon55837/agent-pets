@@ -27,6 +27,7 @@ const setupError = ref('')
 const projects = ref<ProjectMcpProjectRecord[]>([])
 const loadingProjects = ref(false)
 const listError = ref('')
+const registryRecovered = ref(false)
 const removingProject = ref<string | null>(null)
 
 async function refreshProjects(): Promise<void> {
@@ -40,6 +41,7 @@ async function refreshProjects(): Promise<void> {
       return
     }
     projects.value = result.projects
+    registryRecovered.value = result.recovered === true
   } catch {
     listError.value = t('mcpListFailed')
   } finally {
@@ -151,6 +153,8 @@ const RESULT_CODE_KEYS: Partial<Record<ProjectMcpResultCode, TranslationKey>> = 
   too_large: 'onboarding.mcpCode.too_large',
   unsafe_file: 'onboarding.mcpCode.unsafe_file',
   write_failed: 'onboarding.mcpCode.write_failed',
+  stale_paths: 'onboarding.mcpCode.stale_paths',
+  updated: 'onboarding.mcpCode.updated',
 }
 
 function resultMessage(code: ProjectMcpResultCode | undefined, fallback?: string): string {
@@ -162,6 +166,34 @@ const NEXT_STEP_KEYS: Record<ProjectMcpClientId, { hint: TranslationKey, command
   claude: { hint: 'onboarding.mcpNext.claude', command: 'claude mcp list' },
   codex: { hint: 'onboarding.mcpNext.codex', command: 'codex mcp list' },
   opencode: { hint: 'onboarding.mcpNext.opencode', command: 'opencode mcp list' },
+}
+
+const repairingClient = ref('')
+
+// Re-points a stale Agent Pets entry (App moved, Node upgraded) at the current paths. Customized
+// entries are never touched; the main process decides what counts as "ours".
+async function updateStaleClient(project: ProjectMcpProjectRecord, client: ProjectMcpClientId): Promise<void> {
+  if (repairingClient.value) return
+  repairingClient.value = `${project.projectPath}:${client}`
+  listError.value = ''
+  try {
+    const result = await window.electronAPI?.applyProjectMcp({
+      projectPath: project.projectPath,
+      clients: [client],
+      localOnly: false,
+      updateStale: true,
+    })
+    if (!result?.ok) listError.value = translateBackendError(result?.error || t('mcpSetupFailed'))
+    await refreshProjects()
+  } catch {
+    listError.value = t('mcpSetupFailed')
+  } finally {
+    repairingClient.value = ''
+  }
+}
+
+function connectedCount(project: ProjectMcpProjectRecord): number {
+  return project.results.filter(item => item.status === 'already_configured').length
 }
 
 const installedClients = computed(() => (
@@ -181,6 +213,8 @@ const INSTALL_STATUS_LABEL_KEYS: Partial<Record<ProjectMcpInstallStatus, Transla
   installed: 'mcpInstalled',
   already_configured: 'mcpAlreadyConfigured',
   conflict: 'mcpConflictUnchanged',
+  stale: 'onboarding.mcpStale',
+  not_configured: 'onboarding.mcpPlanNone',
 }
 
 function installStatusLabel(status: ProjectMcpInstallStatus): string {
@@ -190,6 +224,7 @@ function installStatusLabel(status: ProjectMcpInstallStatus): string {
 const PROJECT_STATUS_LABEL_KEYS: Partial<Record<ProjectMcpProjectStatus, TranslationKey>> = {
   connected: 'connected',
   partial: 'partial',
+  stale: 'onboarding.mcpStale',
   conflict: 'conflict',
   missing: 'folderMissing',
 }
@@ -204,6 +239,7 @@ function projectStatusLabel(status: ProjectMcpProjectStatus): string {
 const PROJECT_STATUS_TONE: Partial<Record<ProjectMcpProjectStatus, 'success' | 'warn' | 'neutral'>> = {
   connected: 'success',
   partial: 'warn',
+  stale: 'warn',
   missing: 'warn',
   conflict: 'warn',
   error: 'warn',
@@ -398,6 +434,7 @@ onMounted(() => {
       </div>
 
       <div v-if="listError" class="error-msg mcp-list-error" role="alert">{{ listError }}</div>
+      <p v-if="registryRecovered" class="mcp-review-help" role="status">{{ t('onboarding.mcpRecovered') }}</p>
       <div v-if="loadingProjects && projects.length === 0" class="mcp-empty">{{ t('checking') }}</div>
       <div v-else-if="projects.length === 0" class="mcp-empty">{{ t('noProjectsConnected') }}</div>
       <div v-else class="tools-list" role="list" :aria-label="t('connectedMcpProjects')">
@@ -416,10 +453,21 @@ onMounted(() => {
           </div>
           <div class="mcp-project-path" :title="project.projectPath">{{ project.projectPath }}</div>
           <div v-if="project.results.length" class="mcp-client-list">
+            <span class="mcp-count-chip">{{ t('onboarding.mcpConnectedCount', { ok: connectedCount(project), total: project.results.length }) }}</span>
             <span v-for="item in project.results" :key="item.client" :class="`mcp-${item.status}`">
               {{ projectMcpClientLabel(item.client) }}: {{ installStatusLabel(item.status) }}
+              <Button
+                v-if="item.status === 'stale'"
+                variant="secondary"
+                size="sm"
+                :disabled="repairingClient !== ''"
+                @click="updateStaleClient(project, item.client)"
+              >
+                {{ repairingClient === `${project.projectPath}:${item.client}` ? t('installing') : t('onboarding.mcpUpdatePaths') }}
+              </Button>
             </span>
           </div>
+          <div v-if="project.status === 'error' && project.error" class="mcp-inline-error">{{ translateBackendError(project.error) }}</div>
           <div class="mcp-project-actions">
             <Button
               v-if="project.status === 'missing'"

@@ -48,7 +48,13 @@ function parseApplyRequest(value: unknown): ProjectMcpApplyRequest | null {
     typeof client === 'string' && (PROJECT_MCP_CLIENTS as readonly string[]).includes(client)
   ))
   if (clients.length !== raw.clients.length) return null
-  return { projectPath: raw.projectPath, clients: [...new Set(clients)], localOnly: raw.localOnly }
+  if (raw.updateStale !== undefined && typeof raw.updateStale !== 'boolean') return null
+  return {
+    projectPath: raw.projectPath,
+    clients: [...new Set(clients)],
+    localOnly: raw.localOnly,
+    updateStale: raw.updateStale === true,
+  }
 }
 
 export function registerProjectMcpIpc(deps: ProjectMcpIpcDependencies): void {
@@ -114,6 +120,7 @@ export function registerProjectMcpIpc(deps: ProjectMcpIpcDependencies): void {
         summary = deps.installProjectMcp(parsed.projectPath, deps.installOptions(), {
           clients: parsed.clients,
           localOnly: parsed.localOnly,
+          updateStale: parsed.updateStale,
         })
       } catch (error) {
         if (registry && !alreadyTracked) registry.forget(parsed.projectPath)
