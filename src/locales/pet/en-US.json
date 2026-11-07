@@ -19,5 +19,7 @@
   "pet.tool.agent": "Running a sub-task",
   "pet.tool.plan": "Updating the plan",
   "pet.tool.mcp": "MCP: {server}",
-  "pet.tool.generic": "Using {name}"
+  "pet.tool.generic": "Using {name}",
+  "pet.toastWaiting": "Waiting for you",
+  "pet.unreadResultsAria": "{count} results while you were away, click to clear"
 }

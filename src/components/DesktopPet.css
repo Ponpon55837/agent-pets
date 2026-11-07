@@ -126,6 +126,60 @@
   background: var(--border-strong);
 }
 
+.unread-badge {
+  position: absolute;
+  top: 2px;
+  right: calc(50% - 96px * var(--pet-scale, 1) + 2px);
+  z-index: 6;
+  display: inline-flex;
+  min-width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 6px;
+  border: 1px solid var(--surface-panel);
+  border-radius: var(--radius-pill);
+  background: var(--state-success);
+  color: var(--surface-panel);
+  cursor: pointer;
+  font: 700 var(--font-xs)/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  animation: unread-pop 0.28s ease-out;
+}
+
+.unread-badge.error {
+  background: var(--state-error);
+}
+
+.unread-badge:hover {
+  filter: brightness(1.12);
+}
+
+@keyframes unread-pop {
+  from { transform: scale(0.4); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.edge-peek-result-badge {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: grid;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  place-items: center;
+  border: 1px solid var(--surface-panel);
+  border-radius: var(--radius-pill);
+  background: var(--state-success);
+  color: var(--surface-panel);
+  font: 700 var(--font-xs)/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.edge-peek-result-badge.error {
+  background: var(--state-error);
+}
+
 .edge-peek-unread-badge {
   position: absolute;
   top: 3px;
@@ -1170,6 +1224,11 @@
   line-height: 1.4;
 }
 
+.pet-toast.waiting {
+  border-color: rgba(255, 227, 124, 0.5);
+  color: var(--state-warn-bright);
+}
+
 .pet-toast.activity {
   border-color: rgba(139, 156, 247, 0.35);
   color: var(--accent-bright);
@@ -1298,6 +1357,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .unread-badge {
+    animation: none;
+  }
+
   .permission-button {
     transition: none;
   }

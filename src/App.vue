@@ -5,7 +5,7 @@ import DesktopPet from '@/components/DesktopPet.vue'
 import StatusPanel from '@/components/StatusPanel.vue'
 import SetupWizard from '@/components/SetupWizard.vue'
 import ProjectMcpPanel from '@/components/ProjectMcpPanel.vue'
-import { playCue } from '@/utils/sound'
+import { playCue, type SoundCue } from '@/utils/sound'
 import type { DesktopPreferences } from '@/types/desktop'
 import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
 import { setLocale as applyLocale } from '@/i18n'
@@ -155,7 +155,21 @@ function handleStorage(e: StorageEvent) {
   }
 }
 
+// Both windows' stores process every event identically, so only the pet
+// window actually plays audio — otherwise it'd sound twice.
+function playCueIfAllowed(cue: SoundCue): void {
+  if (
+    !isPanelWindow
+    && store.desktopPreferencesReady
+    && store.soundEnabled
+    && !store.dndEnabled
+  ) {
+    playCue(cue)
+  }
+}
+
 onMounted(() => {
+  store.setCueSink(playCueIfAllowed)
   document.documentElement.style.setProperty('--pet-scale', String(store.petScale))
   document.documentElement.style.setProperty('--pet-w', store.scaledW + 'px')
 
@@ -163,17 +177,7 @@ onMounted(() => {
   if (electronAPI?.onAgentStatusEvent) {
     cleanupListener = electronAPI.onAgentStatusEvent((event: unknown) => {
       const cue = store.handleEvent(event as any)
-      // Both windows' stores process every event identically, so only the
-      // pet window actually plays audio — otherwise it'd sound twice.
-      if (
-        cue
-        && !isPanelWindow
-        && store.desktopPreferencesReady
-        && store.soundEnabled
-        && !store.dndEnabled
-      ) {
-        playCue(cue)
-      }
+      if (cue) playCueIfAllowed(cue)
     })
   }
   if (electronAPI?.onPresentationIntent) {
@@ -323,6 +327,7 @@ watch(() => store.hasSuccessSessions, (active) => {
 }, { immediate: true })
 
 onUnmounted(() => {
+  store.setCueSink(null)
   cleanupListener?.()
   cleanupPanelOpened?.()
   cleanupPanelOpenSettings?.()

@@ -29,7 +29,15 @@ import type {
 import { PRESENTATION_REACTIONS } from '@/types/presentation'
 import { formatProject } from '@/utils/format'
 import { AgentSessionIndex } from '@/utils/agent-session-index'
-import { formatElapsedShort, toastDurationFor } from '@/utils/pet-toast'
+import {
+  UNREAD_AWAY_MS,
+  WAITING_INPUT_DELAY_MS,
+  formatElapsedShort,
+  shouldPlaySuccessSound,
+  toastDurationFor,
+  type ToastTone,
+} from '@/utils/pet-toast'
+import type { SoundCue } from '@/utils/sound'
 import { readPetFeedbackDefaults } from '@/utils/pet-defaults'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
@@ -287,7 +295,7 @@ export const useAgentStore = defineStore('agent', () => {
   const showProjectMcpPanel = ref(false)
   const toast = ref<{
     id: number
-    tone: 'success' | 'error'
+    tone: ToastTone
     /** Semantic headline, e.g. "Done" / "Failed" / "3 tasks done". */
     title: string
     /** Source and project, e.g. "Claude · my-repo". */
@@ -471,6 +479,54 @@ export const useAgentStore = defineStore('agent', () => {
     }, remainingMs)
   }
 
+  // --- 不在場時的未讀結果 / 等待輸入提醒 ----------------------------------------
+
+  const unreadResults = ref({ count: 0, hasError: false })
+  let lastPetInteractionAt = Date.now()
+  let cueSink: ((cue: SoundCue) => void) | null = null
+  const waitingInputTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  function markPetInteraction() {
+    lastPetInteractionAt = Date.now()
+  }
+
+  function clearUnreadResults() {
+    if (unreadResults.value.count === 0) return
+    unreadResults.value = { count: 0, hasError: false }
+  }
+
+  function noteUnreadResult(tone: 'success' | 'error') {
+    if (Date.now() - lastPetInteractionAt < UNREAD_AWAY_MS) return
+    unreadResults.value = {
+      count: Math.min(99, unreadResults.value.count + 1),
+      hasError: unreadResults.value.hasError || tone === 'error',
+    }
+  }
+
+  // App.vue decides whether this window may actually make sound.
+  function setCueSink(sink: ((cue: SoundCue) => void) | null) {
+    cueSink = sink
+  }
+
+  function cancelWaitingInputReminder(key: string) {
+    const timer = waitingInputTimers.get(key)
+    if (timer) clearTimeout(timer)
+    waitingInputTimers.delete(key)
+  }
+
+  // The prompt must still be unanswered after a short grace period before the
+  // pet speaks up, so a question answered at once never flashes a bubble.
+  function scheduleWaitingInputReminder(key: string) {
+    cancelWaitingInputReminder(key)
+    waitingInputTimers.set(key, setTimeout(() => {
+      waitingInputTimers.delete(key)
+      const session = sessionsByKey.get(key)
+      if (!session || session.state !== 'waiting-input') return
+      showToast(session.source, session.project, 'waiting')
+      cueSink?.('waiting-input')
+    }, WAITING_INPUT_DELAY_MS))
+  }
+
   function dismissToast() {
     clearToastTimers()
     toast.value = null
@@ -501,7 +557,7 @@ export const useAgentStore = defineStore('agent', () => {
   function showToast(
     source: AgentSource,
     project: string | undefined,
-    tone: 'success' | 'error',
+    tone: ToastTone,
     elapsedMs?: number,
   ) {
     const label = SOURCE_LABELS[source]
@@ -522,7 +578,7 @@ export const useAgentStore = defineStore('agent', () => {
       tone,
       title: count > 1
         ? t('pet.toastManyDone', { count })
-        : t(tone === 'success' ? 'pet.toastDone' : 'pet.toastFailed'),
+        : t(tone === 'success' ? 'pet.toastDone' : tone === 'error' ? 'pet.toastFailed' : 'pet.toastWaiting'),
       meta: count > 1 ? '' : proj ? `${label} · ${proj}` : label,
       ...(count === 1 && elapsed ? { detail: t('pet.toastElapsed', { time: elapsed }) } : {}),
       count,
@@ -1184,6 +1240,12 @@ export const useAgentStore = defineStore('agent', () => {
 
     awardMoodProgress(event, key, prevState)
 
+    if (event.state === 'waiting-input') {
+      if (prevState !== 'waiting-input') scheduleWaitingInputReminder(key)
+    } else {
+      cancelWaitingInputReminder(key)
+    }
+
     if ((event.state === 'success' || event.state === 'error') && prevState !== event.state) {
       if (isQuotaCapableSource(event.source)) quotaStaleSignal.value += 1
       showToast(
@@ -1192,7 +1254,11 @@ export const useAgentStore = defineStore('agent', () => {
         event.state,
         taskStartedAt === undefined ? undefined : Date.now() - taskStartedAt,
       )
+      noteUnreadResult(event.state)
       adjustMood(event.state === 'success' ? MOOD_SUCCESS_REWARD : -MOOD_ERROR_PENALTY)
+      if (event.state === 'success' && !shouldPlaySuccessSound(
+        taskStartedAt === undefined ? undefined : Date.now() - taskStartedAt,
+      )) return null
       return event.state
     }
 
@@ -1230,6 +1296,7 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   function removeSession(key: string) {
+    cancelWaitingInputReminder(key)
     sessionIndex.delete(key)
     moodTaskProgress.delete(key)
   }
@@ -1772,6 +1839,10 @@ export const useAgentStore = defineStore('agent', () => {
     toast,
     toastRemainingMs,
     toastPaused,
+    unreadResults,
+    markPetInteraction,
+    clearUnreadResults,
+    setCueSink,
     pauseToast,
     resumeToast,
     dismissToast,

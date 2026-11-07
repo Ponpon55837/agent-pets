@@ -275,11 +275,21 @@ const activityLabel = computed(() => {
   return t(description.key as TranslationKey, description.params)
 })
 
+const toastIconName = computed(() => {
+  switch (store.toast?.tone) {
+    case 'error': return 'warning'
+    case 'waiting': return 'bell'
+    default: return 'check'
+  }
+})
+
 const toastAutoCloseSeconds = computed(() => (
   store.toast ? Math.max(1, Math.round(store.toast.countdown.durationMs / 1000)) : 0
 ))
 
 function openFromToast(): void {
+  store.markPetInteraction()
+  store.clearUnreadResults()
   store.dismissToast()
   store.togglePanel()
 }
@@ -495,6 +505,7 @@ onBeforeUnmount(() => {
 let lastCursorLookAt = 0
 let lastCursorLookDirection: -1 | 0 | 1 = 0
 function onPetMouseMove(e: MouseEvent): void {
+  store.markPetInteraction()
   if (!store.shimejiEnabled || !store.reactionsActive || store.currentState !== 'idle') return
   if (store.petWindowMode.mode !== 'normal' || store.isDragging) return
   const area = clickAreaRef.value
@@ -517,6 +528,7 @@ function onPetMouseMove(e: MouseEvent): void {
 function onMouseDown(e: MouseEvent) {
   if (e.button !== 0) return
   dismissCoach()
+  store.markPetInteraction()
   hasMoved.value = false
   mouseDownTime = Date.now()
   store.isDragging = true
@@ -574,6 +586,7 @@ function onEdgeMouseDown(e: MouseEvent): void {
 function onClick(e: MouseEvent) {
   if (e.button !== 0) return
   if (hasMoved.value) return
+  store.clearUnreadResults()
   if (isMultiPet.value) {
     multiPetRefs.value.forEach((anim) => anim?.playReaction())
   } else {
@@ -673,6 +686,14 @@ watch(() => store.achievementUnlock, (unlock) => {
           />
         </span>
         <span class="edge-peek-grip" aria-hidden="true" />
+        <span
+          v-if="store.unreadResults.count > 0"
+          class="edge-peek-result-badge"
+          :class="{ error: store.unreadResults.hasError }"
+          :aria-label="t('pet.unreadResultsAria', { count: store.unreadResults.count })"
+        >
+          {{ store.unreadResults.count }}
+        </span>
         <span
           v-if="store.pluginFeedUnreadCount > 0"
           class="edge-peek-unread-badge"
@@ -782,7 +803,7 @@ watch(() => store.achievementUnlock, (unlock) => {
           @click.stop="openFromToast"
         >
           <span class="timed-toast-head">
-            <Icon class="timed-toast-icon" :name="store.toast.tone === 'success' ? 'check' : 'warning'" :size="14" />
+            <Icon class="timed-toast-icon" :name="toastIconName" :size="14" />
             <strong class="timed-toast-title">{{ store.toast.title }}</strong>
             <span v-if="store.toast.meta" class="timed-toast-meta">{{ store.toast.meta }}</span>
           </span>
@@ -873,6 +894,20 @@ watch(() => store.achievementUnlock, (unlock) => {
           <Button size="sm" variant="secondary" @mousedown.stop @click.stop="dismissCoach">{{ t('pet.coachDismiss') }}</Button>
         </div>
       </Transition>
+
+      <span
+        v-if="store.unreadResults.count > 0"
+        class="unread-badge"
+        :class="{ error: store.unreadResults.hasError }"
+        role="status"
+        :aria-label="t('pet.unreadResultsAria', { count: store.unreadResults.count })"
+        data-pet-hit-target="solid"
+        @mousedown.stop
+        @click.stop="store.clearUnreadResults()"
+      >
+        <Icon :name="store.unreadResults.hasError ? 'warning' : 'check'" :size="11" />
+        {{ store.unreadResults.count }}
+      </span>
 
       <template v-if="isMultiPet">
         <div class="multi-pet-row">

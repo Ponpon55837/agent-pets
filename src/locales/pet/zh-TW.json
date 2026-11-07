@@ -19,5 +19,7 @@
   "pet.tool.agent": "派出子任務",
   "pet.tool.plan": "整理待辦",
   "pet.tool.mcp": "MCP：{server}",
-  "pet.tool.generic": "使用 {name}"
+  "pet.tool.generic": "使用 {name}",
+  "pet.toastWaiting": "在等你回覆",
+  "pet.unreadResultsAria": "有 {count} 個你不在時的結果，點擊清除"
 }
