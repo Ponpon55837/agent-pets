@@ -22,3 +22,10 @@ Replace literals with tokens (`--hit-min`, `--z-*`, `--transition-*`); for visua
 - ~46 `transition:` declarations without `var(--transition-*)` in DesktopPet/StatusPanel/PluginPanel.
 - Card tones: `ui/Card.vue` still supports all five (backward compatible); new code should use neutral/accent/danger and express other meaning with `ui/Badge.vue`.
 - Fonts: Caprasimo/Figtree were never bundled; `--organic-font-heading` now honestly falls back to Georgia and body to the system stack. If a font is bundled later, add `@font-face` + THIRD_PARTY_NOTICES in the same change.
+
+## Backdrop blur (DS-07)
+Tokens: `--blur-chip`, `--blur-bubble`, `--blur-scrim` (all `none` under reduced transparency; `html[data-gpu-safe]` disables every blur). Replace literals (`node scripts/check-design-tokens.mjs --verbose` lists `literal-blur`):
+- `DesktopPet.css` ~263/424/762/782 (14/16/14/12px) -> `--blur-bubble` / `--blur-chip`; ~738 `blur(6px)` has no `-webkit-` twin; `.pet-toast` base declares blur once, variants (`.permission-notice`, `.presentation-say`) should only change tint.
+- `SetupWizard.css:71`, `ProjectMcpPanel.css:71`: `blur(4px)` scrims -> `var(--blur-scrim)` (or adopt `ui/Dialog.vue`, see DS-11).
+- `StatusPanel.css`: keep an opaque background under reduced transparency (only ~1357 handles it today); the `--blur-*` tokens already go to `none`.
+- Never place a `backdrop-filter` element inside another; glass is only the outer container.

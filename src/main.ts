@@ -6,6 +6,7 @@ import App from '@/App.vue'
 import { initTheme } from '@/composables/useTheme'
 
 initTheme()
+if (import.meta.env.MODE === 'gpu-safe') document.documentElement.dataset.gpuSafe = ''
 
 const app = createApp(App)
 app.use(createPinia())

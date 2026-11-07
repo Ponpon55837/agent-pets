@@ -6,6 +6,7 @@
 //   undefined-var   var(--x) with no declaration anywhere in src/
 //   bare-color      hex / rgb()/rgba()/hsl() literal outside tokens.css
 //   small-font      font-size below 11px (or a non-token px size under 11)
+//   literal-blur    backdrop-filter blur(<n>px) instead of a --blur-* token
 //   unused-token    --token declared in tokens.css but never referenced
 //                   (informational; never fails --strict)
 //   raw-control     <button|select|input> outside src/components/ui (informational)
@@ -77,6 +78,9 @@ export function analyze(root = defaultRoot) {
         findings.push({ rule: 'bare-color', file: rel(file), line: i + 1, text: line.trim() })
       } else if (/\b(?:rgba?|hsla?)\(/i.test(line)) {
         findings.push({ rule: 'bare-color', file: rel(file), line: i + 1, text: line.trim() })
+      }
+      if (/backdrop-filter:\s*blur\(\s*[\d.]+px/i.test(line)) {
+        findings.push({ rule: 'literal-blur', file: rel(file), line: i + 1, text: line.trim() })
       }
       const fs = line.match(/font-size:\s*([\d.]+)px/i)
       if (fs && Number(fs[1]) < 11) {

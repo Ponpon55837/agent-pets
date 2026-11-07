@@ -19,6 +19,11 @@
   --surface-overlay: rgba(25, 25, 35, 0.98);
   --surface-scrim: rgba(0, 0, 0, 0.5);
   --surface-blur: blur(24px) saturate(165%);
+  /* Three blur strengths app-wide. Components must use these, never a literal
+     blur(). `html[data-gpu-safe]` (dev:safe) and reduced-transparency turn
+     them all off through base.css / the media query below. */
+  --blur-chip: blur(8px) saturate(140%);
+  --blur-bubble: blur(14px) saturate(160%);
   --blur-scrim: blur(4px);
 
   /* Native <option> popups are painted by the OS, not by us — they need an
@@ -343,6 +348,8 @@
 @media (prefers-reduced-transparency: reduce) {
   :root {
     --surface-blur: none;
+    --blur-chip: none;
+    --blur-bubble: none;
     --blur-scrim: none;
   }
 }
