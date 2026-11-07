@@ -124,9 +124,12 @@ export function installCrashGuard(options: CrashGuardOptions): CrashGuard {
     signatures.set(signature, count)
 
     const current = now()
-    occurrences.push({ signature, at: current })
-    occurrences = occurrences.filter(item => current - item.at <= escalation.windowMs).slice(-MAX_TRACKED_OCCURRENCES)
-    if (!escalated && shouldEscalateCrashes(occurrences, current, escalation)) {
+    // Only true uncaught exceptions count; stray promise rejections are logged but never prompt.
+    if (kind === 'uncaughtException') {
+      occurrences.push({ signature, at: current })
+      occurrences = occurrences.filter(item => current - item.at <= escalation.windowMs).slice(-MAX_TRACKED_OCCURRENCES)
+    }
+    if (!escalated && kind === 'uncaughtException' && shouldEscalateCrashes(occurrences, current, escalation)) {
       escalated = true
       try {
         options.onEscalate?.({ kind, message, stack, count })
