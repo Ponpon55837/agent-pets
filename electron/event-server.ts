@@ -4,14 +4,17 @@ import { app } from 'electron'
 import { timingSafeEqual } from 'node:crypto'
 import type { AgentStatusEvent } from '../src/types/agent'
 import { createOrderedBatchCoalescer } from './ipc/broadcast-coalescer.ts'
+import { createEventRateLimiter } from './event-rate-limit.ts'
+import { eventPipelineStats } from './event-stats.ts'
 import { listenOnLocalPort, type LocalServerListenHandle, type LocalServerListenOptions } from './local-server-listen.ts'
 import { AGENT_PETS_SERVER_HEADER } from './main/server-health.ts'
 import { normalizeAgentStatusEvent, type EventNormalizationResult } from './event-normalizer'
 export type { AgentStatusEvent } from '../src/types/agent'
 
 const MAX_BODY_BYTES = 64 * 1024
-const MAX_EVENTS_PER_WINDOW = 500
-const RATE_WINDOW_MS = 10_000
+const MAX_QUEUED_EVENTS = 1_000
+const TERMINAL_STATES = new Set(['success', 'error', 'waiting-permission', 'waiting-input'])
+const SEND_FAILURE_LOG_INTERVAL_MS = 10_000
 
 export type EventIngressNormalizer = (
   value: unknown,
@@ -28,8 +31,8 @@ export function createEventServer(
   normalizeEvent: EventIngressNormalizer = normalizeAgentStatusEvent,
   listenHooks: Pick<LocalServerListenOptions, 'onStatus' | 'onPersistentFailure'> & { onHandle?: (handle: LocalServerListenHandle) => void } = {},
 ) {
-  let rateWindowStartedAt = Date.now()
-  let eventsInWindow = 0
+  const limiter = createEventRateLimiter()
+  let lastSendFailureLogAt = 0
   const enqueueAgentEvent = createOrderedBatchCoalescer<{ window: BrowserWindow; event: AgentStatusEvent }>(batch => {
     const eventsByWindow = new Map<BrowserWindow, AgentStatusEvent[]>()
     for (const { window, event } of batch) {
@@ -39,8 +42,20 @@ export function createEventServer(
     }
     for (const [window, events] of eventsByWindow) {
       if (window.isDestroyed()) continue
-      try { window.webContents.send('agent-status-event', events) } catch {}
+      try { window.webContents.send('agent-status-event', events) } catch (error) {
+        eventPipelineStats.sendFailures += events.length
+        const current = Date.now()
+        if (current - lastSendFailureLogAt >= SEND_FAILURE_LOG_INTERVAL_MS) {
+          lastSendFailureLogAt = current
+          console.error('Delivering agent events to a window failed', error)
+        }
+      }
     }
+  }, undefined, {
+    maxPending: MAX_QUEUED_EVENTS,
+    // Under backpressure keep completions/errors/permission prompts and shed heartbeats first.
+    isPriority: ({ event }) => TERMINAL_STATES.has(event.state),
+    onDrop: () => { eventPipelineStats.droppedByBackpressure += 1 },
   })
 
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
@@ -77,13 +92,8 @@ export function createEventServer(
       return
     }
 
-    const now = Date.now()
-    if (now - rateWindowStartedAt >= RATE_WINDOW_MS) {
-      rateWindowStartedAt = now
-      eventsInWindow = 0
-    }
-    eventsInWindow += 1
-    if (eventsInWindow > MAX_EVENTS_PER_WINDOW) {
+    if (!limiter.allowRequest()) {
+      eventPipelineStats.rateLimited += 1
       response.writeHead(429, { 'retry-after': '10' })
       response.end(JSON.stringify({ error: 'too many events' }))
       request.resume()
@@ -124,6 +134,15 @@ export function createEventServer(
       } catch {
         response.writeHead(400)
         response.end(JSON.stringify({ error: 'invalid JSON' }))
+        return
+      }
+
+      // Budgets are per source session, with a separate one for terminal
+      // events, so one runaway hook cannot starve other agents' completions.
+      if (!limiter.allowEvent(`${event.source}:${event.sessionId}`, TERMINAL_STATES.has(event.state))) {
+        eventPipelineStats.rateLimited += 1
+        response.writeHead(429, { 'retry-after': '10' })
+        response.end(JSON.stringify({ error: 'too many events' }))
         return
       }
 

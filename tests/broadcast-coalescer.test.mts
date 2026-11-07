@@ -41,3 +41,31 @@ test('ordered batch coalescing preserves every event and original order in 1,000
     assert.deepEqual(delivered, expected, `ordered batch for case ${sample}`)
   }
 })
+
+test('bounded ordered coalescer sheds non-priority items first and keeps terminal ones', () => {
+  const scheduled: Array<() => void> = []
+  const delivered: string[] = []
+  const dropped: string[] = []
+  const enqueue = createOrderedBatchCoalescer<string>(
+    values => delivered.push(...values),
+    callback => scheduled.push(callback),
+    { maxPending: 3, isPriority: value => value.startsWith('!'), onDrop: value => dropped.push(value) },
+  )
+  for (const value of ['a', '!done', 'b', 'c', 'd', '!err']) enqueue(value)
+  scheduled.shift()!()
+  assert.deepEqual(delivered, ['!done', 'd', '!err'])
+  assert.deepEqual(dropped, ['a', 'b', 'c'])
+})
+
+test('a full queue of priority items never drops the arriving non-priority item into the queue', () => {
+  const scheduled: Array<() => void> = []
+  const delivered: string[] = []
+  const enqueue = createOrderedBatchCoalescer<string>(
+    values => delivered.push(...values),
+    callback => scheduled.push(callback),
+    { maxPending: 2, isPriority: value => value.startsWith('!') },
+  )
+  for (const value of ['!1', '!2', 'x', '!3']) enqueue(value)
+  scheduled.shift()!()
+  assert.deepEqual(delivered, ['!2', '!3'])
+})

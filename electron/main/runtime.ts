@@ -4,6 +4,7 @@ import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
 import { logMain, mainLogger } from '../diagnostics/main-log'
 import { buildDiagnosticsReport, registerDiagnosticsSection } from '../diagnostics/report'
+import { eventPipelineStats } from '../event-stats'
 import { openWithCorruptionRecovery } from './db-recovery'
 import { LOCAL_USAGE_TICK_MS, shouldRunLocalUsageTick } from './scan-schedule'
 import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
@@ -2943,6 +2944,7 @@ export function registerRuntimeDiagnostics(startupResults: () => unknown, crashS
   registerDiagnosticsSection('localServers', () => serverHealthTracker().snapshot().servers.map(server => ({
     id: server.id, port: server.port, state: server.state, attempt: server.attempt, code: server.code ?? null,
   })))
+  registerDiagnosticsSection('eventPipeline', () => ({ ...eventPipelineStats }))
   registerDiagnosticsSection('stores', () => ({
     history: mainState.historyStore ? 'ready' : 'unavailable',
     achievements: mainState.achievementStore ? 'ready' : 'unavailable',
