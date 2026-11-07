@@ -39,7 +39,14 @@ import { AgentSessionIndex } from '@/utils/agent-session-index'
 import { SESSION_REMOVE_MS, sessionLifecycleAction } from '@/utils/session-lifecycle'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
-import { PANEL_SIZES } from '@/utils/panel-layout'
+import {
+  INITIAL_PANEL_ROUTE,
+  panelSizeFor,
+  panelSizeKey,
+  reducePanelRoute,
+  type PanelRouteAction,
+  type PanelRouteState,
+} from '@/utils/panel-route'
 import {
   createToastCountdown,
   getToastRemainingMs,
@@ -215,7 +222,11 @@ export const useAgentStore = defineStore('agent', () => {
   const sessions = computed(() => Object.fromEntries(sessionsByKey))
   const isDragging = ref(false)
   const petWindowMode = ref<PetWindowModeState>({ mode: 'normal' })
-  const panelView = ref<'sessions' | 'settings'>('sessions')
+  // Panel navigation: one state machine (utils/panel-route.ts) replaces three flags.
+  const panelRoute = ref<PanelRouteState>(INITIAL_PANEL_ROUTE)
+  const panelView = computed(() => panelRoute.value.view)
+  const showWizard = computed(() => panelRoute.value.overlay === 'wizard')
+  const showProjectMcpPanel = computed(() => panelRoute.value.overlay === 'mcp')
   const selectedPet = ref<string>(localStorage.getItem('agent-pet-id') || 'aang-airbender')
   const petScale = ref(parseFloat(localStorage.getItem('agent-pet-scale') || '1'))
   const pets = ref<PetEntry[]>([])
@@ -293,8 +304,6 @@ export const useAgentStore = defineStore('agent', () => {
     return selectedPet.value
   }
 
-  const showWizard = ref(false)
-  const showProjectMcpPanel = ref(false)
   const toast = ref<{
     id: number
     text: string
@@ -1564,56 +1573,52 @@ export const useAgentStore = defineStore('agent', () => {
     else panelModalLocks.delete(key)
   }
 
+  // Every transition goes through here so the window size always follows the route.
+  function navigatePanel(action: PanelRouteAction, options: { resize?: boolean } = {}) {
+    const next = reducePanelRoute(panelRoute.value, action)
+    const resized = panelSizeKey(next) !== panelSizeKey(panelRoute.value)
+    panelRoute.value = next
+    if (options.resize !== false && resized) window.electronAPI?.resizePanel(panelSizeFor(next))
+  }
+
   function closePanel() {
-    showWizard.value = false
-    showProjectMcpPanel.value = false
+    navigatePanel({ type: 'close-overlay' }, { resize: false })
     window.electronAPI?.hidePanel()
   }
 
   function openSettings() {
-    panelView.value = 'settings'
-    showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(PANEL_SIZES.settings)
+    navigatePanel({ type: 'open-settings' })
   }
 
   function openSetupWizard() {
-    showWizard.value = true
-    showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(PANEL_SIZES.wizard)
+    navigatePanel({ type: 'open-overlay', overlay: 'wizard' })
   }
 
   function closeSetupWizard() {
-    showWizard.value = false
-    window.electronAPI?.resizePanel(panelView.value === 'settings' ? PANEL_SIZES.settings : PANEL_SIZES.sessions)
+    navigatePanel({ type: 'close-overlay' })
   }
 
   function openProjectMcpPanel() {
-    panelView.value = 'settings'
-    showWizard.value = false
-    showProjectMcpPanel.value = true
-    window.electronAPI?.resizePanel(PANEL_SIZES.mcp)
+    navigatePanel({ type: 'open-overlay', overlay: 'mcp' })
   }
 
   function closeProjectMcpPanel() {
-    showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(PANEL_SIZES.settings)
+    navigatePanel({ type: 'close-overlay' })
   }
 
   function backToSessions() {
-    panelView.value = 'sessions'
-    showWizard.value = false
-    showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(PANEL_SIZES.sessions)
+    navigatePanel({ type: 'back-to-sessions' })
   }
 
   // Called by electron/main.ts whenever the panel window transitions from
   // hidden to visible. A restore keeps the previous screen (including a
-  // suspended plugin panel); any other open goes back to the Sessions view.
+  // suspended plugin panel); any other open goes back to the Sessions view
+  // (the main process already sized the window for it).
+  const panelOpenCount = ref(0)
   function handlePanelOpened(options?: { restore?: boolean }) {
+    panelOpenCount.value += 1
     if (options?.restore) return
-    panelView.value = 'sessions'
-    showWizard.value = false
-    showProjectMcpPanel.value = false
+    navigatePanel({ type: 'reset' }, { resize: false })
   }
 
   // --- 寵物視窗尺寸同步 -----------------------------------------------------
@@ -1771,6 +1776,7 @@ export const useAgentStore = defineStore('agent', () => {
     sessionList,
     isDragging,
     petWindowMode,
+    panelRoute,
     panelView,
     selectedPet,
     petScale,
@@ -1876,6 +1882,7 @@ export const useAgentStore = defineStore('agent', () => {
     backToSessions,
     handlePanelOpened,
     panelPinned,
+    panelOpenCount,
     setPanelPinned,
     setPanelModalLock,
     setPet,

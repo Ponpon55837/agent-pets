@@ -17,7 +17,7 @@ const { plugins, filteredPlugins, installedSearch, installedFilter, loading, bus
     <div v-if="loading && plugins.length === 0" class="plugin-empty">{{ t('checking') }}</div>
     <EmptyState
       v-else-if="plugins.length === 0"
-      icon="plugin-box"
+      icon="plugin"
       :title="t('plugins.emptyTitle')"
       :description="enabledGlobally ? t('plugins.emptyDescription') : t('plugins.emptyDescriptionOff')"
     >

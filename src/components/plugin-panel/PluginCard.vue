@@ -41,7 +41,7 @@ function onMenu(id: string): void {
   <li class="plugin-card" :class="{ attention: needsAttention }" :aria-label="name" :aria-busy="pluginBusy(plugin.id)">
     <div class="card-head">
       <img v-if="pluginIconUrl(plugin)" class="card-icon" :src="pluginIconUrl(plugin) ?? ''" alt="" @error="hidePluginIcon(plugin.id)" />
-      <span v-else class="card-icon card-icon-placeholder" aria-hidden="true"><Icon name="plugin-box" :size="18" /></span>
+      <span v-else class="card-icon card-icon-placeholder" aria-hidden="true"><Icon name="plugin" :size="18" /></span>
       <div class="card-copy">
         <strong class="card-name" :title="name">{{ name }}</strong>
         <span class="card-meta">

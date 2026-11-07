@@ -70,12 +70,12 @@ const model = defineModel<string>({ required: true })
 
 .size-md .select {
   padding: 8px 30px 8px 13px;
-  font-size: var(--font-body-sm, var(--font-sm));
+  font-size: var(--font-sm);
 }
 
 .size-sm .select {
   padding: 6px 28px 6px 13px;
-  font-size: var(--font-label, var(--font-xs));
+  font-size: var(--font-xs);
 }
 
 .select:hover:not(:disabled) {

@@ -50,7 +50,7 @@ function sizeLabel(bytes: number): string {
 <template>
   <EmptyState
     v-if="!onlineCatalogEnabled"
-    icon="plugin-box"
+    icon="plugin"
     :title="t('plugins.catalogOffTitle')"
     :description="t('plugins.catalogOffDescription')"
   >
@@ -99,7 +99,7 @@ function sizeLabel(bytes: number): string {
     <ul v-else class="catalog-list" :aria-label="t('pluginCatalogHeading')">
       <li v-for="item in filteredCatalogItems" :key="item.plugin.id" class="catalog-card">
         <div class="card-head">
-          <span class="card-icon" aria-hidden="true"><Icon name="plugin-box" :size="18" /></span>
+          <span class="card-icon" aria-hidden="true"><Icon name="plugin" :size="18" /></span>
           <div class="card-copy">
             <strong class="card-name" :title="item.plugin.name[locale]">{{ item.plugin.name[locale] }}</strong>
             <span class="card-meta">{{ t('pluginVersion', { version: item.latestVersion.version }) }} · {{ sizeLabel(item.latestVersion.size) }}</span>

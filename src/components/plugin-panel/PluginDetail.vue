@@ -96,7 +96,7 @@ watch(plugin, async (value, previous) => {
     <Card class="detail-identity">
       <div class="identity-row">
         <img v-if="pluginIconUrl(plugin)" class="identity-icon" :src="pluginIconUrl(plugin) ?? ''" alt="" @error="hidePluginIcon(plugin.id)" />
-        <span v-else class="identity-icon" aria-hidden="true"><Icon name="plugin-box" :size="22" /></span>
+        <span v-else class="identity-icon" aria-hidden="true"><Icon name="plugin" :size="22" /></span>
         <div class="identity-copy">
           <h3 class="identity-name" tabindex="-1" data-detail-heading>{{ name }}</h3>
           <span class="identity-meta">

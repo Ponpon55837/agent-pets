@@ -76,7 +76,7 @@ function when(record: PluginNotificationRecord): string {
                 {{ expanded.has(record.item.id) ? t('plugins.lessDetails') : t('plugins.inboxExpand') }}
               </Button>
               <Button v-if="record.item.link" variant="ghost" size="sm" @click="openNotificationLink(record.item.id)">
-                <Icon name="external" :size="14" />
+                <Icon name="external-link" :size="14" />
                 {{ linkHost(record.item.link) ? t('plugins.openLinkHost', { host: linkHost(record.item.link) }) : t('pluginFeedOpenLink') }}
               </Button>
               <Button v-if="!record.read" variant="secondary" size="sm" @click="markNotificationRead(record.item.id)">
