@@ -409,7 +409,9 @@ export class HistoryStore {
     if (!adapterId || !agentId || !sourceEventId) return false
     const input = safeCount(record.input) ?? 0
     const output = safeCount(record.output) ?? 0
-    if (input === 0 && output === 0) return false
+    const cacheRead = safeCount(record.cacheRead) ?? 0
+    const cacheWrite = safeCount(record.cacheWrite) ?? 0
+    if (input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0) return false
     if (record.quality !== 'exact' && record.quality !== 'estimated') return false
     const safeReceivedAt = Number.isFinite(receivedAt) ? receivedAt : this.now()
     const occurredAt = Number.isFinite(record.occurredAt)
@@ -426,12 +428,15 @@ export class HistoryStore {
 
     return this.transaction(() => {
       const existing = this.statement(`
-        SELECT event_id, local_date, project_id, token_input, token_output, token_quality, occurred_at
+        SELECT event_id, local_date, project_id, token_input, token_output,
+               token_cache_read, token_cache_write, token_quality, occurred_at
         FROM events WHERE adapter_id = ? AND source_event_id = ?
       `).get(adapterId, sourceEventId)
       if (existing) {
         const previousInput = Math.max(0, asInteger(existing.token_input))
         const previousOutput = Math.max(0, asInteger(existing.token_output))
+        const previousCacheRead = Math.max(0, asInteger(existing.token_cache_read))
+        const previousCacheWrite = Math.max(0, asInteger(existing.token_cache_write))
         const previousDate = safeText(existing.local_date)
         const previousProjectId = safeText(existing.project_id)
         const previousOccurredAt = asInteger(existing.occurred_at)
@@ -441,6 +446,8 @@ export class HistoryStore {
         if (
           previousInput === input
           && previousOutput === output
+          && previousCacheRead === cacheRead
+          && previousCacheWrite === cacheWrite
           && previousDate === localDate
           && previousProjectId === projectId
           && previousOccurredAt === occurredAt
@@ -450,7 +457,8 @@ export class HistoryStore {
         this.statement(`
           UPDATE events
           SET session_id = ?, local_date = ?, project_id = ?, occurred_at = ?, received_at = ?,
-              token_input = ?, token_output = ?, token_quality = ?
+              token_input = ?, token_output = ?, token_cache_read = ?, token_cache_write = ?,
+              token_quality = ?
           WHERE event_id = ?
         `).run(
           sessionId,
@@ -460,6 +468,8 @@ export class HistoryStore {
           safeReceivedAt,
           input,
           output,
+          cacheRead,
+          cacheWrite,
           record.quality,
           existing.event_id,
         )
@@ -473,6 +483,8 @@ export class HistoryStore {
           -previousInput,
           -previousOutput,
           'none',
+          -previousCacheRead,
+          -previousCacheWrite,
         )
         this.updateDailyStat(
           localDate,
@@ -484,6 +496,8 @@ export class HistoryStore {
           input,
           output,
           record.quality,
+          cacheRead,
+          cacheWrite,
         )
         return true
       }
@@ -492,8 +506,9 @@ export class HistoryStore {
         INSERT OR IGNORE INTO events(
           event_id, source_event_id, schema_version, type, trust, adapter_id, agent_id,
           session_id, project_id, pet_id, local_date, occurred_at, received_at, state,
-          active_delta_ms, completion_kind, token_input, token_output, token_quality, payload_json
-        ) VALUES (?, ?, 2, 'agent.token_usage', 'local_log', ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, NULL, ?, ?, ?, '{}')
+          active_delta_ms, completion_kind, token_input, token_output, token_cache_read,
+          token_cache_write, token_quality, payload_json
+        ) VALUES (?, ?, 2, 'agent.token_usage', 'local_log', ?, ?, ?, ?, ?, ?, ?, ?, 'idle', 0, NULL, ?, ?, ?, ?, ?, '{}')
       `).run(
         eventId,
         sourceEventId,
@@ -507,6 +522,8 @@ export class HistoryStore {
         safeReceivedAt,
         input,
         output,
+        cacheRead,
+        cacheWrite,
         record.quality,
       ))
       if (inserted === 0) return false
@@ -520,6 +537,8 @@ export class HistoryStore {
         input,
         output,
         record.quality,
+        cacheRead,
+        cacheWrite,
       )
       return true
     })
@@ -559,7 +578,7 @@ export class HistoryStore {
       : [safePet, LOCAL_USAGE_PET_ID, ...dates]
     const rows = this.statement(`
       SELECT local_date, sessions_completed, sessions_failed, active_ms,
-             token_input, token_output, token_quality
+             token_input, token_output, token_cache_read, token_cache_write, token_quality
       FROM daily_stats
       WHERE (pet_id = ? OR pet_id = ?) ${projectClause} AND local_date IN (${placeholders})
     `).all(...summaryParams)
@@ -586,6 +605,8 @@ export class HistoryStore {
              SUM(active_ms) AS active_ms,
              SUM(token_input) AS token_input,
              SUM(token_output) AS token_output,
+             SUM(token_cache_read) AS token_cache_read,
+             SUM(token_cache_write) AS token_cache_write,
              MAX(CASE token_quality WHEN 'exact' THEN 2 WHEN 'estimated' THEN 1 ELSE 0 END) AS token_quality_rank
       FROM daily_stats
       WHERE (pet_id = ? OR pet_id = ?) ${projectClause} AND local_date IN (${placeholders})
@@ -598,6 +619,8 @@ export class HistoryStore {
       activeMs: Math.max(0, asInteger(row.active_ms)),
       tokenInput: Math.max(0, asInteger(row.token_input)),
       tokenOutput: Math.max(0, asInteger(row.token_output)),
+      tokenCacheRead: Math.max(0, asInteger(row.token_cache_read)),
+      tokenCacheWrite: Math.max(0, asInteger(row.token_cache_write)),
       tokenQuality: asInteger(row.token_quality_rank) >= 2
         ? 'exact'
         : asInteger(row.token_quality_rank) >= 1 ? 'estimated' : 'none',
@@ -711,23 +734,28 @@ export class HistoryStore {
     tokenInput: number,
     tokenOutput: number,
     tokenQuality: HistoryTokenQuality,
+    tokenCacheRead = 0,
+    tokenCacheWrite = 0,
   ): void {
     const existing = this.statement(`
-      SELECT sessions_completed, sessions_failed, active_ms, token_input, token_output, token_quality
+      SELECT sessions_completed, sessions_failed, active_ms, token_input, token_output,
+             token_cache_read, token_cache_write, token_quality
       FROM daily_stats WHERE local_date = ? AND pet_id = ? AND project_id = ? AND adapter_id = ?
     `).get(localDate, petId, projectId, adapterId)
     const currentQuality = isTokenQuality(existing?.token_quality) ? existing!.token_quality as HistoryTokenQuality : 'none'
     this.statement(`
       INSERT INTO daily_stats(
         local_date, pet_id, project_id, adapter_id, sessions_completed, sessions_failed,
-        active_ms, token_input, token_output, token_quality
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        active_ms, token_input, token_output, token_cache_read, token_cache_write, token_quality
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(local_date, pet_id, project_id, adapter_id) DO UPDATE SET
         sessions_completed = excluded.sessions_completed,
         sessions_failed = excluded.sessions_failed,
         active_ms = excluded.active_ms,
         token_input = excluded.token_input,
         token_output = excluded.token_output,
+        token_cache_read = excluded.token_cache_read,
+        token_cache_write = excluded.token_cache_write,
         token_quality = excluded.token_quality
     `).run(
       localDate,
@@ -739,6 +767,8 @@ export class HistoryStore {
       Math.max(0, asInteger(existing?.active_ms) + activeMs),
       Math.max(0, asInteger(existing?.token_input) + tokenInput),
       Math.max(0, asInteger(existing?.token_output) + tokenOutput),
+      Math.max(0, asInteger(existing?.token_cache_read) + tokenCacheRead),
+      Math.max(0, asInteger(existing?.token_cache_write) + tokenCacheWrite),
       mergeTokenQuality(currentQuality, tokenQuality),
     )
   }
@@ -824,6 +854,9 @@ export class HistoryStore {
         VALUES (1, 'history-v1', ?, 'history-v1')
       `).run(this.now())
     })
+    // v3/v4 rebuild aggregates through the current writer, which already knows
+    // the v6 cache columns, so make sure they exist before any later step.
+    this.ensureCacheColumns()
     const hasV2 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 2').get())
     if (!hasV2) this.transaction(() => {
       this.database.exec(`
@@ -886,12 +919,52 @@ export class HistoryStore {
         VALUES (5, 'history-daily-summary-covering-index', ?, 'history-daily-summary-covering-index')
       `).run(this.now())
     })
+    const hasV6 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 6').get())
+    if (!hasV6) this.transaction(() => {
+      // Split prompt-cache tokens out of fresh input. Rows imported earlier
+      // folded cache reads into input, so they are downgraded from exact to
+      // estimated; the next local-log scan re-imports them with the split and
+      // restores exact quality (recordTokenUsage updates in place).
+      this.ensureCacheColumns()
+      this.database.exec(`
+        UPDATE events SET token_quality = 'estimated'
+          WHERE type = 'agent.token_usage' AND token_quality = 'exact';
+        DROP INDEX IF EXISTS idx_daily_stats_summary_cover;
+        CREATE INDEX IF NOT EXISTS idx_daily_stats_summary_cover
+          ON daily_stats(
+            pet_id, local_date, project_id, adapter_id,
+            sessions_completed, sessions_failed, active_ms, token_input, token_output,
+            token_cache_read, token_cache_write, token_quality
+          );
+        DELETE FROM daily_stats;
+      `)
+      this.rebuildEventDailyStats()
+      this.rebuildSessionCompletions()
+      this.statement(`
+        INSERT INTO schema_migrations(version, name, applied_at, checksum)
+        VALUES (6, 'history-token-cache-split', ?, 'history-token-cache-split')
+      `).run(this.now())
+    })
+  }
+
+  private ensureCacheColumns(): void {
+    for (const table of ['events', 'daily_stats']) {
+      const columns = new Set(
+        this.database.prepare(`PRAGMA table_info(${table})`).all().map(row => String(row.name)),
+      )
+      for (const column of ['token_cache_read', 'token_cache_write']) {
+        if (!columns.has(column)) {
+          this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`)
+        }
+      }
+    }
   }
 
   private rebuildEventDailyStats(): void {
     const rows = this.statement(`
       SELECT local_date, pet_id, project_id, adapter_id,
-             active_delta_ms, token_input, token_output, token_quality
+             active_delta_ms, token_input, token_output, token_cache_read, token_cache_write,
+             token_quality
       FROM events ORDER BY occurred_at ASC, event_id ASC
     `).all()
     for (const row of rows) {
@@ -905,6 +978,8 @@ export class HistoryStore {
         Math.max(0, asInteger(row.token_input)),
         Math.max(0, asInteger(row.token_output)),
         isTokenQuality(row.token_quality) ? row.token_quality : 'none',
+        Math.max(0, asInteger(row.token_cache_read)),
+        Math.max(0, asInteger(row.token_cache_write)),
       )
     }
   }
@@ -1019,6 +1094,8 @@ function emptyDaily(localDate: string): HistoryDailyStat {
     activeMs: 0,
     tokenInput: 0,
     tokenOutput: 0,
+    tokenCacheRead: 0,
+    tokenCacheWrite: 0,
     tokenQuality: 'none',
   }
 }
@@ -1031,6 +1108,8 @@ function dailyStat(localDate: string, row?: SqliteRow): HistoryDailyStat {
     activeMs: Math.max(0, asInteger(row?.active_ms)),
     tokenInput: Math.max(0, asInteger(row?.token_input)),
     tokenOutput: Math.max(0, asInteger(row?.token_output)),
+    tokenCacheRead: Math.max(0, asInteger(row?.token_cache_read)),
+    tokenCacheWrite: Math.max(0, asInteger(row?.token_cache_write)),
     tokenQuality: isTokenQuality(row?.token_quality) ? row!.token_quality as HistoryTokenQuality : 'none',
   }
 }
@@ -1043,6 +1122,8 @@ function addDaily(left: HistoryDailyStat, right: HistoryDailyStat): HistoryDaily
     activeMs: left.activeMs + right.activeMs,
     tokenInput: left.tokenInput + right.tokenInput,
     tokenOutput: left.tokenOutput + right.tokenOutput,
+    tokenCacheRead: left.tokenCacheRead + right.tokenCacheRead,
+    tokenCacheWrite: left.tokenCacheWrite + right.tokenCacheWrite,
     tokenQuality: mergeTokenQuality(left.tokenQuality, right.tokenQuality),
   }
 }
@@ -1066,11 +1147,14 @@ function normalizeQuotaSnapshot(value: unknown): HistoryQuotaSnapshot | null {
       const windowId = safeText(window.id)
       const label = safeText(window.label)
       const remaining = Number(window.remainingPercent)
-      if (!windowId || !label || !Number.isFinite(remaining) || remaining < 0 || remaining > 100) continue
+      if (!windowId || !label || !Number.isFinite(remaining)) continue
+      // Clamp instead of dropping so one out-of-range reading cannot erase a
+      // provider's whole window list from the stored snapshot.
+      const remainingClamped = Math.min(100, Math.max(0, remaining))
       const resetsAt = typeof window.resetsAt === 'string' && Number.isFinite(Date.parse(window.resetsAt))
         ? new Date(window.resetsAt).toISOString()
         : undefined
-      windows.push({ id: windowId, label, remainingPercent: remaining, ...(resetsAt ? { resetsAt } : {}) })
+      windows.push({ id: windowId, label, remainingPercent: remainingClamped, ...(resetsAt ? { resetsAt } : {}) })
     }
     providers.push({
       id,

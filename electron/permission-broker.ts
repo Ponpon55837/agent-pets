@@ -7,12 +7,15 @@ import type {
   PermissionRequestView,
   PermissionRisk,
 } from '../src/types/permission'
+import { redactSensitiveText } from './permission-redact.ts'
 
 const DEFAULT_TTL_MS = 60_000
 const MIN_TTL_MS = 15_000
 const MAX_TTL_MS = 300_000
 const MAX_ACTION_LENGTH = 80
 const MAX_DESCRIPTION_LENGTH = 280
+const MAX_DETAIL_ITEMS = 5
+const MAX_DETAIL_LENGTH = 120
 const MAX_AUDIT_RECORDS = 500
 const DEFAULT_MAX_REQUEST_RECORDS = 5_000
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
@@ -47,7 +50,11 @@ export interface PermissionRequestInput {
   generation: number
   action: string
   description: string
+  /** Tool arguments (command, path globs). Bounded and redacted here. */
+  details?: ReadonlyArray<string>
   risk?: PermissionRisk
+  /** The tool reaches outside the machine (network / external directory). */
+  network?: boolean
   ttlMs?: number
   allowedDecisions?: ReadonlyArray<PermissionDecisionValue>
   responseHandle: unknown
@@ -107,7 +114,10 @@ interface InternalPermissionRequest {
   generation: number
   action: string
   description: string
+  details: ReadonlyArray<string>
+  truncatedChars: number
   risk: PermissionRisk
+  network: boolean
   receivedAt: number
   expiresAt: number
   status: PermissionRequestStatus
@@ -131,15 +141,19 @@ function isIdentifier(value: unknown): value is string {
   return typeof value === 'string' && IDENTIFIER_PATTERN.test(value)
 }
 
-function sanitizeText(value: unknown, maxLength: number): { value: string; truncated: boolean } {
-  if (typeof value !== 'string') return { value: '', truncated: false }
-  const normalized = value
+function sanitizeText(
+  value: unknown,
+  maxLength: number,
+): { value: string; truncated: boolean; omitted: number } {
+  if (typeof value !== 'string') return { value: '', truncated: false, omitted: 0 }
+  const normalized = redactSensitiveText(value
     .replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ')
     .replace(/\s+/g, ' ')
-    .trim()
+    .trim())
   return {
     value: normalized.slice(0, maxLength),
     truncated: normalized.length > maxLength,
+    omitted: Math.max(0, normalized.length - maxLength),
   }
 }
 
@@ -153,6 +167,12 @@ function isDecisionSource(value: unknown): value is PermissionDecisionSource {
 
 function isRisk(value: unknown): value is PermissionRisk {
   return value === 'low' || value === 'medium' || value === 'high' || value === 'unknown'
+}
+
+// Fail-closed: a risk level must be listed here to be approvable by hotkey, so
+// a level added later (or `unknown`) is excluded by default.
+function isHotkeyRisk(risk: PermissionRisk): boolean {
+  return risk === 'low' || risk === 'medium'
 }
 
 function clampTtl(value: unknown): number {
@@ -267,6 +287,22 @@ export class PermissionBroker {
     const action = sanitizeText(candidate.action, MAX_ACTION_LENGTH)
     const description = sanitizeText(candidate.description, MAX_DESCRIPTION_LENGTH)
     if (!action.value || !description.value) return { ok: false, error: 'invalid_request' }
+    const rawDetails = Array.isArray(candidate.details) ? candidate.details : []
+    const details: string[] = []
+    let truncatedChars = action.omitted + description.omitted
+    let detailsTruncated = false
+    rawDetails.forEach((item, index) => {
+      const cleaned = sanitizeText(item, MAX_DETAIL_LENGTH)
+      if (index >= MAX_DETAIL_ITEMS) {
+        detailsTruncated = true
+        truncatedChars += typeof item === 'string' ? item.length : 0
+        return
+      }
+      if (!cleaned.value) return
+      details.push(cleaned.value)
+      truncatedChars += cleaned.omitted
+      if (cleaned.truncated) detailsTruncated = true
+    })
 
     const receivedAt = this.readNow()
     if (receivedAt === null) return { ok: false, error: 'invalid_request' }
@@ -279,12 +315,15 @@ export class PermissionBroker {
       generation: candidate.generation!,
       action: action.value,
       description: description.value,
+      details: Object.freeze(details),
+      truncatedChars,
       risk: isRisk(candidate.risk) ? candidate.risk : 'unknown',
+      network: candidate.network === true,
       receivedAt,
       expiresAt: receivedAt + clampTtl(candidate.ttlMs),
       status: 'pending',
       allowedDecisions,
-      truncated: action.truncated || description.truncated,
+      truncated: action.truncated || description.truncated || detailsTruncated,
       responseHandle: candidate.responseHandle,
       adapter,
       order: this.nextOrder++,
@@ -442,7 +481,10 @@ export class PermissionBroker {
       generation: request.generation,
       action: request.action,
       description: request.description,
+      details: [...request.details],
+      truncatedChars: request.truncatedChars,
       risk: request.risk,
+      network: request.network,
       receivedAt: request.receivedAt,
       expiresAt: request.expiresAt,
       status: request.status,
@@ -450,7 +492,7 @@ export class PermissionBroker {
       queuePosition,
       queueSize,
       hotkeyEligible: request.status === 'pending'
-        && request.risk !== 'high'
+        && isHotkeyRisk(request.risk)
         && !request.truncated,
       truncated: request.truncated,
     }

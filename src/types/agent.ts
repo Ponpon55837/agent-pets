@@ -98,8 +98,8 @@ export const STATE_LABELS_SHORT: Record<AgentState, string> = {
 }
 
 export const STATE_COLORS: Record<AgentState, string> = {
-  offline: '#555',
-  idle: '#666',
+  offline: '#757575',
+  idle: '#8a8a8a',
   thinking: '#8b9cf7',
   'tool-running': '#8b9cf7',
   'waiting-permission': '#c8b450',

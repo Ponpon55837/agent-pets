@@ -285,7 +285,7 @@
   "capabilityInput": "Input",
   "expandFromEdge": "Expand pet from screen edge",
   "open": "Open",
-  "permissionWarning": "Content was shortened; check OpenCode before allowing.",
+  "permissionWarning": "Content was shortened ({count} characters omitted). Check it in {source} before allowing.",
   "sending": "Sending…",
   "permissionCountdown": "Closes automatically in about 3 seconds.",
   "fiveHourLimit": "5-hour limit",

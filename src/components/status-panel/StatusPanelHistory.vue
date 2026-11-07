@@ -222,9 +222,10 @@ onUnmounted(() => cleanupHistoryUpdated?.())
     <template v-else-if="historySummary">
       <div class="history-stat-grid">
         <Card class="history-stat-tile history-stat-token" tone="accent">
-          <span class="history-stat-label">{{ t('historyTokens') }}</span>
+          <span class="history-stat-label" :title="t('growth.tokenBasisTip')">{{ t('historyTokens') }}</span>
           <strong class="history-stat-number">{{ formatCompactNumber(historySummary.totals.tokenInput + historySummary.totals.tokenOutput) }}</strong>
           <span class="history-stat-meta">{{ historyTokenLabel(historySummary.tokenQuality) }}</span>
+          <span v-if="historySummary.totals.tokenCacheRead + historySummary.totals.tokenCacheWrite > 0" class="history-stat-meta" :title="t('growth.tokenBasisTip')">{{ t('growth.cacheNote', { value: formatCompactNumber(historySummary.totals.tokenCacheRead + historySummary.totals.tokenCacheWrite) }) }}</span>
         </Card>
         <Card class="history-stat-tile history-stat-sessions" tone="success">
           <span class="history-stat-label">{{ t('historyCompleted') }}</span>

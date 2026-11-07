@@ -37,6 +37,8 @@ import type {
 } from '../src/types/project-mcp'
 import type { ProjectPetArchiveResult, ProjectPetCommandResult, ProjectPetView } from '../src/types/project-pet'
 import type { AgentAdapterId } from '../src/types/agent-adapter'
+import type { SessionSnapshotEntry } from './main/session-snapshot'
+import type { LocalServerHealthSnapshot, LocalServerId } from '../src/types/reliability'
 
 const electronAPI: ElectronAPI = {
   onAgentStatusEvent: (callback: (event: unknown) => void) => {
@@ -185,12 +187,38 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.send(IPC_CHANNELS.panelToggle)
   },
 
-  resizePanel: (height: number, width?: number) => {
+  // Prefer the object form; the positional (height, width) form is kept for existing callers.
+  resizePanel: (size: { height: number; width?: number } | number, legacyWidth?: number) => {
+    const { height, width } = typeof size === 'number' ? { height: size, width: legacyWidth } : size
     ipcRenderer.send(IPC_CHANNELS.panelResize, { height, ...(width === undefined ? {} : { width }) })
+  },
+
+  setPanelBlurLock: (lock: { pinned?: boolean; modal?: boolean }) => {
+    ipcRenderer.send(IPC_CHANNELS.panelBlurLock, lock)
   },
 
   hidePanel: () => {
     ipcRenderer.send(IPC_CHANNELS.panelHide)
+  },
+
+  exportDiagnostics: (): Promise<{ ok: boolean; canceled?: boolean }> => ipcRenderer.invoke(IPC_CHANNELS.diagnosticsExport),
+
+  getSessionSnapshot: (): Promise<SessionSnapshotEntry[]> => ipcRenderer.invoke(IPC_CHANNELS.sessionSnapshotGet),
+
+  getServerHealth: (): Promise<LocalServerHealthSnapshot> => ipcRenderer.invoke(IPC_CHANNELS.serverHealthGet),
+
+  retryServerHealth: (id?: LocalServerId): Promise<LocalServerHealthSnapshot> => ipcRenderer.invoke(IPC_CHANNELS.serverHealthRetry, id),
+
+  onServerHealthChanged: (callback: (snapshot: LocalServerHealthSnapshot) => void) => {
+    const handler = (_event: unknown, payload: unknown) => {
+      if (payload && typeof payload === 'object' && Array.isArray((payload as { servers?: unknown }).servers)) {
+        callback(payload as LocalServerHealthSnapshot)
+      }
+    }
+    ipcRenderer.on(IPC_CHANNELS.serverHealthChanged, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.serverHealthChanged, handler)
+    }
   },
 
   onPanelOpened: (callback: (options: { restore: boolean }) => void) => {

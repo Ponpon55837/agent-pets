@@ -8,12 +8,17 @@ import {
   type PermissionAdapterPort,
   type PermissionDeliveryResult,
 } from './permission-broker.ts'
+import { classifyPermissionRisk, isNetworkPermission } from './permission-risk.ts'
 
 export const PERMISSION_ADAPTER_PORT = 17_374
 
 const MAX_BODY_BYTES = 16 * 1024
 const MAX_CREATE_REQUESTS_PER_MINUTE = 60
 const ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
+// The broker applies the final display limits (and counts what it cuts); the
+// adapter only bounds how much it accepts so memory use stays predictable.
+const MAX_PATTERNS = 20
+const MAX_PATTERN_LENGTH = 1_000
 const SOURCES = new Set(['opencode-cli', 'opencode-desktop'])
 
 interface RelayHandle {
@@ -180,7 +185,9 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
         generation: 1,
         action: payload.permission,
         description: describePermission(payload),
-        risk: classifyRisk(payload.permission),
+        ...(payload.title && payload.patterns?.length ? { details: payload.patterns } : {}),
+        risk: classifyPermissionRisk(payload.permission),
+        network: isNetworkPermission(payload.permission),
         allowedDecisions: ['allow_once', 'deny'],
         responseHandle: { relayKey } satisfies RelayHandle,
       })
@@ -281,7 +288,7 @@ function normalizeCreatePayload(value: unknown): CreatePayload | null {
   if (!permission) return null
   const title = sanitizeText(data.title, 160)
   const patterns = Array.isArray(data.patterns)
-    ? data.patterns.slice(0, 5).map((item) => sanitizeText(item, 120)).filter(Boolean)
+    ? data.patterns.slice(0, MAX_PATTERNS).map((item) => sanitizeText(item, MAX_PATTERN_LENGTH)).filter(Boolean)
     : []
   if (data.patterns !== undefined && !Array.isArray(data.patterns)) return null
 
@@ -351,14 +358,6 @@ function describePermission(payload: CreatePayload): string {
   if (payload.title) return payload.title
   if (payload.patterns?.length) return payload.patterns.join(', ')
   return `OpenCode requests ${payload.permission} permission.`
-}
-
-function classifyRisk(permission: string): 'low' | 'medium' | 'high' | 'unknown' {
-  const normalized = permission.toLowerCase()
-  if (normalized.includes('bash') || normalized.includes('edit') || normalized.includes('write')) return 'high'
-  if (normalized.includes('external') || normalized.includes('task')) return 'high'
-  if (normalized.includes('read') || normalized.includes('web')) return 'medium'
-  return 'unknown'
 }
 
 function toExternalKey(source: string, instanceId: string, permissionId: string): string {
