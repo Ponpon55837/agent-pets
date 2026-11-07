@@ -407,6 +407,9 @@ export class AchievementStore {
         `).run(LOCAL_TOKEN_TOTAL_KEY, Math.max(0, Math.min(MAX_TOKEN_COUNT, delta)), MAX_TOKEN_COUNT, delta)
       }
       // Bounded compaction: drop dedupe rows the scanner can no longer present.
+      // Safe because local records carry stable dates: an undated log line
+      // inherits the previous real timestamp in its file, never the file mtime
+      // (which moves on every append and would let a pruned row come back).
       this.statement(`
         DELETE FROM local_token_usage WHERE rowid IN (
           SELECT rowid FROM local_token_usage WHERE occurred_at < ? LIMIT ?
@@ -417,6 +420,11 @@ export class AchievementStore {
         : []
       return { changed: delta !== 0, unlocks }
     })
+  }
+
+  /** Evaluates one pet's unlocks against the current counters (used once per local-log scan). */
+  evaluateTokenAchievements(petIdValue: string, progression?: ProgressionSnapshot): AchievementUnlock[] {
+    return this.transaction(() => this.evaluateAndUnlock(safePetId(petIdValue), this.now(), false, progression))
   }
 
   getSnapshot(petIdValue: string, progression?: ProgressionSnapshot): AchievementSnapshot {

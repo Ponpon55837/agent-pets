@@ -2658,6 +2658,7 @@ export function currentHistorySummary(projectId?: string, rangeDays = 7): Histor
 const LOCAL_USAGE_MIN_SCAN_INTERVAL_MS = 10_000
 let localUsageLastScanAt = 0
 let localUsageCatchUpTimer: ReturnType<typeof setTimeout> | null = null
+let localUsageStalledScans = 0
 
 export async function refreshLocalUsage(options: { catchUp?: boolean } = {}): Promise<void> {
   if (!mainState.localUsageReader || mainState.localUsageScanPromise) return mainState.localUsageScanPromise ?? Promise.resolve()
@@ -2666,8 +2667,10 @@ export async function refreshLocalUsage(options: { catchUp?: boolean } = {}): Pr
     .then(result => {
       localUsageLastScanAt = Date.now()
       if (result.recordsImported > 0) broadcastHistoryUpdated()
+      evaluateLocalTokenAchievements()
+      localUsageStalledScans = result.bytesRead > 0 ? 0 : localUsageStalledScans + 1
       // A budget-limited scan continues shortly instead of waiting a full tick.
-      const delay = localUsageCatchUpDelayMs(result.pending, powerMonitor.isOnBatteryPower())
+      const delay = localUsageCatchUpDelayMs(result.pending, powerMonitor.isOnBatteryPower(), localUsageStalledScans)
       if (delay !== null && !localUsageCatchUpTimer && !mainState.isQuitting) {
         localUsageCatchUpTimer = setTimeout(() => {
           localUsageCatchUpTimer = null
@@ -2904,22 +2907,40 @@ export function createHistoryServices(): void {
  * runs, for the active pet, when achievements are enabled.
  */
 let achievementProgressTimer: ReturnType<typeof setTimeout> | null = null
+let localTokenLedgerChanged = false
 
 function syncLocalTokenAchievements(records: readonly HistoryTokenUsageRecord[], retentionDays: number): void {
   const store = mainState.achievementStore
   if (!store) return
-  const enabled = currentDesktopPreferences().achievementsEnabled
-  const petId = mainState.progressionStore?.getActivePetId() ?? 'aang-airbender'
   try {
+    // Ledger only: a first import arrives in hundreds of 500-record batches,
+    // so unlock evaluation runs once per scan (evaluateLocalTokenAchievements).
     const result = store.syncLocalTokenUsage(records, {
       // One day of slack past the scanner's own retention cutoff.
       compactBefore: Date.now() - (retentionDays + 1) * 24 * 60 * 60 * 1000,
-      evaluatePetId: enabled ? petId : null,
-      progression: enabled ? mainState.progressionStore?.getSnapshot(petId) : undefined,
+      evaluatePetId: null,
     })
-    result.unlocks.forEach(broadcastAchievementUnlock)
-    // A first import arrives in many 500-record batches; refresh progress bars once.
-    if (result.changed && result.unlocks.length === 0 && !achievementProgressTimer) {
+    if (result.changed) localTokenLedgerChanged = true
+  } catch (error) {
+    console.error('Achievement local token sync failed', error)
+    logAchievementDiagnostic('local-token-sync', error)
+  }
+}
+
+/** Once per completed scan: evaluate the active pet if the ledger changed, and refresh progress. */
+function evaluateLocalTokenAchievements(): void {
+  if (!localTokenLedgerChanged) return
+  localTokenLedgerChanged = false
+  const store = mainState.achievementStore
+  if (!store) return
+  try {
+    if (currentDesktopPreferences().achievementsEnabled) {
+      const petId = mainState.progressionStore?.getActivePetId() ?? 'aang-airbender'
+      const unlocks = store.evaluateTokenAchievements(petId, mainState.progressionStore?.getSnapshot(petId))
+      unlocks.forEach(broadcastAchievementUnlock)
+      if (unlocks.length > 0) return
+    }
+    if (!achievementProgressTimer) {
       achievementProgressTimer = setTimeout(() => {
         achievementProgressTimer = null
         broadcastAchievements()
@@ -2927,8 +2948,8 @@ function syncLocalTokenAchievements(records: readonly HistoryTokenUsageRecord[],
       achievementProgressTimer.unref?.()
     }
   } catch (error) {
-    console.error('Achievement local token sync failed', error)
-    logAchievementDiagnostic('local-token-sync', error)
+    console.error('Achievement local token evaluation failed', error)
+    logAchievementDiagnostic('local-token-evaluate', error)
   }
 }
 

@@ -342,3 +342,19 @@ test('compaction drops old dedupe rows but keeps the running total', () => {
     void path
   })
 })
+
+test('ledger syncs without evaluation, then one evaluation per scan unlocks', () => {
+  withStore((store) => {
+    const compactBefore = 0
+    for (let batch = 0; batch < 3; batch += 1) {
+      const result = store.syncLocalTokenUsage(
+        [{ adapterId: 'codex', sourceEventId: `b${batch}`, occurredAt: BASE_TIME, input: 400_000 }],
+        { compactBefore, evaluatePetId: null },
+      )
+      assert.deepEqual(result.unlocks, [])
+    }
+    const unlocks = store.evaluateTokenAchievements('wolf')
+    assert.equal(unlocks.find(unlock => unlock.achievementId === 'one_million')?.tokenQuality, 'exact')
+    assert.deepEqual(store.evaluateTokenAchievements('wolf'), [])
+  })
+})
