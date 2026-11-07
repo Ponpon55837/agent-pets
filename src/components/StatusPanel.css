@@ -137,6 +137,9 @@
 }
 
 .status-panel :deep(.panel-pet-avatar) {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
   position: relative;
   display: grid;
   flex: 0 0 auto;
@@ -146,6 +149,11 @@
   overflow: hidden;
   border-radius: var(--radius-pill);
   background: var(--organic-surface-warm);
+}
+
+.status-panel :deep(.panel-pet-avatar:focus-visible) {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .status-panel :deep(.panel-pet-animation) {

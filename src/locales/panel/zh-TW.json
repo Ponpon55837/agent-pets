@@ -52,5 +52,8 @@
   "panel.sizeLarge": "大",
   "panel.sizeXLarge": "特大",
   "panel.sizeXXLarge": "超大",
-  "panel.sizeHelp": "目前大小：原始素材的 {percent}%。"
+  "panel.sizeHelp": "目前大小：原始素材的 {percent}%。",
+  "panel.changePet": "更換寵物",
+  "panel.subtitleActive": "{running} 個執行中 · {attention} 個待處理",
+  "panel.progressUnavailable": "成長資料暫時無法使用"
 }

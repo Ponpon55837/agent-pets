@@ -61,8 +61,14 @@ const activePetName = computed(() => store.pets.find(pet => pet.id === store.act
 const evolutionLabels: Record<string, Parameters<typeof t>[0]> = {
   egg: 'evolutionEgg', baby: 'evolutionBaby', teen: 'evolutionTeen', adult: 'evolutionAdult', master: 'evolutionMaster',
 }
+// Give up on "loading" after a while so the header never spins forever.
+const progressionTimedOut = ref(false)
+let progressionTimeout: ReturnType<typeof setTimeout> | null = null
+const sessionCounts = computed(() => countByBucket(store.sessionList))
 const panelPetSubtitle = computed(() => {
-  if (!store.progression) return t('petProgressLoading')
+  const { running, attention } = sessionCounts.value
+  if (running + attention > 0) return t('panel.subtitleActive', { running, attention })
+  if (!store.progression) return progressionTimedOut.value ? t('panel.progressUnavailable') : t('petProgressLoading')
   return `${t('historyLevel', { level: store.progression.level })} · ${t(evolutionLabels[store.progression.evolutionStage])} · ${t('dayStreak', { days: store.progression.currentStreak })}`
 })
 
@@ -90,6 +96,11 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   else if (store.showProjectMcpPanel) store.closeProjectMcpPanel()
   else if (store.panelView === 'settings') store.backToSessions()
   else store.closePanel()
+}
+
+function openPetSettings(): void {
+  settingsGroup.value = 'pets'
+  store.openSettings()
 }
 
 function openPluginSettings(): void {
@@ -120,6 +131,7 @@ onMounted(() => {
   // Keep the settings panels code-split while warming the default tab off the
   // render path, so the first settings click does not wait for its chunk.
   void import('@/components/status-panel/SettingsPage.vue').catch(() => {})
+  progressionTimeout = setTimeout(() => { progressionTimedOut.value = true }, 8000)
   document.addEventListener('visibilitychange', syncTickTimer)
   window.addEventListener('keydown', onGlobalKeydown)
   syncTickTimer()
@@ -147,6 +159,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', syncTickTimer)
   window.removeEventListener('keydown', onGlobalKeydown)
+  if (progressionTimeout) clearTimeout(progressionTimeout)
   if (tickTimer) clearInterval(tickTimer)
   removePluginViewRequestListener?.()
   removePanelSettingsListener?.()
@@ -161,9 +174,9 @@ onUnmounted(() => {
         <Icon name="back" />
       </Button>
       <template v-if="store.panelView === 'sessions'">
-        <div class="panel-pet-avatar" aria-hidden="true">
-          <PetAnimation class="panel-pet-animation" :state="store.currentState" :pet-id="store.activePetId" :since="store.highestPrioritySession?.lastSeenAt" :mood="store.mood" />
-        </div>
+        <button type="button" class="panel-pet-avatar" :title="t('panel.changePet')" :aria-label="t('panel.changePet')" @click="openPetSettings">
+          <PetAnimation class="panel-pet-animation" aria-hidden="true" :state="store.currentState" :pet-id="store.activePetId" :since="store.highestPrioritySession?.lastSeenAt" :mood="store.mood" />
+        </button>
         <div class="panel-title-group">
           <span class="panel-title">{{ activePetName }}</span>
           <span class="panel-subtitle">{{ panelPetSubtitle }}</span>

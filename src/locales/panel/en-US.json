@@ -52,5 +52,8 @@
   "panel.sizeLarge": "Large",
   "panel.sizeXLarge": "X-Large",
   "panel.sizeXXLarge": "XX-Large",
-  "panel.sizeHelp": "Current size: {percent}% of the original sprite."
+  "panel.sizeHelp": "Current size: {percent}% of the original sprite.",
+  "panel.changePet": "Change pet",
+  "panel.subtitleActive": "{running} running · {attention} need attention",
+  "panel.progressUnavailable": "Growth data unavailable"
 }
