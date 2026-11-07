@@ -192,7 +192,7 @@ test('history counts each terminal session once across distinct completion event
   assert.equal(store.getAchievementCompletedSessions().length, 2)
 })
 
-test('daily summary covering index preserves 1,000 seeded query results', (t) => {
+test('daily summary pet/date index preserves 1,000 seeded query results', (t) => {
   const now = Date.UTC(2026, 9, 26, 12)
   const database = databasePath()
   const store = new HistoryStore(database.filePath, {
@@ -250,19 +250,15 @@ test('daily summary covering index preserves 1,000 seeded query results', (t) =>
     })
   }
 
-  store.database.exec('DROP INDEX idx_daily_stats_summary_cover')
+  store.database.exec('DROP INDEX idx_daily_stats_pet_date')
   const withoutIndex = runCases()
   store.database.exec(`
-    CREATE INDEX idx_daily_stats_summary_cover
-      ON daily_stats(
-        pet_id, local_date, project_id, adapter_id,
-        sessions_completed, sessions_failed, active_ms, token_input, token_output, token_quality
-      )
+    CREATE INDEX idx_daily_stats_pet_date ON daily_stats(pet_id, local_date)
   `)
   const withIndex = runCases()
   assert.deepEqual(withIndex, withoutIndex)
   const plan = store.database.prepare(`EXPLAIN QUERY PLAN ${querySql}`).all('aang-airbender', 'local-usage', ...dates)
-  assert.ok(plan.some(row => String(row.detail).includes('idx_daily_stats_summary_cover')))
+  assert.ok(plan.some(row => String(row.detail).includes('idx_daily_stats_pet_date')))
 })
 
 test('history v4 migration repairs inflated completion aggregates from unique sessions', (t) => {
@@ -391,7 +387,7 @@ test('summary supports 30 and 90 day ranges with a previous-period comparison', 
   const plan = (store as unknown as { database: { prepare(sql: string): { all(...p: unknown[]): Array<{ detail: string }> } } })
     .database.prepare('EXPLAIN QUERY PLAN SELECT local_date FROM daily_stats WHERE pet_id IN (?, ?) AND local_date BETWEEN ? AND ?')
     .all('a', 'b', '2026-01-01', '2026-02-01').map(row => row.detail).join(' ')
-  assert.match(plan, /idx_daily_stats_summary_cover|sqlite_autoindex_daily_stats/)
+  assert.match(plan, /idx_daily_stats_pet_date|sqlite_autoindex_daily_stats/)
 })
 
 test('unchanged quota readings are not rewritten, changed ones are, and old snapshots expire', (t) => {
@@ -426,4 +422,61 @@ test('achievement completed-session facts can be read incrementally', (t) => {
   store.setAchievementReconciledAt(now - day)
   assert.equal(store.getAchievementReconciledAt(), now - day)
   assert.deepEqual(store.getAchievementCompletedSessions(store.getAchievementReconciledAt()).map(f => f.sessionId), ['new'])
+})
+
+test('history database runs WAL with synchronous=NORMAL and partial success indexes (v7)', (t) => {
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath)
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  assert.deepEqual(store.getPragmaState(), { journalMode: 'wal', synchronous: 1 })
+  const raw = store.database as unknown as { prepare(sql: string): { all(...p: unknown[]): Array<Record<string, unknown>> } }
+  const indexes = raw.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('events', 'daily_stats')").all()
+  const names = indexes.map(row => String(row.name))
+  assert.ok(names.includes('idx_history_events_success_identity'))
+  assert.ok(!names.includes('idx_history_events_completion_identity'))
+  assert.ok(!names.includes('idx_daily_stats_summary_cover'))
+  const success = indexes.find(row => row.name === 'idx_history_events_success_identity')
+  assert.match(String(success?.sql), /WHERE state = 'success'/)
+  const plan = raw.prepare(`EXPLAIN QUERY PLAN SELECT event_id FROM events
+    WHERE agent_id = ? AND session_id = ? AND project_id = ? AND pet_id = ? AND state = 'success' LIMIT 1`)
+    .all('a', 'b', '', 'p').map(row => row.detail).join(' ')
+  assert.match(plan, /idx_history_events_success_identity/)
+})
+
+test('single-statement daily upsert accumulates, floors at zero and merges quality', (t) => {
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath)
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  const priv = store as unknown as { updateDailyStat(...a: unknown[]): void, database: { prepare(sql: string): { get(...p: unknown[]): Record<string, unknown> } } }
+  priv.updateDailyStat('2026-01-01', 'p', '', 'codex', 'success', 1000, 10, 5, 'estimated', 2, 3)
+  priv.updateDailyStat('2026-01-01', 'p', '', 'codex', 'error', 500, 1, 1, 'exact', 0, 0)
+  priv.updateDailyStat('2026-01-01', 'p', '', 'codex', null, 0, -100, -1, 'none', -1, -50)
+  const row = priv.database.prepare('SELECT * FROM daily_stats WHERE pet_id = ?').get('p')
+  assert.equal(row.sessions_completed, 1)
+  assert.equal(row.sessions_failed, 1)
+  assert.equal(row.active_ms, 1500)
+  assert.equal(row.token_input, 0)
+  assert.equal(row.token_output, 5)
+  assert.equal(row.token_cache_read, 1)
+  assert.equal(row.token_cache_write, 0)
+  assert.equal(row.token_quality, 'exact')
+})
+
+test('queueEvent micro-batches into one commit and isolates a failing event', (t) => {
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => 2_000_000 })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  let recorded = 0
+  const base = { source: 'codex', sessionId: 's1', project: 'p', projectId: 'a'.repeat(32) } as const
+  const onRecorded = () => { recorded += 1 }
+  for (let i = 0; i < 50; i += 1) {
+    store.queueEvent({ ...base, state: 'tool-running', timestamp: 1_000_000 + i * 1000 } as never, 'aang-airbender', onRecorded)
+  }
+  store.queueEvent({ ...base, state: 'success', timestamp: 1_100_000, sessionId: '' } as never, 'aang-airbender')
+  store.queueEvent({ ...base, state: 'success', timestamp: 1_100_000 } as never, 'aang-airbender', onRecorded)
+  assert.equal(store.flushQueued(), 51)
+  assert.equal(recorded, 1)
+  const summary = store.getSummary('aang-airbender', undefined, 7)
+  assert.equal(summary.totals.sessionsCompleted, 1)
+  assert.ok(summary.totals.activeMs > 0)
 })

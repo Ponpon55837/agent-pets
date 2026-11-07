@@ -15,6 +15,7 @@ import {
   type AchievementUnlock,
 } from '../src/types/achievement.ts'
 import { localDateKey, localHour as localHourOf } from '../src/utils/local-date.ts'
+import { applyWalPragmas, type SqlitePragmaState } from './sqlite-pragmas.ts'
 import { StatementCache } from './sqlite-statements.ts'
 
 type SqliteRow = Record<string, unknown>
@@ -156,6 +157,7 @@ function rowQuality(row: SqliteRow | undefined): AchievementTokenQuality {
 export class AchievementStore {
   private readonly database: SqliteDatabase
   private readonly statements: StatementCache<SqliteStatement>
+  private pragmas: SqlitePragmaState = { journalMode: '', synchronous: -1 }
   private readonly now: () => number
   private readonly localDate: (timestamp: number) => string
   private readonly localHour: (timestamp: number) => number
@@ -440,10 +442,8 @@ export class AchievementStore {
   }
 
   private migrate(): void {
+    this.pragmas = applyWalPragmas(this.database)
     this.database.exec(`
-      PRAGMA foreign_keys = ON;
-      PRAGMA busy_timeout = 5000;
-      PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS schema_migrations(
         version INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
@@ -503,6 +503,10 @@ export class AchievementStore {
         VALUES (1, 'achievements-v1', ?, 'achievements-v1')
       `).run(this.now())
     })
+  }
+
+  getPragmaState(): SqlitePragmaState {
+    return this.pragmas
   }
 
   private statement(sql: string): SqliteStatement {

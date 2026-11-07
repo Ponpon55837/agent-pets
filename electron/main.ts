@@ -409,9 +409,8 @@ async function bootstrapApp(): Promise<void> {
       }
       try {
         const routedPetId = event.routedPetId ?? mainState.progressionStore?.getActivePetId() ?? 'aang-airbender'
-        if (mainState.historyStore?.recordEvent(event, routedPetId)) {
-          broadcastHistoryUpdated()
-        }
+        // Same-turn events share one SQLite commit; the broadcast is coalesced too.
+        mainState.historyStore?.queueEvent(event, routedPetId, broadcastHistoryUpdated)
       } catch (error) {
         console.error('History event handling failed', error)
       }

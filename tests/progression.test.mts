@@ -207,3 +207,38 @@ test('integration test events from the Setup Wizard never award XP', () => {
     assert.equal(store.getSnapshot('default').totalXp, before.totalXp)
   })
 })
+
+test('progression DB uses WAL + synchronous=NORMAL and ensurePet writes each pet only once', () => {
+  withStore((store) => {
+    assert.deepEqual(store.getPragmaState(), { journalMode: 'wal', synchronous: 1 })
+    const db = (store as unknown as { database: { prepare(sql: string): { get(): Record<string, number> } } }).database
+    const changes = () => Number(db.prepare('SELECT total_changes() AS n').get().n)
+    store.getSnapshot('wolf')
+    const afterFirst = changes()
+    for (let i = 0; i < 20; i += 1) store.getSnapshot('wolf')
+    assert.equal(changes(), afterFirst, 'cached ensurePet must not write again')
+  })
+})
+
+test('heartbeat snapshot reuse is identical to a fresh read and XP stays idempotent', () => {
+  withStore((store) => {
+    const start = 1_700_000_000_000
+    store.handleEvent(event('thinking', start, 'hb'))
+    const beat = store.handleEvent(event('tool-running', start + 60_000, 'hb'))
+    assert.deepEqual(beat.awards, [])
+    assert.deepEqual(beat.snapshot, store.getSnapshot())
+    // Crossing the 30-minute interval awards exactly once, however often it is replayed.
+    let total = 0
+    for (let minute = 2; minute <= 40; minute += 1) {
+      const result = store.handleEvent(event('tool-running', start + minute * 60_000, 'hb'))
+      total += result.awards.reduce((sum, award) => sum + award.amount, 0)
+      assert.deepEqual(result.snapshot, store.getSnapshot())
+    }
+    const replay = store.handleEvent(event('tool-running', start + 40 * 60_000, 'hb'))
+    assert.deepEqual(replay.awards, [])
+    assert.ok(total > 0)
+    const done = store.handleEvent(event('success', start + 41 * 60_000, 'hb'))
+    assert.deepEqual(done.snapshot, store.getSnapshot())
+    assert.deepEqual(store.handleEvent(event('success', start + 41 * 60_000, 'hb')).awards, [])
+  })
+})
