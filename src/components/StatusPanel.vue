@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { t } from '@/i18n'
+import { useProgressionLabels } from '@/composables/useProgressionLabels'
 import type { PluginEventSourceStatusView } from '@/types/plugin'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
@@ -58,9 +59,7 @@ const dashboardTabs = computed(() => [
 ])
 const attentionCount = computed(() => countByBucket(store.sessionList).attention)
 const activePetName = computed(() => store.pets.find(pet => pet.id === store.activePetId)?.displayName ?? t('appName'))
-const evolutionLabels: Record<string, Parameters<typeof t>[0]> = {
-  egg: 'evolutionEgg', baby: 'evolutionBaby', teen: 'evolutionTeen', adult: 'evolutionAdult', master: 'evolutionMaster',
-}
+const { evolutionLabel } = useProgressionLabels()
 // Give up on "loading" after a while so the header never spins forever.
 const progressionTimedOut = ref(false)
 let progressionTimeout: ReturnType<typeof setTimeout> | null = null
@@ -69,7 +68,7 @@ const panelPetSubtitle = computed(() => {
   const { running, attention } = sessionCounts.value
   if (running + attention > 0) return t('panel.subtitleActive', { running, attention })
   if (!store.progression) return progressionTimedOut.value ? t('panel.progressUnavailable') : t('petProgressLoading')
-  return `${t('historyLevel', { level: store.progression.level })} · ${t(evolutionLabels[store.progression.evolutionStage])} · ${t('dayStreak', { days: store.progression.currentStreak })}`
+  return `${t('historyLevel', { level: store.progression.level })} · ${evolutionLabel(store.progression.evolutionStage)} · ${t('dayStreak', { days: store.progression.currentStreak })}`
 })
 
 // The shared clock only needs to be precise while the permission card shows
