@@ -806,11 +806,38 @@
 }
 
 .line-dot {
-  width: 5px;
-  height: 5px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
   box-shadow: 0 0 4px currentColor;
+}
+
+/* State is also carried by shape, not colour alone. */
+.line-dot.dot-error {
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.9);
+}
+
+.line-dot.dot-waiting-permission,
+.line-dot.dot-waiting-input {
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.line-dot.dot-success {
+  border-radius: 2px;
+}
+
+.line-dot.dot-offline,
+.line-dot.dot-idle {
+  box-shadow: none;
+}
+
+.pet-click-area:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-lg);
 }
 
 .line-text {

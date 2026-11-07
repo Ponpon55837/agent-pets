@@ -241,8 +241,46 @@ const displayLines = computed(() => {
 // toggle on — showing a single pet forces picking a "winner", so instead
 // show one small pet per family, side by side.
 const isMultiPet = computed(() => store.isMultiPet)
-const petAnimationFrozen = computed(() => shimejiReducedMotion.value)
-const petLowFps = computed(() => store.petWindowMode.mode === 'mini')
+// Reduced motion degrades the pet instead of freezing it: states that carry
+// information (working, waiting, failed) keep stepping at a very low rate, and
+// only a resting pet is held still.
+const petAnimationFrozen = computed(() => (
+  shimejiReducedMotion.value && (store.currentState === 'idle' || store.currentState === 'offline')
+))
+const petLowFps = computed(() => store.petWindowMode.mode === 'mini' || shimejiReducedMotion.value)
+
+const STATE_LABEL_KEYS: Record<string, TranslationKey> = {
+  offline: 'pet.stateOffline',
+  idle: 'pet.stateIdle',
+  thinking: 'pet.stateThinking',
+  'tool-running': 'pet.stateWorking',
+  'waiting-permission': 'pet.statePermission',
+  'waiting-input': 'pet.stateWaitingInput',
+  success: 'pet.stateSuccess',
+  error: 'pet.stateError',
+}
+
+function stateAriaLabel(state: string): string {
+  return t(STATE_LABEL_KEYS[state] ?? 'pet.stateIdle')
+}
+
+const petAriaLabel = computed(() => t('pet.ariaLabel', { state: stateAriaLabel(store.currentState) }))
+// Spoken when the visible state changes, not on every session update.
+const stateAnnouncement = ref('')
+watch(() => store.currentState, (state, previous) => {
+  if (state === previous) return
+  stateAnnouncement.value = stateAriaLabel(state)
+})
+
+function onPetKeydown(e: KeyboardEvent): void {
+  if (e.target !== e.currentTarget) return
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    store.markPetInteraction()
+    store.clearUnreadResults()
+    store.togglePanel()
+  }
+}
 
 // Mini mode shrinks the sprite to fit the fixed small window, whatever the pet size.
 const MINI_FIT_PX = 88
@@ -707,6 +745,10 @@ watch(() => store.achievementUnlock, (unlock) => {
       ref="clickAreaRef"
       class="pet-click-area"
       :class="{ dragging: dragLift }"
+      :role="store.petWindowMode.mode === 'edge' ? undefined : 'button'"
+      :tabindex="store.petWindowMode.mode === 'edge' ? undefined : 0"
+      :aria-label="store.petWindowMode.mode === 'edge' ? undefined : petAriaLabel"
+      @keydown="onPetKeydown"
       @mousedown="onMouseDown"
       @mouseenter="onPetPointerEnter"
       @mouseleave="pointerOverPet = false"
@@ -904,6 +946,8 @@ watch(() => store.achievementUnlock, (unlock) => {
         </div>
       </Transition>
 
+      <span class="sr-only" role="status" aria-live="polite">{{ stateAnnouncement }}</span>
+
       <span
         v-if="store.petWindowMode.mode === 'mini'"
         class="mini-status"
@@ -960,7 +1004,7 @@ watch(() => store.achievementUnlock, (unlock) => {
               :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
               data-pet-hit-target="solid"
             >
-              <span class="line-dot" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
+              <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
               <span class="line-text">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
                 <span class="line-sep">·</span>{{ STATE_LABELS_SHORT[line.state] }}
@@ -1038,7 +1082,7 @@ watch(() => store.achievementUnlock, (unlock) => {
             :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
             data-pet-hit-target="solid"
           >
-            <span class="line-dot" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
+            <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
             <span class="line-text">
               <template v-if="line.label">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>

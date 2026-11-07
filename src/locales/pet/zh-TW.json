@@ -27,5 +27,14 @@
   "pet.miniWaiting": "等你回覆",
   "pet.miniSuccess": "完成",
   "pet.miniWorking": "工作中",
-  "pet.miniIdle": "待命"
+  "pet.miniIdle": "待命",
+  "pet.ariaLabel": "桌面寵物，目前{state}，按 Enter 開啟面板",
+  "pet.stateOffline": "離線",
+  "pet.stateIdle": "待命",
+  "pet.stateThinking": "思考中",
+  "pet.stateWorking": "工作中",
+  "pet.statePermission": "等待權限",
+  "pet.stateWaitingInput": "等你回覆",
+  "pet.stateSuccess": "已完成",
+  "pet.stateError": "失敗"
 }

@@ -263,7 +263,8 @@ function frameDelay(): number {
     // After the fall plays out the pet idles slowly instead of freezing.
     sulking: props.state === 'error' && activeMotion.name === 'idle',
   })
-  const lowFpsFactor = props.lowFps ? 3 : 1
+  // Reduced motion steps even slower than the mini window does.
+  const lowFpsFactor = props.lowFps ? (prefersReducedMotion() ? 6 : 3) : 1
   return Math.max(80, Math.round(activeMotion.frameDurations[currentFrame] * multiplier * lowFpsFactor))
 }
 

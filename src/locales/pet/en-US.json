@@ -27,5 +27,14 @@
   "pet.miniWaiting": "Waiting for you",
   "pet.miniSuccess": "Done",
   "pet.miniWorking": "Working",
-  "pet.miniIdle": "Idle"
+  "pet.miniIdle": "Idle",
+  "pet.ariaLabel": "Desktop pet, currently {state}. Press Enter to open the panel",
+  "pet.stateOffline": "offline",
+  "pet.stateIdle": "idle",
+  "pet.stateThinking": "thinking",
+  "pet.stateWorking": "working",
+  "pet.statePermission": "waiting for permission",
+  "pet.stateWaitingInput": "waiting for you",
+  "pet.stateSuccess": "done",
+  "pet.stateError": "failed"
 }
