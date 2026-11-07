@@ -50,5 +50,15 @@
   "growth.nextEvolution": "下一個稱號：Lv {level} · {stage}（還差 {levels} 級）",
   "growth.finalStage": "已達最高稱號",
   "growth.badgeNew": "新",
-  "growth.unlockedOn": "{date} 解鎖"
+  "growth.unlockedOn": "{date} 解鎖",
+  "growth.toNextRemaining": "還需 {remaining} XP 升級（{into} / {need}）",
+  "growth.almostLevelUp": "即將升級！",
+  "growth.todayTitle": "今日",
+  "growth.todayXp": "今日 +{xp} XP",
+  "growth.firstDone": "已領每日首次完成獎勵",
+  "growth.firstPending": "完成一次任務可領每日首次獎勵 +{xp}",
+  "growth.streakRisk": "今天還沒完成任務，完成一次即可延續 {days} 天連續紀錄",
+  "growth.longestStreak": "最長連續 {days} 天",
+  "growth.etaDays": "依近 7 天速度，約 {days} 天後達成",
+  "growth.firstRunCta": "完成第一次任務即可獲得 +{xp} XP（含每日首次獎勵）"
 }

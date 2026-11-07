@@ -6,6 +6,8 @@ import { useAgentStore } from '@/stores/agentStore'
 import { nextEvolution, type ProgressionInsights } from '@/types/progression'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
+import { XP_RULES } from '@/types/progression'
+import { displayPercent, etaDaysToLevel, isAlmostLevelUp, streakAtRisk, xpRemaining } from '@/utils/growth-math'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
 
@@ -13,13 +15,27 @@ const store = useAgentStore()
 const { evolutionLabel, moodStage, ruleLabel, xpSources } = useProgressionLabels()
 const progression = computed(() => store.progression)
 const insights = ref<ProgressionInsights | null>(null)
-
-const progressionPercent = computed(() => {
-  if (!progression.value) return 0
-  return Math.min(100, Math.round((progression.value.xpIntoLevel / progression.value.xpToNext) * 100))
-})
-
 const nextStage = computed(() => (progression.value ? nextEvolution(progression.value.level) : null))
+
+const progressionPercent = computed(() => (
+  progression.value ? displayPercent(progression.value.xpIntoLevel, progression.value.xpToNext) : 0
+))
+const remainingXp = computed(() => (
+  progression.value ? xpRemaining(progression.value.xpIntoLevel, progression.value.xpToNext) : 0
+))
+const almostThere = computed(() => (
+  progression.value ? isAlmostLevelUp(progression.value.xpIntoLevel, progression.value.xpToNext) : false
+))
+const atRisk = computed(() => (
+  progression.value && insights.value
+    ? streakAtRisk(progression.value.lastActiveLocalDate, insights.value.localDate, progression.value.currentStreak)
+    : false
+))
+const isFirstRun = computed(() => (progression.value?.totalXp ?? 0) === 0)
+const evolutionEta = computed(() => {
+  if (!progression.value || !nextStage.value) return null
+  return etaDaysToLevel(progression.value.totalXp, nextStage.value.level, insights.value?.averageDailyXp ?? null)
+})
 
 async function loadInsights(): Promise<void> {
   try {
@@ -62,10 +78,21 @@ onMounted(() => { void loadInsights() })
         <span v-else>{{ t('growth.finalStage') }}</span>
       </div>
       <div class="stat-row muted">
-        <span>{{ t('toNextLevel', { value: `${progression.xpIntoLevel} / ${progression.xpToNext}` }) }}</span>
+        <span>{{ almostThere ? t('growth.almostLevelUp') : t('growth.toNextRemaining', { remaining: remainingXp, into: progression.xpIntoLevel, need: progression.xpToNext }) }}</span>
         <span v-if="progression.currentStreak > 0">{{ t('dayStreak', { days: progression.currentStreak }) }}</span>
         <span v-else>{{ t('startStreak') }}</span>
       </div>
+      <div v-if="evolutionEta !== null" class="stat-row muted"><span>{{ t('growth.etaDays', { days: evolutionEta }) }}</span></div>
+      <div v-if="progression.longestStreak > 1" class="stat-row muted"><span>{{ t('growth.longestStreak', { days: progression.longestStreak }) }}</span></div>
+    </Card>
+
+    <Card :title="t('growth.todayTitle')">
+      <p v-if="isFirstRun" class="growth-hint">{{ t('growth.firstRunCta', { xp: XP_RULES.sessionCompleted + XP_RULES.firstCompletionOfDay }) }}</p>
+      <template v-else-if="insights">
+        <div class="stat-row"><span class="stat-readout">{{ t('growth.todayXp', { xp: insights.todayXp }) }}</span></div>
+        <p class="growth-hint">{{ insights.firstCompletionClaimed ? t('growth.firstDone') : t('growth.firstPending', { xp: XP_RULES.firstCompletionOfDay }) }}</p>
+        <p v-if="atRisk" class="growth-risk" role="status">{{ t('growth.streakRisk', { days: progression.currentStreak }) }}</p>
+      </template>
     </Card>
 
     <Card :title="t('growth.recentTitle')">
@@ -128,6 +155,12 @@ onMounted(() => { void loadInsights() })
 .growth-hint {
   margin: 0;
   color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+
+.growth-risk {
+  margin: var(--space-2) 0 0;
+  color: var(--state-warn-bright);
   font-size: var(--font-sm);
 }
 

@@ -50,5 +50,15 @@
   "growth.nextEvolution": "Next title: Lv {level} · {stage} ({levels} levels to go)",
   "growth.finalStage": "Top title reached",
   "growth.badgeNew": "New",
-  "growth.unlockedOn": "Unlocked {date}"
+  "growth.unlockedOn": "Unlocked {date}",
+  "growth.toNextRemaining": "{remaining} XP to level up ({into} / {need})",
+  "growth.almostLevelUp": "Almost there!",
+  "growth.todayTitle": "Today",
+  "growth.todayXp": "Today +{xp} XP",
+  "growth.firstDone": "Daily first-completion bonus claimed",
+  "growth.firstPending": "Finish a task to claim the daily bonus +{xp}",
+  "growth.streakRisk": "No task finished today yet; complete one to keep your {days}-day streak",
+  "growth.longestStreak": "Longest streak {days} days",
+  "growth.etaDays": "About {days} days away at your 7-day pace",
+  "growth.firstRunCta": "Finish your first task to earn +{xp} XP (daily bonus included)"
 }
