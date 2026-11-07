@@ -1,1 +1,10 @@
-{}
+{
+  "onboarding.removeTitle": "Remove the {name} integration?",
+  "onboarding.removeBody": "Only the hook entries Agent Pets wrote are removed. Your own settings and other hooks stay, and the shared hook script is kept while another tool still uses it.",
+  "onboarding.removeFailed": "Removal failed",
+  "onboarding.removeDone": "Agent Pets integration removed. Your other settings were left as they were.",
+  "onboarding.cleanupAll": "Full cleanup…",
+  "onboarding.cleanupTitle": "Remove every Agent Pets integration?",
+  "onboarding.cleanupBody": "This removes all agent hooks and plugins, the shared hook script, connection tokens and the files in ~/.desktop-pet. Your own settings and other hooks stay. The pet will stay offline until you reinstall.",
+  "onboarding.cleanupDone": "Cleanup finished. Run this before uninstalling the app."
+}

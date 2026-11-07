@@ -36,8 +36,10 @@ import type {
 import { PRESENTATION_REACTIONS } from '@/types/presentation'
 import { formatProject } from '@/utils/format'
 import { AgentSessionIndex } from '@/utils/agent-session-index'
+import { SESSION_REMOVE_MS, sessionLifecycleAction } from '@/utils/session-lifecycle'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
+import { PANEL_SIZES } from '@/utils/panel-layout'
 import {
   createToastCountdown,
   getToastRemainingMs,
@@ -54,7 +56,6 @@ export interface PetEntry {
 }
 
 const SUCCESS_DISPLAY_MS = 4_000
-const SESSION_STALE_MS = 15 * 60_000
 const MAX_SESSION_COUNT = 200
 const ACHIEVEMENT_DEFINITION_BY_ID = new Map(ACHIEVEMENT_DEFINITIONS.map(entry => [entry.id, entry]))
 // Kept at/below the main process' quota cache TTL so a poll that arrives on
@@ -122,15 +123,18 @@ function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
       if (typeof window.id !== 'string' || typeof window.label !== 'string') continue
       if (typeof window.usedPercent !== 'number' || !Number.isFinite(window.usedPercent)) continue
       if (typeof window.remainingPercent !== 'number' || !Number.isFinite(window.remainingPercent)) continue
-      if (window.usedPercent < 0 || window.usedPercent > 100 || window.remainingPercent < 0 || window.remainingPercent > 100) continue
+      // Clamp rather than drop: an over-quota reading must show as exhausted.
+      const usedPercent = Math.min(100, Math.max(0, window.usedPercent))
+      const remainingPercent = Math.min(100, Math.max(0, window.remainingPercent))
       const resetsAt = typeof window.resetsAt === 'string' && Number.isFinite(Date.parse(window.resetsAt))
         ? new Date(window.resetsAt).toISOString()
         : undefined
       windows.push({
         id: window.id.slice(0, MAX_QUOTA_TEXT_LENGTH),
         label: window.label.slice(0, MAX_QUOTA_TEXT_LENGTH),
-        usedPercent: window.usedPercent,
-        remainingPercent: window.remainingPercent,
+        usedPercent,
+        remainingPercent,
+        ...(window.overage === true || window.usedPercent > 100 ? { overage: true } : {}),
         ...(resetsAt ? { resetsAt } : {}),
       })
     }
@@ -1132,8 +1136,14 @@ export const useAgentStore = defineStore('agent', () => {
 
   function cleanupStale() {
     const now = Date.now()
-    for (const session of sessionIndex.values()) {
-      if (now - session.lastSeenAt > SESSION_STALE_MS && session.state !== 'offline') {
+    const hasPendingPermission = permissionRequests.value.length > 0
+    for (const session of [...sessionIndex.values()]) {
+      const action = sessionLifecycleAction(session, now, { hasPendingPermission })
+      if (action === 'remove') {
+        // Offline long enough that nobody is looking for it any more.
+        sessionIndex.delete(session.key)
+        moodTaskProgress.delete(session.key)
+      } else if (action === 'offline') {
         // No update in a long time means the process died without sending a
         // terminal event (Stop/SessionEnd) — treat it as gone rather than
         // letting a stuck thinking/tool-running state mask real sessions.
@@ -1142,6 +1152,38 @@ export const useAgentStore = defineStore('agent', () => {
         moodTaskProgress.delete(session.key)
       }
     }
+  }
+
+  // After a renderer reload/crash the in-memory list is empty although agents
+  // may still be running. Main keeps a light mirror; merge it in without
+  // replaying events (no toasts, mood or sound) and never over live data.
+  function restoreSessionSnapshot(entries: unknown): number {
+    if (!Array.isArray(entries)) return 0
+    const now = Date.now()
+    let restored = 0
+    for (const raw of entries.slice(0, MAX_SESSION_COUNT)) {
+      if (!raw || typeof raw !== 'object') continue
+      const entry = raw as Partial<AgentSession>
+      if (typeof entry.source !== 'string' || typeof entry.sessionId !== 'string') continue
+      if (typeof entry.state !== 'string' || !(entry.state in STATE_PRIORITY)) continue
+      if (typeof entry.lastSeenAt !== 'number' || !Number.isFinite(entry.lastSeenAt)) continue
+      if (now - entry.lastSeenAt > SESSION_REMOVE_MS) continue
+      const key = getSessionKey(entry.source as AgentSource, entry.sessionId)
+      if (sessionIndex.get(key)) continue
+      sessionIndex.upsert({
+        key,
+        source: entry.source as AgentSource,
+        sessionId: entry.sessionId,
+        project: typeof entry.project === 'string' ? entry.project : undefined,
+        projectId: typeof entry.projectId === 'string' ? entry.projectId : undefined,
+        routedPetId: typeof entry.routedPetId === 'string' ? entry.routedPetId : undefined,
+        state: entry.state,
+        lastSeenAt: entry.lastSeenAt,
+        toolName: typeof entry.toolName === 'string' ? entry.toolName : undefined,
+      }, MAX_SESSION_COUNT)
+      restored += 1
+    }
+    return restored
   }
 
   function handleSuccessTimeout() {
@@ -1546,6 +1588,23 @@ export const useAgentStore = defineStore('agent', () => {
     window.electronAPI?.togglePanel()
   }
 
+  // Pinning and in-progress modal flows (wizard, MCP setup, confirmations)
+  // suspend the main process's hide-on-blur so the panel stays for reference.
+  const panelPinned = ref(false)
+  const panelModalLocks = reactive(new Set<string>())
+  const panelModalOpen = computed(() => showWizard.value || showProjectMcpPanel.value || panelModalLocks.size > 0)
+  watch(panelModalOpen, open => window.electronAPI?.setPanelBlurLock?.({ modal: open }))
+
+  function setPanelPinned(pinned: boolean) {
+    panelPinned.value = pinned
+    window.electronAPI?.setPanelBlurLock?.({ pinned })
+  }
+
+  function setPanelModalLock(key: string, open: boolean) {
+    if (open) panelModalLocks.add(key)
+    else panelModalLocks.delete(key)
+  }
+
   function closePanel() {
     showWizard.value = false
     showProjectMcpPanel.value = false
@@ -1555,37 +1614,37 @@ export const useAgentStore = defineStore('agent', () => {
   function openSettings() {
     panelView.value = 'settings'
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(720, 460)
+    window.electronAPI?.resizePanel(PANEL_SIZES.settings)
   }
 
   function openSetupWizard() {
     showWizard.value = true
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(520, 680)
+    window.electronAPI?.resizePanel(PANEL_SIZES.wizard)
   }
 
   function closeSetupWizard() {
     showWizard.value = false
-    window.electronAPI?.resizePanel(panelView.value === 'settings' ? 720 : 560, 460)
+    window.electronAPI?.resizePanel(panelView.value === 'settings' ? PANEL_SIZES.settings : PANEL_SIZES.sessions)
   }
 
   function openProjectMcpPanel() {
     panelView.value = 'settings'
     showWizard.value = false
     showProjectMcpPanel.value = true
-    window.electronAPI?.resizePanel(560, 720)
+    window.electronAPI?.resizePanel(PANEL_SIZES.mcp)
   }
 
   function closeProjectMcpPanel() {
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(720, 460)
+    window.electronAPI?.resizePanel(PANEL_SIZES.settings)
   }
 
   function backToSessions() {
     panelView.value = 'sessions'
     showWizard.value = false
     showProjectMcpPanel.value = false
-    window.electronAPI?.resizePanel(560, 460)
+    window.electronAPI?.resizePanel(PANEL_SIZES.sessions)
   }
 
   // Called by electron/main.ts whenever the panel window transitions from
@@ -1845,6 +1904,7 @@ export const useAgentStore = defineStore('agent', () => {
     decidePermission,
     handleEvent,
     cleanupStale,
+    restoreSessionSnapshot,
     handleSuccessTimeout,
     removeSession,
     clearOfflineSessions,
@@ -1857,6 +1917,9 @@ export const useAgentStore = defineStore('agent', () => {
     closeProjectMcpPanel,
     backToSessions,
     handlePanelOpened,
+    panelPinned,
+    setPanelPinned,
+    setPanelModalLock,
     setPet,
     setScale,
     setPetWindowModeState,

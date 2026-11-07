@@ -52,6 +52,12 @@
 3. 點某個工具旁的 **Install**（或 **Install All**）來安裝對應的 hooks——精靈本身不會自動安裝，需要你手動點擊。
 4. Hooks 安裝完後，重新啟動你的編程工具；寵物的外觀就會開始反映你的助手狀態。
 
+### 解除安裝／移除整合
+
+打開 **Setup Wizard**（設定 → 進階），在工具卡片上按 **移除**，只會移除該工具的 Agent Pets hooks。Agent Pets 會保守地修改使用者設定檔：無法解析的檔案絕不覆寫、每次修改前先寫入帶時間戳的 `*.agent-pets-bak-*` 備份（保留最近 5 份），且只移除自己寫入的項目，你的其他 hooks 與設定都會保留。只要還有其他工具在用共用的 hook script，就不會刪它。要刪除 App 之前，請在同一個精靈按 **完整清理…**，一次移除所有 hooks、連線 token 與 `~/.desktop-pet` 內的檔案。
+
+手動移除：從 `~/.claude/settings.json` 與 `~/.codex/hooks.json` 刪除 Agent Pets 的項目（command 含 `.desktop-pet/agent-hook`）、刪除 `~/.config/opencode/plugin/desktop-pet.js`（以及 OpenCode Desktop 的對應檔）、若 `hooks = true` 不是你自己開的就從 `~/.codex/config.toml` 的 `[features]` 移除，最後刪除 `~/.desktop-pet` 資料夾（Windows 為 `%USERPROFILE%\.desktop-pet`）。
+
 ---
 
 ## 使用方式

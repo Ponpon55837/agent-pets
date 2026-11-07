@@ -1,5 +1,5 @@
 
-import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol, powerMonitor } from 'electron'
+import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol, powerMonitor, Notification } from 'electron'
 
 import { join } from 'path'
 
@@ -88,6 +88,7 @@ import { isIntegrationTarget, registerIntegrationIpc } from './ipc/integrations'
 import { registerWindowControlsIpc } from './ipc/window-controls'
 import { registerQuotaIpc } from './ipc/quota'
 import { registerPetsIpc } from './ipc/pets'
+import { registerReliabilityIpc } from './ipc/reliability'
 
 import { registerPetMotionIpc } from './ipc/pet-motion'
 
@@ -95,8 +96,11 @@ import { registerPetMotionIpc } from './ipc/pet-motion'
 
 
 import { mainState } from './main/state'
+import { flushMainLog, logMain, teeConsoleToLog } from './diagnostics/main-log'
+import { acquireRunMarker } from './diagnostics/session-marker'
+import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
 import { setPluginPanelWindowBounds } from './main/runtime'
-import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt } from './main/runtime'
+import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt } from './main/runtime'
 
 
 
@@ -187,6 +191,26 @@ import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MA
 
 
 
+// Process-level error boundary: installed before anything else so a failure in
+// any later service can never surface Electron's native crash dialog or kill
+// the tray application silently.
+teeConsoleToLog()
+const runMarker = acquireRunMarker(join(app.getPath('userData'), 'logs'))
+const crashGuard = installCrashGuard({
+  log: (level, message, detail) => {
+    if (level === 'error') console.error(message, ...(detail === undefined ? [] : [detail]))
+    else console.warn(message)
+  },
+  onUserVisibleError: () => {
+    try {
+      if (!app.isReady() || !Notification.isSupported()) return
+      new Notification({ title: t('reliability.crash.toastTitle'), body: t('reliability.crash.toastBody') }).show()
+    } catch {}
+  },
+})
+installChildProcessGoneLogger(app, (_level, message) => console.error(message))
+export const mainCrashGuardStats = () => crashGuard.stats()
+
 // Enforce Chromium's renderer sandbox even if a future BrowserWindow option
 // accidentally regresses. This must be called before app readiness.
 app.enableSandbox()
@@ -223,44 +247,95 @@ if (!hasSingleInstanceLock) {
   })
 }
 
-app.whenReady().then(async () => {
+const startupResults: StartupStepResult[] = []
+const startupLog = (level: 'error' | 'warn', message: string, detail?: unknown) => {
+  console.error(message, ...(detail === undefined ? [] : [detail]))
+  logMain(level, 'startup', message)
+}
+const startupStep = (name: string, fn: () => void | Promise<void>) => runStartupStep(name, fn, startupLog, startupResults)
+
+async function showStartupFailureDialog(): Promise<void> {
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: 'error',
+      title: t('reliability.startup.failedTitle'),
+      message: t('reliability.startup.failedMessage'),
+      buttons: [t('reliability.startup.retry'), t('reliability.startup.quit')],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (response === 0) {
+      app.relaunch()
+      app.exit(0)
+    } else {
+      app.quit()
+    }
+  } catch {}
+}
+
+async function bootstrapApp(): Promise<void> {
   if (!hasSingleInstanceLock) return
+
+  registerRuntimeDiagnostics(() => startupResults.map(result => ({ name: result.name, ok: result.ok })), () => crashGuard.stats(), runMarker.previousRunUnclean)
+  if (runMarker.previousRunUnclean) {
+    logMain('warn', 'startup', 'previous run did not exit cleanly')
+    try {
+      if (Notification.isSupported()) {
+        new Notification({ title: t('reliability.unclean.title'), body: t('reliability.unclean.body') }).show()
+      }
+    } catch {}
+  }
 
   session.defaultSession.setPermissionCheckHandler(() => false)
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false)
   })
 
-  mainState.eventToken = refreshInstalledIntegrationScripts()
-  mainState.agentAdapterRegistry = createAgentAdapterRegistry(createAgentAdapterOperations())
-  mainState.projectMcpRegistry = new ProjectMcpRegistryStore(
-    join(app.getPath('userData'), 'project-mcp-registry.json'),
-  )
-  createProjectRoutingServices()
-  await createPluginServices()
-  const permissionToken = ensurePermissionToken()
-  const presentationToken = ensurePresentationToken()
-  configureSecureProtocol()
-  createWindowsFullscreenServices()
-  createDesktopServices()
-  createPetWindow()
-  createPanelWindow()
-  syncWindowsFullscreenTargets()
-  mainState.windowsFullscreenDetector?.refresh()
-  powerMonitor.on('on-battery', broadcastPowerSaveState)
-  powerMonitor.on('on-ac', broadcastPowerSaveState)
-  broadcastPowerSaveState()
-  createPresentationServices(presentationToken)
-  await syncPluginHost()
-  initializePluginCatalogAutoCheck()
-  screen.on('display-added', rehomePetWindowForDisplayChange)
-  screen.on('display-removed', rehomePetWindowForDisplayChange)
-  screen.on('display-metrics-changed', rehomePetWindowForDisplayChange)
-  createPermissionServices(permissionToken)
-  createProgressionServices()
-  createAchievementServices()
-  createHistoryServices()
+  await startupStep('integration-scripts', () => { mainState.eventToken = refreshInstalledIntegrationScripts() })
+  await startupStep('adapters', () => {
+    mainState.agentAdapterRegistry = createAgentAdapterRegistry(createAgentAdapterOperations())
+    mainState.projectMcpRegistry = new ProjectMcpRegistryStore(
+      join(app.getPath('userData'), 'project-mcp-registry.json'),
+    )
+  })
+  await startupStep('project-routing', createProjectRoutingServices)
+  await startupStep('plugins', createPluginServices)
+  let permissionToken = ''
+  let presentationToken = ''
+  await startupStep('tokens', () => {
+    permissionToken = ensurePermissionToken()
+    presentationToken = ensurePresentationToken()
+  })
+  await startupStep('protocol', configureSecureProtocol)
+  await startupStep('windows-fullscreen', createWindowsFullscreenServices)
+  await startupStep('desktop', createDesktopServices)
+  await startupStep('pet-window', createPetWindow)
+  await startupStep('panel-window', createPanelWindow)
+  await startupStep('fullscreen-targets', () => {
+    syncWindowsFullscreenTargets()
+    mainState.windowsFullscreenDetector?.refresh()
+  })
+  await startupStep('power-monitor', () => {
+    powerMonitor.on('on-battery', broadcastPowerSaveState)
+    powerMonitor.on('on-ac', broadcastPowerSaveState)
+    broadcastPowerSaveState()
+  })
+  await startupStep('presentation', () => createPresentationServices(presentationToken))
+  await startupStep('plugin-host', async () => {
+    await syncPluginHost()
+    initializePluginCatalogAutoCheck()
+  })
+  await startupStep('display-events', () => {
+    screen.on('display-added', rehomePetWindowForDisplayChange)
+    screen.on('display-removed', rehomePetWindowForDisplayChange)
+    screen.on('display-metrics-changed', rehomePetWindowForDisplayChange)
+  })
+  await startupStep('permission', () => createPermissionServices(permissionToken))
+  await startupStep('progression', createProgressionServices)
+  await startupStep('achievements', createAchievementServices)
+  await startupStep('history', createHistoryServices)
 
+  await startupStep('event-server', () => {
   mainState.eventServer = createEventServer(
     // 視窗關閉後變數可能尚未歸零；對已銷毀的 webContents send 會拋錯，導致
     // 事件回 400 且 onEvent（通知、XP、歷史）整個被跳過。
@@ -270,6 +345,7 @@ app.whenReady().then(async () => {
       if (event.originalEvent === 'AgentPetsIntegrationTest') {
         mainState.pendingIntegrationTests.get(event.sessionId)?.()
       }
+      try { mainState.sessionSnapshot.record(event) } catch {}
       try {
         mainState.desktopNotifications?.handleEvent(event)
       } catch {
@@ -310,7 +386,22 @@ app.whenReady().then(async () => {
       }
     },
     normalizeIngressEvent,
+    (() => {
+      const health = serverHealthTracker().register('event', 17373)
+      return { onStatus: health.onStatus, onPersistentFailure: health.onPersistentFailure, onHandle: health.attach }
+    })(),
   )
+  })
+
+  registerReliabilityIpc({
+    ipcMain,
+    assertTrustedIpcSender,
+    getPanelWindow: () => mainState.panelWindow,
+    getServerHealth: () => serverHealthTracker().snapshot(),
+    getSessionSnapshot: () => mainState.sessionSnapshot.list(),
+    exportDiagnostics,
+    retryServer: id => serverHealthTracker().retry(id),
+  })
 
   registerPetMotionIpc({
     ipcMain,
@@ -359,6 +450,10 @@ app.whenReady().then(async () => {
     getPetContentHeight: () => mainState.petContentHeight,
     setPetContentHeight: value => { mainState.petContentHeight = value },
     setPanelFullscreenAutoHidden: value => { mainState.windowsFullscreenAutoHiddenPanel = value },
+    setPanelBlurLock: lock => {
+      if (lock.pinned !== undefined) mainState.panelPinned = lock.pinned
+      if (lock.modal !== undefined) mainState.panelModalOpen = lock.modal
+    },
     finiteNumber,
     clamp,
     computePanelBounds,
@@ -539,10 +634,28 @@ app.whenReady().then(async () => {
       showPetWindow()
     }
   })
+
+  if (startupResults.some(result => !result.ok)) {
+    // Services start independently, so a partial failure still leaves a usable
+    // app. Only offer retry/quit when nothing visible could be created.
+    if (!mainState.petWindow) await showStartupFailureDialog()
+  }
+}
+
+app.whenReady().then(bootstrapApp).catch(async error => {
+  startupLog('error', 'Application bootstrap failed', error)
+  try {
+    if (!mainState.petWindow) createPetWindow()
+  } catch (windowError) {
+    startupLog('error', 'Fallback pet window failed', windowError)
+  }
+  await showStartupFailureDialog()
 })
 
 app.on('before-quit', () => {
   mainState.isQuitting = true
+  runMarker.clear()
+  flushMainLog()
   mainState.pluginPanelViewController?.close()
   mainState.pluginPanelViewController = null
   mainState.pluginDeveloperModeWatcher?.destroy()

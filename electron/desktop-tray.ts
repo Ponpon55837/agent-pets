@@ -18,6 +18,7 @@ interface DesktopTrayActions {
   invokePluginCommand: (pluginId: string, commandId: string) => void
   onPluginCommandsOmitted?: (pluginIds: string[]) => void
   toggleMiniMode: () => void
+  reloadPet?: () => void
   quit: () => void
 }
 
@@ -133,6 +134,7 @@ export class DesktopTrayController {
       },
       { type: 'separator' },
       { label: t('checkUpdates'), enabled: false },
+      ...(this.actions.reloadPet ? [{ label: t('reliability.tray.reloadPet'), click: () => this.actions.reloadPet?.() }] : []),
       { type: 'separator' },
       { label: t('quit'), click: () => this.actions.quit() },
     ]

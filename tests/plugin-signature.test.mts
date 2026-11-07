@@ -299,7 +299,7 @@ test('signature-risk confirmation defaults focus to Cancel and shows key fingerp
   const dialog = fs.readFileSync(new URL('../src/components/ui/ConfirmDialog.vue', import.meta.url), 'utf8')
   const panel = fs.readFileSync(new URL('../src/components/PluginPanel.vue', import.meta.url), 'utf8')
   const dialogs = fs.readFileSync(new URL('../src/components/plugin-panel/PluginPanelDialogs.vue', import.meta.url), 'utf8')
-  assert.match(dialog, /props\.focusCancel \? '\[data-cancel\]' : '\[data-confirm\]'/)
+  assert.match(dialog, /focusCancel \? '\[data-cancel\]' : '\[data-confirm\]'/)
   assert.match(dialog, /data-cancel/)
   assert.match(dialogs, /:focus-cancel="plan\?\.requiresSignatureConfirmation === true"/)
   assert.match(dialogs, /pluginSignatureKeyChanged/)

@@ -4,7 +4,8 @@ import { app } from 'electron'
 import { timingSafeEqual } from 'node:crypto'
 import type { AgentStatusEvent } from '../src/types/agent'
 import { createOrderedBatchCoalescer } from './ipc/broadcast-coalescer.ts'
-import { listenOnLocalPort } from './local-server-listen.ts'
+import { listenOnLocalPort, type LocalServerListenHandle, type LocalServerListenOptions } from './local-server-listen.ts'
+import { AGENT_PETS_SERVER_HEADER } from './main/server-health.ts'
 import { normalizeAgentStatusEvent, type EventNormalizationResult } from './event-normalizer'
 export type { AgentStatusEvent } from '../src/types/agent'
 
@@ -25,6 +26,7 @@ export function createEventServer(
   eventToken: string,
   onEvent?: (event: AgentStatusEvent) => void,
   normalizeEvent: EventIngressNormalizer = normalizeAgentStatusEvent,
+  listenHooks: Pick<LocalServerListenOptions, 'onStatus' | 'onPersistentFailure'> & { onHandle?: (handle: LocalServerListenHandle) => void } = {},
 ) {
   let rateWindowStartedAt = Date.now()
   let eventsInWindow = 0
@@ -42,6 +44,8 @@ export function createEventServer(
   })
 
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+    // Lets a second Agent Pets instance recognise this port owner without a token.
+    response.setHeader(AGENT_PETS_SERVER_HEADER, 'event')
     if (request.method !== 'POST' || request.url !== '/v1/events') {
       response.writeHead(404)
       response.end()
@@ -105,6 +109,7 @@ export function createEventServer(
     request.on('end', async () => {
       if (bodyRejected) return
 
+      let event: AgentStatusEvent
       try {
         const parsed: unknown = JSON.parse(
           Buffer.concat(chunks).toString('utf8')
@@ -115,17 +120,24 @@ export function createEventServer(
           response.end(JSON.stringify({ error: normalized.error }))
           return
         }
-        const { event } = normalized
-
-        for (const win of getWindows()) enqueueAgentEvent({ window: win, event })
-        onEvent?.(event)
-
-        response.writeHead(204)
-        response.end()
+        event = normalized.event
       } catch {
         response.writeHead(400)
         response.end(JSON.stringify({ error: 'invalid JSON' }))
+        return
       }
+
+      // A failure in downstream side effects (notifications, XP, history) is
+      // our bug, not a malformed request: log it and still acknowledge the hook.
+      try {
+        for (const win of getWindows()) enqueueAgentEvent({ window: win, event })
+        onEvent?.(event)
+      } catch (error) {
+        console.error('Event handler failed', error)
+      }
+
+      response.writeHead(204)
+      response.end()
     })
   })
 
@@ -133,12 +145,16 @@ export function createEventServer(
   server.headersTimeout = 10_000
   server.requestTimeout = 15_000
 
-  listenOnLocalPort(server, 17373, {
+  const handle = listenOnLocalPort(server, 17373, {
     label: 'Event',
+    onStatus: listenHooks.onStatus,
+    onPersistentFailure: listenHooks.onPersistentFailure,
     onListening: () => {
       if (!app.isPackaged) console.log('Event server listening on http://127.0.0.1:17373/v1/events')
     },
   })
+
+  listenHooks.onHandle?.(handle)
 
   return server
 }
