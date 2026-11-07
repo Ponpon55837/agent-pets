@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { locale, t, type TranslationKey } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
 import type { HistoryAgentStat, HistoryDailyStat, HistorySummary } from '@/types/history'
+import GrowthEmptyState from '@/components/growth/GrowthEmptyState.vue'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -28,6 +29,21 @@ const moodStage = computed(() => {
   if (store.mood >= 70) return t('moodRadiant')
   if (store.mood >= 40) return t('moodCharged')
   return t('moodResting')
+})
+
+const INTRO_KEY = 'agent-pet-history-intro-dismissed'
+const introDismissed = ref(true)
+try { introDismissed.value = localStorage.getItem(INTRO_KEY) === '1' } catch { introDismissed.value = false }
+function dismissIntro(): void {
+  introDismissed.value = true
+  try { localStorage.setItem(INTRO_KEY, '1') } catch { /* per-viewer convenience only */ }
+}
+const historyIsEmpty = computed(() => {
+  const summary = historySummary.value
+  if (!summary) return false
+  const totals = summary.totals
+  return summary.agents.length === 0
+    && totals.sessionsCompleted + totals.sessionsFailed + totals.activeMs + totals.tokenInput + totals.tokenOutput === 0
 })
 
 const HISTORY_TOKEN_LABEL_KEYS: Partial<Record<HistorySummary['tokenQuality'], TranslationKey>> = {
@@ -217,9 +233,23 @@ onUnmounted(() => cleanupHistoryUpdated?.())
       </Select>
     </div>
 
-    <div v-if="historyLoading && !historySummary" class="panel-empty">{{ t('checking') }}</div>
-    <div v-else-if="historyError && !historySummary" class="panel-empty history-error">{{ historyError }}</div>
+    <GrowthEmptyState v-if="historyLoading && !historySummary" :title="t('checking')" busy />
+    <GrowthEmptyState v-else-if="historyError && !historySummary" tone="error" icon="warning" :title="historyError">
+      <Button variant="secondary" size="sm" @click="refreshHistory">{{ t('growth.retry') }}</Button>
+    </GrowthEmptyState>
+    <GrowthEmptyState
+      v-else-if="historyIsEmpty"
+      :title="t('growth.historyEmptyTitle')"
+      :description="t('growth.historyEmptyBody')"
+    >
+      <small>{{ t('growth.historyEmptyHint') }}</small>
+    </GrowthEmptyState>
     <template v-else-if="historySummary">
+      <Card v-if="!introDismissed" class="history-intro" role="note">
+        <strong>{{ t('growth.historyIntroTitle') }}</strong>
+        <p>{{ t('growth.historyIntroBody') }}</p>
+        <Button variant="secondary" size="sm" @click="dismissIntro">{{ t('growth.dismiss') }}</Button>
+      </Card>
       <div class="history-stat-grid">
         <Card class="history-stat-tile history-stat-token" tone="accent">
           <span class="history-stat-label" :title="t('growth.tokenBasisTip')">{{ t('historyTokens') }}</span>

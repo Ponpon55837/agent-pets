@@ -4,6 +4,7 @@ import { locale, t } from '@/i18n'
 import { useProgressionLabels } from '@/composables/useProgressionLabels'
 import { useAgentStore } from '@/stores/agentStore'
 import { nextEvolution, type ProgressionInsights } from '@/types/progression'
+import GrowthEmptyState from '@/components/growth/GrowthEmptyState.vue'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import { XP_RULES } from '@/types/progression'
@@ -116,7 +117,15 @@ onMounted(() => { void loadInsights() })
       <ToggleRow :model-value="store.moodVisualsEnabled" :label="t('moodVisuals')" :help="t('moodVisualsHelp')" @update:model-value="store.setMoodVisualsEnabled($event)" />
     </Card>
   </template>
-  <div v-else class="growth-unavailable" role="status">{{ t('growthDataUnavailable') }}</div>
+  <GrowthEmptyState
+    v-else
+    tone="error"
+    icon="warning"
+    :title="t('growth.storageUnavailableTitle')"
+    :description="t('growth.storageUnavailableBody')"
+  >
+    <Button variant="secondary" size="sm" @click="store.initializeProgression()">{{ t('growth.retry') }}</Button>
+  </GrowthEmptyState>
 </template>
 
 <style scoped>

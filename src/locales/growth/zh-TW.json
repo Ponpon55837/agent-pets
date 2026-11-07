@@ -80,5 +80,13 @@
   "growth.categoryHabit": "習慣",
   "growth.categoryExplore": "探索",
   "growth.categoryLevel": "等級",
-  "growth.achievementsHighlight": "從這個開始吧"
+  "growth.achievementsHighlight": "從這個開始吧",
+  "growth.storageUnavailableTitle": "成長資料暫時無法讀取",
+  "growth.storageUnavailableBody": "本機儲存可能還在準備，或讀取失敗。你可以重試；若持續發生，請重新啟動 Agent Pets。",
+  "growth.historyEmptyTitle": "還沒有統計資料",
+  "growth.historyEmptyBody": "在 Codex、Claude Code 或 OpenCode 完成第一次任務後，工作時間、完成次數與 Token 會顯示在這裡。",
+  "growth.historyEmptyHint": "還沒收到事件？先到設定檢查 Hook 是否已安裝。",
+  "growth.historyIntroTitle": "統計只存在這台電腦",
+  "growth.historyIntroBody": "數字來自本機的工作階段紀錄與 Hook 事件，不會上傳，也不含提示內容。Token 為「新輸入＋輸出」，快取另列。",
+  "growth.dismiss": "知道了"
 }

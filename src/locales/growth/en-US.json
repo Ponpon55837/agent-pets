@@ -80,5 +80,13 @@
   "growth.categoryHabit": "Habits",
   "growth.categoryExplore": "Exploration",
   "growth.categoryLevel": "Levels",
-  "growth.achievementsHighlight": "Start here"
+  "growth.achievementsHighlight": "Start here",
+  "growth.storageUnavailableTitle": "Growth data is unavailable",
+  "growth.storageUnavailableBody": "Local storage may still be starting, or reading failed. Retry, and restart Agent Pets if it keeps happening.",
+  "growth.historyEmptyTitle": "No statistics yet",
+  "growth.historyEmptyBody": "After your first finished task in Codex, Claude Code or OpenCode, work time, completions and tokens appear here.",
+  "growth.historyEmptyHint": "Not seeing events yet? Check in Settings that the hooks are installed.",
+  "growth.historyIntroTitle": "Statistics stay on this computer",
+  "growth.historyIntroBody": "Numbers come from local session logs and hook events, are never uploaded, and contain no prompt content. Tokens are fresh input plus output; cache is listed separately.",
+  "growth.dismiss": "Got it"
 }
