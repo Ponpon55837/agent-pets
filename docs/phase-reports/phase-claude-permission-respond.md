@@ -54,7 +54,7 @@
 | `pnpm exec vue-tsc --noEmit` | 通過 |
 | `pnpm lint` | `main-process lint passed` |
 | `pnpm test:unit` | 904／904 通過（第二輪修正後；第一輪為 891／891） |
-| `pnpm test:coverage`（CI 步驟） | 覆蓋門檻通過（all files 行覆蓋 96.27%）；890／891 通過。唯一失敗的是既有的 `presentation-stdio`（2 秒內等不到 MCP 回應），只在機器負載極高（load average 50–300，來自其他程序）時出現，單獨執行通過；本階段沒有修改該測試涉及的程式碼，但新的 hook 測試會啟動多個 Node 程序，可能增加平行執行時的競爭，CI 上需再觀察。 |
+| `pnpm test:coverage`（CI 步驟） | 第二輪：904／904 通過，覆蓋門檻通過（all files 行覆蓋 96.27%）。第一輪曾有一次 890／891：既有的 `presentation-stdio` 在機器負載極高（load average 50–300，來自其他程序）時 2 秒內等不到 MCP 回應，單獨執行通過；新的 hook 測試會啟動多個 Node 程序，可能增加平行競爭，CI 上需再觀察。 |
 | `pnpm exec vite build` | 通過 |
 | `pnpm check:bundle-size`／`check:bundle`／`check:contrast`／`check:design:strict` | 全部通過（design strict 無新發現） |
 | `pnpm audit --prod --audit-level=high` | No known vulnerabilities found |
