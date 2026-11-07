@@ -101,10 +101,6 @@ function selectDashboardTab(tab: DashboardTab): void {
   if ((tab === 'sessions' || tab === 'usage') && !store.quotaUsage) void store.refreshQuota()
 }
 
-function permissionSourceLabel(agentId: string): string {
-  return SOURCE_LABELS[agentId as keyof typeof SOURCE_LABELS] ?? agentId
-}
-
 watch(settingsGroup, group => {
   try { localStorage.setItem(SETTINGS_GROUP_STORAGE_KEY, group) } catch {}
 })
