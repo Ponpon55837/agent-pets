@@ -1,17 +1,55 @@
 import { ref } from 'vue'
 import zhTWMessages from './locales/zh-TW.json' with { type: 'json' }
 import enUSMessages from './locales/en-US.json' with { type: 'json' }
+import petZhTW from './locales/pet/zh-TW.json' with { type: 'json' }
+import petEnUS from './locales/pet/en-US.json' with { type: 'json' }
+import panelZhTW from './locales/panel/zh-TW.json' with { type: 'json' }
+import panelEnUS from './locales/panel/en-US.json' with { type: 'json' }
+import pluginsZhTW from './locales/plugins/zh-TW.json' with { type: 'json' }
+import pluginsEnUS from './locales/plugins/en-US.json' with { type: 'json' }
+import onboardingZhTW from './locales/onboarding/zh-TW.json' with { type: 'json' }
+import onboardingEnUS from './locales/onboarding/en-US.json' with { type: 'json' }
+import permissionZhTW from './locales/permission/zh-TW.json' with { type: 'json' }
+import permissionEnUS from './locales/permission/en-US.json' with { type: 'json' }
+import growthZhTW from './locales/growth/zh-TW.json' with { type: 'json' }
+import growthEnUS from './locales/growth/en-US.json' with { type: 'json' }
+import designZhTW from './locales/design/zh-TW.json' with { type: 'json' }
+import designEnUS from './locales/design/en-US.json' with { type: 'json' }
+import reliabilityZhTW from './locales/reliability/zh-TW.json' with { type: 'json' }
+import reliabilityEnUS from './locales/reliability/en-US.json' with { type: 'json' }
 import zhTWErrors from './locales/errors.zh-TW.json' with { type: 'json' }
 import { DEFAULT_LOCALE, isAppLocale, type AppLocale } from './types/locale.ts'
 
 export type TranslationParams = Record<string, string | number>
 
-const messages = zhTWMessages
+// 各領域的新文案放在 src/locales/<domain>/{zh-TW,en-US}.json，避免平行開發時同時改一個大檔而衝突。
+// key 必須以領域前綴開頭（例如 pet.xxx），且不得與主檔重複。
+const messages = {
+  ...zhTWMessages,
+  ...petZhTW,
+  ...panelZhTW,
+  ...pluginsZhTW,
+  ...onboardingZhTW,
+  ...permissionZhTW,
+  ...growthZhTW,
+  ...designZhTW,
+  ...reliabilityZhTW,
+}
 
 export type TranslationKey = keyof typeof messages
 
 // 顯式標註 Record<TranslationKey, string>：若 en-US.json 缺漏或多出 key，這裡會編譯期報錯
-const englishMessages: Record<TranslationKey, string> = enUSMessages
+const englishMessages: Record<TranslationKey, string> = {
+  ...enUSMessages,
+  ...petEnUS,
+  ...panelEnUS,
+  ...pluginsEnUS,
+  ...onboardingEnUS,
+  ...permissionEnUS,
+  ...growthEnUS,
+  ...designEnUS,
+  ...reliabilityEnUS,
+}
 
 function readPersistedLocale(): AppLocale {
   try {
