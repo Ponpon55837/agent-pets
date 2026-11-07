@@ -102,7 +102,6 @@ function clear(): void {
   min-width: 0;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-pill);
-  outline: none;
   background: var(--surface-raised-hover);
   color: var(--text-primary);
   font: inherit;
@@ -129,6 +128,8 @@ function clear(): void {
 
 .text-field-input:focus-visible {
   border-color: var(--accent);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 1px;
   box-shadow: 0 0 0 var(--focus-ring-width) var(--accent-glow);
 }
 

@@ -11,7 +11,14 @@ import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '@/types/desktop'
 import type { DesktopVisibilityCapabilities } from '@/types/desktop-visibility'
 import type { AppLocale } from '@/types/locale'
-import type { PermissionDecisionValue, PermissionRequestView } from '@/types/permission'
+import type {
+  PermissionDecideResult,
+  PermissionDecisionValue,
+  PermissionOutcome,
+  PermissionOutcomeKind,
+  PermissionRequestView,
+} from '@/types/permission'
+import { classifyDecideResponse, inferVanishedOutcome, outcomeVisibleMs } from '@/utils/permission-view'
 import type { ProgressionSnapshot } from '@/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
 import { ACHIEVEMENT_DEFINITIONS } from '@/types/achievement'
@@ -29,6 +36,7 @@ import type {
 import { PRESENTATION_REACTIONS } from '@/types/presentation'
 import { formatProject } from '@/utils/format'
 import { AgentSessionIndex } from '@/utils/agent-session-index'
+import { SESSION_REMOVE_MS, sessionLifecycleAction } from '@/utils/session-lifecycle'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
 import { PANEL_SIZES } from '@/utils/panel-layout'
@@ -48,7 +56,6 @@ export interface PetEntry {
 }
 
 const SUCCESS_DISPLAY_MS = 4_000
-const SESSION_STALE_MS = 15 * 60_000
 const MAX_SESSION_COUNT = 200
 const ACHIEVEMENT_DEFINITION_BY_ID = new Map(ACHIEVEMENT_DEFINITIONS.map(entry => [entry.id, entry]))
 // Kept at/below the main process' quota cache TTL so a poll that arrives on
@@ -116,15 +123,18 @@ function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
       if (typeof window.id !== 'string' || typeof window.label !== 'string') continue
       if (typeof window.usedPercent !== 'number' || !Number.isFinite(window.usedPercent)) continue
       if (typeof window.remainingPercent !== 'number' || !Number.isFinite(window.remainingPercent)) continue
-      if (window.usedPercent < 0 || window.usedPercent > 100 || window.remainingPercent < 0 || window.remainingPercent > 100) continue
+      // Clamp rather than drop: an over-quota reading must show as exhausted.
+      const usedPercent = Math.min(100, Math.max(0, window.usedPercent))
+      const remainingPercent = Math.min(100, Math.max(0, window.remainingPercent))
       const resetsAt = typeof window.resetsAt === 'string' && Number.isFinite(Date.parse(window.resetsAt))
         ? new Date(window.resetsAt).toISOString()
         : undefined
       windows.push({
         id: window.id.slice(0, MAX_QUOTA_TEXT_LENGTH),
         label: window.label.slice(0, MAX_QUOTA_TEXT_LENGTH),
-        usedPercent: window.usedPercent,
-        remainingPercent: window.remainingPercent,
+        usedPercent,
+        remainingPercent,
+        ...(window.overage === true || window.usedPercent > 100 ? { overage: true } : {}),
         ...(resetsAt ? { resetsAt } : {}),
       })
     }
@@ -1120,8 +1130,14 @@ export const useAgentStore = defineStore('agent', () => {
 
   function cleanupStale() {
     const now = Date.now()
-    for (const session of sessionIndex.values()) {
-      if (now - session.lastSeenAt > SESSION_STALE_MS && session.state !== 'offline') {
+    const hasPendingPermission = permissionRequests.value.length > 0
+    for (const session of [...sessionIndex.values()]) {
+      const action = sessionLifecycleAction(session, now, { hasPendingPermission })
+      if (action === 'remove') {
+        // Offline long enough that nobody is looking for it any more.
+        sessionIndex.delete(session.key)
+        moodTaskProgress.delete(session.key)
+      } else if (action === 'offline') {
         // No update in a long time means the process died without sending a
         // terminal event (Stop/SessionEnd) — treat it as gone rather than
         // letting a stuck thinking/tool-running state mask real sessions.
@@ -1130,6 +1146,38 @@ export const useAgentStore = defineStore('agent', () => {
         moodTaskProgress.delete(session.key)
       }
     }
+  }
+
+  // After a renderer reload/crash the in-memory list is empty although agents
+  // may still be running. Main keeps a light mirror; merge it in without
+  // replaying events (no toasts, mood or sound) and never over live data.
+  function restoreSessionSnapshot(entries: unknown): number {
+    if (!Array.isArray(entries)) return 0
+    const now = Date.now()
+    let restored = 0
+    for (const raw of entries.slice(0, MAX_SESSION_COUNT)) {
+      if (!raw || typeof raw !== 'object') continue
+      const entry = raw as Partial<AgentSession>
+      if (typeof entry.source !== 'string' || typeof entry.sessionId !== 'string') continue
+      if (typeof entry.state !== 'string' || !(entry.state in STATE_PRIORITY)) continue
+      if (typeof entry.lastSeenAt !== 'number' || !Number.isFinite(entry.lastSeenAt)) continue
+      if (now - entry.lastSeenAt > SESSION_REMOVE_MS) continue
+      const key = getSessionKey(entry.source as AgentSource, entry.sessionId)
+      if (sessionIndex.get(key)) continue
+      sessionIndex.upsert({
+        key,
+        source: entry.source as AgentSource,
+        sessionId: entry.sessionId,
+        project: typeof entry.project === 'string' ? entry.project : undefined,
+        projectId: typeof entry.projectId === 'string' ? entry.projectId : undefined,
+        routedPetId: typeof entry.routedPetId === 'string' ? entry.routedPetId : undefined,
+        state: entry.state,
+        lastSeenAt: entry.lastSeenAt,
+        toolName: typeof entry.toolName === 'string' ? entry.toolName : undefined,
+      }, MAX_SESSION_COUNT)
+      restored += 1
+    }
+    return restored
   }
 
   function handleSuccessTimeout() {
@@ -1372,6 +1420,37 @@ export const useAgentStore = defineStore('agent', () => {
 
   const permissionRequest = computed(() => permissionRequests.value[0] ?? null)
 
+  // Result of the most recent request that left the broker's active queue
+  // (expired, handled elsewhere, delivery failed). Shown briefly so a bubble
+  // never just vanishes silently.
+  const permissionOutcome = shallowRef<PermissionOutcome | null>(null)
+  let permissionOutcomeTimer: ReturnType<typeof setTimeout> | null = null
+  // Requests with a decide() call in flight: the broker's broadcast can land
+  // before the IPC result does, and that result decides what the UI says.
+  const decidingRequestIds = new Set<string>()
+
+  function showPermissionOutcome(
+    request: Pick<PermissionRequestView, 'requestId' | 'agentId' | 'action' | 'projectId'>,
+    kind: PermissionOutcomeKind,
+  ): void {
+    if (permissionOutcomeTimer) clearTimeout(permissionOutcomeTimer)
+    permissionOutcome.value = {
+      kind,
+      requestId: request.requestId,
+      agentId: request.agentId,
+      action: request.action,
+      ...(request.projectId ? { projectId: request.projectId } : {}),
+      at: Date.now(),
+    }
+    permissionOutcomeTimer = setTimeout(dismissPermissionOutcome, outcomeVisibleMs(kind))
+  }
+
+  function dismissPermissionOutcome(): void {
+    if (permissionOutcomeTimer) clearTimeout(permissionOutcomeTimer)
+    permissionOutcomeTimer = null
+    permissionOutcome.value = null
+  }
+
   // The broker's `agentId` is the literal AgentSource string for every
   // respond-capable adapter (see electron/permission-adapter-server.ts,
   // which sets `agentId: payload.source` from the same 'opencode-cli' /
@@ -1415,8 +1494,14 @@ export const useAgentStore = defineStore('agent', () => {
     // caller at all).
     const stillPending = new Set(next.map(request => request.requestId))
     for (const request of permissionRequests.value) {
-      if (!stillPending.has(request.requestId)) settleWaitingPermission(request.agentId, request.sessionId)
+      if (stillPending.has(request.requestId)) continue
+      // decidePermission() reports and settles these itself once the IPC returns.
+      if (decidingRequestIds.has(request.requestId)) continue
+      settleWaitingPermission(request.agentId, request.sessionId)
+      showPermissionOutcome(request, inferVanishedOutcome(request, now))
     }
+    // A new request supersedes any result card for an older one.
+    if (next.length > 0 && permissionOutcome.value?.kind !== 'error') dismissPermissionOutcome()
     permissionRequests.value = next
   }
 
@@ -1431,17 +1516,27 @@ export const useAgentStore = defineStore('agent', () => {
   async function decidePermission(
     requestId: string,
     decision: PermissionDecisionValue,
-  ): Promise<void> {
-    // Settle locally right away rather than waiting on the broker's own
-    // broadcast round-trip — see settleWaitingPermission for why this can't
-    // just wait for the next hook event.
+  ): Promise<PermissionDecideResult> {
     const request = permissionRequests.value.find(candidate => candidate.requestId === requestId)
-    if (request) settleWaitingPermission(request.agentId, request.sessionId)
+    if (!request) return { ok: false, kind: 'cancelled' }
+    decidingRequestIds.add(requestId)
+    let result: PermissionDecideResult
     try {
-      await window.electronAPI?.decidePermission(requestId, decision)
-    } catch {
-      // Main process remains authoritative; the next broker broadcast restores UI state.
+      result = classifyDecideResponse(await window.electronAPI?.decidePermission(requestId, decision))
+    } catch (error) {
+      console.warn('[permission] decision IPC failed', error instanceof Error ? error.name : 'unknown')
+      result = { ok: false, kind: 'error' }
+    } finally {
+      decidingRequestIds.delete(requestId)
     }
+    // Only a delivered decision means the agent is no longer waiting. For a
+    // failed delivery or IPC error the pet must keep showing the wait — the
+    // agent really is still blocked.
+    if (result.ok || result.kind === 'cancelled' || result.kind === 'expired') {
+      settleWaitingPermission(request.agentId, request.sessionId)
+    }
+    if (!result.ok) showPermissionOutcome(request, result.kind)
+    return result
   }
 
   // --- 控制面板視窗導覽 ---------------------------------------------------------
@@ -1752,6 +1847,8 @@ export const useAgentStore = defineStore('agent', () => {
     getPresentationStatus,
     permissionRequests,
     permissionRequest,
+    permissionOutcome,
+    dismissPermissionOutcome,
     progression,
     achievements,
     achievementUnlock,
@@ -1767,6 +1864,7 @@ export const useAgentStore = defineStore('agent', () => {
     decidePermission,
     handleEvent,
     cleanupStale,
+    restoreSessionSnapshot,
     handleSuccessTimeout,
     removeSession,
     clearOfflineSessions,

@@ -27,7 +27,9 @@ export interface HistoryIpcDependencies {
 export function registerHistoryIpc(deps: HistoryIpcDependencies): void {
   deps.ipcMain.handle(IPC_CHANNELS.historySummary, async (event, projectId: unknown) => {
     deps.assertTrustedIpcSender(event, deps.getPanelWindow())
-    await deps.refreshLocalUsage()
+    // Never block the summary on a log scan: return stored aggregates now and
+    // let the (throttled) background scan push a historyUpdated when it imports.
+    void deps.refreshLocalUsage().catch(() => undefined)
     return deps.currentHistorySummary(typeof projectId === 'string' ? projectId : undefined)
   })
 

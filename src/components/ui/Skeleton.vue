@@ -1,41 +1,84 @@
 <script setup lang="ts">
-// Placeholder block shown while data loads. Decorative: pair it with a
-// container that sets aria-busy and an accessible status message.
-withDefaults(defineProps<{ width?: string; height?: string; lines?: number }>(), {
-  width: '100%',
-  height: '12px',
+// Loading placeholder. Static (no shimmer) under prefers-reduced-motion.
+// Decorative: the surrounding region should carry aria-busy="true".
+withDefaults(defineProps<{
+  variant?: 'line' | 'block' | 'circle'
+  width?: string
+  height?: string
+  /** Render N stacked lines (variant "line" only). */
+  lines?: number
+}>(), {
+  variant: 'line',
   lines: 1,
 })
 </script>
 
 <template>
-  <span class="skeleton-group" aria-hidden="true">
-    <span v-for="line in lines" :key="line" class="skeleton" :style="{ width: line === lines && lines > 1 ? '60%' : width, height }" />
-  </span>
+  <div v-if="variant === 'line' && lines > 1" class="stack" aria-hidden="true">
+    <span
+      v-for="n in lines"
+      :key="n"
+      class="skeleton variant-line"
+      :style="{ width: n === lines ? '60%' : width, height }"
+    />
+  </div>
+  <span
+    v-else
+    class="skeleton"
+    :class="`variant-${variant}`"
+    :style="{ width, height }"
+    aria-hidden="true"
+  />
 </template>
 
 <style scoped>
-.skeleton-group {
+.stack {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  width: 100%;
 }
 
 .skeleton {
   display: block;
-  border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
-  animation: skeleton-pulse 1.4s ease-in-out infinite;
+  background: linear-gradient(
+    90deg,
+    var(--surface-raised-hover) 25%,
+    var(--border-subtle) 50%,
+    var(--surface-raised-hover) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s var(--ease-standard) infinite;
 }
 
-@keyframes skeleton-pulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
+.variant-line {
+  width: 100%;
+  height: var(--font-md);
+  border-radius: var(--radius-sm);
+}
+
+.variant-block {
+  width: 100%;
+  height: 64px;
+  border-radius: var(--radius-md);
+}
+
+.variant-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+}
+
+@keyframes skeleton-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .skeleton {
     animation: none;
+    background: var(--surface-raised-hover);
+    opacity: 0.6;
   }
 }
 </style>

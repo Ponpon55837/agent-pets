@@ -1,0 +1,43 @@
+import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
+import type { LocalServerHealthSnapshot, LocalServerId } from '../../src/types/reliability.ts'
+import type { SessionSnapshotEntry } from '../main/session-snapshot.ts'
+import { IPC_CHANNELS } from './channels.ts'
+
+export interface ReliabilityIpcDependencies {
+  ipcMain: Pick<IpcMain, 'handle'>
+  assertTrustedIpcSender(event: IpcMainInvokeEvent, requiredWindow?: BrowserWindow | null): void
+  getPanelWindow(): BrowserWindow | null
+  getServerHealth(): LocalServerHealthSnapshot
+  retryServer(id?: LocalServerId): void
+  getSessionSnapshot(): SessionSnapshotEntry[]
+  exportDiagnostics(): Promise<{ ok: boolean; canceled?: boolean }>
+}
+
+const SERVER_IDS: readonly LocalServerId[] = ['event', 'permission', 'presentation']
+
+export function registerReliabilityIpc(deps: ReliabilityIpcDependencies): void {
+  deps.ipcMain.handle(IPC_CHANNELS.serverHealthGet, (event): LocalServerHealthSnapshot => {
+    deps.assertTrustedIpcSender(event)
+    return deps.getServerHealth()
+  })
+
+  deps.ipcMain.handle(IPC_CHANNELS.sessionSnapshotGet, (event): SessionSnapshotEntry[] => {
+    deps.assertTrustedIpcSender(event)
+    return deps.getSessionSnapshot()
+  })
+
+  deps.ipcMain.handle(IPC_CHANNELS.diagnosticsExport, async (event): Promise<{ ok: boolean; canceled?: boolean }> => {
+    deps.assertTrustedIpcSender(event, deps.getPanelWindow())
+    try {
+      return await deps.exportDiagnostics()
+    } catch {
+      return { ok: false }
+    }
+  })
+
+  deps.ipcMain.handle(IPC_CHANNELS.serverHealthRetry, (event, id: unknown): LocalServerHealthSnapshot => {
+    deps.assertTrustedIpcSender(event, deps.getPanelWindow())
+    deps.retryServer(SERVER_IDS.includes(id as LocalServerId) ? id as LocalServerId : undefined)
+    return deps.getServerHealth()
+  })
+}

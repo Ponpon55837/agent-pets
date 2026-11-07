@@ -174,7 +174,7 @@ function projectPetStatusLabel(status: 'unbound' | 'bound' | 'missing-pet'): str
         <Button variant="secondary" size="sm" :disabled="store.projectPetsLoading" @click="store.addProjectPet()">{{ store.projectPetsLoading ? t('checking') : t('addProjectPet') }}</Button>
       </div>
       <div v-if="store.projectPetsError" class="import-error" role="status">{{ store.projectPetsError }}</div>
-      <EmptyState v-if="store.projectPetsLoading && store.projectPets.length === 0" kind="loading" :title="t('panel.loading')" />
+      <EmptyState v-if="store.projectPetsLoading && store.projectPets.length === 0" compact :title="t('panel.loading')" aria-busy="true" />
       <div v-else-if="store.projectPets.length > 0" class="project-pet-list">
         <div v-for="project in store.projectPets" :key="project.projectId" class="project-pet-row">
           <span class="field-copy">

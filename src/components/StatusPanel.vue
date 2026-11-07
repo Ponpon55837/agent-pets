@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
-import { SOURCE_LABELS } from '@/types/agent'
 import { t } from '@/i18n'
 import type { PluginEventSourceStatusView } from '@/types/plugin'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import InlinePermissionCard from '@/components/ui/InlinePermissionCard.vue'
+import PermissionOutcomeNotice from '@/components/permission/PermissionOutcomeNotice.vue'
 import PetAnimation from '@/components/PetAnimation.vue'
+import ServerHealthBanner from '@/components/status-panel/ServerHealthBanner.vue'
 import StatusPanelHistory from '@/components/status-panel/StatusPanelHistory.vue'
 import StatusPanelSessions from '@/components/status-panel/StatusPanelSessions.vue'
 import StatusPanelUsage from '@/components/status-panel/StatusPanelUsage.vue'
@@ -102,10 +103,6 @@ function selectDashboardTab(tab: DashboardTab): void {
   if ((tab === 'sessions' || tab === 'usage') && !store.quotaUsage) void store.refreshQuota()
 }
 
-function permissionSourceLabel(agentId: string): string {
-  return SOURCE_LABELS[agentId as keyof typeof SOURCE_LABELS] ?? agentId
-}
-
 // Move keyboard focus into the panel whenever it is (re)opened so Tab / arrows work immediately.
 watch(() => store.panelOpenCount, async () => {
   await nextTick()
@@ -189,18 +186,14 @@ onUnmounted(() => {
     </div>
 
     <template v-if="store.panelView === 'sessions'">
+      <ServerHealthBanner />
       <InlinePermissionCard
         v-if="store.permissionRequest"
         class="panel-inline-permission"
         :request="store.permissionRequest"
-        :title="`${permissionSourceLabel(store.permissionRequest.agentId)} · ${t('permissionInlineTitle')}`"
-        :project-label="store.permissionRequest.projectId || t('projectUnknown')"
-        :elapsed-label="`${Math.max(0, (nowTick - store.permissionRequest.receivedAt) / 1000).toFixed(1)}s`"
-        :allow-label="t('permissionAllowOnce')"
-        :deny-label="t('permissionDeny')"
-        :warning-label="t('permissionWarning')"
         @decide="store.decidePermission(store.permissionRequest.requestId, $event)"
       />
+      <PermissionOutcomeNotice v-else-if="store.permissionOutcome" />
       <div v-else-if="store.permissionNotice" class="inline-permission-notice" role="status">
         <Icon name="warning" :size="18" />
         <span><strong>{{ store.permissionNotice.title }}</strong><small>{{ store.permissionNotice.detail }}</small></span>
