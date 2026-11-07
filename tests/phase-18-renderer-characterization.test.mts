@@ -12,7 +12,7 @@ test('agent session store keeps the existing bounded eviction and presentation b
   assert.match(source, /sessionIndex\.updatePriority\(key, event\.state, event\.timestamp\)/)
   assert.match(source, /if \(event\.originalEvent === 'AgentPetsIntegrationTest' && event\.state === 'offline'\)/)
   assert.match(source, /prevState !== event\.state/)
-  assert.match(source, /showToast\(event\.source, event\.project, event\.state\)/)
+  assert.match(source, /showToast\(\s*event\.source,\s*event\.project,\s*event\.state,/)
 })
 
 test('status panel preserves dashboard and settings navigation contracts', () => {
@@ -99,11 +99,11 @@ test('pet animation cadence and terminal frame behavior stay fixed', () => {
   assert.ok(source.includes('hold their final'))
   assert.ok(source.includes('frame until the store reports the next state'))
   assert.match(source, /function frameDelay\(\): number/)
-  assert.match(source, /animationFrameId = requestAnimationFrame\(animationTick\)/)
+  assert.match(source, /frameTimerId = setTimeout\(animationStep, frameDelay\(\)\)/)
   assert.match(source, /document\.addEventListener\('visibilitychange', handleDocumentVisibilityChange\)/)
   assert.doesNotMatch(source, /setTimeout\(tick, frameDelay\(\)\)/)
   const desktopPet = read('../src/components/DesktopPet.vue')
-  assert.match(desktopPet, /shimejiReducedMotion\.value \|\| store\.petWindowMode\.mode === 'mini'/)
+  assert.match(desktopPet, /petAnimationFrozen = computed\(\(\) => shimejiReducedMotion\.value\)[\s\S]*petLowFps = computed\(\(\) => store\.petWindowMode\.mode === 'mini'\)/)
   assert.match(desktopPet, /:freeze="petAnimationFrozen"/)
 })
 

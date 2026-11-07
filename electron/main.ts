@@ -26,7 +26,7 @@ import { ProgressionStore } from './progression'
 
 
 import { ProjectMcpRegistryStore } from './project-mcp-registry'
-import { installProjectMcp, removeProjectMcp } from './project-mcp-setup'
+import { installProjectMcp, planProjectMcp, removeProjectMcp } from './project-mcp-setup'
 
 import { PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES } from './plugin-registry'
 
@@ -81,6 +81,8 @@ import { registerDesktopIpc } from './ipc/desktop'
 import { registerPermissionIpc } from './ipc/permission'
 import { registerAdapterIpc } from './ipc/adapters'
 import { registerProjectMcpIpc } from './ipc/project-mcp'
+import { registerOnboardingIpc } from './ipc/onboarding'
+import { OnboardingStore } from './onboarding-state'
 import { registerProjectPetsIpc } from './ipc/project-pets'
 
 import { registerPetAssetIpc } from './ipc/pet-assets'
@@ -100,7 +102,7 @@ import { flushMainLog, logMain, teeConsoleToLog } from './diagnostics/main-log'
 import { acquireRunMarker } from './diagnostics/session-marker'
 import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
 import { setPluginPanelWindowBounds } from './main/runtime'
-import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt } from './main/runtime'
+import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleEdgeRedock, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt } from './main/runtime'
 
 
 
@@ -431,6 +433,9 @@ async function bootstrapApp(): Promise<void> {
     clampWindowBounds,
     setNormalPetBounds: bounds => { mainState.normalPetBounds = bounds },
     scheduleShimejiPositionPersist,
+    repositionVisiblePanel,
+    scheduleEdgeRedock,
+    smoothWalk: true,
   })
 
   registerWindowControlsIpc({
@@ -565,6 +570,13 @@ async function bootstrapApp(): Promise<void> {
     logError: (message, error) => console.error(message, error),
   })
 
+  const onboardingStore = new OnboardingStore(join(app.getPath('userData'), 'onboarding.json'))
+  registerOnboardingIpc({
+    ipcMain,
+    assertTrustedIpcSender: event => assertTrustedIpcSender(event),
+    getStore: () => onboardingStore,
+  })
+
   registerProjectMcpIpc({
     ipcMain,
     assertTrustedIpcSender,
@@ -577,6 +589,7 @@ async function bootstrapApp(): Promise<void> {
     installOptions: () => ({ nodeExecutable: resolveNodeBin(), bridgePath: presentationMcpScriptPath() }),
     getRegistry: () => mainState.projectMcpRegistry,
     installProjectMcp,
+    planProjectMcp,
     removeProjectMcp,
   })
 

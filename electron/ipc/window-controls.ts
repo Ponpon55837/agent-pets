@@ -11,6 +11,8 @@ export interface WindowControlsIpcDependencies {
   ipcMain: Pick<IpcMain, 'on'>
   isTrustedIpcSender(event: IpcMainEvent, requiredWindow?: BrowserWindow | null): boolean
   assertTrustedIpcSender(event: IpcMainEvent, requiredWindow?: BrowserWindow | null): void
+  /** Defaults to process.platform; injectable for tests. */
+  platform?: NodeJS.Platform
   getPetWindow(): BrowserWindow | null
   getPanelWindow(): BrowserWindow | null
   getDesktopPreferences(): DesktopPreferences
@@ -52,6 +54,9 @@ export function registerWindowControlsIpc(deps: WindowControlsIpcDependencies): 
     const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
     const ignore = data.ignore
     if (typeof ignore !== 'boolean') return
+    // Electron cannot forward mouse-move over an ignored window on Linux, so
+    // once click-through is on there is no way to switch it off again.
+    if (ignore && (deps.platform ?? process.platform) === 'linux') return
     if (ignore) petWindow.setIgnoreMouseEvents(true, { forward: true })
     else petWindow.setIgnoreMouseEvents(false)
   })
