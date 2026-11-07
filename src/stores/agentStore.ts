@@ -29,6 +29,7 @@ import type {
 import { PRESENTATION_REACTIONS } from '@/types/presentation'
 import { formatProject } from '@/utils/format'
 import { AgentSessionIndex } from '@/utils/agent-session-index'
+import { readPetFeedbackDefaults } from '@/utils/pet-defaults'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
 import {
@@ -333,10 +334,16 @@ export const useAgentStore = defineStore('agent', () => {
   // Off by default — the click/state-change bounce, idle fidget sway, and
   // waiting-permission shake found it distracting. Off leaves the core
   // sprite state animation (and frame speed-up / mood glow) untouched.
-  const reactionsEnabled = ref(localStorage.getItem('agent-pet-fx') === '1')
+  // On by default (key-event feedback: reaction bounce, urgency shake, reward
+  // glow). Decorative ambient motion is a separate, opt-in switch below.
+  const feedbackDefaults = readPetFeedbackDefaults(localStorage)
+  const reactionsEnabled = ref(feedbackDefaults.reactions)
 
-  // Off by default — the completion toast / "what's it doing" bubble.
-  const bubbleEnabled = ref(localStorage.getItem('agent-pet-bubble') === '1')
+  // On by default — completion / failure / waiting bubbles. The noisier
+  // "what's it doing" tool-activity bubble is its own opt-in switch.
+  const bubbleEnabled = ref(feedbackDefaults.bubble)
+  const ambientEnabled = ref(feedbackDefaults.ambient)
+  const activityBubbleEnabled = ref(feedbackDefaults.activity)
   // shallowRef: all three are always replaced wholesale (setPermissionRequests,
   // setProgressionSnapshot, setAchievementsSnapshot each assign a fresh value),
   // never mutated in place — see the comment on quotaUsage above.
@@ -383,6 +390,12 @@ export const useAgentStore = defineStore('agent', () => {
     dndEnabled.value,
     bubbleEnabled.value,
   ))
+  const ambientActive = computed(() => isDesktopEffectActive(
+    desktopPreferencesReady.value,
+    dndEnabled.value,
+    ambientEnabled.value,
+  ))
+  const activityBubbleActive = computed(() => bubbleActive.value && activityBubbleEnabled.value)
   // Presentation-only preference; it never changes Broker or adapter state.
   const permissionBubbleActive = computed(() => (
     desktopPreferencesReady.value && permissionBubbleEnabled.value
@@ -810,6 +823,16 @@ export const useAgentStore = defineStore('agent', () => {
   function setBubbleEnabled(enabled: boolean) {
     bubbleEnabled.value = enabled
     localStorage.setItem('agent-pet-bubble', enabled ? '1' : '0')
+  }
+
+  function setAmbientEnabled(enabled: boolean) {
+    ambientEnabled.value = enabled
+    localStorage.setItem('agent-pet-ambient', enabled ? '1' : '0')
+  }
+
+  function setActivityBubbleEnabled(enabled: boolean) {
+    activityBubbleEnabled.value = enabled
+    localStorage.setItem('agent-pet-activity', enabled ? '1' : '0')
   }
 
   // --- 寵物選擇與視窗模式 -----------------------------------------------------
@@ -1707,8 +1730,12 @@ export const useAgentStore = defineStore('agent', () => {
     multiPetEnabled,
     reactionsEnabled,
     bubbleEnabled,
+    ambientEnabled,
+    activityBubbleEnabled,
     reactionsActive,
     bubbleActive,
+    ambientActive,
+    activityBubbleActive,
     permissionBubbleActive,
     isMultiPet,
     activeSessions,
@@ -1782,6 +1809,8 @@ export const useAgentStore = defineStore('agent', () => {
     setMultiPetEnabled,
     setReactionsEnabled,
     setBubbleEnabled,
+    setAmbientEnabled,
+    setActivityBubbleEnabled,
     setFamilyPet,
     getPetForFamily,
     resetMood,

@@ -1,1 +1,6 @@
-{}
+{
+  "pet.ambientMotion": "待機小動作",
+  "pet.ambientMotionHelp": "閒置與工作時的呼吸、搖擺等裝飾動畫",
+  "pet.activityBubble": "工作中提示",
+  "pet.activityBubbleHelp": "顯示 Agent 正在使用的工具"
+}

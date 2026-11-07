@@ -1,1 +1,6 @@
-{}
+{
+  "pet.ambientMotion": "Ambient motion",
+  "pet.ambientMotionHelp": "Decorative breathing and sway while idle or working",
+  "pet.activityBubble": "Working hint",
+  "pet.activityBubbleHelp": "Show the tool the agent is currently using"
+}

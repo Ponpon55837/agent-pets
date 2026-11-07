@@ -212,7 +212,7 @@ const bubbleSelection = computed(() => {
     permissionNotice,
     agentToast: Boolean(agentBubbleEnabled && store.toast),
     presentationSay: Boolean(store.presentationSay),
-    activity: Boolean(agentBubbleEnabled && !store.toast && !isMultiPet.value && store.activityText),
+    activity: Boolean(store.activityBubbleActive && agentBubbleEnabled && !store.toast && !isMultiPet.value && store.activityText),
     pluginFeed: pluginFeed ? {
       priority: pluginFeed.priority,
       controls: {

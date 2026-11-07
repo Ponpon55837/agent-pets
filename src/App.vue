@@ -139,9 +139,13 @@ function handleStorage(e: StorageEvent) {
   } else if (e.key === 'agent-pet-multi') {
     store.multiPetEnabled = e.newValue === '1'
   } else if (e.key === 'agent-pet-fx') {
-    store.reactionsEnabled = e.newValue === '1'
+    store.reactionsEnabled = e.newValue !== '0'
   } else if (e.key === 'agent-pet-bubble') {
-    store.bubbleEnabled = e.newValue === '1'
+    store.bubbleEnabled = e.newValue !== '0'
+  } else if (e.key === 'agent-pet-ambient') {
+    store.ambientEnabled = e.newValue === '1'
+  } else if (e.key === 'agent-pet-activity') {
+    store.activityBubbleEnabled = e.newValue === '1'
   } else if (e.key === 'agent-pet-mood' && e.newValue) {
     store.mood = parseFloat(e.newValue)
   } else if (e.key === 'agent-pet-mood-visuals') {

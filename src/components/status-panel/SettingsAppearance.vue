@@ -31,5 +31,7 @@ const scaleOptions = [
   <Card :title="t('petReactions')">
     <ToggleRow :model-value="store.reactionsEnabled" :label="t('bounceShake')" :help="t('animateStatus')" @update:model-value="store.setReactionsEnabled($event)" />
     <ToggleRow :model-value="store.bubbleEnabled" :label="t('statusBubble')" :help="t('showCompletionError')" @update:model-value="store.setBubbleEnabled($event)" />
+    <ToggleRow :model-value="store.ambientEnabled" :label="t('pet.ambientMotion')" :help="t('pet.ambientMotionHelp')" @update:model-value="store.setAmbientEnabled($event)" />
+    <ToggleRow :model-value="store.activityBubbleEnabled" :label="t('pet.activityBubble')" :help="t('pet.activityBubbleHelp')" @update:model-value="store.setActivityBubbleEnabled($event)" />
   </Card>
 </template>

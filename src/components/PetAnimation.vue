@@ -688,12 +688,12 @@ onUnmounted(() => {
       class="pet-canvas"
       :class="{
         'pet-reacting': store.reactionsActive && isReacting,
-        'pet-fidgeting': store.reactionsActive && isFidgeting && !isReacting && urgencyLevel === 0,
+        'pet-fidgeting': store.ambientActive && isFidgeting && !isReacting && urgencyLevel === 0,
         'pet-urgent-1': store.reactionsActive && !isReacting && urgencyLevel === 1,
         'pet-urgent-2': store.reactionsActive && !isReacting && urgencyLevel === 2,
-        'pet-idle-ambient': store.reactionsActive && props.state === 'idle' && !isReacting && !isFidgeting,
-        'pet-thinking-ambient': store.reactionsActive && props.state === 'thinking' && !isReacting,
-        'pet-tool-ambient': store.reactionsActive && props.state === 'tool-running' && !isReacting,
+        'pet-idle-ambient': store.ambientActive && props.state === 'idle' && !isReacting && !isFidgeting,
+        'pet-thinking-ambient': store.ambientActive && props.state === 'thinking' && !isReacting,
+        'pet-tool-ambient': store.ambientActive && props.state === 'tool-running' && !isReacting,
         'pet-waiting-input': store.reactionsActive && props.state === 'waiting-input' && !isReacting && urgencyLevel === 0,
         'pet-rewarding': store.reactionsActive && isRewarding,
         'pet-offline-ambient': props.state === 'offline',
