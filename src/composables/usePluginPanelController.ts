@@ -26,7 +26,25 @@ import type {
 import type { PluginCatalogPanelItem } from '@/types/plugin-catalog'
 import { DEFAULT_PLUGIN_CATALOG_URL, shouldShowCatalogPermissionCheck } from '@/types/plugin-catalog'
 import { isValidPetId } from '@/utils/pet-id'
+import {
+  groupPermissionUnits, installAcknowledgementReasons, parsePermissionUnit, permissionUnitsOfPlan,
+  type PermissionGroupId, type PermissionRisk,
+} from '@/utils/plugin-permissions'
 import { usePluginNotify } from '@/composables/plugin/usePluginNotify'
+export interface PermissionEntryView {
+  unit: string
+  label: string
+  hint: string
+  risk: PermissionRisk
+  known: boolean
+}
+
+export interface PermissionGroupView {
+  id: PermissionGroupId
+  risk: PermissionRisk
+  entries: PermissionEntryView[]
+}
+
 export type PluginDetailSection = 'overview' | 'settings' | 'commands' | 'diagnostics'
 
 export function usePluginPanelController(props: { requestedPluginId?: string }) {
@@ -725,7 +743,6 @@ async function selectArchive(): Promise<void> {
       return
     }
     pendingPlan.value = result.value
-    if (result.value.kind === 'incompatible') setError('incompatible')
   } catch {
     setError('plugin_action_failed')
   } finally {
@@ -744,7 +761,6 @@ async function selectDeveloperFolder(): Promise<void> {
       return
     }
     pendingPlan.value = result.value
-    if (result.value.kind === 'incompatible') setError('incompatible')
   } catch {
     setError('plugin_action_failed')
   } finally {
@@ -764,9 +780,8 @@ function planKindLabel(plan: PluginInstallPlan): string {
 }
 
 function permissionLabel(unit: string): string {
-  const separator = unit.indexOf(':')
-  const kind = separator < 0 ? unit : unit.slice(0, separator)
-  const detail = separator < 0 ? '' : unit.slice(separator + 1)
+  const { kind, detail } = parsePermissionUnit(unit)
+  if (kind === 'network' && detail === 'userGranted') return t('plugins.permNetworkUserGranted')
   if (kind === 'network') return t('pluginPermissionNetwork', { host: detail })
   if (kind === 'links') return t('pluginPermissionLinks', { host: detail })
   if (kind === 'storage') return t('pluginPermissionStorage')
@@ -781,31 +796,60 @@ function permissionLabel(unit: string): string {
   if (detail === 'badge') return t('pluginPermissionBadge')
   if (detail === 'eventSource') return t('pluginPermissionEventSource')
   if (detail.startsWith('skins:')) return t('pluginPermissionSkins', { count: detail.slice(6) })
-  return unit
+  return t('plugins.permUnknown', { unit })
 }
 
-const pendingPermissions = computed(() => {
-  const plan = pendingPlan.value
-  if (!plan) return []
-  const permissionUnits: string[] = []
-  for (const host of plan.permissions?.network?.hosts ?? []) permissionUnits.push(`network:${host}`)
-  for (const host of plan.permissions?.links?.hosts ?? []) permissionUnits.push(`links:${host}`)
-  if (plan.permissions?.storage) permissionUnits.push('storage')
-  if (plan.permissions?.agentStatus) permissionUnits.push('agentStatus')
-  if (plan.permissions?.schedule) permissionUnits.push('schedule')
-  for (const secret of plan.permissions?.secrets ?? []) permissionUnits.push(`secrets:${secret}`)
-  if (plan.contributes?.feed) permissionUnits.push('contributes:feed')
-  if (plan.contributes?.reaction) permissionUnits.push('contributes:reaction')
-  if (plan.contributes?.panelView) permissionUnits.push('contributes:panelView')
-  if (plan.contributes?.commands?.length) permissionUnits.push('contributes:commands')
-  if (plan.contributes?.tray?.commands.length) permissionUnits.push('contributes:tray')
-  if (plan.contributes?.badge) permissionUnits.push('contributes:badge')
-  if (plan.contributes?.skins?.length) permissionUnits.push(`contributes:skins:${plan.contributes.skins.length}`)
-  if (plan.contributes?.eventSource) permissionUnits.push('contributes:eventSource')
-  return permissionUnits.map(permissionLabel)
-})
+function permissionHint(unit: string): string {
+  const { kind, detail } = parsePermissionUnit(unit)
+  if (kind === 'network' && detail === 'userGranted') return t('plugins.hintNetworkUserGranted')
+  if (kind === 'network') return t('plugins.hintNetwork')
+  if (kind === 'links') return t('plugins.hintLinks')
+  if (kind === 'storage') return t('plugins.hintStorage')
+  if (kind === 'agentStatus') return t('plugins.hintAgentStatus')
+  if (kind === 'schedule') return t('plugins.hintSchedule')
+  if (kind === 'secrets') return t('plugins.hintSecrets')
+  if (detail === 'feed') return t('plugins.hintFeed')
+  if (detail === 'reaction') return t('plugins.hintReaction')
+  if (detail === 'panelView') return t('plugins.hintPanel')
+  if (detail === 'commands') return t('plugins.hintCommands')
+  if (detail === 'tray') return t('plugins.hintTray')
+  if (detail === 'badge') return t('plugins.hintBadge')
+  if (detail === 'eventSource') return t('plugins.hintEventSource')
+  if (detail.startsWith('skins:')) return t('plugins.hintSkins')
+  return t('plugins.hintUnknown')
+}
 
-const pendingAddedPermissions = computed(() => (pendingPlan.value?.addedPermissions ?? []).map(permissionLabel))
+function toGroupViews(units: readonly string[]): PermissionGroupView[] {
+  return groupPermissionUnits(units).map(group => ({
+    id: group.id,
+    risk: group.risk,
+    entries: group.entries.map(entry => ({
+      unit: entry.unit,
+      label: permissionLabel(entry.unit),
+      hint: permissionHint(entry.unit),
+      risk: entry.risk,
+      known: entry.known,
+    })),
+  }))
+}
+
+// 更新時：新增權限單獨置頂，既有權限折疊；新安裝時所有權限都是「新增」。
+const pendingPermissionSections = computed(() => {
+  const plan = pendingPlan.value
+  if (!plan) return { isUpdate: false, added: [] as PermissionGroupView[], existing: [] as PermissionGroupView[], existingCount: 0 }
+  const units = permissionUnitsOfPlan(plan)
+  const isUpdate = plan.requiresReconsent && plan.addedPermissions.length > 0
+  if (!isUpdate) return { isUpdate: false, added: toGroupViews(units), existing: [], existingCount: 0 }
+  const added = new Set(plan.addedPermissions)
+  const existingUnits = units.filter(unit => !added.has(unit))
+  return {
+    isUpdate: true,
+    added: toGroupViews(plan.addedPermissions),
+    existing: toGroupViews(existingUnits),
+    existingCount: existingUnits.length,
+  }
+})
+const installAcknowledgements = computed(() => installAcknowledgementReasons(pendingPlan.value))
 
 async function confirmInstall(): Promise<void> {
   const plan = pendingPlan.value
@@ -1036,8 +1080,8 @@ onUnmounted(() => {
     pendingPluginName,
     resourceFields,
     failedPluginIconIds,
-    pendingPermissions,
-    pendingAddedPermissions,
+    pendingPermissionSections,
+    installAcknowledgements,
     pluginName,
     pluginIconUrl,
     hidePluginIcon,
@@ -1082,6 +1126,7 @@ onUnmounted(() => {
     selectDeveloperFolder,
     planKindLabel,
     permissionLabel,
+    permissionHint,
     confirmInstall,
     requestRemove,
     confirmRemove,

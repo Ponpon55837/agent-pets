@@ -2,6 +2,7 @@
 import { nextTick, onUnmounted, ref, watch } from 'vue'
 import { t } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
+import { FOCUSABLE_SELECTOR, nextTrapIndex } from '@/utils/focus-trap'
 
 // Replaces window.confirm(). The native dialog steals focus from the panel,
 // which the main process reads as a blur and hides the panel out from under
@@ -36,29 +37,30 @@ function onKeydown(event: KeyboardEvent) {
     return
   }
   if (event.key !== 'Tab') return
-  // Keep Tab inside the dialog while it is open.
-  const focusable = dialogRef.value?.querySelectorAll<HTMLElement>('button')
-  if (!focusable?.length) return
-  const first = focusable[0]
-  const last = focusable[focusable.length - 1]
-  if (event.shiftKey && document.activeElement === first) {
+  // Keep Tab inside the dialog while it is open. Inputs inside the slot (such as
+  // a confirmation checkbox) are part of the loop, not just the buttons.
+  const focusable = Array.from(dialogRef.value?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? [])
+  const target = nextTrapIndex(focusable.length, focusable.indexOf(document.activeElement as HTMLElement), event.shiftKey)
+  if (target !== null) {
     event.preventDefault()
-    last.focus()
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault()
-    first.focus()
+    focusable[target].focus()
   }
 }
+
+let returnFocusTo: HTMLElement | null = null
 
 // Focus the designated action on open so keyboard confirmation stays explicit.
 watch(() => props.open, async (open) => {
   if (open) {
+    returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
     window.addEventListener('keydown', onKeydown, true)
     await nextTick()
     const selector = props.focusCancel ? '[data-cancel]' : '[data-confirm]'
     ;(dialogRef.value?.querySelector(selector) as HTMLElement | null)?.focus()
   } else {
     window.removeEventListener('keydown', onKeydown, true)
+    if (returnFocusTo?.isConnected) returnFocusTo.focus()
+    returnFocusTo = null
   }
 })
 

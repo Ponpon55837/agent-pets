@@ -12,6 +12,7 @@ import PluginDetail from '@/components/plugin-panel/PluginDetail.vue'
 import PluginCatalog from '@/components/plugin-panel/PluginCatalog.vue'
 import PluginInstalledList from '@/components/plugin-panel/PluginInstalledList.vue'
 import PluginNotificationInbox from '@/components/plugin-panel/PluginNotificationInbox.vue'
+import PluginInstallSheet from '@/components/plugin-panel/PluginInstallSheet.vue'
 import PluginPanelDialogs from '@/components/plugin-panel/PluginPanelDialogs.vue'
 import PluginPanelFrame from '@/components/plugin-panel/PluginPanelFrame.vue'
 import { PLUGIN_PANEL_CONTROLLER } from '@/composables/plugin/context'
@@ -22,10 +23,9 @@ const controller = usePluginPanelController(props)
 provide(PLUGIN_PANEL_CONTROLLER, controller)
 const {
   snapshot, notifications, plugins, catalogItems, busy, loading, toasts, dismissToast, runToastAction,
-  detailPlugin, panelViewPlugin, panelViewFrame, panelViewContent, pendingPlan, pendingRemove, pendingSecretConsentKey,
-  keepData, enabledGlobally, pendingPluginName, pendingPermissions, pendingAddedPermissions,
-  displayFingerprint, planKindLabel, pluginName, refreshPanel, selectArchive, selectDeveloperFolder,
-  updateGlobalPreferences, confirmInstall, confirmRemove, confirmSecretConsent,
+  detailPlugin, panelViewPlugin, panelViewFrame, panelViewContent, pendingRemove, pendingSecretConsentKey,
+  keepData, enabledGlobally, pluginName, refreshPanel, selectArchive, selectDeveloperFolder,
+  updateGlobalPreferences, confirmRemove, confirmSecretConsent,
 } = controller
 
 type PluginTab = 'installed' | 'explore' | 'notifications' | 'advanced'
@@ -168,18 +168,11 @@ function showTab(tab: PluginTab): void {
 
     </div>
 
+    <PluginInstallSheet />
     <PluginPanelDialogs
-      :plan="pendingPlan"
-      :pending-plugin-name="pendingPluginName"
-      :pending-permissions="pendingPermissions"
-      :pending-added-permissions="pendingAddedPermissions"
       :remove-name="pendingRemove ? pluginName(pendingRemove) : ''"
       :keep-data="keepData"
       :secret-consent-open="pendingSecretConsentKey !== ''"
-      :display-fingerprint="displayFingerprint"
-      :plan-kind-label="planKindLabel"
-      @confirm-install="confirmInstall"
-      @cancel-install="pendingPlan = null"
       @confirm-remove="confirmRemove"
       @cancel-remove="pendingRemove = null"
       @update-keep-data="keepData = $event"
