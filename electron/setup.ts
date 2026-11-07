@@ -1,8 +1,8 @@
-import { app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { randomBytes } from 'crypto'
+import { setupEnvironment } from './setup-environment.ts'
 import { createNodeResolver, NodeNotFoundError, NodeUnsupportedError, type NodeInfo } from './node-resolver.ts'
 import type { PetEdge, PetWindowMode } from '../src/types/pet-window'
 import { readConfigText, writeConfigSafely, writeTextAtomic, type ConfigWriteResult } from './safe-config-write.ts'
@@ -24,11 +24,11 @@ const IS_WIN = process.platform === 'win32'
 const IS_MAC = process.platform === 'darwin'
 
 function homeDir(): string {
-  return os.homedir()
+  return setupEnvironment().homeDir()
 }
 
 function appDataDir(): string {
-  return app.getPath('userData')
+  return setupEnvironment().userData()
 }
 
 // Node resolution lives in node-resolver.ts (async, validated cache, no bare-"node" fallback).
@@ -41,6 +41,8 @@ export function resolveNodeBin(): string {
 
 /** Resolve (async) and validate Node.js before an install that writes a hook command. */
 export async function prepareNodeForInstall(): Promise<NodeInfo> {
+  const fixed = setupEnvironment().nodePath?.()
+  if (fixed) return { path: fixed, version: null, supported: true }
   const info = await nodeResolver.resolve()
   if (!info) throw new NodeNotFoundError()
   if (!info.supported) throw new NodeUnsupportedError(info.version)
@@ -49,6 +51,8 @@ export async function prepareNodeForInstall(): Promise<NodeInfo> {
 
 /** Synchronous accessor for installers; prepareNodeForInstall() must have succeeded first. */
 function requireNodeBin(): string {
+  const fixed = setupEnvironment().nodePath?.()
+  if (fixed) return fixed
   const info = nodeResolver.peek() ?? nodeResolver.resolveSync()
   if (!info) throw new NodeNotFoundError()
   return info.path
@@ -68,7 +72,7 @@ function openCodeDesktopPluginPath(): string {
   if (IS_MAC) {
     return path.join(homeDir(), 'Library', 'Application Support', 'opencode', 'plugin', 'desktop-pet.js')
   }
-  return path.join(app.getPath('appData'), 'opencode', 'plugin', 'desktop-pet.js')
+  return path.join(setupEnvironment().appData(), 'opencode', 'plugin', 'desktop-pet.js')
 }
 
 // --- Codex hooks.json ---
@@ -89,7 +93,7 @@ function claudeDesktopConfigPath(): string {
   if (IS_MAC) {
     return path.join(homeDir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
   }
-  return path.join(app.getPath('appData'), 'Claude', 'claude_desktop_config.json')
+  return path.join(setupEnvironment().appData(), 'Claude', 'claude_desktop_config.json')
 }
 
 // --- Claude Code settings.json (shared by CLI & Desktop) ---
@@ -277,10 +281,13 @@ function ensurePresentationToken(): string {
 // extraResources; in dev __dirname is <project>/dist-electron so '..' lands
 // back on the project root, matching getPetsJsonPath's dev/prod split.
 function integrationsDir(): string {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'integrations')
+  const env = setupEnvironment()
+  if (env.isPackaged()) {
+    return path.join(env.resourcesPath(), 'integrations')
   }
-  return path.join(__dirname, '..', 'integrations')
+  const dev = env.integrationsDir()
+  if (!dev) throw new Error('The integrations folder location is not configured')
+  return dev
 }
 
 function ensurePresentationMcpScript(): void {
