@@ -103,6 +103,7 @@ export interface ElectronAPI {
       reportContentHeight: (height: number) => void
       setMousePassthrough: (ignore: boolean) => void
       requestPetHide: () => void
+      showPetContextMenu: () => void
       getOnboardingState: () => Promise<OnboardingState | null>
       updateOnboardingState: (action: OnboardingAction) => Promise<OnboardingState | null>
       togglePanel: () => void

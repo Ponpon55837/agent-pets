@@ -573,6 +573,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (singleClickTimer) clearTimeout(singleClickTimer)
   if (coachTimer) clearTimeout(coachTimer)
   contentObserver?.disconnect()
   contentObserver = null
@@ -674,6 +675,22 @@ function onEdgeMouseDown(e: MouseEvent): void {
   onMouseDown(e)
 }
 
+// A single click waits briefly so a double click (pat) can cancel it instead of
+// also toggling the panel twice.
+const SINGLE_CLICK_DELAY_MS = 220
+let singleClickTimer: ReturnType<typeof setTimeout> | null = null
+
+function onDoubleClick(e: MouseEvent): void {
+  if (e.button !== 0 || hasMoved.value) return
+  if (singleClickTimer) clearTimeout(singleClickTimer)
+  singleClickTimer = null
+  // Rewarded pats show a heart and bump mood; capped pats still react.
+  store.patPet()
+  const reaction = 'encouraging' as const
+  if (isMultiPet.value) multiPetAnimations().forEach(anim => anim.playReaction(reaction))
+  else petAnimRef.value?.playReaction(reaction)
+}
+
 function onClick(e: MouseEvent) {
   if (e.button !== 0) return
   if (hasMoved.value) return
@@ -683,11 +700,14 @@ function onClick(e: MouseEvent) {
   } else {
     petAnimRef.value?.playReaction()
   }
-  store.togglePanel()
+  if (singleClickTimer) clearTimeout(singleClickTimer)
+  singleClickTimer = setTimeout(() => {
+    singleClickTimer = null
+    store.togglePanel()
+  }, SINGLE_CLICK_DELAY_MS)
 }
 
 function onPetContextMenu(e: MouseEvent): void {
-  if (!store.rightClickHideEnabled) return
   const target = e.target instanceof Element ? e.target : null
   if (!target) return
   // Only the actual sprite and its compact Edge representation are hide
@@ -695,7 +715,9 @@ function onPetContextMenu(e: MouseEvent): void {
   // inherit this shortcut.
   const isPetSurface = Boolean(target.closest('[data-pet-context-target="hide"]'))
   if (!isPetSurface) return
-  window.electronAPI?.requestPetHide()
+  // "Hide on right-click" is an explicit opt-in; otherwise show the full menu.
+  if (store.rightClickHideEnabled) window.electronAPI?.requestPetHide()
+  else window.electronAPI?.showPetContextMenu()
 }
 
 // --- Presentation 與成就回饋動畫 ---------------------------------------------
@@ -752,6 +774,7 @@ watch(() => store.achievementUnlock, (unlock) => {
       :tabindex="store.petWindowMode.mode === 'edge' ? undefined : 0"
       :aria-label="store.petWindowMode.mode === 'edge' ? undefined : petAriaLabel"
       @keydown="onPetKeydown"
+      @dblclick="onDoubleClick"
       @mousedown="onMouseDown"
       @mouseenter="onPetPointerEnter"
       @mouseleave="pointerOverPet = false"

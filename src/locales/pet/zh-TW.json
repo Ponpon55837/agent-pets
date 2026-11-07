@@ -3,7 +3,7 @@
   "pet.ambientMotionHelp": "閒置與工作時的呼吸、搖擺等裝飾動畫",
   "pet.activityBubble": "工作中提示",
   "pet.activityBubbleHelp": "顯示 Agent 正在使用的工具",
-  "pet.coachText": "嗨！點我看工作階段，拖曳可以換位置。",
+  "pet.coachText": "嗨！點我看工作階段，拖曳可以換位置，按右鍵有更多選項。",
   "pet.coachDismiss": "知道了",
   "pet.toastDone": "完成",
   "pet.toastFailed": "失敗",
