@@ -44,6 +44,8 @@ type DatabaseSyncConstructor = new (filePath: string) => SqliteDatabase
 export interface HistoryStoreOptions {
   now?: () => number
   localDate?: (timestamp: number) => string
+  /** Local UTC offset in minutes at a time (+330 for India); 5-hour blocks floor to the local hour. */
+  timezoneOffsetMinutes?: (timestamp: number) => number
   retentionDays?: number
 }
 
@@ -71,15 +73,25 @@ const HISTORY_RANGES: readonly number[] = [7, 30, 90]
 const ACTIVE_STATES = new Set<AgentState>(['thinking', 'tool-running'])
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,256}$/
 const PROJECT_ID = /^[a-f0-9]{32}$/
-// 模型 id 只允許常見識別字元；`<synthetic>` 之類的佔位值或任何含空白/路徑跳脫的字串一律視為未知。
-const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,95}$/
+// 模型 id 只允許常見識別字元，最多一個 `provider/model` 斜線段；`<synthetic>` 之類的佔位值、
+// 含空白、`..`、磁碟代號或看起來像本機路徑（Users/、home/…）的字串一律視為未知，避免路徑外洩到 UI 或匯出。
+const MODEL_SEGMENT = '[A-Za-z0-9][A-Za-z0-9._:@+-]{0,63}'
+const MODEL_ID = new RegExp(`^${MODEL_SEGMENT}(?:/${MODEL_SEGMENT})?$`)
+const MAX_MODEL_ID_LENGTH = 96
+const PATH_ROOT_SEGMENTS = new Set([
+  'users', 'home', 'root', 'var', 'tmp', 'private', 'mnt', 'media', 'opt', 'usr', 'etc', 'volumes', 'library', 'srv',
+])
 // 5 小時區塊要往回找到「≥5 小時空檔」才能定出起點；只回看 24 小時，
 // 連續 24 小時沒有空檔的極端情況下，區塊起點會從回看窗口內第一筆重新對齊。
 const USAGE_BLOCK_LOOKBACK_MS = 24 * 60 * 60 * 1000
 const MAX_USAGE_BLOCK_ROWS = 50_000
 
 export function safeModelId(value: unknown): string {
-  return typeof value === 'string' && MODEL_ID.test(value) && !value.includes('..') ? value : ''
+  if (typeof value !== 'string' || value.length > MAX_MODEL_ID_LENGTH || !MODEL_ID.test(value)) return ''
+  if (value.includes('..') || /^[A-Za-z]:/.test(value)) return ''
+  const slash = value.indexOf('/')
+  if (slash >= 0 && PATH_ROOT_SEGMENTS.has(value.slice(0, slash).toLowerCase())) return ''
+  return value
 }
 
 function databaseConstructor(): DatabaseSyncConstructor {
@@ -265,6 +277,7 @@ export class HistoryStore {
   private readonly database: SqliteDatabase
   private readonly now: () => number
   private readonly localDate: (timestamp: number) => string
+  private readonly timezoneOffsetMinutes: (timestamp: number) => number
   private readonly retentionDays: number
   private readonly statements: StatementCache<SqliteStatement>
   private pragmas: SqlitePragmaState = { journalMode: '', synchronous: -1 }
@@ -284,6 +297,7 @@ export class HistoryStore {
     this.statements = new StatementCache(sql => this.database.prepare(sql))
     this.now = options.now ?? Date.now
     this.localDate = options.localDate ?? localDateKey
+    this.timezoneOffsetMinutes = options.timezoneOffsetMinutes ?? (timestamp => -new Date(timestamp).getTimezoneOffset())
     this.retentionDays = Math.min(MAX_RETENTION_DAYS, Math.max(1, Math.floor(options.retentionDays ?? DEFAULT_RETENTION_DAYS)))
     try {
       this.migrate()
@@ -937,7 +951,7 @@ export class HistoryStore {
     }))
     // Newest-first so the row cap drops the oldest rows; latestUsageBlocks re-sorts.
     // Only blocks that can still be current are useful to the Usage panel.
-    return latestUsageBlocks(entries).filter(block => now - block.lastActivityAt < USAGE_BLOCK_MS)
+    return latestUsageBlocks(entries, this.timezoneOffsetMinutes).filter(block => now - block.lastActivityAt < USAGE_BLOCK_MS)
   }
 
   getExport(petId = DEFAULT_PET_ID, projectId?: string, rangeDays: number = 7, growth?: unknown): HistoryExport {
@@ -1389,8 +1403,24 @@ export class HistoryStore {
     })
     // ensureModelSchema is idempotent on its own (column/table/index checks), so
     // a database whose v8 marker was lost, or a half-applied copy, still heals.
+    const modelTableExisted = Boolean(this.database.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'daily_model_stats'",
+    ).get())
     this.ensureModelSchema()
     const hasV8 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 8').get())
+    // The v8 marker alone does not prove the aggregate is populated: a table
+    // that was missing (just recreated) or is empty while local-usage rows
+    // exist is rebuilt here. Both probes are LIMIT 1 index lookups.
+    if (hasV8 && (
+      !modelTableExisted
+      || (
+        !this.statement('SELECT 1 FROM daily_model_stats LIMIT 1').get()
+        && this.statement("SELECT 1 FROM events WHERE type = 'agent.token_usage' AND occurred_at >= 0 LIMIT 1").get()
+      )
+    )) this.transaction(() => {
+      this.database.exec('DELETE FROM daily_model_stats')
+      this.rebuildModelStats()
+    })
     if (!hasV8) this.transaction(() => {
       // Additive: per-model token totals for local-log usage. Existing rows
       // keep an empty model ("unknown") until the next scan re-reads their log

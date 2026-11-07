@@ -96,3 +96,21 @@ test('non-finite timestamps are ignored and an empty input yields no blocks', ()
   assert.deepEqual(latestUsageBlocks([]), [])
   assert.deepEqual(latestUsageBlocks([entry('codex', Number.NaN)]), [])
 })
+
+test('blocks floor to the local hour in half- and quarter-hour time zones', () => {
+  // 2026-11-07 03:50 UTC is 09:20 in India (+5:30), 09:35 in Nepal (+5:45), 13:20 in Adelaide (+9:30).
+  const at = Date.UTC(2026, 10, 7, 3, 50, 0)
+  for (const [offset, localStartUtc] of [
+    [330, Date.UTC(2026, 10, 7, 3, 30, 0)],
+    [345, Date.UTC(2026, 10, 7, 3, 15, 0)],
+    [570, Date.UTC(2026, 10, 7, 3, 30, 0)],
+    [0, Date.UTC(2026, 10, 7, 3, 0, 0)],
+    [-210, Date.UTC(2026, 10, 7, 3, 30, 0)],
+  ] as const) {
+    assert.equal(floorToHour(at, offset), localStartUtc, `offset ${offset}`)
+    const [block] = latestUsageBlocks([entry('claude-code', at)], () => offset)
+    assert.equal(block!.startAt, localStartUtc, `block offset ${offset}`)
+    // The local wall-clock minute of the start is always :00.
+    assert.equal(new Date(block!.startAt + offset * 60_000).getUTCMinutes(), 0)
+  }
+})

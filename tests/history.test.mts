@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import test from 'node:test'
-import { HistoryStore, trimQueuedEvents } from '../electron/history.ts'
+import { HistoryStore, safeModelId, trimQueuedEvents } from '../electron/history.ts'
 import type { AgentStatusEvent } from '../src/types/agent.ts'
 
 function databasePath(): { filePath: string; directory: string } {
@@ -764,7 +764,7 @@ test('v8 migration adds the model column, model aggregates and token-time index 
 test('model aggregates follow updates, moves, clear and rebuild, and usage blocks come from local rows', (t) => {
   let now = Date.UTC(2026, 7, 13, 10, 30, 0)
   const database = databasePath()
-  const store = new HistoryStore(database.filePath, { now: () => now, localDate: timestamp => new Date(timestamp).toISOString().slice(0, 10) })
+  const store = new HistoryStore(database.filePath, { now: () => now, localDate: timestamp => new Date(timestamp).toISOString().slice(0, 10), timezoneOffsetMinutes: () => 0 })
   t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
   const base = { adapterId: 'claude-code', agentId: 'claude', quality: 'exact' as const }
   store.recordTokenUsage({ ...base, sourceEventId: 'm1', occurredAt: now - 20 * 60_000, input: 10, output: 1, model: 'claude-sonnet-4-5' })
@@ -790,4 +790,35 @@ test('model aggregates follow updates, moves, clear and rebuild, and usage block
   assert.deepEqual(store.getSummary().usageBlocks, [])
   store.clear()
   assert.deepEqual(read(), [])
+})
+
+test('a v8 database whose model aggregate is missing or empty is rebuilt on open', (t) => {
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  t.after(() => fs.rmSync(database.directory, { recursive: true, force: true }))
+  const options = { now: () => now, localDate: () => '2026-08-13' }
+  const first = new HistoryStore(database.filePath, options)
+  first.recordTokenUsage({ adapterId: 'codex', agentId: 'codex', sourceEventId: 'a', occurredAt: now - 1_000, input: 8, output: 2, quality: 'exact', model: 'gpt-5-codex' })
+  first.close()
+  const DatabaseSync = (createRequire(import.meta.url)('node:sqlite') as { DatabaseSync: new (file: string) => { exec(sql: string): void, close(): void } }).DatabaseSync
+  for (const damage of ['DROP TABLE daily_model_stats', 'DELETE FROM daily_model_stats']) {
+    const raw = new DatabaseSync(database.filePath)
+    raw.exec(damage)
+    raw.close()
+    const store = new HistoryStore(database.filePath, options)
+    assert.deepEqual(store.getSummary().models.map(stat => [stat.model, stat.tokenInput]), [['gpt-5-codex', 8]], damage)
+    store.close()
+  }
+})
+
+test('model ids that look like paths, drives or placeholders are rejected', () => {
+  for (const ok of ['claude-sonnet-4-5-20250929', 'gpt-5.1-codex', 'openai/gpt-5', 'us.anthropic.claude-opus-4-5-v1:0', 'models/gemini-2.5-pro']) {
+    assert.equal(safeModelId(ok), ok)
+  }
+  for (const bad of [
+    'Users/name/x', 'users/alice', 'home/bob', 'Users/name', 'a/b/c', '/abs', 'C:/x', 'c:model', '../x', 'a/../b',
+    '<synthetic>', 'has space', '~/x', 'x'.repeat(97), '', 42, null,
+  ]) {
+    assert.equal(safeModelId(bad), '', String(bad))
+  }
 })
