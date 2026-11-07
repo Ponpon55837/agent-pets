@@ -62,7 +62,7 @@ import { createPermissionAdapterServer, PERMISSION_ADAPTER_PORT, PermissionAdapt
 import type { DesktopPreferences } from '../../src/types/desktop'
 import { locale, setLocale, t } from '../../src/i18n'
 import tokensCss from '../../src/styles/tokens.css?raw'
-import type { ProgressionSnapshot } from '../../src/types/progression'
+import type { ProgressionAwardEvent, ProgressionEventResult, ProgressionSnapshot } from '../../src/types/progression'
 import type { AchievementUnlock } from '../../src/types/achievement'
 import type { HistorySummary } from '../../src/types/history'
 import type { PresentationIntent } from '../../src/types/presentation'
@@ -2335,6 +2335,27 @@ export function broadcastProgression(snapshot?: ProgressionSnapshot): void {
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
     if (window && !window.isDestroyed()) {
       window.webContents.send(IPC_CHANNELS.progressionUpdated, next)
+    }
+  }
+}
+
+// Tells the pet and panel windows that XP was actually granted (the awards are
+// already deduplicated by the ledger, so a replayed event produces none). The
+// renderer derives toasts and level-up celebrations from this, never XP itself.
+export function broadcastProgressionAwards(result: ProgressionEventResult): void {
+  if (result.awards.length === 0) return
+  const payload: ProgressionAwardEvent = {
+    petId: result.snapshot.petId,
+    awards: result.awards.map(award => ({ ruleId: award.ruleId, amount: award.amount })),
+    at: Date.now(),
+    levelBefore: result.levelBefore,
+    levelAfter: result.snapshot.level,
+    stageBefore: result.stageBefore,
+    stageAfter: result.snapshot.evolutionStage,
+  }
+  for (const window of [mainState.petWindow, mainState.panelWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send(IPC_CHANNELS.progressionAwarded, payload)
     }
   }
 }

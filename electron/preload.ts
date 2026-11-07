@@ -4,7 +4,7 @@ import type { AdapterDiagnoseIpcResult, AdapterInstallIpcResult, AdapterUninstal
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
 import type { PermissionDecisionValue, PermissionRequestView } from '../src/types/permission'
-import type { ProgressionSnapshot } from '../src/types/progression'
+import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
@@ -260,6 +260,18 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.on(IPC_CHANNELS.achievementUnlocked, handler)
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.achievementUnlocked, handler)
+    }
+  },
+
+  getProgressionInsights: (petId?: string): Promise<ProgressionInsights | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.progressionInsights, petId)
+  },
+
+  onProgressionAwarded: (callback: (event: ProgressionAwardEvent) => void) => {
+    const handler = (_event: unknown, payload: ProgressionAwardEvent) => callback(payload)
+    ipcRenderer.on(IPC_CHANNELS.progressionAwarded, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.progressionAwarded, handler)
     }
   },
 

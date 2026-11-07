@@ -28,5 +28,18 @@
   "growth.refreshNow": "立即更新",
   "growth.quotaEmptyTitle": "還沒有額度資料",
   "growth.quotaEmptyBody": "登入 Codex 或 Claude Code CLI 後，這裡會顯示訂閱額度。",
-  "growth.quotaLoading": "正在載入額度…"
+  "growth.quotaLoading": "正在載入額度…",
+  "growth.ruleSessionCompleted": "完成工作階段",
+  "growth.ruleFirstCompletion": "每日首次完成",
+  "growth.ruleActiveTime": "持續專注 30 分鐘",
+  "growth.ruleDailyStreak": "連續使用加成",
+  "growth.ruleUnknown": "其他獎勵",
+  "growth.xpSourcesTitle": "如何獲得 XP",
+  "growth.xpSourceSession": "完成一個工作階段　+{xp}",
+  "growth.xpSourceFirst": "每日第一次完成　+{xp}",
+  "growth.xpSourceActive": "每專注 30 分鐘　+{xp}（每個工作階段最多 +{max}）",
+  "growth.xpSourceStreak": "連續第二天起每天　+{xp}",
+  "growth.recentTitle": "最近獲得",
+  "growth.recentEmpty": "完成第一個工作階段後，這裡會顯示每筆 XP 的來源。",
+  "growth.xpAmount": "+{amount}"
 }

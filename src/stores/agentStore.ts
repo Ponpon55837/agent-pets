@@ -30,6 +30,14 @@ import { PRESENTATION_REACTIONS } from '@/types/presentation'
 import { formatProject } from '@/utils/format'
 import { AgentSessionIndex } from '@/utils/agent-session-index'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
+import {
+  levelUpFromAward,
+  normalizeProgressionAwardEvent,
+  RECENT_AWARD_LIMIT,
+  recentAwardsFromEvent,
+  type LevelUpEvent,
+  type RecentAward,
+} from '@/utils/progression-events'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
 import {
   createToastCountdown,
@@ -359,6 +367,12 @@ export const useAgentStore = defineStore('agent', () => {
   const progression = shallowRef<ProgressionSnapshot | null>(null)
   const achievements = shallowRef<AchievementSnapshot | null>(null)
   const achievementUnlock = ref<AchievementUnlock | null>(null)
+  // XP the main process actually granted (newest first), and the last
+  // level-up/evolution. Both come only from main's award notifications, so a
+  // cold load or a replayed event can never look like a fresh celebration.
+  const recentAwards = shallowRef<RecentAward[]>([])
+  const levelUpEvent = shallowRef<LevelUpEvent | null>(null)
+  let awardSequence = 0
   const presentationQueue = ref<PresentationIntent[]>([])
   const presentationActive = ref<PresentationIntent | null>(null)
   const presentationReaction = ref<{
@@ -868,6 +882,17 @@ export const useAgentStore = defineStore('agent', () => {
     const normalized = normalizeProgressionSnapshot(value)
     if (!normalized) return false
     progression.value = normalized
+    return true
+  }
+
+  function handleProgressionAwarded(value: unknown): boolean {
+    const event = normalizeProgressionAwardEvent(value)
+    if (!event) return false
+    const fresh = recentAwardsFromEvent(event, awardSequence)
+    awardSequence += fresh.length
+    recentAwards.value = [...fresh, ...recentAwards.value].slice(0, RECENT_AWARD_LIMIT)
+    const levelUp = levelUpFromAward(event, `${event.petId}:${event.levelAfter}:${event.at}`)
+    if (levelUp) levelUpEvent.value = levelUp
     return true
   }
 
@@ -1756,6 +1781,9 @@ export const useAgentStore = defineStore('agent', () => {
     progression,
     achievements,
     achievementUnlock,
+    recentAwards,
+    levelUpEvent,
+    handleProgressionAwarded,
     setProgressionSnapshot,
     setAchievementsSnapshot,
     handleAchievementUnlocked,

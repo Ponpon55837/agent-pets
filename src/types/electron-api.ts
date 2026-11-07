@@ -2,7 +2,7 @@
 
 import type { DesktopPreferences, DesktopPreferencesPatch } from './desktop'
 import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView } from './permission'
-import type { ProgressionSnapshot } from './progression'
+import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from './progression'
 import type { AchievementSnapshot, AchievementUnlock } from './achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from './history'
 import type { PetWindowMode, PetWindowModeState } from './pet-window'
@@ -109,6 +109,8 @@ export interface ElectronAPI {
       onAchievementsUpdated: (callback: (snapshot: AchievementSnapshot) => void) => () => void
       onAchievementUnlocked: (callback: (unlock: AchievementUnlock) => void) => () => void
       onProgressionUpdated: (callback: (snapshot: ProgressionSnapshot) => void) => () => void
+      getProgressionInsights: (petId?: string) => Promise<ProgressionInsights | null>
+      onProgressionAwarded: (callback: (event: ProgressionAwardEvent) => void) => () => void
       onDesktopPreferencesUpdated: (callback: (preferences: DesktopPreferences) => void) => () => void
       initializePermissionRequests: () => Promise<PermissionRequestView[]>
       onPermissionRequestsUpdated: (callback: (requests: PermissionRequestView[]) => void) => () => void

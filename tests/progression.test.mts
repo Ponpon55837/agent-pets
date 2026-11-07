@@ -119,3 +119,42 @@ test('project routing snapshots XP to the routed pet and keeps route changes sep
     assert.equal(store.getSnapshot('wolf').totalXp, 30)
   })
 })
+
+test('a success event reports each award plus the level boundary it crossed', () => {
+  withStore(store => {
+    const result = store.handleEvent(event('success', 1_700_000_000_000))
+    assert.deepEqual(result.awards.map(award => award.ruleId).sort(), [
+      'v1.first-completion-of-day',
+      'v1.session-completed',
+    ])
+    assert.equal(result.levelBefore, 1)
+    assert.equal(result.stageBefore, 'egg')
+    // Replaying the same event grants nothing: awards are idempotent.
+    assert.deepEqual(store.handleEvent(event('success', 1_700_000_000_000)).awards, [])
+  })
+})
+
+test('insights expose today XP, the claimed daily bonus, recent ledger and a pace estimate', () => {
+  const day = 24 * 60 * 60 * 1000
+  const base = 1_700_000_000_000
+  const directory = mkdtempSync(join(tmpdir(), 'agent-pets-progression-insights-'))
+  let now = base
+  const store = new ProgressionStore(join(directory, 'progression.sqlite'), { now: () => now })
+  try {
+    assert.equal(store.getInsights().firstCompletionClaimed, false)
+    assert.equal(store.getInsights().averageDailyXp, null)
+    for (let index = 0; index < 3; index += 1) {
+      now = base + index * day
+      store.handleEvent(event('success', now, `s-${index}`))
+    }
+    const insights = store.getInsights()
+    assert.equal(insights.firstCompletionClaimed, true)
+    assert.ok(insights.todayXp >= 30)
+    assert.ok(insights.recent.length >= 2 && insights.recent[0].occurredAt >= insights.recent[1].occurredAt)
+    assert.ok(insights.averageDailyXp !== null && insights.averageDailyXp > 0)
+    assert.equal(store.getRecentLedger('aang-airbender', 1).length, 1)
+  } finally {
+    store.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

@@ -19,6 +19,7 @@ let cleanupPanelOpenSettings: (() => void) | null = null
 let cleanupDesktopPreferences: (() => void) | null = null
 let cleanupPetWindowMode: (() => void) | null = null
 let cleanupProgression: (() => void) | null = null
+let cleanupProgressionAwarded: (() => void) | null = null
 let cleanupAchievements: (() => void) | null = null
 let cleanupAchievementUnlock: (() => void) | null = null
 let cleanupQuotaUpdated: (() => void) | null = null
@@ -222,6 +223,11 @@ onMounted(() => {
       store.setProgressionSnapshot(snapshot)
     })
   }
+  if (electronAPI?.onProgressionAwarded) {
+    cleanupProgressionAwarded = electronAPI.onProgressionAwarded((event: unknown) => {
+      store.handleProgressionAwarded(event)
+    })
+  }
   if (electronAPI?.onAchievementsUpdated) {
     cleanupAchievements = electronAPI.onAchievementsUpdated((snapshot: AchievementSnapshot) => {
       store.setAchievementsSnapshot(snapshot)
@@ -325,6 +331,7 @@ onUnmounted(() => {
   cleanupDesktopPreferences?.()
   cleanupPetWindowMode?.()
   cleanupProgression?.()
+  cleanupProgressionAwarded?.()
   cleanupAchievements?.()
   cleanupAchievementUnlock?.()
   cleanupQuotaUpdated?.()

@@ -1,6 +1,6 @@
 # IPC 安全清單
 
-由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 83 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
+由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 84 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
 
 | 頻道 | 類型 | 允許的寄件者 | 輸入驗證概況 | Preload API | 對應測試 |
 | --- | --- | --- | --- | --- | --- |
@@ -65,6 +65,7 @@
 | `plugin-secret-set` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | setPluginSecret (invoke) | `tests/ipc-plugin-settings.test.mts` |
 | `progression-init` | `handle` | 受信任寵物或設定面板 main frame | 型別；isProgressionPetId；無效輸入回安全預設或錯誤 | initializeProgression (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `progression-set-pet` | `handle` | 受信任寵物或設定面板 main frame | isProgressionPetId；無效輸入回安全預設或錯誤 | setProgressionPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `progression-insights` | `handle` | 受信任寵物或設定面板 main frame | 型別；isProgressionPetId；無效輸入回安全預設或錯誤 | getProgressionInsights (invoke) | `tests/progression.test.mts` |
 | `achievements-init` | `handle` | 受信任寵物或設定面板 main frame | isProgressionPetId；無效輸入回安全預設或錯誤 | initializeAchievements (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `project-mcp-setup` | `handle` | 設定面板 main frame | 長度／數量上限；isDialogOpen；無效輸入回安全預設或錯誤 | setupProjectMcp (invoke) | `tests/project-mcp-registry.test.mts`<br>`tests/project-mcp-setup.test.mts` |
 | `project-mcp-list` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | listProjectMcp (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |

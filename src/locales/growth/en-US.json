@@ -28,5 +28,18 @@
   "growth.refreshNow": "Refresh now",
   "growth.quotaEmptyTitle": "No quota data yet",
   "growth.quotaEmptyBody": "Sign in to the Codex or Claude Code CLI and your subscription quota will appear here.",
-  "growth.quotaLoading": "Loading quota…"
+  "growth.quotaLoading": "Loading quota…",
+  "growth.ruleSessionCompleted": "Session completed",
+  "growth.ruleFirstCompletion": "First completion of the day",
+  "growth.ruleActiveTime": "30 minutes of focused work",
+  "growth.ruleDailyStreak": "Daily streak bonus",
+  "growth.ruleUnknown": "Other reward",
+  "growth.xpSourcesTitle": "How to earn XP",
+  "growth.xpSourceSession": "Complete a session   +{xp}",
+  "growth.xpSourceFirst": "First completion each day   +{xp}",
+  "growth.xpSourceActive": "Every 30 minutes of focus   +{xp} (up to +{max} per session)",
+  "growth.xpSourceStreak": "Each consecutive day from day two   +{xp}",
+  "growth.recentTitle": "Recent XP",
+  "growth.recentEmpty": "Once you finish a session, each XP gain and its source will show up here.",
+  "growth.xpAmount": "+{amount}"
 }
