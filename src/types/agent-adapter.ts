@@ -17,11 +17,11 @@ const OPENCODE_CAPABILITIES = freezeCapabilities({
   waitingInput: true, permissions: 'respond', permissionModes: ['allow_once', 'deny'], orderedEvents: false, healthCheck: true,
 })
 const CODEX_CAPABILITIES = freezeCapabilities({
-  lifecycle: true, sessions: true, projects: true, toolActivity: true, tokenUsage: 'estimated', quota: 'provider',
+  lifecycle: true, sessions: true, projects: true, toolActivity: true, tokenUsage: 'exact', quota: 'provider',
   waitingInput: false, permissions: 'observe', permissionModes: [], orderedEvents: false, healthCheck: true,
 })
 const CLAUDE_CAPABILITIES = freezeCapabilities({
-  lifecycle: true, sessions: true, projects: true, toolActivity: true, tokenUsage: 'estimated', quota: 'provider',
+  lifecycle: true, sessions: true, projects: true, toolActivity: true, tokenUsage: 'exact', quota: 'provider',
   waitingInput: true, permissions: 'observe', permissionModes: [], orderedEvents: false, healthCheck: true,
 })
 const GENERIC_HTTP_CAPABILITIES = freezeCapabilities({

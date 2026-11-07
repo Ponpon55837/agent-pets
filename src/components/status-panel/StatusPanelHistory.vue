@@ -11,9 +11,11 @@ import {
   type HistoryRangeDays,
   type HistorySummary,
 } from '@/types/history'
+import { agentDisplayName } from '@/utils/agent-label'
 import { localDateKey } from '@/utils/local-date'
 import GrowthEmptyState from '@/components/growth/GrowthEmptyState.vue'
 import HistoryChart from '@/components/growth/HistoryChart.vue'
+import HistoryModelList from '@/components/growth/HistoryModelList.vue'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -121,14 +123,6 @@ function tokenLabel(quality: HistorySummary['tokenQuality']): string {
   return t(TOKEN_LABEL_KEYS[quality] ?? 'historyTokenUnavailable')
 }
 
-function agentLabel(adapterId: string): string {
-  const id = adapterId.toLowerCase()
-  if (id.includes('codex')) return t('clientCodex')
-  if (id.includes('claude')) return t('clientClaudeCode')
-  if (id.includes('opencode')) return t('clientOpenCode')
-  return adapterId
-}
-
 function agentShare(agent: HistoryAgentStat): number {
   const summary = historySummary.value
   if (!summary) return 0
@@ -159,6 +153,10 @@ const scanLine = computed(() => {
 const skippedLine = computed(() => {
   const skipped = historySummary.value?.scan?.filesSkipped ?? 0
   return skipped > 0 ? t('growth.scanSkipped', { count: skipped }) : ''
+})
+const deferredLine = computed(() => {
+  const deferred = historySummary.value?.scan?.filesDeferred ?? 0
+  return deferred > 0 ? t('growth.scanDeferred', { count: deferred }) : ''
 })
 
 // --- loading -------------------------------------------------------------------
@@ -373,7 +371,7 @@ onUnmounted(() => {
             </div>
             <div class="history-agent-list">
               <div v-for="agent in historySummary.agents" :key="agent.adapterId" class="history-agent-row">
-                <div class="history-agent-heading"><span>{{ agentLabel(agent.adapterId) }}</span><strong>{{ agentHeadline(agent) }} · {{ agentShare(agent) }}%</strong></div>
+                <div class="history-agent-heading"><span>{{ agentDisplayName(agent.adapterId) }}</span><strong>{{ agentHeadline(agent) }} · {{ agentShare(agent) }}%</strong></div>
                 <ProgressTrack :value="agentShare(agent)" tone="success" decorative />
                 <div class="history-muted">{{ tokens(agent.tokenInput, 'full') }} {{ t('historyTokenIn') }} · {{ tokens(agent.tokenOutput, 'full') }} {{ t('historyTokenOut') }} · {{ tokenLabel(agent.tokenQuality) }}</div>
                 <div class="history-muted history-agent-outcomes">
@@ -387,10 +385,21 @@ onUnmounted(() => {
         </Card>
       </details>
 
+      <details
+        v-if="(historySummary.models ?? []).length > 0"
+        class="history-section"
+        :open="!collapsed.models"
+        @toggle="toggleSection('models', $event)"
+      >
+        <summary>{{ t('growth.modelsTitle') }}</summary>
+        <HistoryModelList :models="historySummary.models" :total-tokens="totalTokens" />
+      </details>
+
       <div class="history-footer">
         <span>{{ t('historyCompactDisclosure', { date: trackingDate() }) }}</span>
         <span v-if="scanLine" class="history-muted">{{ scanLine }}</span>
         <span v-if="skippedLine" class="history-muted">{{ skippedLine }}</span>
+        <span v-if="deferredLine" class="history-muted">{{ deferredLine }}</span>
         <div class="history-actions">
           <Button variant="secondary" size="sm" :disabled="historyExporting" @click="exportHistory('json')">{{ historyExporting ? t('growth.exporting') : t('growth.exportJson') }}</Button>
           <Button variant="secondary" size="sm" :disabled="historyExporting" @click="exportHistory('csv')">{{ t('growth.exportCsv') }}</Button>

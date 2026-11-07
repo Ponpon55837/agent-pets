@@ -120,8 +120,10 @@ test('Night Owl uses the injected local hour boundary', () => {
 
 test('token achievement records quality and ignores replayed source events', () => {
   withStore((store) => {
+    // Event-reported usage only counts for agents without a local log reader.
     const exactEvent = event('thinking', BASE_TIME, 'token-session', {
-      adapterId: 'codex',
+      source: 'opencode-cli',
+      adapterId: 'opencode',
       eventId: 'token-event-1',
       tokenUsage: { input: 1_000_000, output: 0, quality: 'exact' },
     })
@@ -131,7 +133,8 @@ test('token achievement records quality and ignores replayed source events', () 
     assert.equal(store.getSnapshot('wolf').achievements.find(item => item.id === 'one_million')?.tokenQuality, 'exact')
 
     const estimated = event('thinking', BASE_TIME, 'estimated-session', {
-      adapterId: 'claude-code',
+      source: 'opencode-desktop',
+      adapterId: 'opencode',
       eventId: 'token-event-2',
       tokenUsage: { input: 1_000_000, output: 0, quality: 'estimated' },
     })
@@ -265,7 +268,7 @@ test('v2 migration backfills counters and adds pet_id indexes to a v1 database',
   const path = join(directory, 'achievements.sqlite')
   try {
     const first = new AchievementStore(path, { now: () => BASE_TIME, localDate, localHour })
-    for (let i = 0; i < 5; i += 1) first.recordEvent(event('success', BASE_TIME + i, `m${i}`, { tokenUsage: { input: 100, output: 20, quality: 'exact' }, eventId: `e${i}` }) as never, 'aang-airbender')
+    for (let i = 0; i < 5; i += 1) first.recordEvent(event('success', BASE_TIME + i, `m${i}`, { source: 'opencode-cli', tokenUsage: { input: 100, output: 20, quality: 'exact' }, eventId: `e${i}` }) as never, 'aang-airbender')
     const raw = (first as unknown as { database: { exec(sql: string): void } }).database
     raw.exec('DROP TABLE pet_counters; DROP INDEX idx_token_usage_pet; DROP INDEX idx_completed_sessions_pet; DELETE FROM schema_migrations WHERE version = 2;')
     first.close()
@@ -283,4 +286,75 @@ test('v2 migration backfills counters and adds pet_id indexes to a v1 database',
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
+})
+
+test('local-log tokens count once across rescans and streaming growth, and unlock one_million', () => {
+  withStore((store) => {
+    const compactBefore = BASE_TIME - 91 * 24 * 60 * 60 * 1000
+    const records = Array.from({ length: 4 }, (_, i) => ({
+      adapterId: 'claude-code', sourceEventId: `msg-${i}`, occurredAt: BASE_TIME - i * 1_000, input: 200_000, output: 40_000,
+    }))
+    const first = store.syncLocalTokenUsage(records, { compactBefore, evaluatePetId: 'wolf' })
+    assert.equal(first.changed, true)
+    assert.equal(first.unlocks.length, 0)
+    const progress = () => store.getSnapshot('wolf').achievements.find(item => item.id === 'one_million')
+    assert.equal(progress()?.progress?.current, 960_000)
+    // A rescan presents the same ids: nothing changes, nothing unlocks.
+    const rescan = store.syncLocalTokenUsage(records, { compactBefore, evaluatePetId: 'wolf' })
+    assert.deepEqual(rescan, { changed: false, unlocks: [] })
+    assert.equal(progress()?.progress?.current, 960_000)
+    // A streamed message whose usage grew adds only the difference.
+    const grown = store.syncLocalTokenUsage([{ ...records[0]!, output: 80_000 }], { compactBefore, evaluatePetId: 'wolf' })
+    assert.equal(grown.unlocks.find(unlock => unlock.achievementId === 'one_million')?.tokenQuality, 'exact')
+    assert.equal(progress()?.progress?.current, 1_000_000)
+    // Account-level: another pet sees the same exact total.
+    assert.equal(store.getSnapshot('aang-airbender').achievements.find(item => item.id === 'one_million')?.progress?.current, 1_000_000)
+    // Unknown adapters and records older than the compaction horizon are ignored.
+    assert.equal(store.syncLocalTokenUsage([
+      { adapterId: 'opencode', sourceEventId: 'x', occurredAt: BASE_TIME, input: 5 },
+      { adapterId: 'codex', sourceEventId: 'old', occurredAt: compactBefore - 1, input: 5 },
+    ], { compactBefore, evaluatePetId: null }).changed, false)
+  })
+})
+
+test('live Codex and Claude event tokens are ignored so local logs stay the single source', () => {
+  withStore((store) => {
+    for (const [source, adapterId] of [['codex', 'codex'], ['claude', 'claude-code'], ['claude-desktop', undefined]] as const) {
+      store.recordEvent(event('thinking', BASE_TIME, `s-${source}`, {
+        source, ...(adapterId ? { adapterId } : {}), eventId: `e-${source}`, tokenUsage: { input: 2_000_000, output: 0, quality: 'exact' },
+      }) as never, 'wolf')
+    }
+    assert.equal(store.getSnapshot('wolf').achievements.find(item => item.id === 'one_million')?.progress?.current, 0)
+  })
+})
+
+test('compaction drops old dedupe rows but keeps the running total', () => {
+  withStore((store, path) => {
+    const day = 24 * 60 * 60 * 1000
+    store.syncLocalTokenUsage([
+      { adapterId: 'codex', sourceEventId: 'old', occurredAt: BASE_TIME - 10 * day, input: 70 },
+      { adapterId: 'codex', sourceEventId: 'new', occurredAt: BASE_TIME, input: 30 },
+    ], { compactBefore: 0, evaluatePetId: null })
+    store.syncLocalTokenUsage([], { compactBefore: BASE_TIME - 5 * day, evaluatePetId: null })
+    const db = (store as unknown as { database: { prepare(sql: string): { get(): Record<string, number> } } }).database
+    assert.equal(db.prepare('SELECT COUNT(*) AS total FROM local_token_usage').get().total, 1)
+    assert.equal(store.getSnapshot('wolf').achievements.find(item => item.id === 'one_million')?.progress?.current, 100)
+    void path
+  })
+})
+
+test('ledger syncs without evaluation, then one evaluation per scan unlocks', () => {
+  withStore((store) => {
+    const compactBefore = 0
+    for (let batch = 0; batch < 3; batch += 1) {
+      const result = store.syncLocalTokenUsage(
+        [{ adapterId: 'codex', sourceEventId: `b${batch}`, occurredAt: BASE_TIME, input: 400_000 }],
+        { compactBefore, evaluatePetId: null },
+      )
+      assert.deepEqual(result.unlocks, [])
+    }
+    const unlocks = store.evaluateTokenAchievements('wolf')
+    assert.equal(unlocks.find(unlock => unlock.achievementId === 'one_million')?.tokenQuality, 'exact')
+    assert.deepEqual(store.evaluateTokenAchievements('wolf'), [])
+  })
 })

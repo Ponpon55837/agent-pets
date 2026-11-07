@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { t, translateBackendError } from '@/i18n'
 import { useQuotaFormat } from '@/composables/useQuotaFormat'
 import { useAgentStore } from '@/stores/agentStore'
+import type { HistoryUsageBlock } from '@/types/history'
 import { quotaWindowLabel } from '@/utils/format'
 import { quotaFreshness } from '@/utils/quota-math'
+import { usageBlockView } from '@/utils/usage-blocks'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import Icon from '@/components/ui/Icon.vue'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
 import GrowthEmptyState from '@/components/growth/GrowthEmptyState.vue'
+import UsageBlockSummary from '@/components/growth/UsageBlockSummary.vue'
 
 const props = withDefaults(defineProps<{ nowTick: number; active?: boolean }>(), { active: true })
 const store = useAgentStore()
@@ -24,6 +27,45 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 type UsageProvider = NonNullable<typeof store.quotaUsage>['providers'][number]
 
 const providers = computed(() => store.quotaUsage?.providers ?? [])
+
+// --- 本機 5 小時區塊（來自本機紀錄，與服務商額度並列） ------------------------
+// 服務商額度的 provider id 對應 History 的 adapter id；沒有對應卡片的區塊另外列出。
+const PROVIDER_ADAPTER: Record<string, string> = { claude: 'claude-code', codex: 'codex' }
+const usageBlocks = ref<HistoryUsageBlock[]>([])
+const BLOCK_REFRESH_DEBOUNCE_MS = 1_000
+let blockRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let cleanupHistoryUpdated: (() => void) | null = null
+
+let blocksInFlight = false
+
+// Dedicated read-only IPC: never triggers a log scan, so the historyUpdated
+// broadcast a scan sends cannot loop back into another scan.
+async function refreshBlocks(): Promise<void> {
+  if (blocksInFlight) return
+  blocksInFlight = true
+  try {
+    const blocks = await window.electronAPI?.getUsageBlocks()
+    if (Array.isArray(blocks)) usageBlocks.value = blocks
+  } catch { /* blocks are supplementary; keep the last reading */ } finally {
+    blocksInFlight = false
+  }
+}
+
+function blockFor(provider: UsageProvider) {
+  const adapterId = PROVIDER_ADAPTER[provider.id]
+  return adapterId ? usageBlocks.value.find(block => block.adapterId === adapterId) : undefined
+}
+
+// Only blocks still running at this tick are shown.
+const activeBlocks = computed(() => usageBlocks.value.filter(block => usageBlockView(block, props.nowTick).active))
+const unmatchedBlocks = computed(() => {
+  const shown = new Set(providers.value.map(provider => PROVIDER_ADAPTER[provider.id]).filter(Boolean))
+  return activeBlocks.value.filter(block => !shown.has(block.adapterId))
+})
+function activeBlockFor(provider: UsageProvider) {
+  const block = blockFor(provider)
+  return block && activeBlocks.value.includes(block) ? block : undefined
+}
 
 function errorText(provider: UsageProvider): string {
   const params = { provider: provider.name }
@@ -82,15 +124,25 @@ function syncPolling(): void {
   // Opening the tab refreshes when the reading is older than the poll period;
   // while it stays open the panel keeps its own cadence.
   void store.refreshQuota()
+  void refreshBlocks()
   pollTimer = setInterval(() => {
     if (!document.hidden) void store.refreshQuota()
   }, store.quotaRefreshMs)
 }
 
 watch(() => props.active, syncPolling, { immediate: true })
+onMounted(() => {
+  cleanupHistoryUpdated = window.electronAPI?.onHistoryUpdated(() => {
+    if (!props.active) return
+    if (blockRefreshTimer) clearTimeout(blockRefreshTimer)
+    blockRefreshTimer = setTimeout(() => { blockRefreshTimer = null; void refreshBlocks() }, BLOCK_REFRESH_DEBOUNCE_MS)
+  }) ?? null
+})
 onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer)
   if (copiedTimer) clearTimeout(copiedTimer)
+  if (blockRefreshTimer) clearTimeout(blockRefreshTimer)
+  cleanupHistoryUpdated?.()
 })
 </script>
 
@@ -170,6 +222,13 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
+        <UsageBlockSummary v-if="activeBlockFor(provider)" :block="activeBlockFor(provider)!" :now-tick="nowTick" />
+      </Card>
+      <Card v-if="unmatchedBlocks.length > 0" class="usage-provider-card">
+        <template #heading>
+          <span class="usage-provider-name">{{ t('growth.blockLocalTitle') }}</span>
+        </template>
+        <UsageBlockSummary v-for="block in unmatchedBlocks" :key="block.adapterId" :block="block" :now-tick="nowTick" show-agent />
       </Card>
       <div class="usage-footer">
         <span>{{ t('growth.autoRefreshNote') }}</span>

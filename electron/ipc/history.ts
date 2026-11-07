@@ -1,6 +1,6 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import type { HistoryStore } from '../history'
-import type { HistoryClearResult, HistoryCommandResult, HistoryExportFormat, HistorySummary } from '../../src/types/history'
+import type { HistoryClearResult, HistoryCommandResult, HistoryExportFormat, HistorySummary, HistoryUsageBlock } from '../../src/types/history'
 import { t } from '../../src/i18n.ts'
 import { historyDaysToCsv, historyExportFileName } from '../history-export.ts'
 import { IPC_CHANNELS } from './channels.ts'
@@ -46,6 +46,20 @@ export function registerHistoryIpc(deps: HistoryIpcDependencies): void {
       typeof projectId === 'string' ? projectId : undefined,
       rangeDays === 30 || rangeDays === 90 ? rangeDays : 7,
     )
+  })
+
+  // The Usage tab only needs the local 5-hour blocks. Unlike historySummary it
+  // takes no input and never starts a log scan, so a historyUpdated broadcast
+  // that triggers this refetch cannot schedule another scan (no feedback loop).
+  deps.ipcMain.handle(IPC_CHANNELS.historyUsageBlocks, (event): HistoryUsageBlock[] => {
+    deps.assertTrustedIpcSender(event, deps.getPanelWindow())
+    const historyStore = deps.getHistoryStore()
+    if (!historyStore) return []
+    try {
+      return historyStore.getUsageBlocks()
+    } catch {
+      return []
+    }
   })
 
   deps.ipcMain.handle(IPC_CHANNELS.historyClear, (event): HistoryClearResult => {

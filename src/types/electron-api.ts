@@ -5,7 +5,7 @@ import type { DesktopPreferences, DesktopPreferencesPatch } from './desktop'
 import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView, PermissionAuditEntry } from './permission'
 import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from './progression'
 import type { AchievementSnapshot, AchievementUnlock } from './achievement'
-import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySummary } from './history'
+import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySummary, HistoryUsageBlock } from './history'
 import type { PetWindowMode, PetWindowModeState } from './pet-window'
 import type { PetBehaviorManifest, PluginSkinPetSource } from './pet'
 import type { AgentSession } from './agent'
@@ -172,6 +172,7 @@ export interface ElectronAPI {
       }>
       onQuotaUsageUpdated: (callback: (usage: unknown) => void) => () => void
       getHistorySummary: (projectId?: string, rangeDays?: number) => Promise<HistorySummary | null>
+      getUsageBlocks: () => Promise<HistoryUsageBlock[]>
       listProjectPets: () => Promise<ProjectPetView[]>
       pickProjectPet: () => Promise<ProjectPetCommandResult>
       setProjectPetBinding: (projectId: string, petId: string | null) => Promise<ProjectPetCommandResult>

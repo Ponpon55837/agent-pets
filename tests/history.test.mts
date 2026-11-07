@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import test from 'node:test'
-import { HistoryStore, trimQueuedEvents } from '../electron/history.ts'
+import { HistoryStore, safeModelId, trimQueuedEvents } from '../electron/history.ts'
 import type { AgentStatusEvent } from '../src/types/agent.ts'
 
 function databasePath(): { filePath: string; directory: string } {
@@ -713,4 +713,112 @@ test('trimQueuedEvents drops oldest heartbeats and never terminal events while h
   const trimmed = trimQueuedEvents(items, 3)
   assert.deepEqual(trimmed.map(item => item.receivedAt), [2, 4, 5])
   assert.equal(trimQueuedEvents(items, 10).length, 5)
+})
+
+test('v8 migration adds the model column, model aggregates and token-time index to a v7 database, idempotently', (t) => {
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  t.after(() => fs.rmSync(database.directory, { recursive: true, force: true }))
+  const first = new HistoryStore(database.filePath, { now: () => now, localDate: () => '2026-08-13' })
+  first.recordTokenUsageBatch([
+    { adapterId: 'claude-code', agentId: 'claude', sourceEventId: 'a', occurredAt: now - 1_000, input: 30, output: 5, cacheRead: 2, quality: 'exact', model: 'claude-opus-4-5' },
+    { adapterId: 'codex', agentId: 'codex', sourceEventId: 'b', occurredAt: now - 500, input: 12, output: 3, quality: 'exact' },
+  ])
+  first.close()
+  // Reduce to the v7 shape: no model column, table, index or v8 marker.
+  const DatabaseSync = (createRequire(import.meta.url)('node:sqlite') as { DatabaseSync: new (file: string) => { exec(sql: string): void, prepare(sql: string): { all(...p: unknown[]): Array<Record<string, unknown>> }, close(): void } }).DatabaseSync
+  const raw = new DatabaseSync(database.filePath)
+  raw.exec(`
+    DROP TABLE daily_model_stats;
+    DROP INDEX idx_history_events_token_time;
+    ALTER TABLE events DROP COLUMN token_model;
+    DELETE FROM schema_migrations WHERE version = 8;
+  `)
+  raw.close()
+
+  for (let open = 0; open < 2; open += 1) {
+    const store = new HistoryStore(database.filePath, { now: () => now, localDate: () => '2026-08-13' })
+    const summary = store.getSummary()
+    // Pre-v8 rows have no model yet: they are grouped as unknown with exact totals.
+    assert.deepEqual(summary.models.map(stat => [stat.adapterId, stat.model, stat.tokenInput, stat.tokenOutput]), [
+      ['claude-code', '', 30, 5],
+      ['codex', '', 12, 3],
+    ])
+    assert.equal(summary.totals.tokenInput, 42)
+    const db = (store as unknown as { database: typeof raw }).database
+    const versions = db.prepare('SELECT version FROM schema_migrations WHERE version = 8').all()
+    assert.equal(versions.length, 1)
+    const plan = db.prepare(`EXPLAIN QUERY PLAN
+      SELECT adapter_id, occurred_at FROM events
+      WHERE type = 'agent.token_usage' AND occurred_at >= ? ORDER BY occurred_at DESC LIMIT ?`).all(0, 10)
+      .map(row => String(row.detail)).join(' ')
+    assert.match(plan, /idx_history_events_token_time/)
+    const modelPlan = db.prepare(`EXPLAIN QUERY PLAN
+      SELECT adapter_id FROM daily_model_stats WHERE local_date BETWEEN ? AND ?`).all('a', 'b')
+      .map(row => String(row.detail)).join(' ')
+    assert.match(modelPlan, /SEARCH daily_model_stats USING .*(PRIMARY KEY|sqlite_autoindex_daily_model_stats)/)
+    store.close()
+  }
+})
+
+test('model aggregates follow updates, moves, clear and rebuild, and usage blocks come from local rows', (t) => {
+  let now = Date.UTC(2026, 7, 13, 10, 30, 0)
+  const database = databasePath()
+  const store = new HistoryStore(database.filePath, { now: () => now, localDate: timestamp => new Date(timestamp).toISOString().slice(0, 10), timezoneOffsetMinutes: () => 0 })
+  t.after(() => { store.close(); fs.rmSync(database.directory, { recursive: true, force: true }) })
+  const base = { adapterId: 'claude-code', agentId: 'claude', quality: 'exact' as const }
+  store.recordTokenUsage({ ...base, sourceEventId: 'm1', occurredAt: now - 20 * 60_000, input: 10, output: 1, model: 'claude-sonnet-4-5' })
+  // Streaming update of the same message: replaced, not added.
+  store.recordTokenUsage({ ...base, sourceEventId: 'm1', occurredAt: now - 20 * 60_000, input: 25, output: 4, model: 'claude-sonnet-4-5' })
+  // An unknown model never erases a known one.
+  store.recordTokenUsage({ ...base, sourceEventId: 'm1', occurredAt: now - 20 * 60_000, input: 26, output: 4 })
+  store.recordTokenUsageBatch([{ ...base, sourceEventId: 'm2', occurredAt: now - 10 * 60_000, input: 5, output: 1, model: 'claude-opus-4-5' }])
+  const read = () => store.getSummary().models.map(stat => [stat.model, stat.tokenInput, stat.tokenOutput])
+  assert.deepEqual(read(), [['claude-sonnet-4-5', 26, 4], ['claude-opus-4-5', 5, 1]])
+  // A live event with token usage is not a local-log row and never enters blocks or models.
+  store.recordEvent(event({ state: 'success', timestamp: now - 60_000, tokenUsage: { input: 999, output: 0, quality: 'estimated' } }))
+
+  const [block] = store.getSummary().usageBlocks
+  assert.equal(block?.adapterId, 'claude-code')
+  assert.equal(block?.startAt, Date.UTC(2026, 7, 13, 10, 0, 0))
+  assert.equal(block?.tokenInput, 31)
+  assert.equal(store.getSummary().usageBlocks.length, 1)
+
+  store.rebuildDailyStats()
+  assert.deepEqual(read(), [['claude-sonnet-4-5', 26, 4], ['claude-opus-4-5', 5, 1]])
+  now += 6 * 60 * 60 * 1000
+  assert.deepEqual(store.getSummary().usageBlocks, [])
+  store.clear()
+  assert.deepEqual(read(), [])
+})
+
+test('a v8 database whose model aggregate is missing or empty is rebuilt on open', (t) => {
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const database = databasePath()
+  t.after(() => fs.rmSync(database.directory, { recursive: true, force: true }))
+  const options = { now: () => now, localDate: () => '2026-08-13' }
+  const first = new HistoryStore(database.filePath, options)
+  first.recordTokenUsage({ adapterId: 'codex', agentId: 'codex', sourceEventId: 'a', occurredAt: now - 1_000, input: 8, output: 2, quality: 'exact', model: 'gpt-5-codex' })
+  first.close()
+  const DatabaseSync = (createRequire(import.meta.url)('node:sqlite') as { DatabaseSync: new (file: string) => { exec(sql: string): void, close(): void } }).DatabaseSync
+  for (const damage of ['DROP TABLE daily_model_stats', 'DELETE FROM daily_model_stats']) {
+    const raw = new DatabaseSync(database.filePath)
+    raw.exec(damage)
+    raw.close()
+    const store = new HistoryStore(database.filePath, options)
+    assert.deepEqual(store.getSummary().models.map(stat => [stat.model, stat.tokenInput]), [['gpt-5-codex', 8]], damage)
+    store.close()
+  }
+})
+
+test('model ids that look like paths, drives or placeholders are rejected', () => {
+  for (const ok of ['claude-sonnet-4-5-20250929', 'gpt-5.1-codex', 'openai/gpt-5', 'us.anthropic.claude-opus-4-5-v1:0', 'models/gemini-2.5-pro']) {
+    assert.equal(safeModelId(ok), ok)
+  }
+  for (const bad of [
+    'Users/name/x', 'users/alice', 'home/bob', 'Users/name', 'a/b/c', '/abs', 'C:/x', 'c:model', '../x', 'a/../b',
+    '<synthetic>', 'has space', '~/x', 'x'.repeat(97), '', 42, null,
+  ]) {
+    assert.equal(safeModelId(bad), '', String(bad))
+  }
 })

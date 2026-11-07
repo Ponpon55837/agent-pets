@@ -7,7 +7,7 @@ import { buildDiagnosticsReport, registerDiagnosticsSection } from '../diagnosti
 import { eventPipelineStats } from '../event-stats'
 import { resolveLocalPorts } from './ports'
 import { openWithCorruptionRecovery } from './db-recovery'
-import { LOCAL_USAGE_TICK_MS, shouldRunLocalUsageTick } from './scan-schedule'
+import { localUsageCatchUpDelayMs, LOCAL_USAGE_TICK_MS, shouldRunLocalUsageTick } from './scan-schedule'
 import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
 import { join, resolve } from 'path'
 import { randomUUID } from 'node:crypto'
@@ -75,7 +75,7 @@ import { locale, setLocale, t } from '../../src/i18n'
 import tokensCss from '../../src/styles/tokens.css?raw'
 import type { ProgressionAwardEvent, ProgressionEventResult, ProgressionSnapshot } from '../../src/types/progression'
 import type { AchievementUnlock } from '../../src/types/achievement'
-import type { HistorySummary } from '../../src/types/history'
+import type { HistorySummary, HistoryTokenUsageRecord } from '../../src/types/history'
 import type { PresentationIntent } from '../../src/types/presentation'
 import type { PluginEventSourceStatusView, PluginPanelPlugin, PluginPanelResult, PluginPanelSnapshot } from '../../src/types/plugin'
 import type { IpcErrorCode } from '../../src/types/ipc'
@@ -2647,6 +2647,7 @@ export function currentHistorySummary(projectId?: string, rangeDays = 7): Histor
           durationMs: scan.durationMs,
           filesScanned: scan.filesScanned,
           filesSkipped: scan.filesSkipped,
+          filesDeferred: scan.filesDeferred,
         },
       }
     : summary
@@ -2656,14 +2657,27 @@ export function currentHistorySummary(projectId?: string, rangeDays = 7): Histor
 // 60s timer is the regular cadence, so panel-triggered refreshes are throttled.
 const LOCAL_USAGE_MIN_SCAN_INTERVAL_MS = 10_000
 let localUsageLastScanAt = 0
+let localUsageCatchUpTimer: ReturnType<typeof setTimeout> | null = null
+let localUsageStalledScans = 0
 
-export async function refreshLocalUsage(): Promise<void> {
+export async function refreshLocalUsage(options: { catchUp?: boolean } = {}): Promise<void> {
   if (!mainState.localUsageReader || mainState.localUsageScanPromise) return mainState.localUsageScanPromise ?? Promise.resolve()
-  if (Date.now() - localUsageLastScanAt < LOCAL_USAGE_MIN_SCAN_INTERVAL_MS) return
+  if (!options.catchUp && Date.now() - localUsageLastScanAt < LOCAL_USAGE_MIN_SCAN_INTERVAL_MS) return
   mainState.localUsageScanPromise = mainState.localUsageReader.scan()
     .then(result => {
       localUsageLastScanAt = Date.now()
       if (result.recordsImported > 0) broadcastHistoryUpdated()
+      evaluateLocalTokenAchievements()
+      localUsageStalledScans = result.bytesRead > 0 ? 0 : localUsageStalledScans + 1
+      // A budget-limited scan continues shortly instead of waiting a full tick.
+      const delay = localUsageCatchUpDelayMs(result.pending, powerMonitor.isOnBatteryPower(), localUsageStalledScans)
+      if (delay !== null && !localUsageCatchUpTimer && !mainState.isQuitting) {
+        localUsageCatchUpTimer = setTimeout(() => {
+          localUsageCatchUpTimer = null
+          void refreshLocalUsage({ catchUp: true })
+        }, delay)
+        localUsageCatchUpTimer.unref?.()
+      }
     })
     .catch(error => {
       console.error('Local token usage scan failed', error)
@@ -2835,10 +2849,12 @@ export function createHistoryServices(): void {
     )
     if (!mainState.historyStore) throw new Error('History database could not be opened')
     historyStoreRetryAttempt = 0
+    const retentionDays = mainState.historyStore.getRetentionDays()
     mainState.localUsageReader = new LocalUsageReader({
       homeDir: app.getPath('home'),
       history: mainState.historyStore,
       projectRouting: mainState.projectRoutingStore,
+      onRecordsImported: records => syncLocalTokenAchievements(records, retentionDays),
     })
     let scanTick = 0
     mainState.localUsageScanTimer = setInterval(() => {
@@ -2881,6 +2897,59 @@ export function createHistoryServices(): void {
       }, delay)
       historyStoreRetryTimer.unref?.()
     }
+  }
+}
+
+/**
+ * Feeds exact local-log usage into the achievement token ledger (the single
+ * token source for Codex and Claude Code). The ledger always updates so no
+ * token is lost while achievements are switched off; unlock evaluation only
+ * runs, for the active pet, when achievements are enabled.
+ */
+let achievementProgressTimer: ReturnType<typeof setTimeout> | null = null
+let localTokenLedgerChanged = false
+
+function syncLocalTokenAchievements(records: readonly HistoryTokenUsageRecord[], retentionDays: number): void {
+  const store = mainState.achievementStore
+  if (!store) return
+  try {
+    // Ledger only: a first import arrives in hundreds of 500-record batches,
+    // so unlock evaluation runs once per scan (evaluateLocalTokenAchievements).
+    const result = store.syncLocalTokenUsage(records, {
+      // One day of slack past the scanner's own retention cutoff.
+      compactBefore: Date.now() - (retentionDays + 1) * 24 * 60 * 60 * 1000,
+      evaluatePetId: null,
+    })
+    if (result.changed) localTokenLedgerChanged = true
+  } catch (error) {
+    console.error('Achievement local token sync failed', error)
+    logAchievementDiagnostic('local-token-sync', error)
+  }
+}
+
+/** Once per completed scan: evaluate the active pet if the ledger changed, and refresh progress. */
+function evaluateLocalTokenAchievements(): void {
+  if (!localTokenLedgerChanged) return
+  localTokenLedgerChanged = false
+  const store = mainState.achievementStore
+  if (!store) return
+  try {
+    if (currentDesktopPreferences().achievementsEnabled) {
+      const petId = mainState.progressionStore?.getActivePetId() ?? 'aang-airbender'
+      const unlocks = store.evaluateTokenAchievements(petId, mainState.progressionStore?.getSnapshot(petId))
+      unlocks.forEach(broadcastAchievementUnlock)
+      if (unlocks.length > 0) return
+    }
+    if (!achievementProgressTimer) {
+      achievementProgressTimer = setTimeout(() => {
+        achievementProgressTimer = null
+        broadcastAchievements()
+      }, 1_000)
+      achievementProgressTimer.unref?.()
+    }
+  } catch (error) {
+    console.error('Achievement local token evaluation failed', error)
+    logAchievementDiagnostic('local-token-evaluate', error)
   }
 }
 

@@ -131,7 +131,20 @@
   "growth.agentFailure": "失敗 {count}",
   "growth.updating": "更新中…",
   "growth.scanInfo": "本機紀錄掃描於 {age}",
-  "growth.scanSkipped": "{count} 個紀錄檔因超出讀取預算暫未納入。",
+  "growth.scanSkipped": "{count} 個紀錄檔無法讀取。",
   "growth.failedCount": "失敗 {count}",
-  "growth.cacheShown": "快取另計"
+  "growth.cacheShown": "快取另計",
+  "growth.scanDeferred": "{count} 個紀錄檔仍在分批讀取，接下來幾次掃描會陸續納入。",
+  "growth.modelsTitle": "模型分布",
+  "growth.modelsHint": "各模型數字來自本機的 Codex 與 Claude Code 紀錄；Hook 回報的用量不含模型資訊。",
+  "growth.modelUnknown": "未標示模型",
+  "growth.blockTitle": "目前 5 小時區塊",
+  "growth.blockSource": "來自本機紀錄，逐筆精確",
+  "growth.blockLocalTitle": "本機用量",
+  "growth.blockTokens": "{tokens} Token",
+  "growth.blockElapsed": "已過 {elapsed}，剩 {remaining}",
+  "growth.blockBurn": "每分鐘 {rate} Token",
+  "growth.blockStarted": "開始於 {time}",
+  "growth.blockProgressAria": "{agent} 5 小時區塊已經過時間",
+  "growth.blockHint": "區塊從休息滿 5 小時後的第一筆本機用量開始（向下取整到整點），持續 5 小時。這是在本機計算的，可能與上方服務商自己的額度時段不同。"
 }

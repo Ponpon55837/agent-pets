@@ -131,7 +131,20 @@
   "growth.agentFailure": "{count} failed",
   "growth.updating": "Updating…",
   "growth.scanInfo": "Local logs scanned {age}",
-  "growth.scanSkipped": "{count} log files were not included because of the read budget.",
+  "growth.scanSkipped": "{count} log files could not be read.",
   "growth.failedCount": "{count} failed",
-  "growth.cacheShown": "cache counted separately"
+  "growth.cacheShown": "cache counted separately",
+  "growth.scanDeferred": "{count} log files are still being read in parts and will be included over the next scans.",
+  "growth.modelsTitle": "Models",
+  "growth.modelsHint": "Per-model totals come from local Codex and Claude Code logs. Hook-reported usage carries no model.",
+  "growth.modelUnknown": "Unknown model",
+  "growth.blockTitle": "Current 5-hour block",
+  "growth.blockSource": "From local logs, exact per message",
+  "growth.blockLocalTitle": "Local usage",
+  "growth.blockTokens": "{tokens} tokens",
+  "growth.blockElapsed": "{elapsed} elapsed, {remaining} left",
+  "growth.blockBurn": "{rate} tokens/min",
+  "growth.blockStarted": "Started {time}",
+  "growth.blockProgressAria": "{agent} 5-hour block elapsed",
+  "growth.blockHint": "A block starts at the first local usage after a 5-hour break, rounded down to the hour, and lasts 5 hours. It is computed on this computer and can differ from the provider's own limit window above."
 }
