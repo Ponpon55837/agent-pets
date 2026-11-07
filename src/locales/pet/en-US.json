@@ -36,5 +36,7 @@
   "pet.statePermission": "waiting for permission",
   "pet.stateWaitingInput": "waiting for you",
   "pet.stateSuccess": "done",
-  "pet.stateError": "failed"
+  "pet.stateError": "failed",
+  "pet.importZipTitle": "Choose a pet sprite kit (.codex-pet.zip)",
+  "pet.importSpriteTitle": "Choose a spritesheet (192×208 per frame)"
 }

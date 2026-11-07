@@ -36,5 +36,7 @@
   "pet.statePermission": "等待權限",
   "pet.stateWaitingInput": "等你回覆",
   "pet.stateSuccess": "已完成",
-  "pet.stateError": "失敗"
+  "pet.stateError": "失敗",
+  "pet.importZipTitle": "選擇寵物素材包（.codex-pet.zip）",
+  "pet.importSpriteTitle": "選擇 spritesheet（每格 192×208）"
 }

@@ -1,6 +1,7 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import { guardArchive } from '../archive-guard.ts'
 import type { SanitizedPetBehaviorManifest } from '../pet-behavior-manifest'
+import { t as translate } from '../../src/i18n.ts'
 import { SPRITE_ERROR_MESSAGES, validateSpriteSheet } from '../pet-sprite-validation.ts'
 import { IPC_CHANNELS } from './channels.ts'
 
@@ -125,7 +126,7 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
 
     deps.setDialogOpen(true)
     const result = await deps.showOpenDialog(owner, {
-      title: '選擇寵物素材包（.codex-pet.zip）',
+      title: translate('pet.importZipTitle'),
       filters: [{ name: 'Pet sprite kit', extensions: ['zip'] }],
       properties: ['openFile'],
     })
@@ -233,7 +234,7 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
     if (!safeId || !owner) return null
     deps.setDialogOpen(true)
     const result = await deps.showOpenDialog(owner, {
-      title: '選擇 spritesheet（每格 192x208，.webp）',
+      title: translate('pet.importSpriteTitle'),
       filters: [{ name: 'Images', extensions: ['webp', 'png', 'jpg'] }],
       properties: ['openFile'],
     })

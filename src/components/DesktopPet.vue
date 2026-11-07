@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
-import { STATE_LABELS_SHORT, STATE_COLORS } from '@/types/agent'
+import { STATE_COLORS } from '@/types/agent'
 import { locale, t, type TranslationKey } from '@/i18n'
 import type { AchievementUnlock } from '@/types/achievement'
 import type { PluginBadgeView } from '@/types/plugin'
@@ -1033,7 +1033,7 @@ watch(() => store.achievementUnlock, (unlock) => {
               <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
               <span class="line-text">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
-                <span class="line-sep">·</span>{{ STATE_LABELS_SHORT[line.state] }}
+                <span class="line-sep">·</span>{{ stateAriaLabel(line.state) }}
               </span>
               <span v-if="pluginBadgesVisible" class="plugin-status-badges">
                 <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
@@ -1113,7 +1113,7 @@ watch(() => store.achievementUnlock, (unlock) => {
               <template v-if="line.label">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
                 <span class="line-sep">·</span>
-              </template>{{ STATE_LABELS_SHORT[line.state] }}
+              </template>{{ stateAriaLabel(line.state) }}
             </span>
             <span v-if="pluginBadgesVisible" class="plugin-status-badges">
               <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
