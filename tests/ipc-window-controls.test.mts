@@ -22,6 +22,8 @@ test('window control IPC keeps sender scopes, bounds clamps, and hidden-pet pref
   }
   let status: unknown = null
   registerWindowControlsIpc({
+    // Click-through is disabled on Linux (PET-06); pin a supporting platform so CI on ubuntu matches.
+    platform: 'darwin',
     ipcMain: { on: (channel, handler) => { handlers.set(channel, handler) } },
     isTrustedIpcSender: (_event, window) => window === petWindow || window === panelWindow,
     assertTrustedIpcSender: () => undefined,
