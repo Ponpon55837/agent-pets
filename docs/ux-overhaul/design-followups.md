@@ -36,3 +36,8 @@ Tokens added: `--font-2xl` (22px), `--font-floor` (11px), `--leading-tight/norma
 - `DesktopPet.css:330` `10px` -> `var(--font-xs)` (widen/truncate the status-line badge if needed); `:742`, `:853` `max(10px, …)` -> `max(var(--font-floor), calc(11px * var(--pet-scale, 1)))`; `:830` `max(8px, calc(9px * …))` -> same floor.
 - `SetupWizard.css:109`, `ProjectMcpPanel.css:121` `font-size: 24px` -> `var(--font-2xl)`.
 - Replace scattered `line-height: 1 / 1.25 / 1.5` with `--leading-*`.
+
+## Glyph icons (DS-06)
+`Icon.vue` now has `close`, `sparkle`, `wrench`, `alert`, `plugin`, `external-link`, `check`, `info`, `search` (paths in `ui/icons.ts`; `size` prop already takes any px size). `check-design-tokens --verbose` lists remaining `glyph-icon` hits. Known sites:
+- `DesktopPet.vue`: `x` close (~781, use `Button icon-only` + `<Icon name="close">` with >= 32px hit area), sparkle (~702), wrench emoji (~730), `!` notice icon (~690 -> `alert`).
+- `PluginPanel.vue` (~44, ~230): diamond placeholder -> `<Icon name="plugin">`.

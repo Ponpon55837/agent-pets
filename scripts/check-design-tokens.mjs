@@ -9,6 +9,7 @@
 //   literal-blur    backdrop-filter blur(<n>px) instead of a --blur-* token
 //   unused-token    --token declared in tokens.css but never referenced
 //                   (informational; never fails --strict)
+//   glyph-icon     arrow/dingbat/emoji/× glyph in a .vue template (use ui/Icon.vue)
 //   raw-control     <button|select|input> outside src/components/ui (informational)
 //
 // Dependency-free so it can run before `pnpm install` finishes in CI.
@@ -103,6 +104,16 @@ export function analyze(root = defaultRoot) {
   const unused = []
   for (const m of stripComments(tokenText).matchAll(/^\s*(--[a-z0-9-]+)\s*:/gim)) {
     if (!used.has(m[1])) unused.push(m[1])
+  }
+
+  const glyph = /[\u00D7\u2190-\u27BF\u2B00-\u2BFF]|\p{Extended_Pictographic}/u
+  for (const [file, text] of allText) {
+    if (!file.endsWith('.vue') || file.endsWith(`${sep}Icon.vue`)) continue
+    const tpl = text.split('<style')[0].replace(/<script[\s\S]*?<\/script>/g, (m) => m.replace(/[^\n]/g, ' '))
+    tpl.split('\n').forEach((line, i) => {
+      const visible = line.replace(/<!--[\s\S]*?-->/g, '')
+      if (glyph.test(visible)) findings.push({ rule: 'glyph-icon', file: rel(file), line: i + 1, text: visible.trim() })
+    })
   }
 
   const info = { unused }
