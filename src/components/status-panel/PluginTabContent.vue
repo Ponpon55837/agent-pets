@@ -72,30 +72,44 @@ function rect(r: DOMRect) {
   return { x: r.left, y: r.top, width: r.width, height: r.height }
 }
 
+let boundsFrame = 0
+let lastSentKey = ''
+
 function sendBounds(): void {
   const token = openToken.value
   const bounds = readBounds()
   if (!token || !bounds) return
-  window.electronAPI?.setPluginPanelViewBounds(
-    token, rect(bounds.frame), rect(bounds.content), { width: window.innerWidth, height: window.innerHeight },
-  )
+  const next = { frame: rect(bounds.frame), content: rect(bounds.content), viewport: { width: window.innerWidth, height: window.innerHeight } }
+  const key = `${token}|${JSON.stringify(next)}`
+  if (key === lastSentKey) return
+  lastSentKey = key
+  window.electronAPI?.setPluginPanelViewBounds(token, next.frame, next.content, next.viewport)
+}
+
+// Scroll / resize / ResizeObserver can fire many times per frame; send at most once per frame.
+function scheduleBounds(): void {
+  if (boundsFrame) return
+  boundsFrame = requestAnimationFrame(() => { boundsFrame = 0; sendBounds() })
 }
 
 function stopTracking(): void {
   observer?.disconnect()
   observer = null
-  window.removeEventListener('resize', sendBounds)
-  window.removeEventListener('scroll', sendBounds, true)
+  window.removeEventListener('resize', scheduleBounds)
+  window.removeEventListener('scroll', scheduleBounds, true)
+  if (boundsFrame) cancelAnimationFrame(boundsFrame)
+  boundsFrame = 0
+  lastSentKey = ''
 }
 
 function startTracking(): void {
   stopTracking()
   if (!frame.value || !content.value) return
-  observer = new ResizeObserver(sendBounds)
+  observer = new ResizeObserver(scheduleBounds)
   observer.observe(frame.value)
   observer.observe(content.value)
-  window.addEventListener('resize', sendBounds)
-  window.addEventListener('scroll', sendBounds, true)
+  window.addEventListener('resize', scheduleBounds)
+  window.addEventListener('scroll', scheduleBounds, true)
 }
 
 // Closes the native view first so it can never linger over other UI.
