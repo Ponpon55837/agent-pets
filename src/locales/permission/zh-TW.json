@@ -30,5 +30,9 @@
   "permission.hotkeyUnavailable": "快捷鍵已被其他程式佔用，請直接點選按鈕",
   "permission.keyboardHint": "鍵盤：N 或 Esc 拒絕；按住 Y 約 0.6 秒允許",
   "permission.keyboardHintLow": "鍵盤：N 或 Esc 拒絕；Y 允許一次",
-  "permission.announce": "{source} 要求「{action}」權限，{risk}"
+  "permission.announce": "{source} 要求「{action}」權限，{risk}",
+  "permission.queueToggle": "共 {count} 個待處理請求，展開清單",
+  "permission.queueLabel": "待處理的權限請求",
+  "permission.denyAll": "全部拒絕",
+  "permission.denyAllConfirm": "再按一次，拒絕全部 {count} 個"
 }

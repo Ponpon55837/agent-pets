@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { t, type TranslationKey } from '@/i18n'
 import { permissionSourceName } from '@/utils/permission-source'
@@ -8,6 +8,12 @@ import PermissionRiskBadge from '@/components/permission/PermissionRiskBadge.vue
 import PermissionDetails from '@/components/permission/PermissionDetails.vue'
 import PermissionCountdown from '@/components/permission/PermissionCountdown.vue'
 import { usePermissionClock } from '@/components/permission/usePermissionClock'
+import {
+  formatDuration,
+  groupPermissionRequests,
+  PERMISSION_CLICK_GUARD_MS,
+  permissionRemainingMs,
+} from '@/utils/permission-view'
 
 const store = useAgentStore()
 const now = usePermissionClock()
@@ -34,10 +40,60 @@ const inlineError = computed(() => {
   return outcomeText(result.kind, current.agentId)
 })
 
-function decide(decision: 'allow_once' | 'deny'): void {
+// A new request ignores clicks for a moment: a finger already on its way to the
+// previous request's button must not land on this one's Allow.
+const armed = ref(false)
+let armTimer: ReturnType<typeof setTimeout> | null = null
+
+function arm(): void {
+  armed.value = false
+  if (armTimer) clearTimeout(armTimer)
+  armTimer = setTimeout(() => {
+    armTimer = null
+    armed.value = true
+    if (document.hasFocus()) denyButton.value?.focus({ preventScroll: true })
+  }, PERMISSION_CLICK_GUARD_MS)
+}
+
+function decide(decision: 'allow_once' | 'deny', viaKeyboard = false): void {
   const current = request.value
   if (!current || current.status !== 'pending') return
+  // Denying is always safe, so the keyboard may deny straight away.
+  if (!armed.value && !(viaKeyboard && decision === 'deny')) return
   void store.decidePermission(current.requestId, decision)
+}
+
+// --- Queue overview -----------------------------------------------------------
+const queueOpen = ref(false)
+const confirmDenyAll = ref(false)
+let confirmTimer: ReturnType<typeof setTimeout> | null = null
+const queue = computed(() => store.permissionRequests)
+const queueGroups = computed(() => groupPermissionRequests(queue.value))
+const hasQueue = computed(() => queue.value.length > 1)
+
+function toggleQueue(): void {
+  queueOpen.value = !queueOpen.value
+  resetDenyAll()
+}
+
+function resetDenyAll(): void {
+  confirmDenyAll.value = false
+  if (confirmTimer) clearTimeout(confirmTimer)
+  confirmTimer = null
+}
+
+// Two-step: the first press asks, the second (within 4s) denies every pending
+// request one by one through the broker. There is no "allow all".
+async function denyAll(): Promise<void> {
+  if (!confirmDenyAll.value) {
+    confirmDenyAll.value = true
+    confirmTimer = setTimeout(resetDenyAll, 4000)
+    return
+  }
+  resetDenyAll()
+  for (const pending of [...queue.value]) {
+    if (pending.status === 'pending') await store.decidePermission(pending.requestId, 'deny')
+  }
 }
 
 const RISK_LABEL_KEYS: Record<string, TranslationKey> = {
@@ -84,7 +140,7 @@ function onKeydown(event: KeyboardEvent): void {
   const key = event.key.toLowerCase()
   if (key === 'escape' || key === 'n') {
     event.preventDefault()
-    decide('deny')
+    decide('deny', true)
     return
   }
   if (key !== 'y') return
@@ -112,12 +168,17 @@ onBeforeUnmount(cancelHold)
 // this window already has focus: stealing focus from another app's text field
 // would be worse than not focusing at all.
 const denyButton = ref<HTMLButtonElement | null>(null)
-watch(() => request.value?.requestId, async (id) => {
+watch(() => request.value?.requestId, (id) => {
   cancelHold()
-  if (!id) return
-  await nextTick()
-  if (document.hasFocus()) denyButton.value?.focus({ preventScroll: true })
+  resetDenyAll()
+  queueOpen.value = false
+  if (id) arm()
 }, { immediate: true })
+
+onBeforeUnmount(() => {
+  if (armTimer) clearTimeout(armTimer)
+  resetDenyAll()
+})
 </script>
 
 <template>
@@ -139,8 +200,38 @@ watch(() => request.value?.requestId, async (id) => {
     <header class="permission-request-header">
       <span class="permission-request-source">{{ permissionSourceName(request.agentId) }}</span>
       <span class="permission-request-project" :title="request.projectId">{{ request.projectId || t('projectUnknown') }}</span>
-      <span class="permission-request-queue">{{ request.queuePosition }}/{{ request.queueSize }}</span>
+      <button
+        v-if="hasQueue"
+        type="button"
+        class="permission-request-queue permission-queue-toggle"
+        :aria-expanded="queueOpen"
+        :aria-label="t('permission.queueToggle', { count: request.queueSize })"
+        @mousedown.stop
+        @click.stop="toggleQueue"
+      >
+        {{ request.queuePosition }}/{{ request.queueSize }}
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path :d="queueOpen ? 'M3 10.5 8 5.5l5 5' : 'M3 5.5l5 5 5-5'" />
+        </svg>
+      </button>
+      <span v-else class="permission-request-queue">{{ request.queuePosition }}/{{ request.queueSize }}</span>
     </header>
+    <div v-if="queueOpen && hasQueue" class="permission-queue" role="group" :aria-label="t('permission.queueLabel')">
+      <ol class="permission-queue-list">
+        <li v-for="group in queueGroups" :key="group.first.requestId" class="permission-queue-item">
+          <span class="permission-queue-action">{{ group.first.action }}</span>
+          <span class="permission-queue-meta">
+            {{ permissionSourceName(group.first.agentId) }} · {{ group.first.projectId || t('projectUnknown') }}
+          </span>
+          <span v-if="group.count > 1" class="permission-queue-count">×{{ group.count }}</span>
+          <span class="permission-queue-time">{{ formatDuration(permissionRemainingMs(group.first, now)) }}</span>
+          <span v-if="group.first.risk === 'high'" class="permission-queue-risk">{{ t('permissionRiskHigh') }}</span>
+        </li>
+      </ol>
+      <button type="button" class="permission-button deny permission-queue-deny" :class="{ confirming: confirmDenyAll }" @mousedown.stop @click.stop="denyAll">
+        {{ confirmDenyAll ? t('permission.denyAllConfirm', { count: queue.length }) : t('permission.denyAll') }}
+      </button>
+    </div>
     <p class="permission-request-heading">
       <strong id="permission-request-title">{{ request.action }}</strong>
       <PermissionRiskBadge :risk="request.risk" :network="request.network" />
@@ -153,7 +244,7 @@ watch(() => request.value?.requestId, async (id) => {
         type="button"
         ref="denyButton"
         class="permission-button deny"
-        :disabled="request.status !== 'pending'"
+        :disabled="request.status !== 'pending' || !armed"
         @mousedown.stop
         @click.stop="decide('deny')"
       >
@@ -163,7 +254,7 @@ watch(() => request.value?.requestId, async (id) => {
       <button
         type="button"
         class="permission-button allow"
-        :disabled="request.status !== 'pending'"
+        :disabled="request.status !== 'pending' || !armed"
         @mousedown.stop
         @click.stop="decide('allow_once')"
       >
@@ -301,6 +392,81 @@ watch(() => request.value?.requestId, async (id) => {
   color: var(--state-warn-bright);
   font-size: var(--font-xs);
   line-height: 1.3;
+}
+
+.permission-queue-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  cursor: pointer;
+  font-family: var(--font-ui);
+}
+
+.permission-queue-toggle:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.permission-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.permission-queue-list {
+  display: flex;
+  max-height: 9em;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  overflow-y: auto;
+  list-style: none;
+}
+
+.permission-queue-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--font-xs);
+  line-height: 1.3;
+}
+
+.permission-queue-action {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-weight: var(--weight-bold);
+}
+
+.permission-queue-meta {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-queue-count,
+.permission-queue-time {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.permission-queue-risk {
+  color: var(--state-error-soft);
+  font-weight: var(--weight-bold);
+}
+
+.permission-queue-deny.confirming {
+  border-color: var(--state-error);
+  color: var(--state-error-soft);
 }
 
 .permission-request-hint {

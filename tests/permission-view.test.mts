@@ -37,3 +37,21 @@ test('durations are m:ss and never negative', () => {
   assert.equal(formatDuration(-5), '0:00')
   assert.equal(formatDuration(Number.NaN), '0:00')
 })
+
+test('click guard keeps buttons inert for 300ms', async () => {
+  const { isPermissionClickArmed } = await import('../src/utils/permission-view.ts')
+  assert.equal(isPermissionClickArmed(1_000, 1_299), false)
+  assert.equal(isPermissionClickArmed(1_000, 1_300), true)
+})
+
+test('consecutive identical requests of one session fold, others do not', async () => {
+  const { groupPermissionRequests } = await import('../src/utils/permission-view.ts')
+  const make = (requestId: string, over: Record<string, unknown> = {}) => ({
+    requestId, agentId: 'opencode-cli', sessionId: 's1', action: 'read', description: 'a.ts', details: [], ...over,
+  }) as never
+  const groups = groupPermissionRequests([
+    make('1'), make('2'), make('3', { sessionId: 's2' }), make('4', { description: 'b.ts' }), make('5', { description: 'b.ts' }),
+  ])
+  assert.deepEqual(groups.map((g) => g.requestIds), [['1', '2'], ['3'], ['4', '5']])
+  assert.deepEqual(groups.map((g) => g.count), [2, 1, 2])
+})

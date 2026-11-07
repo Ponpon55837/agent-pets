@@ -258,3 +258,18 @@ test('active request helpers match listRequests and keep queue order without sor
   assert.equal(third.ok && third.request.queuePosition, 2)
   assert.deepEqual(broker.listRequests().map(item => item.requestId), ['request-2', 'request-3'])
 })
+
+test('one session cannot hold more than 20 active requests', () => {
+  const broker = new PermissionBroker()
+  broker.registerAdapter(respondPort(async () => 'delivered'))
+  for (let index = 0; index < 20; index += 1) {
+    assert.equal(broker.createRequest('opencode-desktop', request({ requestId: `r-${index}` })).ok, true)
+  }
+  assert.deepEqual(
+    broker.createRequest('opencode-desktop', request({ requestId: 'r-overflow' })),
+    { ok: false, error: 'capacity_exceeded' },
+  )
+  const other = broker.createRequest('opencode-desktop', request({ requestId: 'r-other', sessionId: 'session-2' }))
+  assert.equal(other.ok, true)
+  broker.shutdown()
+})

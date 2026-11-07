@@ -30,5 +30,9 @@
   "permission.hotkeyUnavailable": "The shortcut is taken by another app; use the buttons instead",
   "permission.keyboardHint": "Keyboard: N or Esc denies; hold Y for 0.6 s to allow",
   "permission.keyboardHintLow": "Keyboard: N or Esc denies; Y allows once",
-  "permission.announce": "{source} is asking for \"{action}\" permission, {risk}"
+  "permission.announce": "{source} is asking for \"{action}\" permission, {risk}",
+  "permission.queueToggle": "{count} pending requests, show the list",
+  "permission.queueLabel": "Pending permission requests",
+  "permission.denyAll": "Deny all",
+  "permission.denyAllConfirm": "Press again to deny all {count}"
 }

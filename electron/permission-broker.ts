@@ -18,6 +18,7 @@ const MAX_DETAIL_ITEMS = 5
 const MAX_DETAIL_LENGTH = 120
 const MAX_AUDIT_RECORDS = 500
 const DEFAULT_MAX_REQUEST_RECORDS = 5_000
+const MAX_ACTIVE_PER_SESSION = 20
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
 
 export type PermissionDeliveryResult = 'delivered' | 'already_resolved' | 'rejected'
@@ -268,6 +269,10 @@ export class PermissionBroker {
       return { ok: false, error: 'invalid_request' }
     }
     if (this.requests.has(candidate.requestId)) return { ok: false, error: 'duplicate_request' }
+    // One agent session cannot flood the queue and bury everyone else's requests.
+    if (this.countActiveForSession(adapterId, candidate.sessionId) >= MAX_ACTIVE_PER_SESSION) {
+      return { ok: false, error: 'capacity_exceeded' }
+    }
     if (this.requests.size >= this.maxRequestRecords) {
       return { ok: false, error: 'capacity_exceeded' }
     }
@@ -541,6 +546,14 @@ export class PermissionBroker {
     } catch {
       // Observers cannot interrupt the broker state transition.
     }
+  }
+
+  private countActiveForSession(adapterId: string, sessionId: string): number {
+    let count = 0
+    for (const request of this.requests.values()) {
+      if (!isTerminal(request.status) && request.adapterId === adapterId && request.sessionId === sessionId) count += 1
+    }
+    return count
   }
 
   // Map 依插入順序迭代，而 order 在插入時單調遞增且紀錄不會重新插入，
