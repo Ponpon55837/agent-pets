@@ -1,1 +1,8 @@
-{}
+{
+  "reliability.crash.toastTitle": "Agent Pets hit an internal error",
+  "reliability.crash.toastBody": "The error was contained and the app keeps running. If your pet stops responding, reload it from the menu.",
+  "reliability.startup.failedTitle": "Agent Pets failed to start",
+  "reliability.startup.failedMessage": "Some services could not start. You can restart Agent Pets or quit for now.",
+  "reliability.startup.retry": "Restart",
+  "reliability.startup.quit": "Quit"
+}

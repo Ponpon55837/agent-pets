@@ -1,1 +1,8 @@
-{}
+{
+  "reliability.crash.toastTitle": "Agent Pets 發生內部錯誤",
+  "reliability.crash.toastBody": "程式已自動攔截並繼續執行；若寵物沒有反應，請從選單重新載入寵物。",
+  "reliability.startup.failedTitle": "Agent Pets 啟動失敗",
+  "reliability.startup.failedMessage": "部分服務無法啟動。你可以重新啟動 Agent Pets，或先結束程式。",
+  "reliability.startup.retry": "重新啟動",
+  "reliability.startup.quit": "結束"
+}

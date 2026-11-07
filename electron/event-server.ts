@@ -105,6 +105,7 @@ export function createEventServer(
     request.on('end', async () => {
       if (bodyRejected) return
 
+      let event: AgentStatusEvent
       try {
         const parsed: unknown = JSON.parse(
           Buffer.concat(chunks).toString('utf8')
@@ -115,17 +116,24 @@ export function createEventServer(
           response.end(JSON.stringify({ error: normalized.error }))
           return
         }
-        const { event } = normalized
-
-        for (const win of getWindows()) enqueueAgentEvent({ window: win, event })
-        onEvent?.(event)
-
-        response.writeHead(204)
-        response.end()
+        event = normalized.event
       } catch {
         response.writeHead(400)
         response.end(JSON.stringify({ error: 'invalid JSON' }))
+        return
       }
+
+      // A failure in downstream side effects (notifications, XP, history) is
+      // our bug, not a malformed request: log it and still acknowledge the hook.
+      try {
+        for (const win of getWindows()) enqueueAgentEvent({ window: win, event })
+        onEvent?.(event)
+      } catch (error) {
+        console.error('Event handler failed', error)
+      }
+
+      response.writeHead(204)
+      response.end()
     })
   })
 
