@@ -10,6 +10,7 @@
 //   unused-token    --token declared in tokens.css but never referenced
 //                   (informational; never fails --strict)
 //   glyph-icon     arrow/dingbat/emoji/× glyph in a .vue template (use ui/Icon.vue)
+//   english-literal  untranslated [A-Za-z]{4,} text node in a .vue template (use t())
 //   raw-control     <button|select|input> outside src/components/ui (informational)
 //
 // Dependency-free so it can run before `pnpm install` finishes in CI.
@@ -113,6 +114,16 @@ export function analyze(root = defaultRoot) {
     tpl.split('\n').forEach((line, i) => {
       const visible = line.replace(/<!--[\s\S]*?-->/g, '')
       if (glyph.test(visible)) findings.push({ rule: 'glyph-icon', file: rel(file), line: i + 1, text: visible.trim() })
+    })
+  }
+
+  for (const [file, text] of allText) {
+    if (!file.endsWith('.vue')) continue
+    const tpl = text.split('<style')[0].replace(/<script[\s\S]*?<\/script>/g, (m) => m.replace(/[^\n]/g, ' '))
+    tpl.split('\n').forEach((line, i) => {
+      for (const m of line.replace(/<!--[\s\S]*?-->/g, '').matchAll(/>([^<>{}]*[A-Za-z]{4,}[^<>{}]*)</g)) {
+        findings.push({ rule: 'english-literal', file: rel(file), line: i + 1, text: m[1].trim() })
+      }
     })
   }
 

@@ -47,3 +47,10 @@ Done in ui/: `ToggleRow` is `role="switch"` and links `help` via `aria-described
 - `DesktopPet.vue` permission `alertdialog`: add `aria-describedby="permission-request-description"`; merge the 4 `aria-live` bubbles so only one announces at a time.
 - `SettingsPets.vue:175`: error container `role="alert"` (success/progress stay `role="status"`); rename input needs a label (`ui/Input` or `TextField`).
 - Quota/usage bars: pass `valueText` ("72%, resets in 2h") to `ProgressTrack`; loading regions get `aria-busy="true"` with `ui/Skeleton`.
+
+## i18n literals (DS-13)
+Added: `<html lang>` follows the locale (`i18n.ts`), `utils/accelerator.ts` (`formatAccelerator`/`acceleratorKeys`), `utils/state-label.ts` (`stateAriaLabel`), keys `design.state.*`, `design.operationFailed`; zh-TW `permissionBubbleHelp` no longer names English buttons.
+- `components/permission/PermissionBubble.vue` (~77/87, `<kbd>Ctrl Shift N/Y</kbd>`) and `DesktopPet.vue` (~661-672): replace literal `Deny`/`Allow once` with `t('permissionDeny')`/`t('permissionAllowOnce')`; render `<kbd v-for="k in acceleratorKeys(accel)">` using the accelerator main reports (currently `CommandOrControl+Shift+Y/N` in `electron/main/runtime.ts`) instead of the literal `Ctrl Shift N/Y`.
+- Session state dots/labels: add `:aria-label="stateAriaLabel(state)"` (visual text stays English by decision).
+- `desktop-tray.ts:122`, `runtime.ts:2423/2575`: `'Presentation MCP'`/`'Permission adapter'` labels shown to users should come from locale keys (reliability/permission streams).
+- `node scripts/check-design-tokens.mjs --verbose` lists `english-literal` template text nodes still to move into `t()`.

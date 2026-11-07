@@ -62,6 +62,16 @@ function readPersistedLocale(): AppLocale {
 
 export const locale = ref<AppLocale>(readPersistedLocale())
 
+// Keep <html lang> in step with the UI language so screen readers pick the
+// right voice and the browser picks CJK-appropriate fonts.
+const HTML_LANG: Record<AppLocale, string> = { 'zh-TW': 'zh-TW', 'en-US': 'en' }
+
+function syncDocumentLang(value: AppLocale): void {
+  if (typeof document !== 'undefined') document.documentElement.lang = HTML_LANG[value]
+}
+
+syncDocumentLang(locale.value)
+
 export function getLocale(): AppLocale {
   return locale.value
 }
@@ -69,6 +79,7 @@ export function getLocale(): AppLocale {
 export function setLocale(value: unknown): AppLocale {
   const next = isAppLocale(value) ? value : DEFAULT_LOCALE
   locale.value = next
+  syncDocumentLang(next)
   try {
     if (typeof localStorage !== 'undefined') localStorage.setItem('agent-pet-locale', next)
   } catch {}
@@ -90,7 +101,7 @@ export function translateBackendError(value: unknown): string {
     : value instanceof Error
       ? value.message
       : ''
-  if (!raw) return '操作失敗'
+  if (!raw) return t('design.operationFailed')
   if (locale.value === 'en-US') return raw
 
   const exact: Record<string, string> = zhTWErrors

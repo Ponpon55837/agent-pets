@@ -3,5 +3,14 @@
   "design.theme.help": "面板與設定頁的配色。桌面寵物的氣泡維持深色。",
   "design.theme.system": "跟隨系統",
   "design.theme.light": "淺色",
-  "design.theme.dark": "深色"
+  "design.theme.dark": "深色",
+  "design.operationFailed": "操作失敗",
+  "design.state.offline": "離線",
+  "design.state.idle": "閒置",
+  "design.state.thinking": "思考中",
+  "design.state.tool-running": "執行工具中",
+  "design.state.waiting-permission": "等待權限確認",
+  "design.state.waiting-input": "等待輸入",
+  "design.state.success": "完成",
+  "design.state.error": "發生錯誤"
 }
