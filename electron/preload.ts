@@ -399,7 +399,7 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.projectMcpForget, projectPath)
   },
 
-  uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => {
+  uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode' | 'all') => {
     return ipcRenderer.invoke(IPC_CHANNELS.uninstallIntegrations, target)
   },
 

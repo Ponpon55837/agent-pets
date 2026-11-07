@@ -163,7 +163,7 @@ export interface ElectronAPI {
       listProjectMcp: () => Promise<ProjectMcpRegistrySnapshot>
       removeProjectMcp: (projectPath: string) => Promise<ProjectMcpRemovalSummary>
       forgetProjectMcp: (projectPath: string) => Promise<{ ok: boolean; removed: boolean; error?: string }>
-      uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode') => Promise<{ ok: boolean; error?: string }>
+      uninstallIntegrations: (target?: 'opencode' | 'codex' | 'claude' | 'claudeCode' | 'all') => Promise<{ ok: boolean; error?: string }>
       loadPets: () => Promise<Array<{
         id: string
         displayName: string

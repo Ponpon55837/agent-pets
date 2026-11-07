@@ -212,3 +212,19 @@ test('codex feature text: enable adds once, disable reverts only that line', () 
   assert.equal(already.added, false)
   assert.equal(already.content, '[features]\nhooks = true\n')
 })
+
+test('removing Codex hooks leaves Claude Code hooks (shared script) intact', () => {
+  const dir = tempDir()
+  try {
+    const codex = path.join(dir, 'hooks.json')
+    const claude = path.join(dir, 'settings.json')
+    fs.writeFileSync(codex, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo mine' }] }] } }))
+    mergeAgentPetsHooksFile(codex, desired())
+    mergeAgentPetsHooksFile(claude, desired())
+    removeAgentPetsHooksFile(codex, { description: 'Agent Pets lifecycle hooks for Codex CLI.' })
+    assert.equal(fileHasAgentPetsHooks(codex), false)
+    assert.equal(fileHasAgentPetsHooks(claude), true)
+    const kept = JSON.parse(fs.readFileSync(codex, 'utf8'))
+    assert.equal(kept.hooks.Stop[0].hooks[0].command, 'echo mine')
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})

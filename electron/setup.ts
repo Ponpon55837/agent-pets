@@ -260,24 +260,28 @@ function presentationTokenPath(): string {
   return path.join(hookScriptDeployPath(), 'presentation-token')
 }
 
-function ensureEventToken(): string {
+// Tokens created or read by this process are remembered so that a full cleanup followed by a
+// reinstall in the same session re-uses the value the running event/permission servers already hold.
+const tokenCache = new Map<string, string>()
+
+function ensureToken(tokenPath: string, label: string): string {
   const dir = hookScriptDeployPath()
   ensureDir(dir)
   if (!IS_WIN) {
     try { fs.chmodSync(dir, 0o700) } catch {}
   }
 
-  const tokenPath = eventTokenPath()
   try {
     const stat = fs.lstatSync(tokenPath)
     if (!stat.isFile() || stat.isSymbolicLink()) {
-      throw new Error('Agent Pets event token path is not a regular file')
+      throw new Error(`Agent Pets ${label} token path is not a regular file`)
     }
     const existing = fs.readFileSync(tokenPath, 'utf8').trim()
     if (/^[a-f0-9]{64}$/i.test(existing)) {
       if (!IS_WIN) {
         try { fs.chmodSync(tokenPath, 0o600) } catch {}
       }
+      tokenCache.set(tokenPath, existing)
       return existing
     }
   } catch (error) {
@@ -285,7 +289,7 @@ function ensureEventToken(): string {
     if (code && code !== 'ENOENT') throw error
   }
 
-  const token = randomBytes(32).toString('hex')
+  const token = tokenCache.get(tokenPath) ?? randomBytes(32).toString('hex')
   const descriptor = fs.openSync(tokenPath, 'w', 0o600)
   try {
     fs.writeFileSync(descriptor, `${token}\n`, 'utf8')
@@ -296,85 +300,20 @@ function ensureEventToken(): string {
   if (!IS_WIN) {
     try { fs.chmodSync(tokenPath, 0o600) } catch {}
   }
+  tokenCache.set(tokenPath, token)
   return token
+}
+
+function ensureEventToken(): string {
+  return ensureToken(eventTokenPath(), 'event')
 }
 
 function ensurePermissionToken(): string {
-  const dir = hookScriptDeployPath()
-  ensureDir(dir)
-  if (!IS_WIN) {
-    try { fs.chmodSync(dir, 0o700) } catch {}
-  }
-
-  const tokenPath = permissionTokenPath()
-  try {
-    const stat = fs.lstatSync(tokenPath)
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-      throw new Error('Agent Pets permission token path is not a regular file')
-    }
-    const existing = fs.readFileSync(tokenPath, 'utf8').trim()
-    if (/^[a-f0-9]{64}$/i.test(existing)) {
-      if (!IS_WIN) {
-        try { fs.chmodSync(tokenPath, 0o600) } catch {}
-      }
-      return existing
-    }
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code && code !== 'ENOENT') throw error
-  }
-
-  const token = randomBytes(32).toString('hex')
-  const descriptor = fs.openSync(tokenPath, 'w', 0o600)
-  try {
-    fs.writeFileSync(descriptor, `${token}\n`, 'utf8')
-    fs.fsyncSync(descriptor)
-  } finally {
-    fs.closeSync(descriptor)
-  }
-  if (!IS_WIN) {
-    try { fs.chmodSync(tokenPath, 0o600) } catch {}
-  }
-  return token
+  return ensureToken(permissionTokenPath(), 'permission')
 }
 
 function ensurePresentationToken(): string {
-  const dir = hookScriptDeployPath()
-  ensureDir(dir)
-  if (!IS_WIN) {
-    try { fs.chmodSync(dir, 0o700) } catch {}
-  }
-
-  const tokenPath = presentationTokenPath()
-  try {
-    const stat = fs.lstatSync(tokenPath)
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-      throw new Error('Agent Pets presentation token path is not a regular file')
-    }
-    const existing = fs.readFileSync(tokenPath, 'utf8').trim()
-    if (/^[a-f0-9]{64}$/i.test(existing)) {
-      if (!IS_WIN) {
-        try { fs.chmodSync(tokenPath, 0o600) } catch {}
-      }
-      return existing
-    }
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code && code !== 'ENOENT') throw error
-  }
-
-  const token = randomBytes(32).toString('hex')
-  const descriptor = fs.openSync(tokenPath, 'w', 0o600)
-  try {
-    fs.writeFileSync(descriptor, `${token}\n`, 'utf8')
-    fs.fsyncSync(descriptor)
-  } finally {
-    fs.closeSync(descriptor)
-  }
-  if (!IS_WIN) {
-    try { fs.chmodSync(tokenPath, 0o600) } catch {}
-  }
-  return token
+  return ensureToken(presentationTokenPath(), 'presentation')
 }
 
 // --- Bundled integrations/ source (agent-hook.mjs, agent-hook.cmd) ---
@@ -784,9 +723,40 @@ function installCodex(): ConfigWriteResult[] {
   return results
 }
 
-function uninstallCodex(): void {
+const CODEX_HOOKS_OWNED_TOP_LEVEL = { description: 'Agent Pets lifecycle hooks for Codex CLI.' }
+
+// The hook script (and Windows wrapper) is shared by Codex, Claude Code and Claude Desktop.
+// Remove it only when no remaining config still points at it.
+function isHookScriptReferenced(): boolean {
+  if (fileHasAgentPetsHooks(codexHooksPath())) return true
+  if (fileHasAgentPetsHooks(claudeCodeSettingsPath())) return true
+  try {
+    const desktop = readConfigText(claudeDesktopConfigPath())
+    if (desktop && JSON.parse(desktop)?.agent === hookScriptPath()) return true
+  } catch {}
+  return false
+}
+
+function releaseSharedHookScript(): void {
+  if (isHookScriptReferenced()) return
   removeFile(hookScriptPath())
-  removeFile(codexHooksPath())
+  removeFile(hookWrapperPath())
+}
+
+function uninstallCodex(): void {
+  // Throws ConfigRefusedError for an unparseable file, leaving it untouched.
+  removeAgentPetsHooksFile(codexHooksPath(), CODEX_HOOKS_OWNED_TOP_LEVEL)
+  const configFile = codexConfigPath()
+  if (fileExists(configFile) && fileExists(codexFeatureMarkerPath())) {
+    const existing = readConfigText(configFile) ?? ''
+    const next = disableCodexHooksFeatureText(existing)
+    if (next !== existing) {
+      writeConfigSafely(configFile, next)
+      if (next === '') removeFile(configFile)
+    }
+  }
+  removeFile(codexFeatureMarkerPath())
+  releaseSharedHookScript()
 }
 
 // --- Claude Desktop ---
@@ -796,11 +766,11 @@ function installClaude(): ConfigWriteResult[] {
 }
 
 function uninstallClaude(): void {
-  removeFile(hookScriptPath())
   const configFile = claudeDesktopConfigPath()
   if (fileExists(configFile)) {
     removeJsonKeyFile(configFile, 'agent', hookScriptPath())
   }
+  releaseSharedHookScript()
 }
 
 // --- Claude Code (CLI & Desktop share settings.json) ---
@@ -839,11 +809,9 @@ function installClaudeCode(): ConfigWriteResult[] {
 function uninstallClaudeCode(): void {
   const settingsFile = claudeCodeSettingsPath()
   if (!fileExists(settingsFile)) return
-  try {
-    removeAgentPetsHooksFile(settingsFile)
-  } catch {
-    // unparseable settings.json: leave it exactly as it is
-  }
+  // Throws ConfigRefusedError for an unparseable settings.json, leaving it untouched.
+  removeAgentPetsHooksFile(settingsFile)
+  releaseSharedHookScript()
 }
 
 // Repair hooks written by older Windows builds. Those builds used Electron's
@@ -926,17 +894,48 @@ function installIntegration(target?: IntegrationTarget): ConfigWriteResult[] {
   }
 }
 
-function uninstallIntegration(target?: IntegrationTarget): void {
+function cleanupDeployDirectory(): void {
+  for (const filePath of [
+    eventTokenPath(),
+    permissionTokenPath(),
+    presentationTokenPath(),
+    presentationMcpScriptPath(),
+    hookScriptPath(),
+    hookWrapperPath(),
+    codexFeatureMarkerPath(),
+  ]) {
+    removeFile(filePath)
+  }
+  try { fs.rmdirSync(hookScriptDeployPath()) } catch { /* not empty: user files stay */ }
+}
+
+/**
+ * Removes Agent Pets' own entries. With no target every integration is removed; with 'all' the
+ * tokens and bridge scripts under the deploy directory are removed too. Every step runs even if an
+ * earlier one is refused; failures are reported together afterwards.
+ */
+function uninstallIntegration(target?: IntegrationTarget | 'all'): void {
   switch (target) {
     case 'opencode': uninstallOpenCode(); return
     case 'codex': uninstallCodex(); return
     case 'claude': uninstallClaude(); return
     case 'claudeCode': uninstallClaudeCode(); return
-    default:
-      uninstallOpenCode()
-      uninstallCodex()
-      uninstallClaude()
-      uninstallClaudeCode()
+    default: {
+      const failures: string[] = []
+      const steps: Array<[IntegrationTarget, () => void]> = [
+        ['opencode', uninstallOpenCode],
+        ['codex', uninstallCodex],
+        ['claude', uninstallClaude],
+        ['claudeCode', uninstallClaudeCode],
+      ]
+      for (const [name, run] of steps) {
+        try { run() } catch (error) {
+          failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+      if (target === 'all' && failures.length === 0) cleanupDeployDirectory()
+      if (failures.length > 0) throw new Error(failures.join('\n'))
+    }
   }
 }
 

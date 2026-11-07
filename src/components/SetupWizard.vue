@@ -10,6 +10,7 @@ import { locale, t, translateBackendError, type TranslationKey } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import Icon from '@/components/ui/Icon.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -29,6 +30,9 @@ const installing = ref<AgentAdapterId | 'all' | null>(null)
 const testing = ref<AgentSource | null>(null)
 const diagnosing = ref<AgentAdapterId | null>(null)
 const installError = ref('')
+const removing = ref<AgentAdapterId | 'all' | null>(null)
+const pendingRemoval = ref<AgentAdapterId | 'all' | null>(null)
+const removalNotice = ref('')
 
 const elapsedMs = ref(0)
 let elapsedTimer: ReturnType<typeof setInterval> | null = null
@@ -91,6 +95,46 @@ async function install(target?: AgentAdapterId) {
   }
   installing.value = null
   await detectTools()
+}
+
+function requestRemoval(target: AgentAdapterId | 'all') {
+  if (installing.value !== null || removing.value !== null) return
+  pendingRemoval.value = target
+}
+
+// Removal only strips Agent Pets' own entries in main; the confirm text spells out what is kept.
+async function confirmRemoval() {
+  const target = pendingRemoval.value
+  pendingRemoval.value = null
+  if (!target) return
+  removing.value = target
+  installError.value = ''
+  removalNotice.value = ''
+  try {
+    const result = target === 'all'
+      ? await window.electronAPI?.uninstallIntegrations('all')
+      : await window.electronAPI?.uninstallAdapter(target)
+    if (result && !result.ok) {
+      installError.value = translateBackendError(result.error || t('onboarding.removeFailed'))
+    } else {
+      removalNotice.value = t(target === 'all' ? 'onboarding.cleanupDone' : 'onboarding.removeDone')
+    }
+  } catch {
+    installError.value = t('onboarding.removeFailed')
+  }
+  removing.value = null
+  await detectTools()
+}
+
+function removalTitle(): string {
+  const target = pendingRemoval.value
+  if (target === 'all') return t('onboarding.cleanupTitle')
+  const tool = tools.value.find(item => item.id === target)
+  return t('onboarding.removeTitle', { name: tool?.displayName ?? '' })
+}
+
+function removalMessage(): string {
+  return pendingRemoval.value === 'all' ? t('onboarding.cleanupBody') : t('onboarding.removeBody')
 }
 
 async function testIntegration(tool: ToolStatus) {
@@ -224,10 +268,20 @@ onUnmounted(() => {
                 size="sm"
                 class="tool-action install-action install-btn"
                 v-if="tool.installable && tool.installTarget"
-                :disabled="installing !== null || testing !== null || diagnosing !== null"
+                :disabled="installing !== null || testing !== null || diagnosing !== null || removing !== null"
                 @click="install(tool.id)"
               >
                 {{ installing === tool.id ? t('installing') : tool.installed ? t('reinstall') : t('install') }}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                class="tool-action remove-btn"
+                v-if="tool.installable && (tool.installed || tool.health === 'degraded')"
+                :disabled="installing !== null || testing !== null || diagnosing !== null || removing !== null"
+                @click="requestRemoval(tool.id)"
+              >
+                {{ removing === tool.id ? t('removing') : t('remove') }}
               </Button>
             </div>
           </div>
@@ -256,15 +310,34 @@ onUnmounted(() => {
 
       <p class="wizard-note">{{ t('adapterNote') }}</p>
 
-      <div v-if="installError" class="error-msg">{{ installError }}</div>
+      <div v-if="installError" class="error-msg" role="alert">{{ installError }}</div>
+      <p v-else-if="removalNotice" class="wizard-note" role="status">{{ removalNotice }}</p>
 
       <div class="wizard-actions">
+        <Button
+          variant="ghost"
+          class="cleanup-btn"
+          :disabled="installing !== null || removing !== null"
+          @click="requestRemoval('all')"
+        >
+          {{ removing === 'all' ? t('removing') : t('onboarding.cleanupAll') }}
+        </Button>
         <Button variant="secondary" @click="detectTools">{{ t('refresh') }}</Button>
         <Button variant="primary" :disabled="installing !== null" @click="install()">
           {{ installing === 'all' ? t('installing') : t('installAll') }}
         </Button>
       </div>
     </div>
+
+    <ConfirmDialog
+      :open="pendingRemoval !== null"
+      :title="removalTitle()"
+      :message="removalMessage()"
+      tone="danger"
+      :confirm-label="t('remove')"
+      @confirm="confirmRemoval"
+      @cancel="pendingRemoval = null"
+    />
   </div>
 </template>
 
