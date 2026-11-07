@@ -149,6 +149,10 @@ export interface HistoryExport {
   }
   /** Growth snapshot (XP/level/streak and unlocked achievements), when available. */
   growth?: unknown
+  /** Past sessions of the export range (metadata only, project labels blanked), newest first and bounded. */
+  sessions?: HistorySessionListItem[]
+  /** True when more sessions matched than the export carries. */
+  sessionsTruncated?: boolean
 }
 
 export type HistoryExportFormat = 'json' | 'csv'
@@ -168,3 +172,93 @@ export type HistoryClearResult =
   | { ok: false; error: 'unavailable' }
 
 export const HISTORY_TERMINAL_STATES = new Set<AgentState>(['success', 'error', 'offline'])
+
+/**
+ * How a past session ended. `active` / `incomplete` are derived at read time
+ * from a still-open session: recent activity versus none for a while.
+ */
+export const HISTORY_SESSION_OUTCOMES = ['success', 'error', 'cancelled', 'active', 'incomplete'] as const
+export type HistorySessionOutcome = (typeof HISTORY_SESSION_OUTCOMES)[number]
+
+/** Page size bounds for the session list; the main process clamps to these. */
+export const HISTORY_SESSION_PAGE_DEFAULT = 30
+export const HISTORY_SESSION_PAGE_MAX = 50
+/** Most recent timeline entries returned for one session. */
+export const HISTORY_SESSION_TIMELINE_MAX = 500
+export const HISTORY_SESSION_SEARCH_MAX = 64
+
+/** Keyset cursor: the (lastSeenAt, id) of the last row of the previous page. */
+export interface HistorySessionCursor {
+  lastSeenAt: number
+  id: string
+}
+
+export interface HistorySessionQuery {
+  projectId?: string
+  adapterId?: string
+  /** Inclusive epoch-ms bounds on the session's last activity. */
+  from?: number
+  to?: number
+  outcome?: HistorySessionOutcome
+  /** Case-insensitive substring over the project name and the agent only. */
+  search?: string
+  limit?: number
+  cursor?: HistorySessionCursor
+}
+
+/**
+ * One past session, metadata only: no prompts, transcript text, tool
+ * arguments or absolute paths ever reach this shape.
+ */
+export interface HistorySessionListItem {
+  /** Opaque, stable id (adapter, agent and a hash); never the raw session id. */
+  id: string
+  adapterId: string
+  agentId: string
+  /** Canonical project fingerprint; '' when the session had no project. */
+  projectId: string
+  /** Last path segment the agent reported for its workspace; '' when unknown. */
+  projectLabel: string
+  startedAt: number
+  /** When the session first reached its terminal state; null while open. */
+  endedAt: number | null
+  lastSeenAt: number
+  /** lastSeenAt - startedAt. */
+  durationMs: number
+  activeMs: number
+  outcome: HistorySessionOutcome
+  /** False for sessions recorded before timelines existed: counts below are unknown. */
+  tracked: boolean
+  toolRuns: number
+  permissionWaits: number
+  permissionWaitMs: number
+  tokenInput: number
+  tokenOutput: number
+  tokenCacheRead: number
+  tokenCacheWrite: number
+  /** 'local' = matched local-log usage, 'hook' = totals the hook reported, 'none' = no tokens. */
+  tokenSource: 'local' | 'hook' | 'none'
+  /** Model with the most fresh input + output tokens; '' when unknown. */
+  topModel: string
+}
+
+export interface HistorySessionPage {
+  items: HistorySessionListItem[]
+  /** Pass back as `cursor` for the next page; null on the last page. */
+  nextCursor: HistorySessionCursor | null
+}
+
+export interface HistorySessionTimelineEntry {
+  occurredAt: number
+  state: AgentState
+  /** Tool name only (for tool-running); never its arguments. */
+  toolName?: string
+}
+
+export interface HistorySessionDetail {
+  session: HistorySessionListItem
+  /** Oldest first; at most HISTORY_SESSION_TIMELINE_MAX entries. */
+  timeline: HistorySessionTimelineEntry[]
+  /** True when older entries exist than the ones returned. */
+  truncated: boolean
+}
