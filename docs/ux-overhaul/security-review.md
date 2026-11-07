@@ -217,3 +217,33 @@ Secret 掃描：對 diff 新增行（排除 lockfile 與 tests）以常見金鑰
 2. M-1、M-2、M-3 — 修改小、測試容易，建議在本 phase 內處理。
 3. L-1、L-2、L-3、L-4、L-6 — 建議同一輪處理（均為局部修改）。
 4. 其餘 Low／Info 可列入 follow-up。
+
+---
+
+## 修正狀態
+
+分支 `ws/fix-sec`。M-4（版本號）不屬於本 stream，維持原判斷，待使用者確認後處理。
+
+| 項目 | 狀態 | Commit | 修正內容 |
+|---|---|---|---|
+| M-1 | 已修正 | `41b7de9` (SEC-01) | `classifyPermissionRisk` 改為整串（trim、小寫）精確比對 `read/glob/grep/list`；`mcp__*`、含 `__ : . / \`、空白或參數的名稱、未知工具一律 `high`。`toolBaseName` 只保留給網路旗標顯示，不參與風險判斷。測試涵蓋報告中的繞過範例。 |
+| M-2 | 已修正 | `b91e804` (SEC-02) | `findGitLocation` 對 `gitdir`/`commondir` 做 realpath 與包含檢查；指向選取資料夾外者標記 `outside`，不讀不寫，`localOnly` 回報 warning 並略過。`info` 目錄或 `exclude` 為 symlink 一律拒絕，寫入改用 `writeTextAtomic`。已知取捨：資料夾外的合法 linked worktree 不再自動寫入 exclude。 |
+| M-3 | 已修正 | `bc605dc` (SEC-03) | 只有 SQLITE_CORRUPT/NOTADB 或 `quick_check` 失敗才搬移資料庫；鎖定、忙碌、磁碟滿、權限、遷移錯誤保留原檔並交給既有重試計時器。遷移原本就在 transaction 內回滾（有測試驗證原檔與 `schema_migrations` 不變）。`.corrupt-*` 最多保留 3 份，Clear History 會一併刪除，重建後以桌面通知提示（`reliability.history.*`）。未做 `pre-v6` 備份副本（回滾已保證原檔完整）。 |
+| M-4 | 未處理（不在本 stream） | - | 版本號與發版流程需使用者確認。 |
+| L-1 | 已修正 | `d41078d` | `where.exe` 由 System32 執行並拒絕 cwd／Downloads／Temp 內的候選；啟動修復只針對「hook 指向非 Node 的 exe（舊版 Electron 遞迴）」，Node 路徑變動不再改寫使用者設定。 |
+| L-2 | 已修正 | `d41078d` | POSIX 改單引號（`'` → `'\''`）；含換行／NUL（POSIX）或 `"`、`%`、換行（Windows）的路徑丟 `ConfigRefusedError('unsafe')`。 |
+| L-3 | 已修正 | `53f7aa6` | 由檔頭讀出尺寸，寬 ≤ 6144、高 ≤ 13312、總像素 ≤ 16M，否則 `E_SIZE`。 |
+| L-4 | 已修正 | `53f7aa6` | 啟動時修剪過大的 audit 檔並刪除舊 `permission-audit.json`；讀取只讀尾端 512KB；trim 改 `renameSyncWithRetry`。 |
+| L-5 | 已修正 | `53f7aa6` | 追蹤表滿時改用共用 overflow 桶；新增不依賴 sessionId 的全域事件預算（一般 2000、終端 300／10 秒）。 |
+| L-6 | 已修正 | `53f7aa6` | `project-mcp-remove` 要求路徑在 registry；`looksLikeOurs` 另需 `command` 為絕對路徑且 basename 為 `node`/`node.exe`（含 Codex TOML）。 |
+| L-7 | 已修正 | `cf471c9` | 兩份 redaction 補上含空白使用者名稱、`C:/Users/x`、email、`curl -u`、`mysql -p`、`export X_TOKEN v`。plugin log 訊息截至 300 字。未做：診斷匯出前的使用者提示（UI）。 |
+| L-8 | 已修正 | `cf471c9` | logger 對 `plugin:*`（30/分）、`renderer*`（20/分）設配額並記錄丟棄數；error 與 startup 行另寫入有上限的 `main-evidence.log`，輪替不會洗掉，`readRecent` 會合併。 |
+| L-9 | 已修正 | `cf471c9` | 失敗後 TTL 指數退避：timeout 10 秒起、其餘（expired／rate-limited／not-signed-in／unavailable）60 秒起，上限 15 分鐘，成功即重置。 |
+| L-10 | 已修正 | `d41078d` | `isAgentPetsHook` 只認 token 完全等於 `*/.desktop-pet/agent-hook.(mjs\|cmd)`；空殼檔若為 symlink 則保留連結（已被寫成 `{}`），不再刪連結。 |
+| I-1 | 不處理 | - | 屬刻意設計，由確認對話框文案處理（UI）。 |
+| I-2 | 已修正 | `d41078d` | 備份直接以 `0600` 建立，不再先複製後 chmod。 |
+| I-3 | 不處理 | - | 需設計決策（自動重啟）。 |
+| I-4 | 不處理 | - | 報告已判定為合理範圍。 |
+| I-5 | 已修正 | `cf471c9` | 開發用 log 改印實際解析後的連接埠。 |
+| I-6 | 不處理 | - | 變更追蹤狀態易與其他 stream 的 merge 衝突，留待整合後處理。 |
+| I-7 | 不處理 | - | 預覽內容改由主行程回傳屬 UI／IPC 契約變更，留作 follow-up。 |

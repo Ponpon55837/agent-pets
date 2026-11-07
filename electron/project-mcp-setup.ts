@@ -346,6 +346,13 @@ function installCodex(
   return installedResult('codex', 'installed', filePath, updated ? 'updated' : 'installed', updated ? 'Codex project MCP paths updated.' : 'Codex project MCP installed.')
 }
 
+// A stale entry of ours runs Node.js by absolute path; any other command is the user's own.
+function nodeCommand(value: unknown): boolean {
+  if (typeof value !== 'string') return false
+  if (!path.posix.isAbsolute(value) && !path.win32.isAbsolute(value)) return false
+  return /^node(\.exe)?$/i.test(path.win32.basename(value))
+}
+
 function bridgeName(value: unknown): boolean {
   return typeof value === 'string' && /(^|[\\/])presentation-mcp\.mjs$/.test(value)
 }
@@ -358,11 +365,11 @@ function looksLikeOurs(client: ProjectMcpClientId, entry: unknown): boolean {
   const onlyKeys = (allowed: string[]) => Object.keys(entry).every(key => allowed.includes(key))
   if (client === 'claude') {
     return onlyKeys(['type', 'command', 'args']) && entry.type === 'stdio'
-      && typeof entry.command === 'string' && Array.isArray(entry.args) && entry.args.length === 1 && bridgeName(entry.args[0])
+      && nodeCommand(entry.command) && Array.isArray(entry.args) && entry.args.length === 1 && bridgeName(entry.args[0])
   }
   if (client === 'opencode') {
     return onlyKeys(['type', 'command', 'enabled']) && entry.type === 'local'
-      && Array.isArray(entry.command) && entry.command.length === 2 && bridgeName(entry.command[1])
+      && Array.isArray(entry.command) && entry.command.length === 2 && nodeCommand(entry.command[0]) && bridgeName(entry.command[1])
   }
   return false
 }
@@ -373,7 +380,7 @@ function codexLooksLikeOurs(section: string): boolean {
     .filter((key): key is string => Boolean(key))
   if (keys.some(key => key !== 'command' && key !== 'args')) return false
   const args = tomlValue(section, 'args')
-  return Array.isArray(args) && args.length === 1 && bridgeName(args[0])
+  return nodeCommand(tomlValue(section, 'command')) && Array.isArray(args) && args.length === 1 && bridgeName(args[0])
 }
 
 function mismatchResult(
@@ -702,7 +709,9 @@ export function installProjectMcp(
 
   if (selection?.localOnly) {
     const location = findGitLocation(canonicalPath)
-    if (location) {
+    if (location?.outside) {
+      summary.warnings = ['.git points outside the project folder; skipped editing its info/exclude.']
+    } else if (location) {
       const tracked = readTrackedPaths(location)
       const relativePaths = results
         .filter(result => result.status === 'installed' || result.status === 'already_configured')
