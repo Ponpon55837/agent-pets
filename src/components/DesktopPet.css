@@ -1,4 +1,7 @@
 .desktop-pet {
+  /* Tallest a bubble may grow: stays inside the headroom reserved above the
+     sprite (QUOTA_TOOLTIP_HEADROOM_H in agentStore) with a little slack. */
+  --pet-bubble-max-h: 176px;
   position: relative;
   width: 100%;
   height: 100%;
@@ -726,14 +729,15 @@
   transform: scale(0.92) translateY(3px);
 }
 
-/* Overlays the top of the canvas rather than sitting in flex flow above it —
-   there's no spare window height reserved for it, and deliberately so: on
-   show/hide it must never trigger a pet-window resize (that was previously
+/* Bubbles sit ABOVE the sprite (bottom-anchored to the click area's top edge)
+   inside the window's reserved transparent headroom, so they never cover the
+   pet's face and never trigger a pet-window resize (that was previously
    causing a slow position drift, since every resize re-anchors the window). */
 .permission-request {
   position: absolute;
-  top: 2px;
+  bottom: calc(100% - 2px);
   left: 50%;
+  transform-origin: 50% 100%;
   z-index: 8;
   width: min(248px, calc(var(--pet-w, 260px) - 8px));
   padding: 10px;
@@ -753,6 +757,7 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   text-align: left;
   transform: translateX(-50%);
+  max-height: calc(var(--pet-bubble-max-h) - var(--space-3));
 }
 
 .permission-request.risk-high {
@@ -893,10 +898,12 @@
 
 .pet-toast {
   position: absolute;
-  top: max(2px, calc(2px * var(--pet-scale, 1)));
+  bottom: calc(100% + 4px);
   left: 50%;
   transform: translateX(-50%);
+  transform-origin: 50% calc(100% + 9px);
   z-index: 5;
+  max-height: var(--pet-bubble-max-h);
   max-width: calc(var(--pet-w, 250px) - 10px);
   background: rgba(30, 30, 40, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -904,11 +911,11 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   color: #f2f2f2;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: max(10px, calc(11px * var(--pet-scale, 1)));
+  font-size: max(var(--font-sm), calc(var(--font-xs) * var(--pet-scale, 1)));
   font-weight: 600;
   line-height: 1.3;
-  padding: max(5px, calc(6px * var(--pet-scale, 1))) max(10px, calc(11px * var(--pet-scale, 1)));
-  border-radius: max(10px, calc(12px * var(--pet-scale, 1)));
+  padding: max(6px, calc(6px * var(--pet-scale, 1))) max(10px, calc(11px * var(--pet-scale, 1)));
+  border-radius: max(var(--radius-md), calc(12px * var(--pet-scale, 1)));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -992,7 +999,7 @@
 .plugin-feed-source {
   overflow: hidden;
   color: rgba(228, 255, 243, 0.64);
-  font-size: max(8px, calc(9px * var(--pet-scale, 1)));
+  font-size: max(var(--font-xs), calc(9px * var(--pet-scale, 1)));
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1015,13 +1022,13 @@
 }
 
 .plugin-feed-message strong {
-  font-size: max(10px, calc(11px * var(--pet-scale, 1)));
+  font-size: max(var(--font-xs), calc(11px * var(--pet-scale, 1)));
   font-weight: 700;
 }
 
 .plugin-feed-message span {
   color: rgba(228, 255, 243, 0.84);
-  font-size: max(9px, calc(10px * var(--pet-scale, 1)));
+  font-size: max(var(--font-xs), calc(10px * var(--pet-scale, 1)));
   font-weight: 500;
 }
 
@@ -1044,7 +1051,7 @@
   color: inherit;
   cursor: pointer;
   font: inherit;
-  font-size: max(8px, calc(9px * var(--pet-scale, 1)));
+  font-size: max(var(--font-xs), calc(9px * var(--pet-scale, 1)));
 }
 
 .plugin-feed-open-panel:hover {
@@ -1133,6 +1140,22 @@
   color: #ffb3b3;
 }
 
+.pet-toast.coach-mark {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: max-content;
+  max-width: min(240px, calc(var(--pet-w, 250px) - 10px));
+  white-space: normal;
+  text-align: left;
+}
+
+.coach-copy {
+  font-weight: 500;
+  line-height: 1.4;
+}
+
 .pet-toast.activity {
   border-color: rgba(139, 156, 247, 0.35);
   color: var(--accent-bright);
@@ -1195,7 +1218,7 @@
 .toast-enter-from,
 .toast-leave-to {
   opacity: 0;
-  transform: translateX(-50%) scale(0.9) translateY(6px);
+  transform: translateX(-50%) translateY(8px) scale(0.86);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -2,5 +2,7 @@
   "pet.ambientMotion": "Ambient motion",
   "pet.ambientMotionHelp": "Decorative breathing and sway while idle or working",
   "pet.activityBubble": "Working hint",
-  "pet.activityBubbleHelp": "Show the tool the agent is currently using"
+  "pet.activityBubbleHelp": "Show the tool the agent is currently using",
+  "pet.coachText": "Hi! Click me to see your sessions, drag me to move.",
+  "pet.coachDismiss": "Got it"
 }

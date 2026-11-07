@@ -16,6 +16,7 @@ import { quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
 import { selectBubble } from '@/utils/feed-arbiter'
 import { summarizePluginBadgesForPet } from '@/utils/plugin-badges'
 import PetAnimation from '@/components/PetAnimation.vue'
+import Button from '@/components/ui/Button.vue'
 
 const store = useAgentStore()
 const dragOffset = ref({ x: 0, y: 0 })
@@ -226,6 +227,45 @@ const bubbleSelection = computed(() => {
   })
 })
 
+// --- 首次啟動引導（coach mark）-----------------------------------------------
+
+const COACH_STORAGE_KEY = 'agent-pet-coach-v1'
+const COACH_VISIBLE_MS = 20_000
+const coachArmed = ref(false)
+let coachTimer: ReturnType<typeof setTimeout> | null = null
+
+function coachAlreadySeen(): boolean {
+  try {
+    return localStorage.getItem(COACH_STORAGE_KEY) === '1'
+  } catch {
+    return true
+  }
+}
+
+function dismissCoach(): void {
+  if (coachTimer) clearTimeout(coachTimer)
+  coachTimer = null
+  if (!coachArmed.value) return
+  coachArmed.value = false
+  try {
+    localStorage.setItem(COACH_STORAGE_KEY, '1')
+  } catch {}
+}
+
+function armCoach(): void {
+  if (coachAlreadySeen()) return
+  coachArmed.value = true
+  coachTimer = setTimeout(dismissCoach, COACH_VISIBLE_MS)
+}
+
+const coachShown = computed(() => (
+  coachArmed.value
+  && bubbleSelection.value === null
+  && store.petWindowMode.mode === 'normal'
+  && store.desktopPreferencesReady
+  && !store.dndEnabled
+))
+
 function openPluginFeedLink(itemId: string): void {
   store.openPluginFeedLink(itemId)
 }
@@ -398,6 +438,7 @@ const clickAreaRef = ref<HTMLElement | null>(null)
 let contentObserver: ResizeObserver | null = null
 
 onMounted(() => {
+  armCoach()
   store.loadPets()
   void initializeShimejiEnvironment()
   petDocumentVisible.value = document.visibilityState === 'visible'
@@ -422,6 +463,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (coachTimer) clearTimeout(coachTimer)
   contentObserver?.disconnect()
   contentObserver = null
   cleanupPluginBadgeListener?.()
@@ -456,6 +498,7 @@ function onPetMouseMove(e: MouseEvent): void {
 
 function onMouseDown(e: MouseEvent) {
   if (e.button !== 0) return
+  dismissCoach()
   hasMoved.value = false
   mouseDownTime = Date.now()
   store.isDragging = true
@@ -781,6 +824,21 @@ watch(() => store.achievementUnlock, (unlock) => {
             ×
           </button>
         </article>
+      </Transition>
+
+      <Transition v-else-if="coachShown" name="toast">
+        <div
+          key="coach"
+          class="pet-toast coach-mark"
+          role="status"
+          aria-live="polite"
+          data-pet-hit-target="solid"
+          @mousedown.stop
+          @click.stop
+        >
+          <span class="coach-copy">{{ t('pet.coachText') }}</span>
+          <Button size="sm" variant="secondary" @mousedown.stop @click.stop="dismissCoach">{{ t('pet.coachDismiss') }}</Button>
+        </div>
       </Transition>
 
       <template v-if="isMultiPet">
