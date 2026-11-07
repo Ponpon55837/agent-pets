@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { PermissionDecisionValue, PermissionRequestView } from '@/types/permission'
 import { t } from '@/i18n'
+import { useAgentStore } from '@/stores/agentStore'
+import { permissionSourceName } from '@/utils/permission-source'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 
@@ -19,7 +21,21 @@ const emit = defineEmits<{
   decide: [decision: PermissionDecisionValue]
 }>()
 
+const store = useAgentStore()
 const deciding = ref<PermissionDecisionValue | null>(null)
+
+// A failed decision leaves the buttons usable again so the user can retry or
+// go back to the agent; the card says why instead of silently resetting.
+const decideError = computed(() => {
+  const outcome = store.permissionOutcome
+  if (!outcome || outcome.requestId !== props.request.requestId) return null
+  const key = outcome.kind === 'delivery_failed' ? 'permission.outcomeDeliveryFailed' : 'permission.outcomeError'
+  return t(key, { source: permissionSourceName(props.request.agentId) })
+})
+
+watch(() => store.permissionOutcome, (outcome) => {
+  if (outcome?.requestId === props.request.requestId) deciding.value = null
+})
 
 watch(() => props.request.requestId, () => {
   deciding.value = null
@@ -56,6 +72,7 @@ function decide(decision: PermissionDecisionValue): void {
       {{ request.description }}
     </p>
     <p v-if="request.truncated" class="inline-permission-warning">{{ warningLabel }}</p>
+    <p v-if="decideError" class="inline-permission-warning" role="alert">{{ decideError }}</p>
     <div class="inline-permission-actions">
       <Button
         v-if="canAllow()"

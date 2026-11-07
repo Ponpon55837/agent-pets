@@ -32,3 +32,29 @@ export interface PermissionRequestView {
   hotkeyEligible: boolean
   truncated: boolean
 }
+
+/**
+ * Renderer-side result of a request that has left the broker's active queue.
+ * It carries no request content beyond the already-sanitized action label, so
+ * it is safe to keep around for a few seconds after the request is gone.
+ */
+export type PermissionOutcomeKind =
+  | 'expired'
+  | 'cancelled'
+  | 'delivery_failed'
+  | 'conflict'
+  | 'error'
+
+export interface PermissionOutcome {
+  kind: PermissionOutcomeKind
+  requestId: string
+  agentId: string
+  action: string
+  projectId?: string
+  at: number
+}
+
+/** What `decidePermission` reports back to its caller. */
+export type PermissionDecideResult =
+  | { ok: true; status: 'allowed' | 'denied' }
+  | { ok: false; kind: PermissionOutcomeKind }

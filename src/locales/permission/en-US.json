@@ -1,1 +1,9 @@
-{}
+{
+  "permission.outcomeExpired": "Timed out. {source} was told it was cancelled",
+  "permission.outcomeCancelled": "Already handled in {source}",
+  "permission.outcomeDeliveryFailed": "Could not send the decision. Please handle it in {source}",
+  "permission.outcomeConflict": "This request can no longer be answered here. Please go back to {source}",
+  "permission.outcomeError": "Something went wrong sending the decision. Try again, or handle it in {source}",
+  "permission.dismiss": "Got it",
+  "permission.viewInPanel": "View in panel"
+}
