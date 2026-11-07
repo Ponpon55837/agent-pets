@@ -295,21 +295,90 @@
 
 .status-panel :deep(.session-item) {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: var(--organic-space-3);
-  min-height: 52px;
-  padding: var(--organic-space-3) var(--organic-space-4);
 }
 
-.status-panel :deep(.session-item:not(.is-last)::after) {
+.status-panel :deep(.session-item + .session-item::before) {
   position: absolute;
+  top: 0;
   right: var(--organic-space-4);
-  bottom: 0;
   left: var(--organic-space-4);
   height: 1px;
   background: var(--organic-border-soft);
   content: '';
+}
+
+.status-panel :deep(.session-row) {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--organic-space-3);
+  min-height: 52px;
+  padding: var(--organic-space-3) var(--organic-space-4);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.status-panel :deep(button.session-row) {
+  cursor: pointer;
+}
+
+.status-panel :deep(button.session-row:hover) {
+  background: var(--surface-raised-hover);
+}
+
+.status-panel :deep(button.session-row:focus-visible) {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: calc(var(--focus-ring-width) * -1);
+}
+
+.status-panel :deep(.session-details) {
+  display: flex;
+  margin: 0;
+  padding: 0 var(--organic-space-4) var(--organic-space-3) calc(var(--organic-space-4) + 10px + var(--organic-space-3));
+  flex-direction: column;
+  gap: var(--organic-space-1);
+  font-size: var(--font-body-sm);
+}
+
+.status-panel :deep(.session-details > div) {
+  display: flex;
+  gap: var(--organic-space-2);
+}
+
+.status-panel :deep(.session-details dt) {
+  flex: 0 0 5.5em;
+  color: var(--text-muted);
+}
+
+.status-panel :deep(.session-details dd) {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.status-panel :deep(.session-path) {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.status-panel :deep(.session-filter-bar) {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--organic-space-2);
+  padding: 0 var(--organic-space-4) var(--organic-space-3);
+}
+
+.status-panel :deep(.session-filter-bar .select-wrap) {
+  margin-left: auto;
+}
+
+.status-panel :deep(.session-filter-bar .select-wrap + .select-wrap) {
+  margin-left: 0;
 }
 
 .status-panel :deep(.session-status-dot) {
@@ -422,7 +491,7 @@
   align-items: center;
   gap: var(--organic-space-3);
   min-height: 46px;
-  padding: var(--organic-space-2) var(--organic-space-4);
+  padding: var(--organic-space-2) var(--organic-space-2) var(--organic-space-2) var(--organic-space-4);
   border-radius: var(--organic-radius-md);
   background: var(--organic-surface-2);
   color: var(--text-secondary);
@@ -434,6 +503,8 @@
 }
 
 .status-panel :deep(.offline-session-item .session-title-line) {
+  min-width: 0;
+  flex: 1;
   color: var(--text-secondary);
   font-size: var(--font-body-md);
 }

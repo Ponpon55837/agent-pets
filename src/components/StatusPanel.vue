@@ -95,6 +95,11 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   else store.closePanel()
 }
 
+function openPluginSettings(): void {
+  settingsGroup.value = 'integrations'
+  store.openSettings()
+}
+
 function selectDashboardTab(tab: DashboardTab): void {
   dashboardTab.value = tab
   if ((tab === 'sessions' || tab === 'usage') && !store.quotaUsage) void store.refreshQuota()
@@ -213,7 +218,7 @@ onUnmounted(() => {
           {{ tab.label }}
         </Button>
       </div>
-      <StatusPanelSessions v-show="dashboardTab === 'sessions'" :active="dashboardTab === 'sessions'" :now-tick="nowTick" :plugin-event-source-statuses="pluginEventSourceStatuses" />
+      <StatusPanelSessions v-show="dashboardTab === 'sessions'" :active="dashboardTab === 'sessions'" :now-tick="nowTick" :plugin-event-source-statuses="pluginEventSourceStatuses" @manage-plugins="openPluginSettings" />
       <StatusPanelUsage v-show="dashboardTab === 'usage'" :now-tick="nowTick" />
       <StatusPanelHistory v-show="dashboardTab === 'history'" :active="dashboardTab === 'history'" />
     </template>
