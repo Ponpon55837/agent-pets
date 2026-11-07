@@ -95,17 +95,21 @@ test('imports exact Codex and Claude local log usage and deduplicates Claude str
   assert.equal(scan.recordsImported, 3)
 
   const summary = store.getSummary()
-  assert.equal(summary.totals.tokenInput, 227)
+  // Fresh input excludes prompt-cache tokens, which are reported separately.
+  assert.equal(summary.totals.tokenInput, 220)
+  assert.equal(summary.totals.tokenCacheRead, 5)
+  assert.equal(summary.totals.tokenCacheWrite, 2)
   assert.equal(summary.totals.tokenOutput, 50)
   assert.equal(summary.tokenQuality, 'exact')
   const claude = summary.agents.find(agent => agent.adapterId === 'claude-code')!
-  assert.equal(claude.tokenInput, 77)
+  assert.equal(claude.tokenInput, 70)
+  assert.equal(claude.tokenCacheRead, 5)
   assert.equal(claude.tokenOutput, 15)
   const codex = summary.agents.find(agent => agent.adapterId === 'codex')!
   assert.equal(codex.tokenInput, 150)
   assert.equal(codex.tokenOutput, 35)
   const otherPetSummary = store.getSummary('another-pet')
-  assert.equal(otherPetSummary.totals.tokenInput, 227)
+  assert.equal(otherPetSummary.totals.tokenInput, 220)
   assert.equal(otherPetSummary.totals.tokenOutput, 50)
   assert.equal(JSON.stringify(store.getExport()).includes('secret prompt'), false)
 })
@@ -420,4 +424,74 @@ test('incremental byte budgets charge only bytes read after the cached offset', 
   const resumed = await reader.scan()
   assert.equal(resumed.filesScanned, 2)
   assert.equal(resumed.filesSkipped, 0)
+})
+
+test('a file larger than maxFileBytes is consumed in chunks instead of being skipped, and scans expose diagnostics', async t => {
+  const fixture = setup()
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const store = new HistoryStore(fixture.database, { now: () => now, localDate: () => '2026-08-13' })
+  t.after(() => { store.close(); fixture.cleanup() })
+
+  const file = path.join(fixture.home, '.claude', 'projects', 'big', 'session.jsonl')
+  const assistant = (id: string) => ({
+    type: 'assistant',
+    timestamp: new Date(now).toISOString(),
+    session_id: 'big',
+    message: { id, usage: { input_tokens: 10, output_tokens: 5 } },
+  })
+  const filler = (index: number) => ({ type: 'user', message: { content: `f-${index}-` + 'x'.repeat(200) } })
+  writeJsonl(file, [
+    ...Array.from({ length: 400 }, (_, index) => filler(index)),
+    assistant('late-message'),
+  ])
+  assert.ok(fs.statSync(file).size > 64 * 1024)
+
+  const reader = new LocalUsageReader({
+    homeDir: fixture.home,
+    history: store,
+    now: () => now,
+    maxFileBytes: 64 * 1024,
+    maxTotalBytes: 1024 * 1024,
+  })
+  assert.equal(reader.getDiagnostics(), null)
+  let imported = 0
+  for (let pass = 0; pass < 4; pass += 1) {
+    const scan = await reader.scan()
+    assert.equal(scan.filesSkipped, 0)
+    imported += scan.recordsImported
+  }
+  assert.equal(imported, 1)
+  assert.equal(store.getSummary().totals.tokenInput, 10)
+  const diagnostics = reader.getDiagnostics()
+  assert.ok(diagnostics && diagnostics.durationMs >= 0 && diagnostics.finishedAt > 0)
+})
+
+test('cache-heavy Claude and Codex logs keep cache tokens out of the headline input total', async t => {
+  const fixture = setup()
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const store = new HistoryStore(fixture.database, { now: () => now, localDate: () => '2026-08-13' })
+  t.after(() => { store.close(); fixture.cleanup() })
+
+  writeJsonl(path.join(fixture.home, '.claude', 'projects', 'p', 's.jsonl'), [{
+    type: 'assistant',
+    timestamp: new Date(now).toISOString(),
+    session_id: 's',
+    message: { id: 'm1', usage: { input_tokens: 10, cache_read_input_tokens: 900_000, cache_creation_input_tokens: 40, output_tokens: 20 } },
+  }])
+  const codex = (input: number, cached: number, output: number) => ({
+    type: 'event_msg',
+    timestamp: new Date(now).toISOString(),
+    payload: { type: 'token_count', info: {
+      last_token_usage: { input_tokens: input },
+      total_token_usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output },
+    } },
+  })
+  writeJsonl(path.join(fixture.home, '.codex', 'sessions', 'c.jsonl'), [codex(1000, 800, 50), codex(1500, 1200, 80)])
+
+  await new LocalUsageReader({ homeDir: fixture.home, history: store, now: () => now }).scan()
+  const totals = store.getSummary().totals
+  assert.equal(totals.tokenInput, 10 + 300)
+  assert.equal(totals.tokenCacheRead, 900_000 + 1200)
+  assert.equal(totals.tokenCacheWrite, 40)
+  assert.equal(totals.tokenOutput, 20 + 80)
 })

@@ -145,6 +145,7 @@ export interface ElectronAPI {
             usedPercent: number
             remainingPercent: number
             resetsAt?: string
+            overage?: boolean
           }>
           error?: string
         }>

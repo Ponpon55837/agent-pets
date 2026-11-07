@@ -2446,13 +2446,32 @@ export function broadcastAchievementUnlock(unlock: AchievementUnlock): void {
 
 export function currentHistorySummary(projectId?: string): HistorySummary | null {
   if (!mainState.historyStore) return null
-  return mainState.historyStore.getSummary(mainState.progressionStore?.getActivePetId() ?? 'aang-airbender', projectId)
+  const summary = mainState.historyStore.getSummary(mainState.progressionStore?.getActivePetId() ?? 'aang-airbender', projectId)
+  const scan = mainState.localUsageReader?.getDiagnostics()
+  return scan
+    ? {
+        ...summary,
+        scan: {
+          finishedAt: scan.finishedAt,
+          durationMs: scan.durationMs,
+          filesScanned: scan.filesScanned,
+          filesSkipped: scan.filesSkipped,
+        },
+      }
+    : summary
 }
+
+// Opening the History tab must not rescan the whole log tree each time; the
+// 60s timer is the regular cadence, so panel-triggered refreshes are throttled.
+const LOCAL_USAGE_MIN_SCAN_INTERVAL_MS = 10_000
+let localUsageLastScanAt = 0
 
 export async function refreshLocalUsage(): Promise<void> {
   if (!mainState.localUsageReader || mainState.localUsageScanPromise) return mainState.localUsageScanPromise ?? Promise.resolve()
+  if (Date.now() - localUsageLastScanAt < LOCAL_USAGE_MIN_SCAN_INTERVAL_MS) return
   mainState.localUsageScanPromise = mainState.localUsageReader.scan()
     .then(result => {
+      localUsageLastScanAt = Date.now()
       if (result.recordsImported > 0) broadcastHistoryUpdated()
     })
     .catch(error => {
