@@ -3,7 +3,7 @@
 - 日期：2026-11-07
 - 分支：`feat/token-usage-detail`（自 `origin/main` `75a574f`）
 - 基準版本：`1.10.3`（本 phase 未修改版本）
-- 建議版本：**patch**，預計以 `1.11.1` 發佈（排在權限 phase 的 `1.11.0` 之後）
+- 建議版本：以 **patch 1.10.4** 發佈
 
 ## 範圍
 
@@ -29,14 +29,17 @@
 ### 解析（`electron/local-usage.ts`）
 
 - Claude：`message.model` → `record.model`。Codex：記錄最近一行 `turn_context.payload.model`（存在 parser state 的 `codexModel`），後續 `token_count` 沿用；跨切片、跨掃描都會保留。
-- 模型 id 使用白名單 `^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,95}$` 且不得含 `..`；`<synthetic>` 這類佔位值或像路徑的字串都存成空字串（顯示為「未標示模型」）。
+- 模型 id 每段為 `[A-Za-z0-9][A-Za-z0-9._:@+-]{0,63}`，最多一個 `provider/model` 斜線，總長 ≤ 96；不得含 `..`、磁碟代號（`C:`），第一段也不能是本機路徑根目錄（`Users`、`home`、`root`、`var`、`tmp`、`private`、`mnt`、`media`、`opt`、`usr`、`etc`、`Volumes`、`Library`、`srv`）。`<synthetic>` 這類佔位值或像路徑的字串都存成空字串（顯示為「未標示模型」）。
+- **時間戳**：沒有時間戳的行沿用同一個檔案裡前一筆真實時間戳；檔案裡完全沒有前一筆可沿用時，那筆紀錄就捨棄。不再使用檔案 mtime 當備援：mtime 每次附加都會變，會讓紀錄的日期往後移、跳過清除歷史的 cutoff，並在去重列被壓縮後重新計入成就。JSONL 只會附加，所以沿用的時間戳在重新掃描時是穩定的，History 與成就帳本都因此冪等。
 - 每個檔案只開一次 handle（`O_NOFOLLOW` 並重新比對 dev/ino），以 1 MB 切片往前讀一次，只把尚未讀完的最後一行（上限 `maxLineBytes`=256 KB，超過就走既有的捨棄模式）帶到下一個切片。記憶體約為每個檔案 1 MB＋256 KB，不再是 16 MB。
-- 預算：`maxTotalBytes`（64 MB）仍是每次掃描的上限，但剩餘預算不夠時只讀該檔的一部分；另外新增 `maxScanMs`（預設 4 秒，monotonic clock 可注入）。被延後的檔案保留原本的 cache entry，下一次掃描從存下的 parser offset 繼續。結果新增 `filesDeferred` 與 `pending`。
+- 預算：`maxTotalBytes`（64 MB）仍是每次掃描的上限，但剩餘預算不夠時只讀該檔的一部分；另外新增 `maxScanMs`（預設 4 秒，monotonic clock 可注入）。被延後的檔案保留原本的 cache entry，下一次掃描從存下的 parser offset 繼續。結果新增 `filesDeferred`、`pending` 與 `bytesRead`。
+- **保證前進**：先走完所有 root 的目錄，再開始計算時間預算，所以走目錄的時間不會吃掉讀取預算；每次掃描無論時鐘如何都至少讀一個切片。各 root 的檔案以 round-robin 交錯處理，大量的 Codex 檔案不會餓死 Claude root。
+- **延後的判定**：只有在 byte 上限或時間預算讓讀取停下時才算 deferred；檔案提早結束（被截短、讀到 0 byte）不算，避免永遠 `pending`。
 - 演算法：每個 byte 只讀一次、每行只 `JSON.parse` 一次（沿用既有的子字串預篩）；接續讀取只會重讀尚未讀完的那一行。
 
 ### 排程（`electron/main/scan-schedule.ts`、`runtime.ts`）
 
-- `localUsageCatchUpDelayMs(pending, onBattery)`：插電且 `pending` 時 3 秒後接續一次（略過 10 秒的面板節流）；用電池時等一般的 tick，避免第一次大量匯入讓硬碟一直醒著。每次掃描本身仍每個檔案、每個切片都 yield 給 event loop。
+- `localUsageCatchUpDelayMs(pending, onBattery, stalledScans)`：插電且 `pending` 時 3 秒後接續一次（略過 10 秒的面板節流）；用電池時等一般的 tick，避免第一次大量匯入讓硬碟一直醒著。連續 2 次接續掃描都讀到 0 byte 就停止接續，回到一般 tick，不會每 3 秒空轉。每次掃描本身仍每個檔案、每個切片都 yield 給 event loop。
 
 ### History（`electron/history.ts`）與遷移
 
@@ -49,7 +52,7 @@
 | 索引 | `idx_history_events_token_time ON events(occurred_at) WHERE type = 'agent.token_usage'`（partial index，heartbeat 列不會維護也不會被掃到） |
 | 回填 | 在同一個 transaction 裡以單一 set-based `INSERT … SELECT … GROUP BY` 從 events 重建 `daily_model_stats`；既有列的模型是空字串 |
 
-- `ensureModelSchema()` 每次開啟都會檢查欄位、資料表與索引是否存在，所以 v8 標記遺失或只套用一半的資料庫也能自己修好；`v8` 標記則只寫一次。
+- `ensureModelSchema()` 每次開啟都會檢查欄位、資料表與索引是否存在，所以 v8 標記遺失或只套用一半的資料庫也能自己修好；`v8` 標記則只寫一次。如果已經有 v8 標記，但 `daily_model_stats` 原本不存在（剛重建），或是空的而 events 裡有本機用量列，開啟時會重建彙總（兩個 `LIMIT 1` 的索引查詢）。
 - 不會移除或改寫既有欄位，也沒有改既有 token 總量的計算方式。這次遷移只**新增一個欄位、一張彙總表與一個索引**，沒有其他變更。
 - **模型回填**：`applyTokenUsage` 判斷「完全相同」時把模型也算進去，所以 App 重開後的第一次完整掃描，遇到 v8 以前匯入的列（模型為空）就會就地補上模型並修正 `daily_model_stats`；Token 總量不變。未知模型永遠不會覆蓋已知模型。
 - 寫入：單筆時對 `daily_model_stats` 做一次 additive upsert；`recordTokenUsageBatch` 期間比照既有的 `dailyBatch` 在記憶體裡累加，每個 key 只寫一次。`clear()` 會一起清空，`rebuildDailyStats()` 會一起重建；保留策略與 `daily_stats` 一致（彙總長期保留、原始事件 90 天）。
@@ -61,7 +64,7 @@
 
 與 ccusage `blocks` 相同：
 
-1. 依時間排序；第一筆用量開啟一個區塊，起點是該筆時間**向下取整到整點（UTC 整點）**，終點為起點＋5 小時。
+1. 依時間排序；第一筆用量開啟一個區塊，起點是該筆時間**向下取整到本地整點**，終點為起點＋5 小時。時區偏移由呼叫端明確傳入（`HistoryStore` 預設用該時刻的系統偏移，可注入），所以函式仍是純函式；+5:30、+5:45、+9:30 等時區的區塊也從本地整點開始。偏移傳 0 時就是 ccusage 原本的 UTC 整點。
 2. 下一筆若距區塊起點 ≥ 5 小時，或距上一筆 ≥ 5 小時，就結束目前區塊，並用該筆（同樣取整點）開新區塊。
 3. 進行中＝`now < 終點` 且距最後一筆未滿 5 小時。
 4. 已過時間＝`now − 起點`（限制在區塊範圍內）；剩餘＝`終點 − now`；每分鐘 Token＝（新輸入＋輸出）÷ 從第一筆用量到 `now` 的分鐘數（不足 1 分鐘時為 0）。
@@ -75,10 +78,12 @@ Token 的計算基準與 History 主數字相同：新輸入＋輸出，快取�
 - `syncLocalTokenUsage`：用 `digest(adapter + sourceEventId)` 作 key 做 upsert。重新掃描時值不變就是 0；Claude 串流訊息的用量變大時只加差額，因此重新掃描是冪等的。
 - 壓縮：比 `now − (retentionDays + 1 天)` 更舊的去重列會分批刪除（每次 5,000 列），累計值保留。掃描器的 cutoff 至少是 `now − retentionDays`，這些紀錄不會再被送進來；比 horizon 更舊的紀錄一律忽略，所以不會重複計算。
 - 本機紀錄描述的是這台電腦與帳號，不是某隻寵物，所以本機 Token 由所有寵物共用（與 History 相同）。`tokenTotal` 為寵物自己的事件 Token 加上本機累計值；只要寵物有估算列，品質就標為 `estimated`。
-- 執行期：每批匯入（500 筆）都會更新帳本；成就開啟時才為目前的寵物評估解鎖。進度條的廣播合併為 1 秒一次。
+- 執行期：每批匯入（500 筆）只更新帳本；每次掃描結束後，如果帳本有變動，才為目前的寵物評估一次解鎖並取 progression snapshot（成就開啟時），不再每批各評估一次（第一次匯入 20 萬筆約 400 次）。進度條的廣播合併為 1 秒一次。
+- 壓縮依 `occurred_at` 是安全的，因為本機紀錄的日期已經穩定（見「時間戳」）。
 
 ### UI
 
+- 用量頁透過專用的 `history-usage-blocks` IPC（`getUsageBlocks`）讀取區塊：會檢查寄件者、不接受任何輸入、不會觸發掃描。原本借用 `getHistorySummary` 會啟動掃描，掃描的 `historyUpdated` 又觸發重新讀取，形成約 10 秒一次的循環；現在重新讀取以 1 秒 trailing debounce 合併，同時只會有一個請求。IPC 清單已重新產生。
 - 用量頁：每張供應商卡片在額度下方顯示 `UsageBlockSummary`（區塊 Token、已過／剩餘、每分鐘 Token、「來自本機紀錄，逐筆精確」與開始時間，滑過可看規則說明）；沒有對應供應商卡片的 Agent 列在「本機用量」卡片。進度條使用 `ProgressTrack`，文字使用既有 token，沒有新的色彩字面值。
 - 歷史頁：新的可收合區塊「模型分布」（`HistoryModelList.vue`），長模型名稱會以 `min-width: 0` 與省略號截斷；頁尾新增「仍在分批讀取」提示，`filesSkipped` 的文案改為「無法讀取」。
 - 文案：`growth.*` 新增 13 個 key，`growth.scanSkipped` 改寫，繁中與英文都有。`agentDisplayName` 抽到 `src/utils/agent-label.ts` 供兩個元件共用。
@@ -90,7 +95,7 @@ Token 的計算基準與 History 主數字相同：新輸入＋輸出，快取�
 | `pnpm install --frozen-lockfile` | 通過，沒有新增依賴 |
 | `pnpm exec vue-tsc --noEmit` | 通過 |
 | `pnpm lint` | main-process lint passed |
-| `pnpm test:unit` | **887／887 通過**（基準 869，新增 18） |
+| `pnpm test:unit` | **897／897 通過**（基準 869，新增 28；第一輪 18 個，審查修正 10 個） |
 | `pnpm test:coverage` | 涵蓋率 96.31% lines（門檻 85）。三次執行各有 1–2 個計時敏感測試逾時（`presentation-stdio`、`relaunch` 的 single-instance lock、MCP response），每次失敗的測試都不同；當時機器 load average 約 270（同時有其他 agent 在跑）。這些測試與相關原始碼在本分支沒有任何差異，單獨執行 5/5 通過。CI 需要重跑確認。 |
 | `pnpm exec vite build` | 通過 |
 | `pnpm check:bundle-size`、`check:bundle` | 通過 |
@@ -103,7 +108,8 @@ Token 的計算基準與 History 主數字相同：新輸入＋輸出，快取�
 - `tests/history.test.mts`：v7 → v8 遷移（刪掉欄位、資料表、索引與標記後重開兩次，驗證冪等、模型分組與 `EXPLAIN QUERY PLAN` 使用新索引與 PK）；模型彙總在串流更新、未知模型不覆蓋、batch、rebuild、clear 下都正確，live 事件不會進入區塊或模型。
 - `tests/local-usage.test.mts`：Claude／Codex 模型解析與白名單、模型加總等於 Agent 加總、`turn_context` 與 `token_count` 跨切片、重新掃描補上模型、時間預算延後後總數不變、`onRecordsImported` 在重新掃描時送出相同 id；byte 預算測試改為驗證「部分讀取＋`pending`」。
 - `tests/achievements.test.mts`：重新掃描冪等、串流增長只加差額並解鎖 `one_million`（`exact`）、跨寵物共用、未知 adapter 與太舊的紀錄被忽略、live Codex／Claude Token 被忽略、壓縮後累計值不變；既有兩個測試改用 OpenCode 事件。
-- `tests/scan-schedule.test.mts`：插電接續、電池等待。
+- `tests/scan-schedule.test.mts`：插電接續、電池等待、連續無進度後停止接續。
+- 審查修正的回歸測試：時鐘在讀取前就超過預算時每次掃描仍有進度；跨 root 交錯讓 Claude 不被 Codex 餓死；走目錄之後檔案被截短不算 deferred；沒有時間戳的行沿用前一筆、開頭沒有時間戳的行被捨棄、附加後重新掃描日期不變且不重新匯入；+5:30／+5:45／+9:30／−3:30 時區的本地整點；v8 標記存在但彙總表遺失或為空時會重建；模型 id 拒絕 `Users/name/x`、`home/…`、多段斜線、磁碟代號、`..`；帳本同步不評估、掃描結束評估一次；`history-usage-blocks` 會檢查寄件者且不觸發掃描。
 
 所有測試都使用 `mkdtemp` 底下的假 home 與暫存 SQLite，不會讀取真正的 `~/.claude` 或 `~/.codex`，也不會呼叫 Keychain／safeStorage。
 
@@ -113,7 +119,7 @@ Token 的計算基準與 History 主數字相同：新輸入＋輸出，快取�
 - **記憶體上限**：每個檔案約 1 MB 切片加上最多 256 KB 的未完成行；每個檔案每次掃描的紀錄 map 受 `maxFileBytes` 限制；區塊查詢最多 50,000 列；成就帳本會壓縮到大約保留天數的範圍。
 - **輸入驗證**：模型 id 有白名單與長度上限，在 main process 寫入前、讀出時都會再驗證一次；Vue 文字插值會自動跳脫。帳本只接受 `codex`／`claude-code` adapter，Token 數量沿用既有的 `safeToken` 上限。
 - **隱私**：只存模型 id、雜湊後的 id 與數字。`cwd` 仍只在記憶體中用來解析專案；傳給成就帳本的物件雖然帶有 `cwd`，但帳本不會儲存。新的 log（`Local usage consumer failed`、`Achievement local token sync failed`）只輸出 error 物件，不含紀錄內容。
-- **IPC**：沒有新增 channel。用量頁沿用既有、已有 sender 驗證的 `getHistorySummary`。
+- **IPC**：新增一個唯讀 channel `history-usage-blocks`：只允許面板 main frame（`assertTrustedIpcSender`），不接受任何參數、不觸發掃描、不寫入任何東西，錯誤時回空陣列；preload 與 `electron-api.ts` 型別同步，`docs/security/ipc-inventory.md` 已重新產生並通過檢查。
 
 ## 效能審查
 
@@ -124,9 +130,10 @@ Token 的計算基準與 History 主數字相同：新輸入＋輸出，快取�
 
 ## 殘餘風險與已知缺口
 
-- **區塊是本機推算**：起點以 UTC 整點對齊（與 ccusage 相同）；在非整點時區（例如 UTC+5:30），區塊起點看起來會在本地的半點。如果連續使用超過 24 小時都沒有 5 小時空檔，區塊起點會從回看窗口裡的第一筆重新對齊。區塊也可能與供應商實際的額度時段不同，UI 已經說明這一點。
+- **區塊是本機推算**：起點以本地整點對齊；跨越夏令時間切換的那一個區塊，起點用的是第一筆用量當下的偏移。如果連續使用超過 24 小時都沒有 5 小時空檔，區塊起點會從回看窗口裡的第一筆重新對齊。區塊也可能與供應商實際的額度時段不同，UI 已經說明這一點。
 - **清除歷史後**：區塊與模型分布只會根據清除之後的紀錄重新計算。
 - **模型回填**要等 App 重開後第一次完整掃描（掃描到的檔案）才會發生；超過保留天數或在清除 cutoff 之前的列會一直顯示為「未標示模型」。
+- **沒有時間戳的開頭行**：檔案裡第一筆可匯入的行如果沒有時間戳，會被捨棄（實務上 Claude Code 與 Codex 的紀錄行都有時間戳）。
 - **成就帳本**：如果匯入當下成就資料庫無法使用（正在啟動重試），那批紀錄要等下次 App 重開時的完整重新掃描才會補進來。本機 Token 由所有寵物共用，用量夠時所有寵物都能解鎖 `one_million`，這是刻意的設計。舊版本已經記錄在 `token_usage` 裡的 Codex／Claude live 事件 Token 會保留，不回溯移除（實際上這兩個 hook 不會送 Token，影響應該接近 0）。
 - **History 的 live 事件 Token**：History 對 live 事件 `tokenUsage` 的處理沒有改（不在本 phase 範圍）。如果有第三方整合以 Codex／Claude source 回報 Token，History 的每日總數仍可能與本機紀錄重複；成就已經不會重複計算。
 - **Codex 模型格式**：沒有真實的 rollout fixture，`turn_context.payload.model` 是依已知格式實作並以合成資料測試。如果某個 Codex 版本不寫這一行，模型會顯示為「未標示模型」，Token 總量不受影響。
@@ -135,4 +142,4 @@ Token 的計算基準與 History 主數字相同：新輸入＋輸出，快取�
 
 ## 版本建議
 
-**Patch**。遷移是純新增：一個欄位、一張彙總表、一個 partial index，加上成就資料庫的一張去重表；沒有修改或移除既有欄位，沒有新的 IPC 或公開契約，也沒有新的安全邊界。預計以 `1.11.1` 發佈。本 phase 沒有修改 `package.json`，等使用者確認後再更新版本。
+**Patch**。遷移是純新增：一個欄位、一張彙總表、一個 partial index，加上成就資料庫的一張去重表；沒有修改或移除既有欄位，沒有新的公開契約或安全邊界（只新增一個唯讀、檢查寄件者的 IPC）。以 patch **1.10.4** 發佈。本 phase 沒有修改 `package.json`，等使用者確認後再更新版本。
