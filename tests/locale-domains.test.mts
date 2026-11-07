@@ -24,3 +24,20 @@ test('domain locale files have identical key sets, a domain prefix, and no clash
     }
   }
 })
+
+test('every panel-domain key is referenced by the renderer source', () => {
+  const sourceRoot = join(import.meta.dirname, '..', 'src')
+  const files: string[] = []
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name)
+      if (full.includes(`${join('src', 'locales')}`)) continue
+      if (statSync(full).isDirectory()) walk(full)
+      else if (/\.(vue|ts)$/.test(name)) files.push(full)
+    }
+  }
+  walk(sourceRoot)
+  const text = files.map((file) => readFileSync(file, 'utf8')).join('\n')
+  const unused = Object.keys(read(join(root, 'panel', 'zh-TW.json'))).filter((key) => !text.includes(`'${key}'`) && !text.includes(`"${key}"`))
+  assert.deepEqual(unused, [])
+})
