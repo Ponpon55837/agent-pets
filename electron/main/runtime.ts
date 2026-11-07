@@ -2105,7 +2105,7 @@ export function showPanelWindow(view: 'sessions' | 'settings' | 'restore' = 'ses
     const [width, height] = mainState.panelWindow.getSize()
     setPluginPanelWindowBounds(computePanelBounds(height, width))
   } else {
-    mainState.panelWindow.setBounds(computePanelBounds(view === 'settings' ? 720 : 560))
+    mainState.panelWindow.setBounds(computePanelBounds(PANEL_SIZES[view === 'settings' ? 'settings' : 'sessions'].height))
   }
   const wasHidden = !mainState.panelWindow.isVisible()
   if (wasHidden) {
