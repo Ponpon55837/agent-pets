@@ -19,7 +19,7 @@ const SESSION = '3f1c2a9e-1111-4222-8333-944455556666'
 const PROMPT = 'c7278cfd-2a0f-456e-bb13-7335119fc535'
 const TOOL_INPUT = { command: 'git status', description: 'Show the working tree status' }
 
-interface Recorded { route: string; body: Record<string, unknown>; token?: string }
+interface Recorded { route: string; body: Record<string, unknown>; token?: string; at: number }
 type Handler = (route: string, body: Record<string, unknown>) => { status: number; body?: unknown }
 
 async function readBody(request: IncomingMessage): Promise<Record<string, unknown>> {
@@ -69,16 +69,18 @@ async function harness(options: {
   const permissionCalls: Recorded[] = []
   const eventCalls: Recorded[] = []
   const eventServer = await listen(async (request, response) => {
-    eventCalls.push({ route: request.url ?? '', body: await readBody(request) })
+    const at = process.hrtime.bigint()
+    eventCalls.push({ route: request.url ?? '', body: await readBody(request), at: Number(at) })
     response.statusCode = 204
     response.end()
   })
   const permissionServer = options.permissionServer === false
     ? null
     : await listen(async (request, response) => {
+      const at = Number(process.hrtime.bigint())
       const route = (request.url ?? '').replace('/v1/permission/', '')
       const body = await readBody(request)
-      permissionCalls.push({ route, body, token: String(request.headers['x-agent-pets-permission-token'] ?? '') })
+      permissionCalls.push({ route, body, token: String(request.headers['x-agent-pets-permission-token'] ?? ''), at })
       const result = options.handler?.(route, body) ?? { status: 204 }
       response.statusCode = result.status
       if (result.body !== undefined) {
@@ -100,7 +102,12 @@ async function harness(options: {
     // A loaded runner can miss the short per-call budgets; these tests check payloads, not latency.
     .replace('AbortSignal.timeout(300)', 'AbortSignal.timeout(5000)')
     .replace(/(lookup|\}), 1000\)/g, '$1, 5000)')
-  assert.equal((patched.match(/, 5000\)/g) ?? []).length, 5)
+  if ((patched.match(/, 5000\)/g) ?? []).length !== 6) {
+    // Close the servers first so a stale patch fails the test instead of hanging the run.
+    await new Promise<void>(resolve => eventServer.close(() => resolve()))
+    if (permissionServer) await new Promise<void>(resolve => permissionServer.close(() => resolve()))
+    throw new Error('agent-hook.mjs call budgets changed; update the test patch')
+  }
   fs.writeFileSync(hookPath, patched)
 
   return {
@@ -174,7 +181,13 @@ test('allow from the pet prints the PermissionRequest allow decision and reports
     assert.equal(request.body.permission, 'Bash')
     assert.equal(request.body.detail, 'git status')
     assert.equal(request.body.ttlSeconds, 30)
+    assert.equal(request.body.scope, 'main')
+    assert.equal(request.body.filePath, undefined)
     assert.match(String(request.body.permissionId), /^[a-f0-9]{32}$/)
+    // Every call of this invocation carries the same per-invocation nonce.
+    const nonce = request.body.nonce
+    assert.match(String(nonce), /^[a-f0-9]{32}$/)
+    for (const call of h.permissionCalls) assert.equal(call.body.nonce, nonce, call.route)
     // Only the approved command leaves the hook: no model-written description, suggestions or transcript path.
     const sent = JSON.stringify(request.body)
     for (const leaked of ['Show the working tree status', 'secret-transcript', 'addRules', PROMPT]) {
@@ -184,10 +197,11 @@ test('allow from the pet prints the PermissionRequest allow decision and reports
     const delivered = h.permissionCalls.find(call => call.route === 'result')!
     assert.deepEqual(delivered.body, {
       source: 'claude', instanceId: `claude-${SESSION}`, permissionId: request.body.permissionId,
-      decisionId: 'decision-1', result: 'delivered',
+      nonce, decisionId: 'decision-1', result: 'delivered',
     })
-    // The observe event still reaches the event server.
+    // The observe event still reaches the event server, after the pet request exists.
     assert.equal(h.eventCalls[0]?.body.state, 'waiting-permission')
+    assert.ok(h.eventCalls[0]!.at > request.at, 'request is created before the status event')
   } finally {
     await h.close()
   }
@@ -246,6 +260,8 @@ test('connection refused, server refusal or a missing token fail fast and silent
     { handler: () => ({ status: 503, body: { error: 'source_disabled' } }) },
     { handler: () => ({ status: 401, body: { error: 'unauthorized' } }) },
     { handler: () => ({ status: 429, body: { error: 'rate_limited' } }) },
+    // An identical request from another invocation already owns the bubble.
+    { handler: () => ({ status: 409, body: { error: 'in_use' } }) },
     { permissionToken: null },
     { permissionToken: 'not-a-token' },
   ] as const) {
@@ -301,11 +317,20 @@ test('PostToolUse and PostToolUseFailure recompute the same permission id; turn 
     await runHook(h, { ...post, prompt_id: 'other-prompt' })
     assert.notEqual(h.permissionCalls[0]!.body.permissionId, permissionId)
 
-    for (const eventName of ['Stop', 'UserPromptSubmit', 'SessionEnd']) {
+    for (const eventName of ['UserPromptSubmit', 'SessionEnd']) {
       h.permissionCalls.length = 0
       await runHook(h, { session_id: SESSION, prompt_id: PROMPT, hook_event_name: eventName, cwd: '/tmp/project-x' })
       assert.deepEqual(h.permissionCalls.map(call => call.route), ['resolved-session'], eventName)
       assert.deepEqual(h.permissionCalls[0]!.body, { source: 'claude', instanceId: `claude-${SESSION}` })
+    }
+    // A new tool call or the main turn ending settles only that agent's earlier prompts.
+    for (const [eventName, extra, scope] of [
+      ['PreToolUse', {}, 'main'], ['Stop', {}, 'main'], ['PreToolUse', { agent_id: 'agent-7' }, 'agent-7'],
+    ] as const) {
+      h.permissionCalls.length = 0
+      await runHook(h, { ...post, hook_event_name: eventName, ...extra })
+      assert.deepEqual(h.permissionCalls.map(call => call.route), ['resolved-session'], eventName)
+      assert.deepEqual(h.permissionCalls[0]!.body, { source: 'claude', instanceId: `claude-${SESSION}`, scope })
     }
 
     // A background task may still be waiting for the pet when the main turn stops.
@@ -325,6 +350,33 @@ test('an unusual session id still becomes a valid bounded identifier', async () 
     for (const key of ['instanceId', 'sessionId', 'permissionId']) {
       assert.match(String(request.body[key]), /^[A-Za-z0-9._:-]{1,128}$/, key)
     }
+  } finally {
+    await h.close()
+  }
+})
+
+test('the bubble detail falls back to the arguments without the model description', async () => {
+  const h = await harness({ handler: route => (route === 'request' ? { status: 201, body: { requestId: 'r1' } } : { status: 410 }) })
+  try {
+    const cases: Array<[string, Record<string, unknown>, string | undefined, string | undefined]> = [
+      ['WebSearch', { query: 'node 24 release notes', allowed_domains: ['nodejs.org'] }, 'node 24 release notes', undefined],
+      ['NotebookEdit', { notebook_path: '/tmp/project-x/nb.ipynb', new_source: 'print(1)' }, '/tmp/project-x/nb.ipynb', '/tmp/project-x/nb.ipynb'],
+      ['Write', { file_path: '/tmp/project-x/a.ts', content: 'secret body' }, '/tmp/project-x/a.ts', '/tmp/project-x/a.ts'],
+      ['mcp__github__create_issue', { title: 'Bug', repo: 'o/r', description: 'model text' }, '{"repo":"o/r","title":"Bug"}', undefined],
+      ['Task', { description: 'only a description' }, undefined, undefined],
+    ]
+    for (const [index, [tool, input, detail, filePath]] of cases.entries()) {
+      h.permissionCalls.length = 0
+      await runHook(h, permissionRequest({ tool_name: tool, tool_input: input, prompt_id: `p-${index}` }))
+      const request = h.permissionCalls.find(call => call.route === 'request')!
+      assert.equal(request.body.detail, detail, tool)
+      assert.equal(request.body.filePath, filePath, tool)
+      assert.ok(!JSON.stringify(request.body).includes('model text'))
+      assert.ok(!JSON.stringify(request.body).includes('secret body'))
+    }
+    h.permissionCalls.length = 0
+    await runHook(h, permissionRequest({ tool_input: { command: 'x'.repeat(5000) } }))
+    assert.equal(String(h.permissionCalls[0]!.body.detail).length, 1000)
   } finally {
     await h.close()
   }

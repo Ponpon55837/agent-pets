@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { createHash } from 'crypto'
+import { createHash, randomBytes } from 'crypto'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -153,12 +153,29 @@ function claudePermissionIds(payload) {
   }
 }
 
+const DETAIL_KEYS = ['command', 'file_path', 'notebook_path', 'url', 'pattern', 'query']
+
+// What the bubble shows. Known argument fields first; otherwise the arguments as compact JSON
+// (MCP tools, Task, ...). `description` is the model's own summary, not what will run, so it is
+// never shown. The app redacts and shortens this further before display.
 function permissionDetail(toolInput) {
-  if (!toolInput || typeof toolInput !== 'object') return undefined
-  for (const key of ['command', 'file_path', 'url', 'pattern']) {
+  if (!toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput)) return undefined
+  for (const key of DETAIL_KEYS) {
     if (typeof toolInput[key] === 'string' && toolInput[key].trim()) return toolInput[key].slice(0, 1000)
   }
-  return undefined
+  const { description: _description, ...rest } = toolInput
+  if (Object.keys(rest).length === 0) return undefined
+  return canonicalJson(rest).slice(0, 1000)
+}
+
+function editedFilePath(toolInput) {
+  const value = toolInput?.file_path ?? toolInput?.notebook_path
+  return typeof value === 'string' && value.length <= 4096 ? value : undefined
+}
+
+// The main agent or the subagent that asked; requests are superseded per scope.
+function agentScope(payload) {
+  return typeof payload?.agent_id === 'string' && payload.agent_id ? toIdentifier('', payload.agent_id) : 'main'
 }
 
 async function permissionPost(token, route, body, timeoutMs) {
@@ -190,22 +207,31 @@ function writeStdout(text) {
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-async function respondToPermission(payload, waitSeconds) {
+/** Creates the pet request; returns what polling needs, or null to stay silent. */
+async function createPermissionRequest(payload, waitSeconds) {
   const token = readPermissionToken()
-  if (!token) return
+  if (!token) return null
   const ids = claudePermissionIds(payload)
   const toolName = typeof payload?.tool_name === 'string' && payload.tool_name ? payload.tool_name : 'unknown'
-  const lookup = { source, instanceId: ids.instanceId, permissionId: ids.permissionId }
+  // Unique to this invocation: only this process can read and acknowledge the decision, so an
+  // identical request running in parallel (409 here) can never consume the same click.
+  const nonce = randomBytes(16).toString('hex')
+  const lookup = { source, instanceId: ids.instanceId, permissionId: ids.permissionId, nonce }
   const created = await permissionPost(token, 'request', {
     ...lookup,
     sessionId: ids.sessionId,
+    scope: agentScope(payload),
     project: typeof payload?.cwd === 'string' ? payload.cwd : undefined,
     permission: toolName.slice(0, 80),
     detail: permissionDetail(payload?.tool_input),
+    filePath: editedFilePath(payload?.tool_input),
     ttlSeconds: waitSeconds,
   }, 1000)
-  if (created.status !== 200 && created.status !== 201) return
+  if (created.status !== 200 && created.status !== 201) return null
+  return { token, lookup }
+}
 
+async function pollPermissionDecision({ token, lookup }, waitSeconds) {
   // The broker expires the request after waitSeconds; the grace covers the
   // final poll so a click just before expiry is still picked up.
   const deadline = Date.now() + waitSeconds * 1000 + 2000
@@ -237,12 +263,18 @@ async function resolveClaudePermissions(eventName, payload) {
     await permissionPost(token, 'resolved', { source, instanceId: ids.instanceId, permissionId: ids.permissionId }, 1000)
     return
   }
-  // A background task may still be waiting for an answer after the main turn stops.
-  if (eventName === 'Stop' && Array.isArray(payload?.background_tasks) && payload.background_tasks.length > 0) return
+  // A new tool call (PreToolUse fires before its own PermissionRequest) or the main turn ending
+  // means earlier prompts of that agent were answered in the terminal.
+  if (eventName === 'PreToolUse' || eventName === 'Stop') {
+    // A background task may still be waiting for an answer after the main turn stops.
+    if (eventName === 'Stop' && Array.isArray(payload?.background_tasks) && payload.background_tasks.length > 0) return
+    await permissionPost(token, 'resolved-session', { source, instanceId: ids.instanceId, scope: agentScope(payload) }, 1000)
+    return
+  }
   await permissionPost(token, 'resolved-session', { source, instanceId: ids.instanceId }, 1000)
 }
 
-const RESOLVING_EVENTS = new Set(['PostToolUse', 'PostToolUseFailure', 'Stop', 'UserPromptSubmit', 'SessionEnd'])
+const RESOLVING_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'UserPromptSubmit', 'SessionEnd'])
 
 async function main() {
   let eventToken
@@ -292,10 +324,15 @@ async function main() {
   const waitSeconds = isClaude && (eventName === 'PermissionRequest' || RESOLVING_EVENTS.has(eventName))
     ? readRespondOptIn()
     : null
+  // The pet request is created before the status event, so the app already knows this prompt
+  // can be answered from the pet when the event arrives (no "go back to the terminal" notice).
+  const pending = waitSeconds !== null && eventName === 'PermissionRequest'
+    ? await createPermissionRequest(payload, waitSeconds)
+    : null
   const permissionWork = waitSeconds === null
     ? null
     : eventName === 'PermissionRequest'
-      ? respondToPermission(payload, waitSeconds)
+      ? (pending ? pollPermissionDecision(pending, waitSeconds) : null)
       : resolveClaudePermissions(eventName, payload)
 
   try {
