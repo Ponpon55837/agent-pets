@@ -43,6 +43,9 @@ jobs:
       - run: pnpm exec vite build
 
       # 原本只在 release 才檢查；提早在 PR 失敗，避免 release 建置到一半才發現
+      - name: Check renderer bundle size budget
+        run: pnpm check:bundle-size
+
       - name: Check plugin panel tokens bundle
         run: pnpm check:bundle
 

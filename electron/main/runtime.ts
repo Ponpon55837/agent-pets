@@ -5,6 +5,7 @@ import { attachRendererRecovery, type RendererRecovery } from './renderer-recove
 import { logMain, mainLogger } from '../diagnostics/main-log'
 import { buildDiagnosticsReport, registerDiagnosticsSection } from '../diagnostics/report'
 import { eventPipelineStats } from '../event-stats'
+import { resolveLocalPorts } from './ports'
 import { openWithCorruptionRecovery } from './db-recovery'
 import { LOCAL_USAGE_TICK_MS, shouldRunLocalUsageTick } from './scan-schedule'
 import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
@@ -1672,6 +1673,10 @@ export function applyMacFullscreenVisibilityPolicy(): void {
   }
 }
 
+export function localPorts() {
+  return resolveLocalPorts(process.env, app.isPackaged)
+}
+
 export function serverHealthTracker(): ServerHealthTracker {
   if (!mainState.serverHealth) {
     mainState.serverHealth = createServerHealthTracker({
@@ -2568,8 +2573,8 @@ export function createPresentationServices(presentationToken: string): void {
     token: presentationToken,
     controller: mainState.presentationController,
   })
-  const presentationHealth = serverHealthTracker().register('presentation', PRESENTATION_MCP_PORT)
-  const presentationHandle = listenOnLocalPort(server, PRESENTATION_MCP_PORT, {
+  const presentationHealth = serverHealthTracker().register('presentation', localPorts().presentation)
+  const presentationHandle = listenOnLocalPort(server, localPorts().presentation, {
     label: 'Presentation MCP',
     onStatus: presentationHealth.onStatus,
     onPersistentFailure: presentationHealth.onPersistentFailure,
@@ -2762,8 +2767,8 @@ export function createPermissionServices(permissionToken: string): void {
   broker.registerAdapter(relay.createPort('opencode-cli'))
   broker.registerAdapter(relay.createPort('opencode-desktop'))
   const server = createPermissionAdapterServer({ token: permissionToken, broker, relay })
-  const permissionHealth = serverHealthTracker().register('permission', PERMISSION_ADAPTER_PORT)
-  const permissionHandle = listenOnLocalPort(server, PERMISSION_ADAPTER_PORT, {
+  const permissionHealth = serverHealthTracker().register('permission', localPorts().permission)
+  const permissionHandle = listenOnLocalPort(server, localPorts().permission, {
     label: 'Permission adapter',
     onStatus: permissionHealth.onStatus,
     onPersistentFailure: permissionHealth.onPersistentFailure,

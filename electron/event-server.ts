@@ -29,7 +29,7 @@ export function createEventServer(
   eventToken: string,
   onEvent?: (event: AgentStatusEvent) => void,
   normalizeEvent: EventIngressNormalizer = normalizeAgentStatusEvent,
-  listenHooks: Pick<LocalServerListenOptions, 'onStatus' | 'onPersistentFailure'> & { onHandle?: (handle: LocalServerListenHandle) => void } = {},
+  listenHooks: Pick<LocalServerListenOptions, 'onStatus' | 'onPersistentFailure'> & { onHandle?: (handle: LocalServerListenHandle) => void; port?: number } = {},
 ) {
   const limiter = createEventRateLimiter()
   let lastSendFailureLogAt = 0
@@ -173,7 +173,7 @@ export function createEventServer(
   server.headersTimeout = 10_000
   server.requestTimeout = 15_000
 
-  const handle = listenOnLocalPort(server, 17373, {
+  const handle = listenOnLocalPort(server, listenHooks.port ?? 17373, {
     label: 'Event',
     onStatus: listenHooks.onStatus,
     onPersistentFailure: listenHooks.onPersistentFailure,
