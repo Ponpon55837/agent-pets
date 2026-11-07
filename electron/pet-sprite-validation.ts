@@ -11,7 +11,7 @@ export type SpriteValidationError = 'E_TYPE' | 'E_SIZE' | 'E_ROWS'
 
 export const SPRITE_ERROR_MESSAGES: Record<SpriteValidationError, string> = {
   E_TYPE: 'Spritesheet dimensions could not be read',
-  E_SIZE: 'Spritesheet size must be a multiple of the 192x208 frame grid',
+  E_SIZE: 'Spritesheet size must be a multiple of the 192x208 frame grid and within the maximum dimensions',
   E_ROWS: 'Spritesheet needs at least 9 animation rows',
 }
 
@@ -73,10 +73,19 @@ export function readImageSize(bytes: Uint8Array): ImageSize | null {
   return null
 }
 
+// Upper bounds read from the image header (no decode needed) so a tiny, highly compressed file
+// cannot make the renderer allocate gigabytes.
+export const SPRITE_MAX_WIDTH = SPRITE_CELL_WIDTH * 32
+export const SPRITE_MAX_HEIGHT = SPRITE_CELL_HEIGHT * 64
+export const SPRITE_MAX_PIXELS = 16 * 1024 * 1024
+
 export function validateSpriteSheet(bytes: Uint8Array): { ok: true; size: ImageSize } | { ok: false; code: SpriteValidationError } {
   const size = readImageSize(bytes)
   if (!size || size.width <= 0 || size.height <= 0) return { ok: false, code: 'E_TYPE' }
   if (size.width % SPRITE_CELL_WIDTH !== 0 || size.height % SPRITE_CELL_HEIGHT !== 0) {
+    return { ok: false, code: 'E_SIZE' }
+  }
+  if (size.width > SPRITE_MAX_WIDTH || size.height > SPRITE_MAX_HEIGHT || size.width * size.height > SPRITE_MAX_PIXELS) {
     return { ok: false, code: 'E_SIZE' }
   }
   if (size.height / SPRITE_CELL_HEIGHT < SPRITE_MIN_ROWS) return { ok: false, code: 'E_ROWS' }

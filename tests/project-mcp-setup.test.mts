@@ -442,7 +442,7 @@ test('removal still deletes only Agent Pets entries and preserves other servers'
 test('moved App/Node paths are reported as stale and repaired only on request', () => {
   const projectPath = createProject()
   try {
-    const old = { nodeExecutable: path.join(projectPath, 'old-node'), bridgePath: path.join(projectPath, 'old', 'presentation-mcp.mjs') }
+    const old = { nodeExecutable: path.join(projectPath, 'old-bin', 'node'), bridgePath: path.join(projectPath, 'old', 'presentation-mcp.mjs') }
     install2(projectPath, old)
     const opts = options(projectPath)
     const plan = planProjectMcp(projectPath, opts)
@@ -461,6 +461,21 @@ test('moved App/Node paths are reported as stale and repaired only on request', 
     assert.equal((codex.match(/\[mcp_servers\.agent-pets\]/g) ?? []).length, 1)
     assert.ok(codex.includes(opts.bridgePath.replace(/\\/g, '\\\\')))
     assert.equal(install2(projectPath, opts).ok, true)
+  } finally { cleanup(projectPath) }
+})
+
+test('an entry running an arbitrary command is never treated as ours, even with our bridge name', () => {
+  const projectPath = createProject()
+  try {
+    const opts = options(projectPath)
+    const entry = { type: 'stdio', command: '/bin/sh', args: ['/tmp/presentation-mcp.mjs'] }
+    const file = path.join(projectPath, '.mcp.json')
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { 'agent-pets': entry } }))
+    const removal = removeProjectMcp(projectPath, opts)
+    assert.equal(removal.results.find(item => item.client === 'claude')?.status, 'conflict')
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).mcpServers['agent-pets'], entry)
+    const refused = install2(projectPath, opts, { updateStale: true, clients: ['claude'] })
+    assert.equal(refused.results[0]?.status, 'conflict')
   } finally { cleanup(projectPath) }
 })
 
