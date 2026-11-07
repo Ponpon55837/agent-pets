@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { locale, t, type TranslationKey } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
-import type { HistoryAgentStat, HistoryDailyStat, HistorySummary } from '@/types/history'
+import { HISTORY_RANGE_OPTIONS, type HistoryAgentStat, type HistoryDailyStat, type HistoryRangeDays, type HistorySummary } from '@/types/history'
 import GrowthEmptyState from '@/components/growth/GrowthEmptyState.vue'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
@@ -17,6 +17,32 @@ const historyLoading = ref(false)
 const historyError = ref('')
 const historyAction = ref('')
 const historyProjectFilter = ref('')
+const RANGE_KEY = 'agent-pet-history-range'
+function readRange(): HistoryRangeDays {
+  try {
+    const stored = Number(localStorage.getItem(RANGE_KEY))
+    return HISTORY_RANGE_OPTIONS.find(option => option === stored) ?? 7
+  } catch { return 7 }
+}
+const historyRange = ref<HistoryRangeDays>(readRange())
+const RANGE_LABEL_KEYS = { 7: 'growth.range7', 30: 'growth.range30', 90: 'growth.range90' } as const
+function selectRange(days: HistoryRangeDays): void {
+  if (historyRange.value === days) return
+  historyRange.value = days
+  try { localStorage.setItem(RANGE_KEY, String(days)) } catch { /* convenience only */ }
+  void refreshHistory()
+}
+// Compact chart labels: roughly seven labels whatever the range.
+const labelStep = computed(() => Math.max(1, Math.ceil((historySummary.value?.days.length ?? 7) / 7)))
+function tokenDelta(): string {
+  const summary = historySummary.value
+  if (!summary) return ''
+  const previous = summary.previousTotals.tokenInput + summary.previousTotals.tokenOutput
+  if (previous <= 0) return ''
+  const current = summary.totals.tokenInput + summary.totals.tokenOutput
+  const percent = Math.round(((current - previous) / previous) * 100)
+  return t('growth.deltaVsPrevious', { days: summary.rangeDays, delta: `${percent > 0 ? '+' : ''}${percent}%` })
+}
 let cleanupHistoryUpdated: (() => void) | null = null
 const progression = computed(() => store.progression)
 const evolutionLabels = computed<Record<string, string>>(() => ({
@@ -74,7 +100,7 @@ async function refreshHistory(): Promise<void> {
   historyLoading.value = true
   historyError.value = ''
   try {
-    const summary = await window.electronAPI?.getHistorySummary(historyProjectFilter.value || undefined)
+    const summary = await window.electronAPI?.getHistorySummary(historyProjectFilter.value || undefined, historyRange.value)
     historySummary.value = summary ?? null
     if (!summary) historyError.value = t('historyDataUnavailable')
   } catch {
@@ -88,11 +114,18 @@ async function refreshHistory(): Promise<void> {
 function historyDateLabel(value: string): string {
   const date = new Date(`${value}T12:00:00`)
   if (!Number.isFinite(date.getTime())) return value
-  return date.toLocaleDateString(locale.value, { month: 'numeric', day: 'numeric' })
+  const options: Intl.DateTimeFormatOptions = historyRange.value === 7
+    ? { weekday: 'short', month: 'numeric', day: 'numeric' }
+    : { month: 'numeric', day: 'numeric' }
+  return date.toLocaleDateString(locale.value, options)
 }
 
+function isToday(day: HistoryDailyStat): boolean {
+  return historySummary.value?.localDate === day.localDate
+}
+
+// Today keeps its date and is only marked, never replaced by a word.
 function historyDayLabel(day: HistoryDailyStat): string {
-  if (historySummary.value?.days.at(-1)?.localDate === day.localDate) return t('historyToday')
   return historyDateLabel(day.localDate)
 }
 
@@ -219,6 +252,17 @@ onUnmounted(() => cleanupHistoryUpdated?.())
         <div class="history-kicker">{{ t('historyTitle') }}</div>
         <p>{{ t('historyHelp') }}</p>
       </div>
+      <div class="history-range" role="group" :aria-label="t('growth.rangeLabel')">
+        <button
+          v-for="days in HISTORY_RANGE_OPTIONS"
+          :key="days"
+          type="button"
+          class="history-range-button"
+          :class="{ active: historyRange === days }"
+          :aria-pressed="historyRange === days"
+          @click="selectRange(days)"
+        >{{ t(RANGE_LABEL_KEYS[days]) }}</button>
+      </div>
       <Select
         :model-value="historyProjectFilter"
         size="sm"
@@ -255,6 +299,7 @@ onUnmounted(() => cleanupHistoryUpdated?.())
           <span class="history-stat-label" :title="t('growth.tokenBasisTip')">{{ t('historyTokens') }}</span>
           <strong class="history-stat-number">{{ formatCompactNumber(historySummary.totals.tokenInput + historySummary.totals.tokenOutput) }}</strong>
           <span class="history-stat-meta">{{ historyTokenLabel(historySummary.tokenQuality) }}</span>
+          <span v-if="tokenDelta()" class="history-stat-meta">{{ tokenDelta() }}</span>
           <span v-if="historySummary.totals.tokenCacheRead + historySummary.totals.tokenCacheWrite > 0" class="history-stat-meta" :title="t('growth.tokenBasisTip')">{{ t('growth.cacheNote', { value: formatCompactNumber(historySummary.totals.tokenCacheRead + historySummary.totals.tokenCacheWrite) }) }}</span>
         </Card>
         <Card class="history-stat-tile history-stat-sessions" tone="success">
@@ -274,20 +319,21 @@ onUnmounted(() => cleanupHistoryUpdated?.())
         <span>{{ t('historyStreak', { days: progression.currentStreak }) }}</span>
       </div>
 
-      <Card class="history-chart-card" :title="t('historyTokenTrend')" tone="accent">
+      <Card class="history-chart-card" :title="t('growth.trendTitle', { days: historySummary.rangeDays })" tone="accent">
         <template #heading><span class="history-muted">{{ t('historyUpdated', { time: formatUpdated(new Date(historySummary.generatedAt).toISOString()) }) }}</span></template>
         <div class="history-bar-chart">
           <div
-            v-for="day in historySummary.days"
+            v-for="(day, dayIndex) in historySummary.days"
             :key="day.localDate"
             class="history-bar-column"
+            :class="{ today: isToday(day) }"
             :title="`${day.sessionsCompleted}${t('historyCompleted')} · ${day.sessionsFailed}${t('historyFailed')}`"
           >
-            <span class="history-bar-value">{{ formatCompactNumber(historyDayTokenTotal(day)) }}</span>
+            <span v-if="historySummary.days.length <= 7" class="history-bar-value">{{ formatCompactNumber(historyDayTokenTotal(day)) }}</span>
             <div class="history-bar-track" role="img" :aria-label="`${historyDayLabel(day)} ${historyDayTokenTotal(day)} tokens`">
               <div class="history-bar-fill" :style="{ height: `${historyDayBarHeight(day)}%` }" />
             </div>
-            <span class="history-bar-label">{{ historyDayLabel(day) }}</span>
+            <span class="history-bar-label">{{ (historySummary.days.length - 1 - dayIndex) % labelStep === 0 ? historyDayLabel(day) : '' }}</span>
           </div>
         </div>
       </Card>
@@ -323,3 +369,36 @@ onUnmounted(() => cleanupHistoryUpdated?.())
     />
   </div>
 </template>
+
+<style scoped>
+.history-range {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.history-range-button {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+
+.history-range-button.active {
+  border-color: var(--border-accent);
+  background: var(--accent-wash);
+  color: var(--text-primary);
+}
+
+.history-range-button:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.history-bar-column.today .history-bar-fill {
+  background: var(--accent-bright);
+}
+</style>

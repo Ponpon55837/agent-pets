@@ -19,7 +19,7 @@ function createHistoryIpcHarness() {
     getPanelWindow: () => panelWindow,
     getHistoryStore: () => historyStore,
     refreshLocalUsage: async () => { records.refreshes += 1 },
-    currentHistorySummary: projectId => ({ projectId: projectId ?? null }),
+    currentHistorySummary: (projectId, rangeDays) => ({ projectId: projectId ?? null, rangeDays }),
     broadcastHistoryUpdated: () => { records.broadcasts += 1 },
     documentsPath: () => 'test-documents',
     joinPath: (...parts: string[]) => parts.join('/'),
@@ -48,8 +48,8 @@ test('history IPC registration uses injected services and preserves handler beha
     IPC_CHANNELS.historyClear,
     IPC_CHANNELS.historyExport,
   ])
-  assert.deepEqual(await invoke(IPC_CHANNELS.historySummary, 'project-a'), { projectId: 'project-a' })
-  assert.deepEqual(await invoke(IPC_CHANNELS.historySummary, 7), { projectId: null })
+  assert.deepEqual(await invoke(IPC_CHANNELS.historySummary, 'project-a'), { projectId: 'project-a', rangeDays: 7 })
+  assert.deepEqual(await invoke(IPC_CHANNELS.historySummary, 7), { projectId: null, rangeDays: 7 })
   assert.equal(harness.records.refreshes, 2)
 
   assert.deepEqual(await invoke(IPC_CHANNELS.historyClear), { ok: true })
@@ -64,4 +64,13 @@ test('history IPC registration uses injected services and preserves handler beha
   ])
   assert.equal(harness.records.refreshes, 4)
   assert.equal(harness.records.trusted.length, 7)
+})
+
+test('history summary range is limited to the supported 7/30/90 windows', async () => {
+  const harness = createHistoryIpcHarness()
+  const invoke = (...args: unknown[]) => harness.handlers.get(IPC_CHANNELS.historySummary)?.({}, ...args) as Promise<{ rangeDays: number }>
+  assert.equal((await invoke(undefined, 30)).rangeDays, 30)
+  assert.equal((await invoke(undefined, 90)).rangeDays, 90)
+  assert.equal((await invoke(undefined, 365)).rangeDays, 7)
+  assert.equal((await invoke(undefined, '30')).rangeDays, 7)
 })

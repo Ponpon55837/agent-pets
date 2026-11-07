@@ -15,7 +15,7 @@ export interface HistoryIpcDependencies {
   getPanelWindow(): BrowserWindow | null
   getHistoryStore(): HistoryStore | null
   refreshLocalUsage(): Promise<void>
-  currentHistorySummary(projectId?: string): HistorySummary | null
+  currentHistorySummary(projectId?: string, rangeDays?: number): HistorySummary | null
   broadcastHistoryUpdated(): void
   documentsPath(): string
   joinPath(...parts: string[]): string
@@ -25,12 +25,15 @@ export interface HistoryIpcDependencies {
 }
 
 export function registerHistoryIpc(deps: HistoryIpcDependencies): void {
-  deps.ipcMain.handle(IPC_CHANNELS.historySummary, async (event, projectId: unknown) => {
+  deps.ipcMain.handle(IPC_CHANNELS.historySummary, async (event, projectId: unknown, rangeDays?: unknown) => {
     deps.assertTrustedIpcSender(event, deps.getPanelWindow())
     // Never block the summary on a log scan: return stored aggregates now and
     // let the (throttled) background scan push a historyUpdated when it imports.
     void deps.refreshLocalUsage().catch(() => undefined)
-    return deps.currentHistorySummary(typeof projectId === 'string' ? projectId : undefined)
+    return deps.currentHistorySummary(
+      typeof projectId === 'string' ? projectId : undefined,
+      rangeDays === 30 || rangeDays === 90 ? rangeDays : 7,
+    )
   })
 
   deps.ipcMain.handle(IPC_CHANNELS.historyClear, (event): HistoryClearResult => {

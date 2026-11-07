@@ -54,6 +54,7 @@ const MAX_QUOTA_WINDOWS = 32
 const MAX_ACTIVE_GAP_MS = 5 * 60 * 1000
 const MAX_ACHIEVEMENT_BACKFILL_EVENTS = 100_000
 const LOCAL_USAGE_CUTOFF_KEY = 'local_usage_cutoff_at'
+const HISTORY_RANGES: readonly number[] = [7, 30, 90]
 const ACTIVE_STATES = new Set<AgentState>(['thinking', 'tool-running'])
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,256}$/
 const PROJECT_ID = /^[a-f0-9]{32}$/
@@ -561,70 +562,59 @@ export class HistoryStore {
     return true
   }
 
-  getSummary(petId = DEFAULT_PET_ID, projectId?: string): HistorySummary {
+  getSummary(petId = DEFAULT_PET_ID, projectId?: string, rangeDays: number = 7): HistorySummary {
     const safePet = safePetId(petId)
     const safeProject = typeof projectId === 'string' && PROJECT_ID.test(projectId) ? projectId : null
+    const span = HISTORY_RANGES.includes(rangeDays) ? rangeDays : 7
     const today = this.localDate(this.now())
-    const dates = Array.from({ length: 7 }, (_, index) => dateOffset(today, index - 6))
-    const placeholders = dates.map(() => '?').join(', ')
+    const dates = Array.from({ length: span }, (_, index) => dateOffset(today, index - (span - 1)))
+    const previousDates = Array.from({ length: span }, (_, index) => dateOffset(today, index - (2 * span - 1)))
     // Local token-usage rows are always recorded under the shared
     // LOCAL_USAGE_PET_ID bucket (see recordTokenUsage), never under the
     // routed pet, so a project filter must still include that bucket -
     // scoped to the same project - or token totals would silently read
     // zero every time a project is selected.
     const projectClause = safeProject ? 'AND project_id = ?' : ''
-    const summaryParams = safeProject
-      ? [safePet, LOCAL_USAGE_PET_ID, safeProject, ...dates]
-      : [safePet, LOCAL_USAGE_PET_ID, ...dates]
+    // One range scan over the previous + current window; the covering index
+    // (pet_id, local_date, ...) serves it, and everything else is folded in JS.
     const rows = this.statement(`
-      SELECT local_date, sessions_completed, sessions_failed, active_ms,
+      SELECT local_date, adapter_id, sessions_completed, sessions_failed, active_ms,
              token_input, token_output, token_cache_read, token_cache_write, token_quality
       FROM daily_stats
-      WHERE (pet_id = ? OR pet_id = ?) ${projectClause} AND local_date IN (${placeholders})
-    `).all(...summaryParams)
+      WHERE pet_id IN (?, ?) ${projectClause} AND local_date BETWEEN ? AND ?
+    `).all(
+      ...(safeProject ? [safePet, LOCAL_USAGE_PET_ID, safeProject] : [safePet, LOCAL_USAGE_PET_ID]),
+      previousDates[0],
+      today,
+    )
     // A day can have multiple aggregate rows (one per project and adapter).
-    // Fold them before building the seven-day projection; keeping only the
-    // last row would silently drop sessions and token usage from the HUD.
+    // Fold them before building the projection; keeping only the last row
+    // would silently drop sessions and token usage from the HUD.
+    const currentDates = new Set(dates)
+    const previousSet = new Set(previousDates)
     const byDate = new Map<string, HistoryDailyStat>()
+    const byAgent = new Map<string, HistoryDailyStat>()
+    let previousTotals = emptyDaily('previous')
     for (const row of rows) {
       const date = String(row.local_date)
-      const current = byDate.get(date) ?? emptyDaily(date)
-      byDate.set(date, addDaily(current, dailyStat(date, row)))
+      const stat = dailyStat(date, row)
+      if (previousSet.has(date)) {
+        previousTotals = addDaily(previousTotals, stat)
+        continue
+      }
+      if (!currentDates.has(date)) continue
+      byDate.set(date, addDaily(byDate.get(date) ?? emptyDaily(date), stat))
+      const adapterId = safeText(row.adapter_id, 'unknown')
+      byAgent.set(adapterId, addDaily(byAgent.get(adapterId) ?? emptyDaily(adapterId), stat))
     }
-    const days = dates.map(localDate => {
-      return byDate.get(localDate) ?? emptyDaily(localDate)
-    })
+    const days = dates.map(localDate => byDate.get(localDate) ?? emptyDaily(localDate))
     const totals = days.reduce((sum, day) => addDaily(sum, day), emptyDaily('total'))
-    const agentParams = safeProject
-      ? [safePet, LOCAL_USAGE_PET_ID, safeProject, ...dates]
-      : [safePet, LOCAL_USAGE_PET_ID, ...dates]
-    const agents = this.statement(`
-      SELECT adapter_id,
-             SUM(sessions_completed) AS sessions_completed,
-             SUM(sessions_failed) AS sessions_failed,
-             SUM(active_ms) AS active_ms,
-             SUM(token_input) AS token_input,
-             SUM(token_output) AS token_output,
-             SUM(token_cache_read) AS token_cache_read,
-             SUM(token_cache_write) AS token_cache_write,
-             MAX(CASE token_quality WHEN 'exact' THEN 2 WHEN 'estimated' THEN 1 ELSE 0 END) AS token_quality_rank
-      FROM daily_stats
-      WHERE (pet_id = ? OR pet_id = ?) ${projectClause} AND local_date IN (${placeholders})
-      GROUP BY adapter_id
-      ORDER BY (token_input + token_output) DESC, active_ms DESC, adapter_id ASC
-    `).all(...agentParams).map(row => ({
-      adapterId: safeText(row.adapter_id, 'unknown'),
-      sessionsCompleted: Math.max(0, asInteger(row.sessions_completed)),
-      sessionsFailed: Math.max(0, asInteger(row.sessions_failed)),
-      activeMs: Math.max(0, asInteger(row.active_ms)),
-      tokenInput: Math.max(0, asInteger(row.token_input)),
-      tokenOutput: Math.max(0, asInteger(row.token_output)),
-      tokenCacheRead: Math.max(0, asInteger(row.token_cache_read)),
-      tokenCacheWrite: Math.max(0, asInteger(row.token_cache_write)),
-      tokenQuality: asInteger(row.token_quality_rank) >= 2
-        ? 'exact'
-        : asInteger(row.token_quality_rank) >= 1 ? 'estimated' : 'none',
-    } satisfies HistoryAgentStat))
+    const agents: HistoryAgentStat[] = [...byAgent.entries()]
+      .map(([adapterId, { localDate: _ignored, ...agent }]) => ({ adapterId, ...agent }))
+      .sort((a, b) =>
+        (b.tokenInput + b.tokenOutput) - (a.tokenInput + a.tokenOutput)
+        || b.activeMs - a.activeMs
+        || a.adapterId.localeCompare(b.adapterId))
     const quotaRow = this.statement(
       'SELECT payload_json FROM quota_snapshots ORDER BY updated_at DESC LIMIT 1',
     ).get()
@@ -635,8 +625,11 @@ export class HistoryStore {
       petId: safePet,
       ...(safeProject ? { projectId: safeProject } : {}),
       retentionDays: this.retentionDays,
+      rangeDays: span,
+      localDate: today,
       days,
       totals,
+      previousTotals: { ...previousTotals, localDate: 'previous' },
       agents,
       tokenQuality: totals.tokenQuality,
       // Mirrors the cutoff LocalUsageReader.scanNow() actually applies, so
@@ -649,11 +642,11 @@ export class HistoryStore {
     }
   }
 
-  getExport(petId = DEFAULT_PET_ID, projectId?: string): HistoryExport {
+  getExport(petId = DEFAULT_PET_ID, projectId?: string, rangeDays: number = 7): HistoryExport {
     return {
       schemaVersion: 1,
       exportedAt: this.now(),
-      summary: this.getSummary(petId, projectId),
+      summary: this.getSummary(petId, projectId, rangeDays),
     }
   }
 

@@ -88,5 +88,11 @@
   "growth.historyEmptyHint": "還沒收到事件？先到設定檢查 Hook 是否已安裝。",
   "growth.historyIntroTitle": "統計只存在這台電腦",
   "growth.historyIntroBody": "數字來自本機的工作階段紀錄與 Hook 事件，不會上傳，也不含提示內容。Token 為「新輸入＋輸出」，快取另列。",
-  "growth.dismiss": "知道了"
+  "growth.dismiss": "知道了",
+  "growth.rangeLabel": "統計區間",
+  "growth.range7": "7 天",
+  "growth.range30": "30 天",
+  "growth.range90": "90 天",
+  "growth.trendTitle": "近 {days} 天 Token 用量",
+  "growth.deltaVsPrevious": "較前 {days} 天 {delta}"
 }

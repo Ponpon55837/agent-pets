@@ -2456,9 +2456,9 @@ export function broadcastAchievementUnlock(unlock: AchievementUnlock): void {
   broadcastAchievements()
 }
 
-export function currentHistorySummary(projectId?: string): HistorySummary | null {
+export function currentHistorySummary(projectId?: string, rangeDays = 7): HistorySummary | null {
   if (!mainState.historyStore) return null
-  const summary = mainState.historyStore.getSummary(mainState.progressionStore?.getActivePetId() ?? 'aang-airbender', projectId)
+  const summary = mainState.historyStore.getSummary(mainState.progressionStore?.getActivePetId() ?? 'aang-airbender', projectId, rangeDays)
   const scan = mainState.localUsageReader?.getDiagnostics()
   return scan
     ? {

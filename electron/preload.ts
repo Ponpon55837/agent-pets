@@ -371,8 +371,8 @@ const electronAPI: ElectronAPI = {
     }
   },
 
-  getHistorySummary: (projectId?: string): Promise<HistorySummary | null> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.historySummary, projectId)
+  getHistorySummary: (projectId?: string, rangeDays?: number): Promise<HistorySummary | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.historySummary, projectId, rangeDays)
   },
 
   listProjectPets: (): Promise<ProjectPetView[]> => {

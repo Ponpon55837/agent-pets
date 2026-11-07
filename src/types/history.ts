@@ -71,8 +71,14 @@ export interface HistorySummary {
   petId: string
   projectId?: string
   retentionDays: number
+  /** Number of days in `days` (7, 30 or 90). */
+  rangeDays: number
+  /** Today's local date, so the UI never infers it from the last bar. */
+  localDate: string
   days: HistoryDailyStat[]
   totals: HistoryDailyStat
+  /** The equally long period right before `days`, for delta display. */
+  previousTotals: HistoryDailyStat
   agents: HistoryAgentStat[]
   tokenQuality: HistoryTokenQuality
   // The effective start of local token counting: max(last "Clear History",
@@ -83,6 +89,9 @@ export interface HistorySummary {
   /** Diagnostics of the last local log scan (attached by the main process). */
   scan?: HistoryScanDiagnostics
 }
+
+export const HISTORY_RANGE_OPTIONS = [7, 30, 90] as const
+export type HistoryRangeDays = (typeof HISTORY_RANGE_OPTIONS)[number]
 
 export interface HistoryScanDiagnostics {
   finishedAt: number

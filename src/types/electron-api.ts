@@ -158,7 +158,7 @@ export interface ElectronAPI {
         throttled?: { retryInSec: number }
       }>
       onQuotaUsageUpdated: (callback: (usage: unknown) => void) => () => void
-      getHistorySummary: (projectId?: string) => Promise<HistorySummary | null>
+      getHistorySummary: (projectId?: string, rangeDays?: number) => Promise<HistorySummary | null>
       listProjectPets: () => Promise<ProjectPetView[]>
       pickProjectPet: () => Promise<ProjectPetCommandResult>
       setProjectPetBinding: (projectId: string, petId: string | null) => Promise<ProjectPetCommandResult>
