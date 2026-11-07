@@ -127,17 +127,26 @@ export function createEventServer(
         return
       }
 
-      // A failure in downstream side effects (notifications, XP, history) is
-      // our bug, not a malformed request: log it and still acknowledge the hook.
       try {
         for (const win of getWindows()) enqueueAgentEvent({ window: win, event })
-        onEvent?.(event)
       } catch (error) {
-        console.error('Event handler failed', error)
+        console.error('Event dispatch failed', error)
       }
 
+      // Acknowledge first: the hook must never wait on synchronous SQLite work.
       response.writeHead(204)
       response.end()
+
+      // Side effects (notifications, XP, history) run right after the response
+      // is flushed. setImmediate keeps arrival order, and a failure here is our
+      // bug, not the caller's, so it is logged rather than surfaced.
+      setImmediate(() => {
+        try {
+          onEvent?.(event)
+        } catch (error) {
+          console.error('Event handler failed', error)
+        }
+      })
     })
   })
 

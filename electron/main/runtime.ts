@@ -4,6 +4,7 @@ import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
 import { logMain, mainLogger } from '../diagnostics/main-log'
 import { buildDiagnosticsReport, registerDiagnosticsSection } from '../diagnostics/report'
+import { openWithCorruptionRecovery } from './db-recovery'
 import { LOCAL_USAGE_TICK_MS, shouldRunLocalUsageTick } from './scan-schedule'
 import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
 import { join, resolve } from 'path'
@@ -2583,10 +2584,26 @@ export function scheduleAchievementStoreRetry(): void {
   }, delay)
 }
 
+const HISTORY_STORE_RETRY_DELAYS_MS = [30_000, 120_000, 600_000] as const
+let historyStoreRetryTimer: ReturnType<typeof setTimeout> | null = null
+let historyStoreRetryAttempt = 0
+
+export function cancelHistoryStoreRetry(): void {
+  if (historyStoreRetryTimer) clearTimeout(historyStoreRetryTimer)
+  historyStoreRetryTimer = null
+}
+
 export function createHistoryServices(): void {
   if (mainState.historyStore) return
   try {
-    mainState.historyStore = new HistoryStore(join(app.getPath('userData'), 'history.sqlite'))
+    const databasePath = join(app.getPath('userData'), 'history.sqlite')
+    mainState.historyStore = openWithCorruptionRecovery(
+      databasePath,
+      () => new HistoryStore(databasePath),
+      { log: (message, detail) => console.error(message, detail) },
+    )
+    if (!mainState.historyStore) throw new Error('History database could not be opened')
+    historyStoreRetryAttempt = 0
     mainState.localUsageReader = new LocalUsageReader({
       homeDir: app.getPath('home'),
       history: mainState.historyStore,
@@ -2605,8 +2622,18 @@ export function createHistoryServices(): void {
     // History is an additive HUD feature. A broken history database must not
     // prevent the pet, event receiver, XP, or permission controls from booting.
     console.error('History storage is unavailable', error)
+    try { mainState.historyStore?.close() } catch {}
     mainState.historyStore = null
     mainState.localUsageReader = null
+    const delay = HISTORY_STORE_RETRY_DELAYS_MS[historyStoreRetryAttempt]
+    if (delay !== undefined && !historyStoreRetryTimer && !mainState.isQuitting) {
+      historyStoreRetryAttempt += 1
+      historyStoreRetryTimer = setTimeout(() => {
+        historyStoreRetryTimer = null
+        createHistoryServices()
+      }, delay)
+      historyStoreRetryTimer.unref?.()
+    }
   }
 }
 
