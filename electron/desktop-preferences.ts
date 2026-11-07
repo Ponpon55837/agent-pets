@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { renameSyncWithRetry } from './fs-rename.ts'
+import { dndHasExpired, normalizeDndUntil } from './dnd-schedule.ts'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
 import { DEFAULT_LOCALE, isAppLocale } from '../src/types/locale.ts'
 import {
@@ -91,11 +92,15 @@ const BOOLEAN_KEYS = [
   'fullscreenAutoHideEnabled',
   'rightClickHideEnabled',
   'soundEnabled',
+  'soundOnPermission',
+  'soundOnError',
+  'soundOnSuccess',
   'launchAtStartup',
 ] as const
 
 const DEFAULTS: StoredDesktopPreferences = {
   dndEnabled: false,
+  dndUntil: null,
   notificationsEnabled: true,
   permissionBubbleEnabled: true,
   presentationMcpEnabled: true,
@@ -106,8 +111,16 @@ const DEFAULTS: StoredDesktopPreferences = {
   fullscreenAutoHideEnabled: false,
   rightClickHideEnabled: false,
   soundEnabled: false,
+  soundVolume: 60,
+  soundOnPermission: true,
+  soundOnError: true,
+  soundOnSuccess: true,
   launchAtStartup: false,
   locale: DEFAULT_LOCALE,
+}
+
+function isVolume(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -121,17 +134,32 @@ function sanitizeStored(value: unknown): Partial<StoredDesktopPreferences> {
     if (typeof value[key] === 'boolean') result[key] = value[key]
   }
   if (isAppLocale(value.locale)) result.locale = value.locale
+  if (isVolume(value.soundVolume)) result.soundVolume = Math.round(value.soundVolume)
+  if (value.dndUntil === null) result.dndUntil = null
+  else if (typeof value.dndUntil === 'number' && Number.isFinite(value.dndUntil) && value.dndUntil > 0) {
+    result.dndUntil = Math.floor(value.dndUntil)
+  }
   return result
 }
 
 export function parseDesktopPreferencesPatch(value: unknown): DesktopPreferencesPatch {
   if (!isRecord(value)) throw new TypeError('Desktop preferences patch must be an object')
 
-  const allowed = new Set<string>([...BOOLEAN_KEYS, 'locale'])
+  const allowed = new Set<string>([...BOOLEAN_KEYS, 'locale', 'dndUntil', 'soundVolume'])
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) throw new TypeError(`Unsupported desktop preference: ${key}`)
     if (key === 'locale') {
       if (!isAppLocale(value[key])) throw new TypeError('Desktop preference locale is unsupported')
+      continue
+    }
+    if (key === 'soundVolume') {
+      if (!isVolume(value[key])) throw new TypeError('Desktop preference soundVolume must be a number from 0 to 100')
+      continue
+    }
+    if (key === 'dndUntil') {
+      if (value[key] !== null && !(typeof value[key] === 'number' && Number.isFinite(value[key]) && (value[key] as number) > 0)) {
+        throw new TypeError('Desktop preference dndUntil must be a positive number or null')
+      }
       continue
     }
     if (typeof value[key] !== 'boolean') {
@@ -206,9 +234,13 @@ export class DesktopPreferencesStore {
 
   get(): DesktopPreferences {
     const stored = this.load()
+    const now = Date.now()
+    const dndExpired = dndHasExpired(stored.dndEnabled ?? false, stored.dndUntil, now)
     return {
       ...DEFAULTS,
       ...stored,
+      dndEnabled: dndExpired ? false : (stored.dndEnabled ?? false),
+      dndUntil: dndExpired ? null : (stored.dndEnabled ? (stored.dndUntil ?? null) : null),
       captureExclusionEnabled: supportedVisibilityPreference(
         stored.captureExclusionEnabled,
         this.visibilityCapabilities.captureExclusion.supported,
@@ -236,6 +268,9 @@ export class DesktopPreferencesStore {
     const patch = parseDesktopPreferencesPatch(value)
     const current = this.get()
     const next: DesktopPreferences = { ...current, ...patch }
+    // A timed DND only makes sense while DND is on; the end time is clamped to
+    // a bounded window so a forged value cannot pin it on indefinitely by accident.
+    next.dndUntil = normalizeDndUntil(next.dndUntil, next.dndEnabled, Date.now())
 
     // Keep unsupported values disabled even when an old settings file or a
     // forged renderer request asks to enable them. The response is the
@@ -260,6 +295,7 @@ export class DesktopPreferencesStore {
 
     this.stored = {
       dndEnabled: next.dndEnabled,
+      dndUntil: next.dndUntil,
       notificationsEnabled: next.notificationsEnabled,
       permissionBubbleEnabled: next.permissionBubbleEnabled,
       presentationMcpEnabled: next.presentationMcpEnabled,
@@ -270,6 +306,10 @@ export class DesktopPreferencesStore {
       fullscreenAutoHideEnabled: next.fullscreenAutoHideEnabled,
       rightClickHideEnabled: next.rightClickHideEnabled,
       soundEnabled: next.soundEnabled,
+      soundVolume: next.soundVolume,
+      soundOnPermission: next.soundOnPermission,
+      soundOnError: next.soundOnError,
+      soundOnSuccess: next.soundOnSuccess,
       launchAtStartup: next.launchAtStartup,
       locale: next.locale,
     }
@@ -280,6 +320,7 @@ export class DesktopPreferencesStore {
   private persist(preferences: DesktopPreferences): void {
     writeJsonAtomic(this.filePath, {
       dndEnabled: preferences.dndEnabled,
+      dndUntil: preferences.dndUntil,
       notificationsEnabled: preferences.notificationsEnabled,
       permissionBubbleEnabled: preferences.permissionBubbleEnabled,
       presentationMcpEnabled: preferences.presentationMcpEnabled,
@@ -290,6 +331,10 @@ export class DesktopPreferencesStore {
       fullscreenAutoHideEnabled: preferences.fullscreenAutoHideEnabled,
       rightClickHideEnabled: preferences.rightClickHideEnabled,
       soundEnabled: preferences.soundEnabled,
+      soundVolume: preferences.soundVolume,
+      soundOnPermission: preferences.soundOnPermission,
+      soundOnError: preferences.soundOnError,
+      soundOnSuccess: preferences.soundOnSuccess,
       launchAtStartup: preferences.launchAtStartup,
       locale: preferences.locale,
     } satisfies StoredDesktopPreferences)

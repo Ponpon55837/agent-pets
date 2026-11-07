@@ -1,6 +1,6 @@
 # IPC 安全清單
 
-由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 91 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
+由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 92 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
 
 | 頻道 | 類型 | 允許的寄件者 | 輸入驗證概況 | Preload API | 對應測試 |
 | --- | --- | --- | --- | --- | --- |
@@ -26,9 +26,10 @@
 | `add-custom-pet` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | addCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `rename-custom-pet` | `handle` | 設定面板 main frame | 型別；長度／數量上限；isFile, isSymbolicLink；無效輸入回安全預設或錯誤 | renameCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `remove-custom-pet` | `handle` | 設定面板 main frame | isDirectory, isSymbolicLink；無效輸入回安全預設或錯誤 | removeCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
-| `get-custom-pet-sprite` | `handle` | 受信任寵物或設定面板 main frame | isFile, isSymbolicLink；無效輸入回安全預設或錯誤 | getCustomPetSprite (invoke) | `tests/ipc-pet-assets.test.mts` |
+| `get-custom-pet-sprite` | `handle` | 受信任寵物或設定面板 main frame | 數值範圍；isFile, isSymbolicLink；無效輸入回安全預設或錯誤 | getCustomPetSprite (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `import-pet-zip` | `handle` | 設定面板 main frame | 長度／數量上限；isFile, isSymbolicLink, isSupportedRasterImage；無效輸入回安全預設或錯誤 | importPetZip (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `import-pet-sprite` | `handle` | 設定面板 main frame | 長度／數量上限；isFile, isSymbolicLink, isSupportedRasterImage；無效輸入回安全預設或錯誤 | importPetSprite (invoke) | `tests/ipc-pet-assets.test.mts` |
+| `pet-context-menu` | `on` | 寵物視窗 main frame | handler／controller 驗證 payload；拒絕無效輸入 | showPetContextMenu (send) | `tests/pet-context-menu.test.mts` |
 | `pet-drag-start` | `on` | 寵物視窗 main frame | handler／controller 驗證 payload；拒絕無效輸入 | startDrag (send) | `tests/ipc-pet-motion.test.mts` |
 | `pet-drag-end` | `on` | 寵物視窗 main frame | 型別；無效輸入回安全預設或錯誤 | notifyDragEnd (send) | `tests/ipc-pet-motion.test.mts` |
 | `pet-window-hover` | `on` | 寵物視窗 main frame | handler／controller 驗證 payload；拒絕無效輸入 | notifyPetHover (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |

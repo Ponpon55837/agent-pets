@@ -3,10 +3,10 @@ import type { ElectronAPI } from '../src/types/electron-api'
 import type { AdapterDiagnoseIpcResult, AdapterInstallIpcResult, AdapterUninstallIpcResult } from '../src/types/ipc'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
-import type { PermissionDecisionValue, PermissionRequestView } from '../src/types/permission'
-import type { ProgressionSnapshot } from '../src/types/progression'
+import type { PermissionDecisionValue, PermissionRequestView, PermissionAuditEntry } from '../src/types/permission'
+import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
-import type { HistoryClearResult, HistoryCommandResult, HistorySummary } from '../src/types/history'
+import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySummary } from '../src/types/history'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 import type { PetBehaviorManifest, PluginSkinPetSource } from '../src/types/pet'
 import type { PresentationIntent, PresentationStatusUpdate } from '../src/types/presentation'
@@ -184,6 +184,10 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.send(IPC_CHANNELS.petHideRequest)
   },
 
+  showPetContextMenu: () => {
+    ipcRenderer.send(IPC_CHANNELS.petContextMenu)
+  },
+
   getOnboardingState: (): Promise<OnboardingState | null> => ipcRenderer.invoke(IPC_CHANNELS.onboardingGet),
 
   updateOnboardingState: (action: OnboardingAction): Promise<OnboardingState | null> => {
@@ -206,6 +210,14 @@ const electronAPI: ElectronAPI = {
 
   hidePanel: () => {
     ipcRenderer.send(IPC_CHANNELS.panelHide)
+  },
+
+  reportRendererError: (report: { message: string; stack?: string; kind: 'vue' | 'unhandledrejection' | 'error' }): void => {
+    ipcRenderer.send(IPC_CHANNELS.rendererErrorReport, report)
+  },
+
+  reloadRenderer: (): void => {
+    ipcRenderer.send(IPC_CHANNELS.rendererReload)
   },
 
   exportDiagnostics: (): Promise<{ ok: boolean; canceled?: boolean }> => ipcRenderer.invoke(IPC_CHANNELS.diagnosticsExport),
@@ -300,6 +312,18 @@ const electronAPI: ElectronAPI = {
     }
   },
 
+  getProgressionInsights: (petId?: string): Promise<ProgressionInsights | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.progressionInsights, petId)
+  },
+
+  onProgressionAwarded: (callback: (event: ProgressionAwardEvent) => void) => {
+    const handler = (_event: unknown, payload: ProgressionAwardEvent) => callback(payload)
+    ipcRenderer.on(IPC_CHANNELS.progressionAwarded, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.progressionAwarded, handler)
+    }
+  },
+
   onProgressionUpdated: (callback: (snapshot: ProgressionSnapshot) => void) => {
     const handler = (_event: unknown, snapshot: ProgressionSnapshot) => callback(snapshot)
     ipcRenderer.on(IPC_CHANNELS.progressionUpdated, handler)
@@ -330,6 +354,14 @@ const electronAPI: ElectronAPI = {
 
   decidePermission: (requestId: string, decision: PermissionDecisionValue) => {
     return ipcRenderer.invoke(IPC_CHANNELS.permissionDecide, { requestId, decision })
+  },
+
+  listPermissionAudit: (): Promise<PermissionAuditEntry[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.permissionAuditList)
+  },
+
+  clearPermissionAudit: (): Promise<{ ok: boolean }> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.permissionAuditClear)
   },
 
   quitApp: () => {
@@ -368,8 +400,8 @@ const electronAPI: ElectronAPI = {
     }
   },
 
-  getHistorySummary: (projectId?: string): Promise<HistorySummary | null> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.historySummary, projectId)
+  getHistorySummary: (projectId?: string, rangeDays?: number): Promise<HistorySummary | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.historySummary, projectId, rangeDays)
   },
 
   listProjectPets: (): Promise<ProjectPetView[]> => {
@@ -400,8 +432,12 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.historyClear)
   },
 
-  exportHistory: (): Promise<HistoryCommandResult> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.historyExport)
+  exportHistory: (request?: HistoryExportRequest): Promise<HistoryCommandResult> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.historyExport, request)
+  },
+
+  revealHistoryExport: (): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.historyRevealExport)
   },
 
   onHistoryUpdated: (callback: () => void) => {

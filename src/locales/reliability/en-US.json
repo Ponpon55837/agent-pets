@@ -25,5 +25,7 @@
   "reliability.diagnostics.help": "Export versions, system info and recent error logs for bug reports. Saved locally only, with tokens, prompts and personal paths removed; nothing is uploaded.",
   "reliability.diagnostics.export": "Export diagnostics",
   "reliability.diagnostics.saved": "Diagnostics saved.",
-  "reliability.diagnostics.failed": "Could not save diagnostics."
+  "reliability.diagnostics.failed": "Could not save diagnostics.",
+  "reliability.renderer.errorMessage": "Something went wrong in this view.",
+  "reliability.renderer.reload": "Reload"
 }

@@ -34,6 +34,8 @@ export interface ProjectMcpIpcDependencies {
   removeProjectMcp: typeof removeProjectMcp
   installOptions(): ProjectMcpInstallOptions
   getRegistry(): ProjectMcpRegistryStore | null
+  /** Current app language, for native dialog text. */
+  getLocale?(): 'zh-TW' | 'en-US'
 }
 
 const MAX_REMEMBERED_PICKS = 16
@@ -48,7 +50,13 @@ function parseApplyRequest(value: unknown): ProjectMcpApplyRequest | null {
     typeof client === 'string' && (PROJECT_MCP_CLIENTS as readonly string[]).includes(client)
   ))
   if (clients.length !== raw.clients.length) return null
-  return { projectPath: raw.projectPath, clients: [...new Set(clients)], localOnly: raw.localOnly }
+  if (raw.updateStale !== undefined && typeof raw.updateStale !== 'boolean') return null
+  return {
+    projectPath: raw.projectPath,
+    clients: [...new Set(clients)],
+    localOnly: raw.localOnly,
+    updateStale: raw.updateStale === true,
+  }
 }
 
 export function registerProjectMcpIpc(deps: ProjectMcpIpcDependencies): void {
@@ -69,12 +77,13 @@ export function registerProjectMcpIpc(deps: ProjectMcpIpcDependencies): void {
     if (!owner || owner.isDestroyed()) return { ok: false, error: 'No settings window is available' }
     if (deps.isDialogOpen()) return { ok: false, error: 'Another dialog is already open' }
 
+    const english = deps.getLocale?.() === 'en-US'
     deps.setDialogOpen(true)
     let result: DirectoryDialogResult
     try {
       result = await deps.showOpenDialog(owner, {
-        title: '將 Agent Pets MCP 安裝到專案',
-        message: '選擇本機專案資料夾',
+        title: english ? 'Set up Agent Pets MCP for a project' : '為專案設定 Agent Pets MCP',
+        message: english ? 'Choose a local project folder' : '選擇本機專案資料夾',
         properties: ['openDirectory', 'createDirectory'],
       })
     } catch (error) {
@@ -114,6 +123,7 @@ export function registerProjectMcpIpc(deps: ProjectMcpIpcDependencies): void {
         summary = deps.installProjectMcp(parsed.projectPath, deps.installOptions(), {
           clients: parsed.clients,
           localOnly: parsed.localOnly,
+          updateStale: parsed.updateStale,
         })
       } catch (error) {
         if (registry && !alreadyTracked) registry.forget(parsed.projectPath)

@@ -21,6 +21,9 @@ const MAX_RESPONSE_BYTES = 1024 * 1024
 // coalesces the pet and panel windows asking at roughly the same moment.
 const CACHE_TTL_MS = 90_000
 const FORCE_REFRESH_COOLDOWN_MS = 10_000
+// Failures are not worth holding for the full success TTL: a user who fixes a
+// login and presses Refresh must not keep seeing the same error for 90s.
+const ERROR_CACHE_TTL_MS = 10_000
 const MAX_WINDOWS_PER_PROVIDER = 32
 const MAX_DISPLAY_TEXT_LENGTH = 96
 // Claude Code answers /usage itself without asking a model. Running it lets
@@ -63,17 +66,31 @@ export interface QuotaWindow {
   overage?: boolean
 }
 
+export type QuotaErrorKind =
+  | 'not-signed-in'
+  | 'expired'
+  | 'timeout'
+  | 'rate-limited'
+  | 'unavailable'
+
 export interface QuotaProvider {
   id: 'codex' | 'claude'
   name: string
   plan?: string
   windows: QuotaWindow[]
   error?: string
+  errorKind?: QuotaErrorKind
+  /** ISO time of this provider's last successful reading. */
+  fetchedAt?: string
+  /** True when `windows` are the last good reading kept after a failure. */
+  stale?: boolean
 }
 
 export interface QuotaUsageResult {
   updatedAt: string
   providers: QuotaProvider[]
+  /** Set when a forced refresh was answered from cache during the cooldown. */
+  throttled?: { retryInSec: number }
 }
 
 interface ClaudeCredential {
@@ -89,7 +106,7 @@ let inFlight: Promise<QuotaUsageResult> | null = null
 let tempSequence = 0
 let lastFetchStartedAt = 0
 
-class QuotaDisplayError extends Error {}
+export class QuotaDisplayError extends Error {}
 // The CLI could not answer; the stored-token request is tried instead.
 class ClaudeCliUnavailable extends Error {}
 
@@ -128,6 +145,25 @@ function cleanPlan(value: unknown): string | undefined {
 
 function displayString(value: unknown, fallback: string): string {
   return (nonEmptyString(value) || fallback).slice(0, MAX_DISPLAY_TEXT_LENGTH)
+}
+
+export function classifyQuotaError(error: unknown): QuotaErrorKind {
+  if (error instanceof Error && error.name === 'AbortError') return 'timeout'
+  const message = error instanceof QuotaDisplayError ? error.message : ''
+  if (/timed out/i.test(message)) return 'timeout'
+  if (/rate limited|\(429\)/i.test(message)) return 'rate-limited'
+  if (/expired|cannot access quota|re-authenticate/i.test(message)) return 'expired'
+  if (/no existing|unavailable|api-key mode|credentials/i.test(message)) return 'not-signed-in'
+  return 'unavailable'
+}
+
+function failedProvider(
+  id: QuotaProvider['id'],
+  name: string,
+  error: unknown,
+  fallback: string,
+): QuotaProvider {
+  return { id, name, windows: [], error: safeError(error, fallback), errorKind: classifyQuotaError(error) }
 }
 
 function safeError(error: unknown, fallback: string): string {
@@ -369,7 +405,7 @@ async function fetchCodexQuota(): Promise<QuotaProvider> {
     if (parsed.windows.length === 0) throw new QuotaDisplayError('Codex returned no quota windows.')
     return { id: 'codex', name: 'Codex', ...parsed }
   } catch (error) {
-    return { id: 'codex', name: 'Codex', windows: [], error: safeError(error, 'Could not load Codex usage.') }
+    return failedProvider('codex', 'Codex', error, 'Could not load Codex usage.')
   }
 }
 
@@ -757,21 +793,65 @@ async function fetchClaudeQuota(): Promise<QuotaProvider> {
     }
     return await fetchClaudeApiQuota(binary)
   } catch (error) {
-    return { id: 'claude', name: 'Claude Code', windows: [], error: safeError(error, 'Could not load Claude usage.') }
+    return failedProvider('claude', 'Claude Code', error, 'Could not load Claude usage.')
   }
 }
 
-export async function getQuotaUsage(force = false): Promise<QuotaUsageResult> {
+// Last good reading per provider, kept so a transient failure can still show
+// (clearly marked stale) numbers instead of replacing the whole card with an
+// error. Only ever holds already-sanitized display data.
+const lastGoodProviders = new Map<QuotaProvider['id'], QuotaProvider>()
+let cachedTtlMs = CACHE_TTL_MS
+
+function withRetainedReadings(providers: QuotaProvider[], nowIso: string): QuotaProvider[] {
+  return providers.map((provider) => {
+    if (!provider.error) {
+      const fresh: QuotaProvider = { ...provider, fetchedAt: nowIso }
+      lastGoodProviders.set(provider.id, fresh)
+      return fresh
+    }
+    const previous = lastGoodProviders.get(provider.id)
+    if (!previous) return provider
+    return {
+      ...provider,
+      plan: previous.plan,
+      windows: previous.windows,
+      fetchedAt: previous.fetchedAt,
+      stale: true,
+    }
+  })
+}
+
+export function resetQuotaCacheForTests(): void {
+  cachedResult = null
+  cachedAt = 0
+  lastFetchStartedAt = 0
+  cachedTtlMs = CACHE_TTL_MS
+  lastGoodProviders.clear()
+}
+
+export async function getQuotaUsage(
+  force = false,
+  fetchProviders: () => Promise<QuotaProvider[]> = () => Promise.all([fetchCodexQuota(), fetchClaudeQuota()]),
+): Promise<QuotaUsageResult> {
   const now = Date.now()
-  if (!force && cachedResult && now - cachedAt < CACHE_TTL_MS) return cachedResult
-  if (force && cachedResult && now - lastFetchStartedAt < FORCE_REFRESH_COOLDOWN_MS) return cachedResult
+  if (!force && cachedResult && now - cachedAt < cachedTtlMs) return cachedResult
+  if (force && cachedResult && now - lastFetchStartedAt < FORCE_REFRESH_COOLDOWN_MS) {
+    return {
+      ...cachedResult,
+      throttled: { retryInSec: Math.max(1, Math.ceil((FORCE_REFRESH_COOLDOWN_MS - (now - lastFetchStartedAt)) / 1000)) },
+    }
+  }
   if (inFlight) return inFlight
   lastFetchStartedAt = now
   inFlight = (async () => {
-    const providers = await Promise.all([fetchCodexQuota(), fetchClaudeQuota()])
-    const result = { updatedAt: new Date().toISOString(), providers }
+    const fetched = await fetchProviders()
+    const updatedAt = new Date().toISOString()
+    const providers = withRetainedReadings(fetched, updatedAt)
+    const result = { updatedAt, providers }
     cachedResult = result
     cachedAt = Date.now()
+    cachedTtlMs = providers.some((provider) => provider.error) ? ERROR_CACHE_TTL_MS : CACHE_TTL_MS
     return result
   })()
   try {

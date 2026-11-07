@@ -18,7 +18,7 @@ const OPENCODE_CAPABILITIES = freezeCapabilities({
 })
 const CODEX_CAPABILITIES = freezeCapabilities({
   lifecycle: true, sessions: true, projects: true, toolActivity: true, tokenUsage: 'estimated', quota: 'provider',
-  waitingInput: true, permissions: 'observe', permissionModes: [], orderedEvents: false, healthCheck: true,
+  waitingInput: false, permissions: 'observe', permissionModes: [], orderedEvents: false, healthCheck: true,
 })
 const CLAUDE_CAPABILITIES = freezeCapabilities({
   lifecycle: true, sessions: true, projects: true, toolActivity: true, tokenUsage: 'estimated', quota: 'provider',
@@ -75,6 +75,8 @@ export type DiagnosticCheckStatus = 'pass' | 'warn' | 'fail'
 export interface AdapterDiagnosticCheck {
   id: string
   status: DiagnosticCheckStatus
+  /** `<id>.<status>`: stable key for localized text; `message` is an English fallback. */
+  code?: string
   message: string
 }
 
@@ -130,6 +132,8 @@ export type InstallErrorCode =
   | 'permission_denied'
   | 'file_busy'
   | 'read_only'
+  | 'node_missing'
+  | 'node_unsupported'
   | 'unknown'
 
 /** Structured result of one install/repair; the renderer localizes it from these codes. */

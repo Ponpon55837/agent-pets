@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
-import { STATE_LABELS_SHORT, STATE_COLORS } from '@/types/agent'
+import { STATE_COLORS } from '@/types/agent'
 import { locale, t, type TranslationKey } from '@/i18n'
 import type { AchievementUnlock } from '@/types/achievement'
 import type { PluginBadgeView } from '@/types/plugin'
@@ -22,6 +22,7 @@ import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 import { describeTool } from '@/utils/pet-toast'
 import PermissionBubble from '@/components/permission/PermissionBubble.vue'
+import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
 
 const store = useAgentStore()
 const clickAreaRef = ref<HTMLElement | null>(null)
@@ -241,8 +242,46 @@ const displayLines = computed(() => {
 // toggle on — showing a single pet forces picking a "winner", so instead
 // show one small pet per family, side by side.
 const isMultiPet = computed(() => store.isMultiPet)
-const petAnimationFrozen = computed(() => shimejiReducedMotion.value)
-const petLowFps = computed(() => store.petWindowMode.mode === 'mini')
+// Reduced motion degrades the pet instead of freezing it: states that carry
+// information (working, waiting, failed) keep stepping at a very low rate, and
+// only a resting pet is held still.
+const petAnimationFrozen = computed(() => (
+  shimejiReducedMotion.value && (store.currentState === 'idle' || store.currentState === 'offline')
+))
+const petLowFps = computed(() => store.petWindowMode.mode === 'mini' || shimejiReducedMotion.value)
+
+const STATE_LABEL_KEYS: Record<string, TranslationKey> = {
+  offline: 'pet.stateOffline',
+  idle: 'pet.stateIdle',
+  thinking: 'pet.stateThinking',
+  'tool-running': 'pet.stateWorking',
+  'waiting-permission': 'pet.statePermission',
+  'waiting-input': 'pet.stateWaitingInput',
+  success: 'pet.stateSuccess',
+  error: 'pet.stateError',
+}
+
+function stateAriaLabel(state: string): string {
+  return t(STATE_LABEL_KEYS[state] ?? 'pet.stateIdle')
+}
+
+const petAriaLabel = computed(() => t('pet.ariaLabel', { state: stateAriaLabel(store.currentState) }))
+// Spoken when the visible state changes, not on every session update.
+const stateAnnouncement = ref('')
+watch(() => store.currentState, (state, previous) => {
+  if (state === previous) return
+  stateAnnouncement.value = stateAriaLabel(state)
+})
+
+function onPetKeydown(e: KeyboardEvent): void {
+  if (e.target !== e.currentTarget) return
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    store.markPetInteraction()
+    store.clearUnreadResults()
+    store.togglePanel()
+  }
+}
 
 // Mini mode shrinks the sprite to fit the fixed small window, whatever the pet size.
 const MINI_FIT_PX = 88
@@ -535,6 +574,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (singleClickTimer) clearTimeout(singleClickTimer)
   if (coachTimer) clearTimeout(coachTimer)
   contentObserver?.disconnect()
   contentObserver = null
@@ -636,6 +676,22 @@ function onEdgeMouseDown(e: MouseEvent): void {
   onMouseDown(e)
 }
 
+// A single click waits briefly so a double click (pat) can cancel it instead of
+// also toggling the panel twice.
+const SINGLE_CLICK_DELAY_MS = 220
+let singleClickTimer: ReturnType<typeof setTimeout> | null = null
+
+function onDoubleClick(e: MouseEvent): void {
+  if (e.button !== 0 || hasMoved.value) return
+  if (singleClickTimer) clearTimeout(singleClickTimer)
+  singleClickTimer = null
+  // Rewarded pats show a heart and bump mood; capped pats still react.
+  store.patPet()
+  const reaction = 'encouraging' as const
+  if (isMultiPet.value) multiPetAnimations().forEach(anim => anim.playReaction(reaction))
+  else petAnimRef.value?.playReaction(reaction)
+}
+
 function onClick(e: MouseEvent) {
   if (e.button !== 0) return
   if (hasMoved.value) return
@@ -645,11 +701,14 @@ function onClick(e: MouseEvent) {
   } else {
     petAnimRef.value?.playReaction()
   }
-  store.togglePanel()
+  if (singleClickTimer) clearTimeout(singleClickTimer)
+  singleClickTimer = setTimeout(() => {
+    singleClickTimer = null
+    store.togglePanel()
+  }, SINGLE_CLICK_DELAY_MS)
 }
 
 function onPetContextMenu(e: MouseEvent): void {
-  if (!store.rightClickHideEnabled) return
   const target = e.target instanceof Element ? e.target : null
   if (!target) return
   // Only the actual sprite and its compact Edge representation are hide
@@ -657,23 +716,28 @@ function onPetContextMenu(e: MouseEvent): void {
   // inherit this shortcut.
   const isPetSurface = Boolean(target.closest('[data-pet-context-target="hide"]'))
   if (!isPetSurface) return
-  window.electronAPI?.requestPetHide()
+  // "Hide on right-click" is an explicit opt-in; otherwise show the full menu.
+  if (store.rightClickHideEnabled) window.electronAPI?.requestPetHide()
+  else window.electronAPI?.showPetContextMenu()
 }
 
 // --- Presentation 與成就回饋動畫 ---------------------------------------------
 
 watch(() => store.presentationReaction, (reaction) => {
-  if (!reaction || !store.reactionsActive) return
+  // An explicit MCP request is always shown: with motion effects off the pet
+  // still gets its icon mark, just without the movement.
+  if (!reaction) return
+  const kind = reaction.reaction
   if (isMultiPet.value) {
     if (reaction.petId) {
-      multiPetAnimationForPet(reaction.petId)?.playReaction()
+      multiPetAnimationForPet(reaction.petId)?.playReaction(kind)
     } else {
-      multiPetAnimations().forEach(anim => anim.playReaction())
+      multiPetAnimations().forEach(anim => anim.playReaction(kind))
     }
     return
   }
   if (!reaction.petId || reaction.petId === store.activePetId) {
-    petAnimRef.value?.playReaction()
+    petAnimRef.value?.playReaction(kind)
   }
 }, { deep: true })
 
@@ -694,6 +758,11 @@ function playAchievementReward(unlock: AchievementUnlock): void {
 watch(() => store.achievementUnlock, (unlock) => {
   if (unlock) playAchievementReward(unlock)
 })
+
+// Level-up / evolution reuses the reward animation (growth stream).
+watch(() => store.levelUpEvent, (event) => {
+  if (event && store.reactionsActive) petAnimRef.value?.playReward()
+})
 </script>
 
 <template>
@@ -707,6 +776,11 @@ watch(() => store.achievementUnlock, (unlock) => {
       ref="clickAreaRef"
       class="pet-click-area"
       :class="{ dragging: dragLift }"
+      :role="store.petWindowMode.mode === 'edge' ? undefined : 'button'"
+      :tabindex="store.petWindowMode.mode === 'edge' ? undefined : 0"
+      :aria-label="store.petWindowMode.mode === 'edge' ? undefined : petAriaLabel"
+      @keydown="onPetKeydown"
+      @dblclick="onDoubleClick"
       @mousedown="onMouseDown"
       @mouseenter="onPetPointerEnter"
       @mouseleave="pointerOverPet = false"
@@ -766,19 +840,7 @@ watch(() => store.achievementUnlock, (unlock) => {
       </Transition>
 
       <Transition v-else-if="bubbleSelection === 'permission-notice' && store.permissionBubbleActive && store.permissionNotice" name="toast" mode="out-in">
-        <div
-          key="permission"
-          class="pet-toast permission-notice"
-          role="status"
-          aria-live="polite"
-          data-pet-hit-target="solid"
-        >
-          <span class="permission-notice-icon" aria-hidden="true">!</span>
-          <span class="permission-notice-copy">
-            <strong>{{ store.permissionNotice.title }}</strong>
-            <span>{{ store.permissionNotice.detail }}</span>
-          </span>
-        </div>
+        <PermissionNoticeBubble key="permission-notice" />
       </Transition>
 
       <Transition v-else-if="bubbleSelection === 'presentation-say' && store.presentationSay" name="toast" mode="out-in">
@@ -904,6 +966,8 @@ watch(() => store.achievementUnlock, (unlock) => {
         </div>
       </Transition>
 
+      <span class="sr-only" role="status" aria-live="polite">{{ stateAnnouncement }}</span>
+
       <span
         v-if="store.petWindowMode.mode === 'mini'"
         class="mini-status"
@@ -960,10 +1024,10 @@ watch(() => store.achievementUnlock, (unlock) => {
               :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
               data-pet-hit-target="solid"
             >
-              <span class="line-dot" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
+              <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
               <span class="line-text">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
-                <span class="line-sep">·</span>{{ STATE_LABELS_SHORT[line.state] }}
+                <span class="line-sep">·</span>{{ stateAriaLabel(line.state) }}
               </span>
               <span v-if="pluginBadgesVisible" class="plugin-status-badges">
                 <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
@@ -1038,12 +1102,12 @@ watch(() => store.achievementUnlock, (unlock) => {
             :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
             data-pet-hit-target="solid"
           >
-            <span class="line-dot" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
+            <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
             <span class="line-text">
               <template v-if="line.label">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
                 <span class="line-sep">·</span>
-              </template>{{ STATE_LABELS_SHORT[line.state] }}
+              </template>{{ stateAriaLabel(line.state) }}
             </span>
             <span v-if="pluginBadgesVisible" class="plugin-status-badges">
               <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
@@ -1094,3 +1158,4 @@ watch(() => store.achievementUnlock, (unlock) => {
 </template>
 
 <style scoped src="@/components/DesktopPet.css"></style>
+<style scoped src="@/components/DesktopPetBubbles.css"></style>

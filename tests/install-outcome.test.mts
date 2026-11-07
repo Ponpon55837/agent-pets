@@ -23,3 +23,10 @@ test('install errors map to stable codes', () => {
   assert.equal(classifyInstallError(new Error('boom')).code, 'unknown')
   assert.equal(failedOutcome('claude-code', new Error('boom')).action, 'failed')
 })
+
+import { NodeNotFoundError, NodeUnsupportedError } from '../electron/node-resolver.ts'
+
+test('missing or old Node.js maps to dedicated install error codes', () => {
+  assert.equal(classifyInstallError(new NodeNotFoundError()).code, 'node_missing')
+  assert.equal(classifyInstallError(new NodeUnsupportedError('v16.1.0')).code, 'node_unsupported')
+})

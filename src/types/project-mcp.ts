@@ -6,6 +6,7 @@ export type ProjectMcpInstallStatus =
   | 'installed'
   | 'already_configured'
   | 'not_configured'
+  | 'stale'
   | 'conflict'
   | 'error'
 
@@ -14,6 +15,8 @@ export type ProjectMcpResultCode =
   | 'installed'
   | 'already_configured'
   | 'not_configured'
+  | 'stale_paths'
+  | 'updated'
   | 'removed'
   | 'already_absent'
   | 'entry_changed'
@@ -56,7 +59,7 @@ export interface ProjectMcpPlanClient {
   relativePath: string
   exists: boolean
   /** Current state of the file for this client; 'error' means it cannot be edited as-is. */
-  status: 'not_configured' | 'already_configured' | 'conflict' | 'error'
+  status: 'not_configured' | 'already_configured' | 'stale' | 'conflict' | 'error'
   code?: ProjectMcpResultCode
   message?: string
   /** true/false when the project is a Git repo with a readable index; null when unknown. */
@@ -80,11 +83,14 @@ export interface ProjectMcpApplyRequest {
   projectPath: string
   clients: ProjectMcpClientId[]
   localOnly: boolean
+  /** Rewrite entries that are clearly Agent Pets' own but point at outdated paths. */
+  updateStale?: boolean
 }
 
 export type ProjectMcpProjectStatus =
   | 'connected'
   | 'partial'
+  | 'stale'
   | 'conflict'
   | 'missing'
   | 'error'
@@ -96,12 +102,16 @@ export interface ProjectMcpProjectRecord {
   lastCheckedAt: string
   status: ProjectMcpProjectStatus
   results: ProjectMcpInstallResult[]
+  /** Why the check failed (status 'error'). */
+  error?: string
 }
 
 export interface ProjectMcpRegistrySnapshot {
   ok: boolean
   projects: ProjectMcpProjectRecord[]
   error?: string
+  /** The project list file was unreadable and has been set aside; the list starts empty. */
+  recovered?: boolean
 }
 
 export type ProjectMcpRemovalStatus =

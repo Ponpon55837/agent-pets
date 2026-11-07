@@ -1,6 +1,7 @@
 import type { AgentAdapterId, InstallErrorCode, InstallOutcome, InstallReport } from '../src/types/agent-adapter.ts'
 import type { ConfigWriteResult } from './safe-config-write.ts'
 import { ConfigRefusedError } from './safe-config-write.ts'
+import { NodeNotFoundError, NodeUnsupportedError } from './node-resolver.ts'
 
 export function reportFromWrites(results: ReadonlyArray<ConfigWriteResult>): InstallReport {
   const written = results.filter(result => result.status === 'written')
@@ -17,6 +18,8 @@ export function classifyInstallError(error: unknown): { code: InstallErrorCode, 
       : error.code === 'too_large' ? 'config_too_large' : 'config_unparseable'
     return { code, path: error.filePath }
   }
+  if (error instanceof NodeNotFoundError) return { code: 'node_missing' }
+  if (error instanceof NodeUnsupportedError) return { code: 'node_unsupported' }
   const errno = (error as NodeJS.ErrnoException | null)?.code
   const target = (error as NodeJS.ErrnoException | null)?.path
   const path = typeof target === 'string' ? target : undefined

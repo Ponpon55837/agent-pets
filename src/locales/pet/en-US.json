@@ -3,7 +3,7 @@
   "pet.ambientMotionHelp": "Decorative breathing and sway while idle or working",
   "pet.activityBubble": "Working hint",
   "pet.activityBubbleHelp": "Show the tool the agent is currently using",
-  "pet.coachText": "Hi! Click me to see your sessions, drag me to move.",
+  "pet.coachText": "Hi! Click me to see your sessions, drag me to move, right-click for more.",
   "pet.coachDismiss": "Got it",
   "pet.toastDone": "Done",
   "pet.toastFailed": "Failed",
@@ -27,5 +27,16 @@
   "pet.miniWaiting": "Waiting for you",
   "pet.miniSuccess": "Done",
   "pet.miniWorking": "Working",
-  "pet.miniIdle": "Idle"
+  "pet.miniIdle": "Idle",
+  "pet.ariaLabel": "Desktop pet, currently {state}. Press Enter to open the panel",
+  "pet.stateOffline": "offline",
+  "pet.stateIdle": "idle",
+  "pet.stateThinking": "thinking",
+  "pet.stateWorking": "working",
+  "pet.statePermission": "waiting for permission",
+  "pet.stateWaitingInput": "waiting for you",
+  "pet.stateSuccess": "done",
+  "pet.stateError": "failed",
+  "pet.importZipTitle": "Choose a pet sprite kit (.codex-pet.zip)",
+  "pet.importSpriteTitle": "Choose a spritesheet (192×208 per frame)"
 }

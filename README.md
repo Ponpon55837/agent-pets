@@ -25,11 +25,13 @@ Desktop pet that shows real-time status of your AI coding agents.
 
 ## Supported Agents
 
-| Agent | CLI | Desktop |
-|-------|-----|---------|
-| OpenCode | ✅ | ✅ |
-| Codex | ✅ | ✅ |
-| Claude Code | ✅ | ✅ |
+| Agent | CLI | Desktop | Permission | Quota | Token usage |
+|-------|-----|---------|------------|-------|-------------|
+| OpenCode | ✅ | ✅ | respond (allow / deny on the pet) | — | estimated |
+| Codex | ✅ | ⚠️ | observe (approve in the tool) | provider | estimated |
+| Claude Code | ✅ | ✅ | observe (approve in the tool) | provider | estimated |
+
+⚠️ Codex Desktop shares `~/.codex` with the CLI, but there is no separate Desktop install API, so Desktop support depends on that build running the same hooks; verify it with **Wait for real event** in the Setup Wizard. *Permission*: `respond` agents can be allowed or denied on the pet; `observe` agents show a Waiting Permission state and must be approved in the tool itself. Codex does not report a "waiting for input" state.
 
 The **Generic HTTP** adapter is available to local integrations through the authenticated `/v1/events` endpoint. It is observe-only and has no permission-response capability.
 
@@ -44,6 +46,13 @@ Download and run `Agent Pets.exe` from the [Releases](https://github.com/Ponpon5
 ### Install (macOS)
 
 Download `AgentPets-<version>-arm64.dmg` (Apple Silicon) or `AgentPets-<version>-x64.dmg` (Intel) from the [Releases](https://github.com/Ponpon55837/agent-pets/releases) page, open it, and drag the app to your Applications folder.
+
+### Opening an unsigned build
+
+Releases are currently not code-signed, so the OS warns the first time you open the app:
+
+- **macOS (Gatekeeper)** — if you see "cannot be opened because the developer cannot be verified", right-click the app in Applications, choose **Open**, then confirm. Or go to **System Settings → Privacy & Security** and press **Open Anyway**. As a last resort: `xattr -dr com.apple.quarantine "/Applications/Agent Pets.app"`.
+- **Windows (SmartScreen)** — choose **More info → Run anyway**.
 
 ### First Run
 
@@ -128,7 +137,7 @@ The panel uses an extensible section navigator: **Language**, **Appearance**, **
 - **Presentation MCP** — Allow or disable the local MCP presentation channel. When enabled, clients can send bounded reactions or plain-text speech; Do Not Disturb and waiting/error/permission states take precedence. **On by default.**
 
 **Advanced section**
-- **Setup Wizard** — Re-run tool detection, or install/reinstall hooks.
+- **Setup Wizard** — Check each tool's integration, install/repair/remove hooks, and verify the connection.
 - **Restart Pet** — Fully relaunch Agent Pets if the pet or its animation gets stuck.
 - **Quit** — Exit Agent Pets.
 
@@ -165,13 +174,13 @@ In **Settings → Advanced**, click **Setup MCP for a project**. Choose the loca
 
 - Codex: `.codex/config.toml` (`mcp_servers.agent-pets`)
 - Claude Code: `.mcp.json` (`mcpServers.agent-pets`)
-- OpenCode: `opencode.json` (`mcp.servers.agent-pets`)
+- OpenCode: `opencode.json` (`mcp.agent-pets`; the older `mcp.servers.agent-pets` wrapper is migrated automatically)
 
 The written entry contains the path of the Node.js executable and bridge script on **your** machine, so it is useless to teammates and should not be committed. In a Git repository the **Local only** option (on by default) adds the new files to the project's `.git/info/exclude`; if Git already tracks a target file the review and result steps warn you instead. A config file with comments or trailing commas (JSONC, common for `opencode.json`) or invalid JSON is never rewritten: the result card shows the reason and a copyable snippet to paste by hand. Existing indentation, line endings and other MCP servers are preserved, and the result card shows each config path (copyable) and the next step: approve `agent-pets` in `/mcp` for Claude Code, trust the project for Codex (`codex mcp list`), restart OpenCode.
 
 The operation is idempotent. Existing matching entries are reported as already configured; a different entry with the same server name is reported as a conflict and is never overwritten. The setup writes only project-local configuration and does not run a shell command or reinstall hooks. Restart the affected agent client after setup so it reloads its MCP catalog.
 
-The button opens a dedicated MCP panel, separate from the Setup Wizard and the growing Settings page. The panel keeps every project configured through this button, re-checks all three client entries, and shows `Connected`, `Partial`, `Conflict`, or `Folder missing`, together with the project path and last check. **Refresh** re-checks the list. **Remove MCP** removes only matching Agent Pets entries; if a user changed an entry, it is preserved and marked as a conflict. A missing project folder can be removed from the local list without touching any files. **Done** returns to Settings.
+The button opens a dedicated MCP panel, separate from the Setup Wizard and the growing Settings page. The panel keeps every project configured through this button, re-checks all three client entries, and shows `Connected`, `Partial`, `Conflict`, or `Folder missing`, together with the project path and last check. **Refresh** re-checks the list. **Remove MCP** removes only matching Agent Pets entries; if a user changed an entry, it is preserved and marked as a conflict. A missing project folder can be removed from the local list without touching any files. This list stores project paths in plain text in Agent Pets' local data folder (unlike Project pets, which keep only salted hashes); it never leaves your machine. **Done** returns to Settings.
 
 ### History HUD
 
@@ -181,7 +190,7 @@ The **Project filter** above History limits the seven-day view to one project, a
 
 #### Connect an agent project that is already in use
 
-1. Start Agent Pets and keep **Settings → Attention → Presentation MCP** enabled (on by default). The app must remain running because the stdio bridge connects to its local loopback control server.
+1. Start Agent Pets and keep **Settings → Desktop → Presentation MCP** enabled (on by default). The app must remain running because the stdio bridge connects to its local loopback control server.
 2. Use a real Node.js executable; never use the packaged `Agent Pets.exe` as the interpreter. In Windows PowerShell:
 
    ```powershell
@@ -206,19 +215,29 @@ The **Project filter** above History limits the seven-day view to one project, a
    claude mcp list
    ```
 
-   **OpenCode:** add this server under `mcp.servers` in `opencode.json` (or the project-scoped OpenCode config):
+   **OpenCode:** add this server under `mcp` in `opencode.json` (or the project-scoped OpenCode config). Use the absolute Node.js path, because GUI-launched apps often lack your shell `PATH`: `command -v node` on macOS/Linux, `(Get-Command node).Source` in PowerShell. A bare `node` works only if the client inherits your `PATH`.
 
    ```json
    {
      "mcp": {
-       "servers": {
-         "agent-pets": {
-           "type": "local",
-           "command": ["node", "C:/Users/<your-user>/.desktop-pet/presentation-mcp.mjs"]
-         }
+       "agent-pets": {
+         "type": "local",
+         "command": ["/absolute/path/to/node", "/Users/<you>/.desktop-pet/presentation-mcp.mjs"],
+         "enabled": true
        }
      }
    }
+   ```
+
+   On Windows use `C:/Users/<you>/.desktop-pet/presentation-mcp.mjs`. (`~` means your home folder on macOS/Linux; it is `%USERPROFILE%` on Windows.)
+
+   macOS/Linux equivalents of the PowerShell commands above:
+
+   ```sh
+   bridge="$HOME/.desktop-pet/presentation-mcp.mjs"
+   node --version && test -f "$bridge" && echo ok
+   codex mcp add agent-pets -- node "$bridge"
+   claude mcp add --scope user agent-pets -- node "$bridge"
    ```
 
 4. Fully restart the agent client and confirm that `pet_status`, `pet_react`, and `pet_say` appear in its MCP view. If hooks work but these tools do not appear, check the bridge path, Node executable, Presentation MCP toggle, and that Agent Pets is still running.
@@ -229,23 +248,35 @@ Turning Presentation MCP off rejects new presentation intents only; it does not 
 
 ## Setup Wizard
 
-The Setup Wizard reads the runtime Agent Adapter registry and installs hooks when you click a button — it does not install anything on its own. Each adapter reports its supported sources, capabilities, health, and diagnosis checks:
+The Setup Wizard reads the runtime Agent Adapter registry and installs hooks only when you click a button; it never installs anything on its own. It checks the files Agent Pets writes and the configuration folders of each tool (it does not scan for running processes). Each adapter reports its supported sources, a capability list, health, and diagnosis checks:
 
-- **OpenCode CLI / Desktop** — Writes a plugin to `~/.config/opencode/plugin/` (note: singular `plugin`, matching where OpenCode itself scans) and the platform's OpenCode Desktop plugin dir
-- **Codex CLI** — Creates `~/.codex/hooks.json` and enables hooks in `~/.codex/config.toml`
-- **Claude Code CLI & Desktop** — Adds a `hooks` block to `~/.claude/settings.json` (CLI and Desktop share this config, so one install covers both; which one actually fired an event is resolved at runtime via Claude Code's `CLAUDE_CODE_ENTRYPOINT` env var, not by the installer)
+- **OpenCode CLI / Desktop** — Writes a plugin to `~/.config/opencode/plugin/` (singular `plugin`, matching where OpenCode scans) and the platform's OpenCode Desktop plugin dir. Either side alone counts as connected.
+- **Codex CLI** — Creates `~/.codex/hooks.json` and sets `hooks = true` under `[features]` in `~/.codex/config.toml`.
+- **Claude Code CLI & Desktop** — Adds a `hooks` block to `~/.claude/settings.json` (CLI and Desktop share it; which one fired is resolved at runtime from Claude Code's `CLAUDE_CODE_ENTRYPOINT`).
 
-Each adapter shows a status dot and capability chips:
+Status: 🟢 connected, 🟡 missing or outdated pieces (press **Repair**), 🔴 error. Install/repair results appear inside the tool's card (installed, repaired, unchanged, or the reason it failed, plus where your previous config was backed up). **Install all** runs every tool independently and reports how many succeeded.
 
-- 🟢 **Green** — Installed and configured
-- 🟡 **Yellow** — Detected but not (fully) configured
-- 🔴 **Red** — Error or unavailable
+Verifying a connection:
 
-Click **Diagnose** to inspect bounded health checks. Click **Install** next to an installable adapter to (re)install just that integration, or **Install All** to run every adapter installer idempotently. Click **Refresh** if a status seems stale.
+- **Wait for real event** — run any prompt in the tool; the wizard waits 30 seconds for an event the tool itself sends and tells you whether it came from the CLI or Desktop. This is the only check that proves the hook works end to end.
+- **Test receiver** — sends a short-lived event through this app's authenticated local HTTP receiver. It proves the receiver, adapter mapping and renderer work, but does not involve the tool, so it passes even if a hook is broken.
+- **Diagnose** — lists the individual checks (config file, enabled flag, hook script version, Node.js path, tool present) with a hint for each failure.
 
-For a configured adapter, click **Test** to send a short-lived event through the running app's authenticated local HTTP receiver. A passing result confirms HTTP 204, adapter selection, canonical mapping, and renderer receipt in this Agent Pets instance; it does not launch the coding tool or prove that tool's hook has fired on its own. Generic HTTP is always observe-only and cannot respond to permissions.
+Generic HTTP is always observe-only and cannot respond to permissions.
 
-> Note: there is no separate "Codex Desktop" hook install — only Codex CLI hooks are wired up today.
+> Note: there is no separate "Codex Desktop" hook install; only Codex CLI hooks are wired up, and Codex Desktop works only if it runs the same hooks.
+
+### Troubleshooting
+
+| Symptom | What to check |
+|---------|---------------|
+| Pet stays Offline | Press **Wait for real event** and run a prompt. No event: restart the tool (hooks load at start), then **Diagnose**. |
+| Diagnose: *Node.js executable missing* | Install Node.js 18+, then press **Repair** (it writes the absolute path; a bare `node` fails in apps launched from Finder/Dock). Moving between nvm versions also needs a **Repair**. |
+| Diagnose: *hooks not enabled* (Codex) | **Repair** adds `hooks = true` under `[features]` in `~/.codex/config.toml`. |
+| Install refused: *not valid JSON* | Your `settings.json`/`hooks.json` has comments or a syntax error. Agent Pets leaves it untouched; fix the file (or move it aside) and install again. Backups are named `*.agent-pets-bak-*`. |
+| Events never arrive | Port `17373` on `127.0.0.1` may be used by another program; quit it and restart Agent Pets. |
+| Claude Code: project MCP not available | Approve `agent-pets` in `/mcp` the first time; Codex needs the project to be trusted. |
+| Hook script out of date | **Repair** redeploys it. |
 
 ## Plugins
 

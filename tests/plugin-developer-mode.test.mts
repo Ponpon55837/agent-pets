@@ -44,3 +44,29 @@ test('developer folder watcher rejects a symlink root and invalid plugin id', ()
     fs.rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('developer reload failures are reported and no timer outlives destroy()', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-watch-'))
+  const source = path.join(directory, 'plugin')
+  fs.mkdirSync(source, { recursive: true })
+  fs.writeFileSync(path.join(source, 'a.js'), 'w')
+  const errors: string[] = []
+  const watcher = new PluginDeveloperModeWatcher(20, pluginId => errors.push(pluginId))
+  try {
+    assert.equal(watcher.watch('sample-plugin', source, async () => { throw new Error('reload failed') }), true)
+    // fs.watch start-up latency varies by platform; keep touching the file until the watcher reports.
+    for (let attempt = 0; attempt < 40 && errors.length === 0; attempt += 1) {
+      fs.writeFileSync(path.join(source, 'a.js'), `x${attempt}`)
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    assert.ok(errors.length >= 1 && errors.every(id => id === 'sample-plugin'))
+    const seen = errors.length
+    fs.writeFileSync(path.join(source, 'a.js'), 'y')
+    watcher.destroy()
+    await new Promise(resolve => setTimeout(resolve, 150))
+    assert.equal(errors.length, seen)
+  } finally {
+    watcher.destroy()
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+})

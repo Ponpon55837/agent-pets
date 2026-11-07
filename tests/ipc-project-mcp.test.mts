@@ -64,7 +64,7 @@ test('project MCP IPC preserves setup, list, remove, and forget contracts throug
     'plan:test-project',
     'ensure',
     'register:test-project',
-    'install:test-project:{"clients":["claude"],"localOnly":true}',
+    'install:test-project:{"clients":["claude"],"localOnly":true,"updateStale":false}',
     'ensure',
     'ensure',
     'remove:test-project',
