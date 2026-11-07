@@ -125,6 +125,7 @@ const electronAPI: ElectronAPI = {
   getPluginDiagnostics: (pluginId: string): Promise<PluginPanelResult<{ logs: PluginBrokerLogEntry[]; diagnostics: PluginBrokerDiagnostic[] }>> => ipcRenderer.invoke(IPC_CHANNELS.pluginDiagnostics, pluginId),
   listPluginNotifications: (): Promise<PluginPanelResult<PluginNotificationRecord[]>> => ipcRenderer.invoke(IPC_CHANNELS.pluginNotificationsList),
   markPluginNotificationRead: (itemId: string): Promise<PluginPanelResult<{ read: boolean }>> => ipcRenderer.invoke(IPC_CHANNELS.pluginNotificationsRead, itemId),
+  markAllPluginNotificationsRead: (pluginId?: string): Promise<PluginPanelResult<{ marked: number }>> => ipcRenderer.invoke(IPC_CHANNELS.pluginNotificationsReadAll, pluginId),
   clearPluginNotifications: (pluginId?: string): Promise<PluginPanelResult<{ removed: number }>> => ipcRenderer.invoke(IPC_CHANNELS.pluginNotificationsClear, pluginId),
   onPluginNotificationsChanged: (callback: () => void) => {
     const handler = () => callback()

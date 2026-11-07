@@ -337,7 +337,6 @@ async function bootstrapApp(): Promise<void> {
   // The pet becomes visible before plugins, history or achievements spin up,
   // so a slow plugin directory or disk never delays the first paint.
   await startupStep('pet-window', createPetWindow)
-  await startupStep('panel-window', createPanelWindow)
   await startupStep('plugins', createPluginServices)
   await startupStep('fullscreen-targets', () => {
     syncWindowsFullscreenTargets()
@@ -720,6 +719,12 @@ async function bootstrapApp(): Promise<void> {
     }
   })
 
+  // The hidden panel is a second Chromium renderer running the whole Vue app.
+  // Creating it last keeps it from competing with the pet's first paint and the
+  // service steps above; ensureDesktopWindows() creates it on demand if the user
+  // opens it earlier. Every panelWindow consumer already tolerates null.
+  await startupStep('panel-window', createPanelWindow)
+  syncWindowsFullscreenTargets()
   if (startupResults.some(result => !result.ok)) {
     // Services start independently, so a partial failure still leaves a usable
     // app. Only offer retry/quit when nothing visible could be created.

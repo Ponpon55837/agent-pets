@@ -61,6 +61,7 @@ const DEFAULT_PET_ID = 'aang-airbender'
 const MAX_PET_ID_LENGTH = 128
 const MAX_SESSION_KEY_LENGTH = 600
 const MAX_ACTIVE_GAP_MS = 5 * 60 * 1000
+const ACTIVITY_RETENTION_MS = 90 * 24 * 60 * 60 * 1000
 const ACTIVE_STATES = new Set<AgentState>(['thinking', 'tool-running'])
 
 function databaseConstructor(): DatabaseSyncConstructor {
@@ -121,6 +122,7 @@ export class ProgressionStore {
     this.activePetId = this.defaultPetId
     try {
       this.migrate()
+      this.pruneStaleActivity()
       this.ensurePet(this.defaultPetId)
     } catch (error) {
       this.database.close()
@@ -132,6 +134,20 @@ export class ProgressionStore {
     this.activePetId = normalizePetId(petId, this.defaultPetId)
     this.ensurePet(this.activePetId)
     return this.getSnapshot(this.activePetId)
+  }
+
+  /**
+   * Drops per-session activity rows idle for `maxAgeMs`. Awarded XP lives in the
+   * ledger (unique idempotency keys), so a session that resumes after expiry
+   * restarts its active-time counter but can never be paid twice.
+   */
+  pruneStaleActivity(maxAgeMs = ACTIVITY_RETENTION_MS, limit = 5000): number {
+    const cutoff = this.now() - maxAgeMs
+    return changedCount(this.statement(`
+      DELETE FROM xp_session_activity WHERE session_key IN (
+        SELECT session_key FROM xp_session_activity WHERE last_seen_at < ? LIMIT ?
+      )
+    `).run(cutoff, Math.max(1, Math.floor(limit))))
   }
 
   getPragmaState(): SqlitePragmaState {
@@ -329,6 +345,16 @@ export class ProgressionStore {
         `INSERT INTO schema_migrations(version, name, applied_at, checksum)
          VALUES (2, 'progression-pet-idempotency', ?, ?)`,
       ).run(this.now(), `${XP_POLICY_VERSION}-pet-idempotency`)
+    })
+
+    // v3 bounds xp_session_activity (one row per session, previously forever).
+    const hasV3 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 3').get())
+    if (!hasV3) this.transaction(() => {
+      this.database.exec('CREATE INDEX IF NOT EXISTS idx_xp_session_activity_seen ON xp_session_activity(last_seen_at)')
+      this.statement(
+        `INSERT INTO schema_migrations(version, name, applied_at, checksum)
+         VALUES (3, 'progression-activity-last-seen-index', ?, ?)`,
+      ).run(this.now(), `${XP_POLICY_VERSION}-activity-index`)
     })
   }
 

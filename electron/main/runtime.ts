@@ -2807,6 +2807,7 @@ export function createHistoryServices(): void {
     if (historyPruneTimer) clearInterval(historyPruneTimer)
     historyPruneTimer = setInterval(() => {
       void mainState.historyStore?.pruneInBatches().catch(error => console.error('History prune failed', error))
+      try { mainState.progressionStore?.pruneStaleActivity() } catch (error) { console.error('XP activity prune failed', error) }
     }, HISTORY_PRUNE_INTERVAL_MS)
     historyPruneTimer.unref?.()
   } catch (error) {

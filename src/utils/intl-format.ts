@@ -54,11 +54,17 @@ const RELATIVE_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
   ['second', 1],
 ]
 
+const relativeFormatCache = new Map<string, Intl.RelativeTimeFormat>()
+
 /** "5 minutes ago" / "in 2 hours" via Intl.RelativeTimeFormat. */
 export function formatRelative(value: Stamp, now: Stamp = Date.now(), loc: string = currentLocale()): string {
   const diffSeconds = Math.round((toDate(value).getTime() - toDate(now).getTime()) / 1000)
   const abs = Math.abs(diffSeconds)
-  const rtf = new Intl.RelativeTimeFormat(loc, { numeric: 'auto' })
+  let rtf = relativeFormatCache.get(loc)
+  if (!rtf) {
+    rtf = new Intl.RelativeTimeFormat(loc, { numeric: 'auto' })
+    relativeFormatCache.set(loc, rtf)
+  }
   for (const [unit, size] of RELATIVE_UNITS) {
     if (abs >= size || unit === 'second') return rtf.format(Math.trunc(diffSeconds / size), unit)
   }

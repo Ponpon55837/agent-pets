@@ -91,6 +91,7 @@ export interface ElectronAPI {
       getPluginDiagnostics: (pluginId: string) => Promise<PluginPanelResult<{ logs: PluginBrokerLogEntry[]; diagnostics: PluginBrokerDiagnostic[] }>>
       listPluginNotifications: () => Promise<PluginPanelResult<PluginNotificationRecord[]>>
       markPluginNotificationRead: (itemId: string) => Promise<PluginPanelResult<{ read: boolean }>>
+      markAllPluginNotificationsRead: (pluginId?: string) => Promise<PluginPanelResult<{ marked: number }>>
       clearPluginNotifications: (pluginId?: string) => Promise<PluginPanelResult<{ removed: number }>>
       onPluginNotificationsChanged: (callback: () => void) => () => void
       publishPresentationStatus: (snapshot: PresentationStatusUpdate) => void

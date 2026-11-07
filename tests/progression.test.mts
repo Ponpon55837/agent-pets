@@ -242,3 +242,34 @@ test('heartbeat snapshot reuse is identical to a fresh read and XP stays idempot
     assert.deepEqual(store.handleEvent(event('success', start + 41 * 60_000, 'hb')).awards, [])
   })
 })
+
+test('stale session activity is pruned without changing XP or allowing double payment', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'agent-pets-progression-prune-'))
+  const path = join(directory, 'progression.sqlite')
+  let clock = 1_700_000_000_000
+  const store = new ProgressionStore(path, { now: () => clock })
+  try {
+    const start = clock
+    const work = (session: string, from: number): number => {
+      let total = 0
+      store.handleEvent(event('thinking', from, session))
+      for (let minute = 4; minute <= 40; minute += 4) {
+        total = store.handleEvent(event('tool-running', from + minute * 60_000, session)).snapshot.totalXp
+      }
+      return total
+    }
+    const beforeTotal = work('old', start)
+    assert.ok(beforeTotal > 0)
+    store.handleEvent(event('thinking', start + 41 * 60_000, 'fresh'))
+    clock = start + 100 * 24 * 60 * 60 * 1000
+    store.handleEvent(event('thinking', clock - 1000, 'fresh2'))
+    assert.equal(store.pruneStaleActivity(), 2, 'old and fresh were idle > 90 days')
+    const db = (store as unknown as { database: { prepare(sql: string): { get(): Record<string, number> } } }).database
+    assert.equal(Number(db.prepare('SELECT COUNT(*) AS n FROM xp_session_activity').get().n), 1)
+    // Replaying the old session after expiry restarts counting but the ledger keeps XP idempotent.
+    assert.equal(work('old', clock), beforeTotal)
+  } finally {
+    store.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

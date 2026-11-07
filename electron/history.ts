@@ -148,6 +148,19 @@ function tokenUsage(event: AgentStatusEvent): {
   }
 }
 
+interface DailyBatchEntry {
+  localDate: string
+  petId: string
+  projectId: string
+  adapterId: string
+  activeMs: number
+  tokenInput: number
+  tokenOutput: number
+  tokenCacheRead: number
+  tokenCacheWrite: number
+  tokenQuality: HistoryTokenQuality
+}
+
 interface SessionRow {
   sessionPk: string
   adapterId: string
@@ -200,6 +213,7 @@ export class HistoryStore {
   private readonly statements: StatementCache<SqliteStatement>
   private pragmas: SqlitePragmaState = { journalMode: '', synchronous: -1 }
   private transactionDepth = 0
+  private dailyBatch: Map<string, DailyBatchEntry> | null = null
   private queuedEvents: Array<{ event: AgentStatusEvent, petId: string, receivedAt: number, onRecorded?: () => void }> = []
   private flushHandle: ReturnType<typeof setImmediate> | null = null
   private closed = false
@@ -447,6 +461,46 @@ export class HistoryStore {
     // Keep them in a global bucket so switching pets cannot make token totals
     // appear to drop to zero. The parameter remains for API compatibility.
     void petId
+    return this.applyTokenUsage(record, receivedAt)
+  }
+
+  /**
+   * Imports many local-log records in one transaction. Event rows keep their
+   * per-record dedupe, but the daily_stats deltas are summed in memory and
+   * written once per (date, pet, project, adapter) key at the end, so N records
+   * cost O(N) event statements plus O(keys) aggregate statements.
+   */
+  recordTokenUsageBatch(records: readonly HistoryTokenUsageRecord[], receivedAt = this.now()): number {
+    if (records.length === 0) return 0
+    return this.transaction(() => {
+      const nested = this.dailyBatch !== null
+      if (!nested) this.dailyBatch = new Map()
+      let imported = 0
+      try {
+        for (const record of records) {
+          if (this.applyTokenUsage(record, receivedAt)) imported += 1
+        }
+        if (!nested) this.flushDailyBatch()
+      } finally {
+        if (!nested) this.dailyBatch = null
+      }
+      return imported
+    })
+  }
+
+  private flushDailyBatch(): void {
+    const batch = this.dailyBatch
+    this.dailyBatch = null
+    if (!batch) return
+    for (const entry of batch.values()) {
+      this.updateDailyStat(
+        entry.localDate, entry.petId, entry.projectId, entry.adapterId, null, entry.activeMs,
+        entry.tokenInput, entry.tokenOutput, entry.tokenQuality, entry.tokenCacheRead, entry.tokenCacheWrite,
+      )
+    }
+  }
+
+  private applyTokenUsage(record: HistoryTokenUsageRecord, receivedAt: number): boolean {
     const safePet = LOCAL_USAGE_PET_ID
     const adapterId = SAFE_ID.test(record.adapterId) ? record.adapterId : ''
     const agentId = safeText(record.agentId, 'unknown')
@@ -894,6 +948,21 @@ export class HistoryStore {
       completed === 0 && failed === 0 && activeMs === 0 && tokenInput === 0 && tokenOutput === 0
       && tokenCacheRead === 0 && tokenCacheWrite === 0 && tokenQuality === 'none'
     ) return
+    if (this.dailyBatch && completed === 0 && failed === 0) {
+      const key = `${localDate}\u0000${petId}\u0000${projectId}\u0000${adapterId}`
+      const entry = this.dailyBatch.get(key) ?? {
+        localDate, petId, projectId, adapterId, activeMs: 0, tokenInput: 0, tokenOutput: 0,
+        tokenCacheRead: 0, tokenCacheWrite: 0, tokenQuality: 'none' as HistoryTokenQuality,
+      }
+      entry.activeMs += activeMs
+      entry.tokenInput += tokenInput
+      entry.tokenOutput += tokenOutput
+      entry.tokenCacheRead += tokenCacheRead
+      entry.tokenCacheWrite += tokenCacheWrite
+      entry.tokenQuality = mergeTokenQuality(entry.tokenQuality, tokenQuality)
+      this.dailyBatch.set(key, entry)
+      return
+    }
     // One additive upsert instead of SELECT + UPSERT. The insert branch clamps
     // negative corrections to 0 and the update branch applies the raw delta
     // with the same MAX(0, ...) floor the read-modify-write version used.
