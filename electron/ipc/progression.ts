@@ -10,7 +10,7 @@ export interface ProgressionIpcDependencies {
   assertTrustedIpcSender(event: IpcMainInvokeEvent, requiredWindow?: BrowserWindow | null): void
   isProgressionPetId(value: unknown): value is string
   setActiveProgressionPet(petId: string): ProgressionSnapshot | null
-  getProgressionStore(): Pick<ProgressionStore, 'getActivePetId' | 'getInsights'> | null
+  getProgressionStore(): Pick<ProgressionStore, 'getActivePetId' | 'getInsights' | 'getSnapshot'> | null
   getAchievementStore(): AchievementStore | null
 }
 
@@ -44,6 +44,6 @@ export function registerProgressionIpc(deps: ProgressionIpcDependencies): void {
     const selectedPet = petId === undefined
       ? deps.getProgressionStore()?.getActivePetId() ?? 'aang-airbender'
       : deps.isProgressionPetId(petId) ? petId : null
-    return selectedPet ? achievementStore.getSnapshot(selectedPet) : null
+    return selectedPet ? achievementStore.getSnapshot(selectedPet, deps.getProgressionStore()?.getSnapshot(selectedPet)) : null
   })
 }

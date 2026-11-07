@@ -2434,8 +2434,10 @@ export function broadcastProgressionAwards(result: ProgressionEventResult): void
 }
 
 export function broadcastAchievements(petId?: string): void {
+  const targetPet = petId ?? mainState.progressionStore?.getActivePetId() ?? 'aang-airbender'
   const snapshot = mainState.achievementStore?.getSnapshot(
-    petId ?? mainState.progressionStore?.getActivePetId() ?? 'aang-airbender',
+    targetPet,
+    mainState.progressionStore?.getSnapshot(targetPet),
   )
   if (!snapshot) return
   for (const window of [mainState.petWindow, mainState.panelWindow]) {

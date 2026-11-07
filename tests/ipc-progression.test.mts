@@ -13,7 +13,7 @@ test('progression IPC registration delegates validation and pet-scoped snapshots
     assertTrustedIpcSender: event => senders.push(event),
     isProgressionPetId: value => typeof value === 'string' && value.startsWith('pet-'),
     setActiveProgressionPet: petId => { selectedPets.push(petId); return { petId } },
-    getProgressionStore: () => ({ getActivePetId: () => 'pet-active', getInsights: (petId: string) => ({ petId }) as never }),
+    getProgressionStore: () => ({ getActivePetId: () => 'pet-active', getInsights: (petId: string) => ({ petId }) as never, getSnapshot: () => undefined as never }),
     getAchievementStore: () => ({ getSnapshot: petId => { achievementSnapshots.push(petId); return { petId } } }),
   })
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)?.({}, ...args)

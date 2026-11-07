@@ -933,6 +933,13 @@ export const useAgentStore = defineStore('agent', () => {
         || typeof item.unlocked !== 'boolean'
         || (item.unlockedAt !== undefined && (!Number.isSafeInteger(item.unlockedAt) || item.unlockedAt < 0))
         || (item.tokenQuality !== 'none' && item.tokenQuality !== 'estimated' && item.tokenQuality !== 'exact')
+        || item.category !== definition.category
+        || typeof item.hidden !== 'boolean'
+        || !item.progress
+        || !Number.isSafeInteger(item.progress.current)
+        || !Number.isSafeInteger(item.progress.target)
+        || item.progress.current < 0
+        || item.progress.target <= 0
       ) return null
       seen.add(definition.id)
       return {
@@ -944,6 +951,9 @@ export const useAgentStore = defineStore('agent', () => {
         unlocked: item.unlocked,
         ...(item.unlockedAt === undefined ? {} : { unlockedAt: item.unlockedAt }),
         tokenQuality: item.tokenQuality,
+        category: definition.category,
+        hidden: item.hidden,
+        progress: { current: Math.min(item.progress.current, item.progress.target), target: item.progress.target },
       }
     })
     if (normalized.some(item => item === null)) return false

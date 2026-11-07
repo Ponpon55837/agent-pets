@@ -320,8 +320,11 @@ export class AchievementStore {
     })
   }
 
-  getSnapshot(petIdValue: string): AchievementSnapshot {
+  getSnapshot(petIdValue: string, progression?: ProgressionSnapshot): AchievementSnapshot {
     const petId = safePetId(petIdValue)
+    // Progress is read from the same facts evaluate() uses, so a bar can never
+    // disagree with the unlock rule.
+    const context = this.readContext(petId, this.localDate(this.now()), false, progression)
     const rows = this.statement(`
       SELECT achievement_id, version, unlocked_at, token_quality
       FROM achievement_unlocks
@@ -353,6 +356,9 @@ export class AchievementStore {
           unlocked: Boolean(row),
           ...(unlockedAt > 0 ? { unlockedAt } : {}),
           tokenQuality,
+          category: definition.category,
+          hidden: definition.hidden === true,
+          progress: definition.progress(context),
         }
       }),
     }
