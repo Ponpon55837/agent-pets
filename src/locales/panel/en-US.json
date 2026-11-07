@@ -58,5 +58,8 @@
   "panel.setupWizardHelp": "Re-run hook installation and integration checks.",
   "panel.more": "More options",
   "panel.menuKeepOpen": "Keep open",
-  "panel.dndActive": "Do Not Disturb is on"
+  "panel.dndActive": "Do Not Disturb is on",
+  "panel.sizeReset": "Panel size",
+  "panel.sizeResetAction": "Reset panel size",
+  "panel.sizeResetHelp": "Drag the panel edges to resize it; every view shares the same size. Reset returns to the default size."
 }

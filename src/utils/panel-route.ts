@@ -38,3 +38,13 @@ export function panelSizeKey(state: PanelRouteState): PanelSizeKey {
 export function panelSizeFor(state: PanelRouteState): PanelSize {
   return PANEL_SIZES[panelSizeKey(state)]
 }
+
+// What the window should be told when the route changes. Switching between the
+// dashboard and Settings never resizes (the user's size is the one size); only a
+// wizard / MCP overlay asks for a larger minimum, and closing it releases that.
+export type PanelResizeRequest = { release: true } | (PanelSize & { release?: undefined })
+
+export function panelResizeRequest(previous: PanelRouteState, next: PanelRouteState): PanelResizeRequest | null {
+  if (previous.overlay === next.overlay) return null
+  return next.overlay ? { ...PANEL_SIZES[next.overlay] } : { release: true }
+}

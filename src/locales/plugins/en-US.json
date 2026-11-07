@@ -219,5 +219,10 @@
   "plugins.presenceSkins": "Provides {count} pet skins you can pick in the Pets settings",
   "plugins.presenceEventSource": "The status row \"{name}\" is showing",
   "plugins.presenceEventSourceNone": "Work status row: nothing reported right now",
-  "plugins.offTitle": "Plugins are off"
+  "plugins.offTitle": "Plugins are off",
+  "plugins.dashTabDetails": "Plugin details",
+  "plugins.dashTabSettings": "Plugin settings",
+  "plugins.dashTabFeedEmpty": "This plugin has no recent notifications.",
+  "plugins.dashTabScrollPrev": "Scroll tabs left",
+  "plugins.dashTabScrollNext": "Scroll tabs right"
 }

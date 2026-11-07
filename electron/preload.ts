@@ -199,10 +199,20 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.send(IPC_CHANNELS.panelToggle)
   },
 
-  // Prefer the object form; the positional (height, width) form is kept for existing callers.
-  resizePanel: (size: { height: number; width?: number } | number, legacyWidth?: number) => {
-    const { height, width } = typeof size === 'number' ? { height: size, width: legacyWidth } : size
-    ipcRenderer.send(IPC_CHANNELS.panelResize, { height, ...(width === undefined ? {} : { width }) })
+  // Asks for a transient minimum size (wizard / MCP) or releases it ({ release: true });
+  // the user's own panel size is owned by the main process. The positional
+  // (height, width) form is kept for existing callers.
+  resizePanel: (size: { height?: number; width?: number; release?: boolean } | number, legacyWidth?: number) => {
+    const data = typeof size === 'number' ? { height: size, width: legacyWidth } : size
+    ipcRenderer.send(IPC_CHANNELS.panelResize, {
+      ...(data.release === true ? { release: true } : {}),
+      ...(data.height === undefined ? {} : { height: data.height }),
+      ...(data.width === undefined ? {} : { width: data.width }),
+    })
+  },
+
+  resetPanelSize: () => {
+    ipcRenderer.send(IPC_CHANNELS.panelResetSize)
   },
 
   setPanelBlurLock: (lock: { pinned?: boolean; modal?: boolean }) => {

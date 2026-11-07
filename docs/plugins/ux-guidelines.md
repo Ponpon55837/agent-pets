@@ -15,6 +15,10 @@ Everything lives under **Settings → Integrations → Plugins**, in four tabs.
 
 The **detail page** has four sections: **Overview** (notification routing: target pet, mute and notification rate; the network hosts table, declared versus allowed, with revoke; and "Where it shows up in the app": Tray items, current badge text, skins, status row), **Settings** (your `settings` form), **Commands** (your `commands`) and **Diagnostics** (your logs and rejected calls). The page header shows version and signature state. Users can also report an issue or remove the plugin (optionally deleting its settings and data).
 
+### The dashboard tab
+
+An enabled plugin also gets its own tab in the control panel, after Sessions, Quota and History. It appears only while plugins are globally on and your plugin is installed, enabled and not crashed, and it disappears the moment any of that stops being true. The tab shows your manifest `name` (truncated when long), your `icon` (or a generic plugin icon) and a badge with your unread notification count or `badge` text. If you contribute a `panelView`, it is embedded in the tab under the same frame, sandbox and size rules as the Settings plugin page, and it is closed whenever the user switches tabs or hides the panel, so keep your page responsive and stateless between opens. Without a `panelView`, the tab shows your recent notifications and your `commands` as buttons, with links to your settings and details.
+
 ### The install sheet
 
 Before anything is installed, a sheet shows the source (catalog, local file or developer folder), the version change, the author signature state and every requested permission **grouped by risk**: *Network and external links* and *Data and secrets* groups carry high-risk items, storage, schedule and Agent status are medium, and display contributions are low. For an update, **new permissions** are listed separately from the existing ones. Adding network, link or secret permissions, or a changed or removed signing key, requires the user to tick **I understand these changes**, and focus starts on Cancel. Plan for this: an update that adds a high-risk permission is a speed bump, so make it rare and explain it in your release notes.
@@ -23,7 +27,7 @@ Before anything is installed, a sheet shows the source (catalog, local file or d
 
 Toasts are drawn by the app to confirm the user's own actions (for example command sent, access to a host revoked, notifications cleared). A plugin cannot create one. Your notifications use the pet bubble and the inbox.
 
-A panel page is shown inside a frame the host draws: a back button (Esc), your icon, your `panelView.title` with "plugin name · version" below it, the signature state, **Reload panel**, a link to the plugin's permissions and settings, and **Maximize** (double-click the header; Esc restores). While loading it shows "Loading …" and offers Cancel after 5 seconds; a failed load shows reload, back and report buttons. The frame position and the "Plugin content" marker are not yours to change. The user's own resize of your panel is remembered per plugin across restarts, so treat `preferredSize` as a first-open default and make the layout responsive.
+A panel page is shown inside a frame the host draws: a back button (Esc), your icon, your `panelView.title` with "plugin name · version" below it, the signature state, **Reload panel**, a link to the plugin's permissions and settings, and **Maximize** (double-click the header; Esc restores). While loading it shows "Loading …" and offers Cancel after 5 seconds; a failed load shows reload, back and report buttons. The frame position and the "Plugin content" marker are not yours to change. The control panel has one user-resizable size shared by every view, so opening your panel never resizes the window and `preferredSize` no longer changes it: make the layout responsive from 360 px wide up to full screen.
 
 ## Writing for people
 

@@ -20,7 +20,7 @@ test('panel sizes are expressed as {width, height} objects', () => {
 test('fitPanelHeight shrinks to the work area and respects the minimum', () => {
   assert.equal(fitPanelHeight(720, 1000), 720)
   assert.equal(fitPanelHeight(720, 600), 600 - PANEL_GAP * 2)
-  assert.equal(fitPanelHeight(50, 1000), 160)
+  assert.equal(fitPanelHeight(50, 1000), 420)
 })
 
 test('panel bounds stay inside a short work area wherever the pet sits', () => {

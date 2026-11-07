@@ -108,8 +108,7 @@ import { disposeMainTimers } from './main/dispose-timers'
 import { flushMainLog, logMain, teeConsoleToLog } from './diagnostics/main-log'
 import { acquireRunMarker } from './diagnostics/session-marker'
 import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
-import { setPluginPanelWindowBounds } from './main/runtime'
-import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, broadcastProgressionIfChanged, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, cancelHistoryStoreRetry, localPorts, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode } from './main/runtime'
+import { setPluginPanelWindowBounds, MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, broadcastProgressionIfChanged, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, cancelHistoryStoreRetry, localPorts, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode, requestPanelMinimum, resetPanelSize } from './main/runtime'
 
 
 
@@ -528,10 +527,8 @@ async function bootstrapApp(): Promise<void> {
     },
     finiteNumber,
     clamp,
-    computePanelBounds,
-    setPanelBounds: setPluginPanelWindowBounds,
-    panelMinWidth: PANEL_MIN_WIDTH,
-    panelMaxWidth: PANEL_MAX_WIDTH,
+    requestPanelMinimum,
+    resetPanelSize,
     getDisplayWorkArea: bounds => screen.getDisplayMatching(bounds).workArea,
     animateBounds,
     persistPetBounds,

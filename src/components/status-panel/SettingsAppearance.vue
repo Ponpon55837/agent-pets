@@ -3,12 +3,14 @@ import { computed } from 'vue'
 import { t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
+import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import Select from '@/components/ui/Select.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
 import { type PetThemePreference, PET_THEME_PREFERENCES, THEME_PREFERENCES, petThemePreference, setPetThemePreference, setThemePreference, themePreference } from '@/composables/useTheme'
 
 const store = useAgentStore()
+const resetPanelSize = () => window.electronAPI?.resetPanelSize?.()
 const petLabel = (option: PetThemePreference) =>
   option === 'light' ? t('design.theme.petLight') : option === 'follow' ? t('design.theme.petFollow') : t('design.theme.petDark')
 const SCALES = [
@@ -54,6 +56,11 @@ const scaleModel = computed({
     <ToggleRow :model-value="store.bubbleEnabled" :label="t('statusBubble')" :help="t('showCompletionError')" @update:model-value="store.setBubbleEnabled($event)" />
     <ToggleRow :model-value="store.ambientEnabled" :label="t('pet.ambientMotion')" :help="t('pet.ambientMotionHelp')" @update:model-value="store.setAmbientEnabled($event)" />
     <ToggleRow :model-value="store.activityBubbleEnabled" :label="t('pet.activityBubble')" :help="t('pet.activityBubbleHelp')" @update:model-value="store.setActivityBubbleEnabled($event)" />
+    <div class="theme-row">
+      <span class="theme-row-label">{{ t('panel.sizeReset') }}</span>
+      <Button size="sm" @click="resetPanelSize">{{ t('panel.sizeResetAction') }}</Button>
+    </div>
+    <p class="theme-help">{{ t('panel.sizeResetHelp') }}</p>
   </Card>
 </template>
 

@@ -16,6 +16,10 @@ import ServerHealthBanner from '@/components/status-panel/ServerHealthBanner.vue
 import StatusPanelHistory from '@/components/status-panel/StatusPanelHistory.vue'
 import StatusPanelSessions from '@/components/status-panel/StatusPanelSessions.vue'
 import StatusPanelUsage from '@/components/status-panel/StatusPanelUsage.vue'
+import PluginTabContent from '@/components/status-panel/PluginTabContent.vue'
+import { usePluginTabs } from '@/composables/usePluginTabs'
+import { isBuiltInDashboardTab, parseStoredDashboardTab, pluginIdOfTab, resolveDashboardTab } from '@/utils/plugin-tabs'
+import { requestPluginDetail } from '@/utils/plugin-detail-request'
 import { countByBucket } from '@/utils/session-view'
 import { DEFAULT_SETTINGS_GROUP, SETTINGS_GROUPS, isSettingsGroupId, type SettingsGroupId } from '@/utils/settingsRegistry'
 
@@ -45,8 +49,9 @@ function onHeaderMenu(id: string): void {
   else if (id === 'theme') setThemePreference(nextThemePreference(themePreference.value))
 }
 
-type DashboardTab = 'sessions' | 'usage' | 'history'
+type DashboardTab = string
 
+const DASHBOARD_TAB_STORAGE_KEY = 'agent-pets-dashboard-tab'
 const SETTINGS_GROUP_STORAGE_KEY = 'agent-pets-settings-group'
 
 function readStoredSettingsGroup(): SettingsGroupId {
@@ -60,6 +65,7 @@ function readStoredSettingsGroup(): SettingsGroupId {
 // The last-used group is remembered across panel opens.
 const settingsGroup = ref<SettingsGroupId>(readStoredSettingsGroup())
 const dashboardTab = ref<DashboardTab>('sessions')
+const pluginTabs = usePluginTabs()
 // Usage and History mount on first visit, then stay mounted so their state survives tab switches.
 const visitedTabs = ref(new Set<DashboardTab>(['sessions']))
 const requestedPluginViewId = ref('')
@@ -82,7 +88,17 @@ const dashboardTabs = computed(() => [
   { value: 'sessions', label: t('sessions'), badge: attentionCount.value },
   { value: 'usage', label: t('tokenRemaining') },
   { value: 'history', label: t('history') },
+  ...pluginTabs.tabs.value.map(tab => ({
+    value: tab.value,
+    label: tab.label,
+    iconUrl: tab.iconUrl ?? undefined,
+    icon: tab.iconUrl ? undefined : 'plugin',
+    badgeText: tab.badgeText,
+    truncate: true,
+  })),
 ])
+const activePluginTab = computed(() => pluginTabs.tabs.value.find(tab => tab.value === dashboardTab.value) ?? null)
+const pluginTabIds = computed(() => pluginTabs.tabs.value.map(tab => tab.pluginId))
 const attentionCount = computed(() => countByBucket(store.sessionList).attention)
 const activePetName = computed(() => store.pets.find(pet => pet.id === store.activePetId)?.displayName ?? t('appName'))
 const { evolutionLabel } = useProgressionLabels()
@@ -150,11 +166,43 @@ function openPluginSettings(): void {
 
 function selectDashboardTab(tab: DashboardTab): void {
   dashboardTab.value = tab
-  visitedTabs.value.add(tab)
+  if (isBuiltInDashboardTab(tab)) visitedTabs.value.add(tab)
+  try { localStorage.setItem(DASHBOARD_TAB_STORAGE_KEY, tab) } catch {}
   // refreshQuota() is TTL-gated, so this only reaches the network when the
   // reading is stale; a first-ever open still loads.
   if (tab === 'sessions' || tab === 'usage') void store.refreshQuota()
 }
+
+function openPluginTabSettings(pluginId: string, section: 'overview' | 'settings' = 'settings'): void {
+  requestPluginDetail(pluginId, section)
+  openPluginSettings()
+}
+
+// Restore the remembered tab once the plugin list is known, but only if it still qualifies;
+// a plugin tab that disappears later (disabled, removed, crashed) falls back to Sessions.
+let restoredTab = false
+watch(() => [pluginTabs.loading.value, pluginTabIds.value.join('|')] as const, () => {
+  if (pluginTabs.loading.value) return
+  if (!restoredTab) {
+    restoredTab = true
+    let stored: string | null = null
+    try { stored = parseStoredDashboardTab(localStorage.getItem(DASHBOARD_TAB_STORAGE_KEY)) } catch {}
+    if (stored && stored !== dashboardTab.value) {
+      const resolved = resolveDashboardTab(stored, pluginTabIds.value)
+      if (resolved !== dashboardTab.value) selectDashboardTab(resolved)
+    }
+    return
+  }
+  if (pluginIdOfTab(dashboardTab.value) !== null) {
+    const resolved = resolveDashboardTab(dashboardTab.value, pluginTabIds.value)
+    if (resolved !== dashboardTab.value) selectDashboardTab(resolved)
+  }
+}, { immediate: true })
+
+// Plugins are managed in Settings, so re-read them whenever the dashboard is shown again.
+watch(() => [store.panelView, store.panelOpenCount] as const, ([view]) => {
+  if (view === 'sessions') void pluginTabs.refresh()
+})
 
 // Move keyboard focus into the panel whenever it is (re)opened so Tab / arrows work immediately.
 watch(() => store.panelOpenCount, async () => {
@@ -272,12 +320,25 @@ onUnmounted(() => {
           :ariaLabel="t('dashboardSections')"
           id-prefix="tab-"
           panel-id-prefix="panel-"
+          scrollable
+          :scroll-prev-label="t('plugins.dashTabScrollPrev')"
+          :scroll-next-label="t('plugins.dashTabScrollNext')"
           @update:model-value="selectDashboardTab($event as DashboardTab)"
         />
       </div>
       <StatusPanelSessions v-show="dashboardTab === 'sessions'" :active="dashboardTab === 'sessions'" :now-tick="nowTick" :plugin-event-source-statuses="pluginEventSourceStatuses" @manage-plugins="openPluginSettings" />
       <StatusPanelUsage v-if="visitedTabs.has('usage')" v-show="dashboardTab === 'usage'" :active="dashboardTab === 'usage'" :now-tick="nowTick" />
       <StatusPanelHistory v-if="visitedTabs.has('history')" v-show="dashboardTab === 'history'" :active="dashboardTab === 'history'" />
+      <PluginTabContent
+        v-if="activePluginTab"
+        :key="activePluginTab.pluginId"
+        :tab="activePluginTab"
+        :active="!store.showWizard && !store.showProjectMcpPanel"
+        :feed="pluginTabs.feedFor(activePluginTab.pluginId)"
+        :loading="pluginTabs.loading.value"
+        @open-settings="openPluginTabSettings($event, 'settings')"
+        @open-detail="openPluginTabSettings($event, 'overview')"
+      />
     </template>
 
     <SettingsPage v-else v-model:group="settingsGroup" :requested-plugin-id="requestedPluginViewId" :requested-plugin-nonce="pluginViewRequestNonce" />

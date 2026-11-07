@@ -58,5 +58,8 @@
   "panel.setupWizardHelp": "重新執行 Hook 安裝與整合檢查。",
   "panel.more": "更多選項",
   "panel.menuKeepOpen": "保持開啟",
-  "panel.dndActive": "勿擾模式已開啟"
+  "panel.dndActive": "勿擾模式已開啟",
+  "panel.sizeReset": "面板大小",
+  "panel.sizeResetAction": "重設面板大小",
+  "panel.sizeResetHelp": "拖曳面板邊緣可以調整大小，所有畫面共用同一個大小。重設會回到預設尺寸。"
 }

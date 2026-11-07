@@ -110,7 +110,8 @@ export interface ElectronAPI {
       getOnboardingState: () => Promise<OnboardingState | null>
       updateOnboardingState: (action: OnboardingAction) => Promise<OnboardingState | null>
       togglePanel: () => void
-      resizePanel: ((size: { height: number; width?: number }) => void) & ((height: number, width?: number) => void)
+      resizePanel: ((size: { height?: number; width?: number; release?: boolean }) => void) & ((height: number, width?: number) => void)
+      resetPanelSize: () => void
       setPanelBlurLock: (lock: { pinned?: boolean; modal?: boolean }) => void
       hidePanel: () => void
       onPanelOpened: (callback: (options: { restore: boolean }) => void) => () => void

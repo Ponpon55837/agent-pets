@@ -28,7 +28,7 @@ No. See [Sandbox](sandbox.md). Do work that needs a local tool as a separate app
 Confirm `panelView.entry` points to an `.html` file inside the package and that every asset is a package file (the only external URL a page can load is `agent-pets://plugin/_shared/tokens.css`). Use **Reload panel**, read **Diagnostics**, and remember `fetch` and `WebSocket` are blocked in pages; use `api.net.fetch`. A panel that is still loading after 5 seconds offers Cancel.
 
 **The panel opens at the wrong size.**
-`preferredSize` is only the first-open default (width 320–960, height 240–800). Once the user resizes the panel, that size is remembered for your plugin.
+`preferredSize` is still validated but no longer resizes the window: the control panel uses one user-resizable size (minimum 360×420, up to the display's work area) for every view, so make your page responsive.
 
 **My schedule stopped firing.**
 Callbacks that return a Promise block the next tick until they settle (the host skips overlapping runs), schedules are capped at 16 per plugin, and the effective interval is never below the manifest `minIntervalSec` or the user's minimum (default 60 s). Three consecutive Worker crashes disable the plugin.

@@ -60,8 +60,7 @@ import {
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
 import {
   INITIAL_PANEL_ROUTE,
-  panelSizeFor,
-  panelSizeKey,
+  panelResizeRequest,
   reducePanelRoute,
   type PanelRouteAction,
   type PanelRouteState,
@@ -1856,14 +1855,17 @@ export const useAgentStore = defineStore('agent', () => {
   // Every transition goes through here so the window size always follows the route.
   function navigatePanel(action: PanelRouteAction, options: { resize?: boolean } = {}) {
     const next = reducePanelRoute(panelRoute.value, action)
-    const resized = panelSizeKey(next) !== panelSizeKey(panelRoute.value)
+    const request = panelResizeRequest(panelRoute.value, next)
     panelRoute.value = next
-    if (options.resize !== false && resized) window.electronAPI?.resizePanel(panelSizeFor(next))
+    if (options.resize !== false && request) window.electronAPI?.resizePanel(request)
   }
 
   function closePanel() {
+    const before = panelRoute.value
     navigatePanel({ type: 'close-overlay' }, { resize: false })
     window.electronAPI?.hidePanel()
+    // Hide first, then drop an overlay's minimum size, so the window never visibly resizes on close.
+    if (before.overlay) window.electronAPI?.resizePanel({ release: true })
   }
 
   function openSettings() {

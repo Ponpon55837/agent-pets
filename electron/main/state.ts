@@ -23,6 +23,7 @@ import type { PluginHostWindowController } from '../plugin-host-window'
 import type { PluginNetworkClient } from '../plugin-net.ts'
 import type { PluginPanelViewController } from '../plugin-panel-view.ts'
 import { PluginPanelWindowSizer } from '../plugin-panel-window.ts'
+import type { PanelSizeStore } from '../panel-size-store.ts'
 import { PluginUiMessageGuard } from '../plugin-ui-messages.ts'
 import type { PluginPreferencesStore } from '../plugin-preferences'
 import type { PluginRegistry } from '../plugin-registry'
@@ -87,6 +88,11 @@ export const mainState = {
   pluginPanelWindowSizer: new PluginPanelWindowSizer() as PluginPanelWindowSizer,
   programmaticPluginPanelSize: null as { width: number; height: number } | null,
   pluginPanelResizeResetTimer: null as ReturnType<typeof setTimeout> | null,
+  // The user's own panel size (persisted), a transient wizard / MCP minimum, and the settle timer.
+  panelUserSize: null as { width: number; height: number } | null,
+  panelMinimumSize: null as { width: number; height: number } | null,
+  panelSizeStore: null as PanelSizeStore | null,
+  panelSettleTimer: null as ReturnType<typeof setTimeout> | null,
   pluginBroker: null as PluginBroker | null,
   pluginCommandController: null as PluginCommandController | null,
   pluginBadgeController: null as PluginBadgeController | null,
