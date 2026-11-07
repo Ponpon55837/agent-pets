@@ -15,10 +15,11 @@ test('unknown, renamed and compound tool names fail closed to high', () => {
   }
 })
 
-test('MCP-wrapped names are judged by their tool, not their server', () => {
-  assert.equal(classifyPermissionRisk('mcp__server__bash'), 'high')
-  assert.equal(classifyPermissionRisk('mcp__files__read'), 'low')
-  assert.equal(classifyPermissionRisk('mcp__read__bash'), 'high')
+test('MCP-wrapped, separated and argument-bearing names are high risk', () => {
+  for (const name of ['mcp__server__bash', 'mcp__files__read', 'mcp__x__read', 'mcp__read__bash', 'foo:list', 'a b list',
+    'x/read', 'x\\read', 'ns.read', 'rm -rf x list', 'read file', 'read\tgrep', 'read\nbash', 'read;rm']) {
+    assert.equal(classifyPermissionRisk(name), 'high', name)
+  }
   assert.equal(toolBaseName('mcp__srv__Do.Thing'), 'thing')
 })
 

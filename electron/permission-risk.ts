@@ -21,7 +21,7 @@ const NETWORK_TOOLS: ReadonlySet<string> = new Set([
   'external_directory',
 ])
 
-/** The tool name with any `mcp__server__` / `server:` / `ns.` prefix removed. */
+/** Display/network-flag helper only (never used for risk): the tool name with any `mcp__server__` / `server:` / `ns.` prefix removed. */
 export function toolBaseName(permission: string): string {
   const segments = permission
     .toLowerCase()
@@ -32,8 +32,10 @@ export function toolBaseName(permission: string): string {
 }
 
 export function classifyPermissionRisk(permission: string): PermissionRisk {
-  const base = toolBaseName(permission)
-  if (READ_ONLY_TOOLS.has(base)) return 'low'
+  // Exact match on the whole (trimmed, lower-cased) name. No prefix stripping:
+  // `mcp__x__read`, `foo:list`, `x/read` or `rm -rf x list` are never `low`.
+  const name = typeof permission === 'string' ? permission.trim().toLowerCase() : ''
+  if (READ_ONLY_TOOLS.has(name)) return 'low'
   return 'high'
 }
 

@@ -14,12 +14,61 @@ import {
 
 type HookEntry = Record<string, unknown>
 
+// Our hooks always run the deployed script `<home>/.desktop-pet/agent-hook.mjs` (or its Windows
+// `.cmd` wrapper). A hook is ours only when one whole command token / argument is exactly such a
+// path; substring matches (e.g. a user's `~/desktop-pet-project/agent-hook.sh`) never count.
+const AGENT_PETS_HOOK_PATH = /(?:^|[\\/])\.desktop-pet[\\/]agent-hook\.(?:mjs|cmd)$/i
+
+function shellTokens(command: string): string[] {
+  // Minimal POSIX/cmd-tolerant splitter: quotes group, adjacent pieces join (`'a'\\''b'`), and a
+  // backslash is literal except for `\\'` outside quotes (the POSIX single-quote escape we emit).
+  const tokens: string[] = []
+  let current = ''
+  let started = false
+  let quote: '"' | "'" | null = null
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index]!
+    if (quote) {
+      if (char === quote) quote = null
+      else current += char
+    } else if (char === '"' || char === "'") {
+      quote = char
+      started = true
+    } else if (char === '\\' && command[index + 1] === "'") {
+      current += "'"
+      started = true
+      index += 1
+    } else if (/\s/.test(char)) {
+      if (started) tokens.push(current)
+      current = ''
+      started = false
+    } else {
+      current += char
+      started = true
+    }
+  }
+  if (started) tokens.push(current)
+  return tokens
+}
+
 export function isAgentPetsHook(hook: unknown): boolean {
   if (!isJsonObject(hook) || hook.type !== 'command') return false
   const command = typeof hook.command === 'string' ? hook.command : ''
-  const args = Array.isArray(hook.args) ? hook.args.join(' ') : ''
-  const combined = `${command} ${args}`
-  return combined.includes('agent-hook') && combined.includes('desktop-pet')
+  const args = Array.isArray(hook.args) ? hook.args.filter((arg): arg is string => typeof arg === 'string') : []
+  return [...shellTokens(command), ...args].some(token => AGENT_PETS_HOOK_PATH.test(token))
+}
+
+/**
+ * True only for the known-bad state written by older Windows builds: a hook whose runtime is
+ * some executable other than Node.js (Electron's own exe, which recursively launches the app).
+ * A hook that merely points at a different Node.js install is NOT legacy and is left alone.
+ */
+export function isLegacyElectronHook(hook: unknown): boolean {
+  if (!isJsonObject(hook)) return false
+  const command = typeof hook.command === 'string' ? hook.command.trim() : ''
+  if (!command) return false
+  const executables = command.match(/[^\\/"\s][^\\/"]*\.exe\b/gi) ?? []
+  return executables.some(name => !/^node\.exe$/i.test(name.trim()))
 }
 
 export function removeAgentPetsHooks(groups: unknown): unknown[] {
@@ -112,6 +161,11 @@ export function removeAgentPetsHooksFile(
   if (Object.keys(root).length === 0) {
     // Everything left was written by Agent Pets: keep a backup, then remove the empty shell.
     const write = writeConfigSafely(filePath, serializeJson(root))
+    // A symlinked dotfile was rewritten at its real target; deleting only the link would leave
+    // the target as `{}` and break the link, so a symlink is kept as an empty config instead.
+    let isLink = false
+    try { isLink = fs.lstatSync(filePath).isSymbolicLink() } catch { /* already gone */ }
+    if (isLink) return { status: 'removed', path: filePath, backupPath: write.backupPath }
     fs.rmSync(filePath, { force: true })
     return { status: 'deleted_file', path: filePath, backupPath: write.backupPath }
   }
@@ -244,6 +298,18 @@ export function disableCodexHooksFeatureText(existing: string): string {
 /** First token of a shell-form command, honouring double quotes. */
 export function leadingExecutable(command: string): string {
   const trimmed = command.trim()
+  if (trimmed.startsWith("'")) {
+    // POSIX single quotes; a literal quote is written as '\''.
+    let value = ''
+    let index = 1
+    while (index < trimmed.length) {
+      if (trimmed.startsWith("'\\''", index)) { value += "'"; index += 4; continue }
+      if (trimmed[index] === "'") return value
+      value += trimmed[index]
+      index += 1
+    }
+    return value
+  }
   if (trimmed.startsWith('"')) {
     const end = trimmed.indexOf('"', 1)
     return end > 0 ? trimmed.slice(1, end) : trimmed.slice(1)
@@ -291,14 +357,26 @@ export function isCodexHooksFeatureEnabled(config: string | null): boolean {
 // ---- Hook command construction (quoting) ----
 
 /**
- * Shell-form command Codex runs. Every path is double-quoted so spaces, non-ASCII characters and
- * cmd/sh metacharacters in a user name cannot split or alter the command. On Windows the batch
- * wrapper receives the node path itself, so only the wrapper is referenced.
+ * Shell-form command Codex runs. On POSIX every path is single-quoted (`'` becomes `'\''`), so `$`,
+ * backticks, `"` and `\` in a user name stay literal. On Windows the batch wrapper is double-quoted
+ * and receives the node path itself, so only the wrapper is referenced. Paths that cannot be quoted
+ * safely (newline/NUL everywhere, `"` and `%` on Windows) are refused with a ConfigRefusedError.
  */
 export function codexHookCommand(options: { isWindows: boolean, nodeBin: string, hookScript: string, wrapper: string }): string {
-  return options.isWindows
-    ? `"${options.wrapper}" codex`
-    : `"${options.nodeBin}" "${options.hookScript}" codex`
+  const refuse = (value: string, pattern: RegExp) => {
+    if (pattern.test(value)) {
+      throw new ConfigRefusedError('unsafe', value, 'A path contains characters that cannot be quoted safely in a hook command; Agent Pets did not modify the hook configuration.')
+    }
+  }
+  if (options.isWindows) {
+    refuse(options.wrapper, /["%\r\n\0]/)
+    return `"${options.wrapper}" codex`
+  }
+  const quote = (value: string) => {
+    refuse(value, /[\r\n\0]/)
+    return `'${value.replace(/'/g, `'\\''`)}'`
+  }
+  return `${quote(options.nodeBin)} ${quote(options.hookScript)} codex`
 }
 
 /** Escapes a path for use inside a double-quoted string in a .cmd file. */

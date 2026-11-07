@@ -26,13 +26,13 @@ import { DesktopTrayController } from '../desktop-tray'
 import type { PluginTrayCommandItem } from '../plugin-tray'
 import { desktopVisibilityCapabilitiesForPlatform, macVisibleOnFullScreen } from '../desktop-visibility'
 import { PermissionBroker } from '../permission-broker'
-import { appendPermissionAudit, clearPermissionAudit, readPermissionAudit } from '../permission-audit'
+import { appendPermissionAudit, clearPermissionAudit, readPermissionAudit, trimPermissionAuditOnStartup } from '../permission-audit'
 import type { PermissionAuditEntry } from '../../src/types/permission'
 import { ProgressionStore } from '../progression'
 import { AchievementStore } from '../achievements'
 import { HistoryStore } from '../history'
 import { LocalUsageReader } from '../local-usage'
-import { createPresentationMcpServer, PRESENTATION_MCP_PORT } from '../presentation-mcp'
+import { createPresentationMcpServer } from '../presentation-mcp'
 import { listenOnLocalPort } from '../local-server-listen'
 import { normalizePresentationStatus, PresentationController } from '../presentation-controller'
 
@@ -68,7 +68,7 @@ import { isPluginPanelInstallConfirmation, isPluginPanelPluginId, isPluginPanelP
 import { handlePluginProtocolRequest } from '../plugin-protocol'
 import { pluginHostAssets } from '../plugin-host-assets'
 import { parsePluginManifest } from '../plugin-manifest'
-import { createPermissionAdapterServer, PERMISSION_ADAPTER_PORT, PermissionAdapterRelay } from '../permission-adapter-server'
+import { createPermissionAdapterServer, PermissionAdapterRelay } from '../permission-adapter-server'
 import type { DesktopPreferences } from '../../src/types/desktop'
 import { locale, setLocale, t } from '../../src/i18n'
 import tokensCss from '../../src/styles/tokens.css?raw'
@@ -1033,7 +1033,7 @@ export async function createPluginServices(): Promise<void> {
   })
   mainState.pluginBroker = new PluginBroker({
     userDataDirectory,
-    onLog: (pluginId, entry) => logMain(entry.level === 'info' ? 'info' : entry.level === 'warn' ? 'warn' : 'error', `plugin:${pluginId}`, entry.message),
+    onLog: (pluginId, entry) => logMain(entry.level === 'info' ? 'info' : entry.level === 'warn' ? 'warn' : 'error', `plugin:${pluginId}`, String(entry.message).slice(0, 300)),
     getContext: pluginId => {
       const context = mainState.pluginRuntimeContexts.get(pluginId)
       return context ? { ...context, dndEnabled: currentDesktopPreferences().dndEnabled } : null
@@ -2677,7 +2677,7 @@ export function createPresentationServices(presentationToken: string): void {
     onStatus: presentationHealth.onStatus,
     onPersistentFailure: presentationHealth.onPersistentFailure,
     onListening: () => {
-      if (!app.isPackaged) console.log(`Presentation MCP control listening on http://127.0.0.1:${PRESENTATION_MCP_PORT}`)
+      if (!app.isPackaged) console.log(`Presentation MCP control listening on http://127.0.0.1:${localPorts().presentation}`)
     },
   })
   presentationHealth.attach(presentationHandle)
@@ -2756,6 +2756,16 @@ export function cancelHistoryStoreRetry(): void {
   historyStoreRetryTimer = null
 }
 
+function notifyHistoryRecovered(): void {
+  try {
+    if (!Notification.isSupported()) return
+    new Notification({
+      title: t('reliability.history.recoveredTitle'),
+      body: t('reliability.history.recoveredBody'),
+    }).show()
+  } catch {}
+}
+
 export function createHistoryServices(): void {
   if (mainState.historyStore) return
   try {
@@ -2763,7 +2773,12 @@ export function createHistoryServices(): void {
     mainState.historyStore = openWithCorruptionRecovery(
       databasePath,
       () => new HistoryStore(databasePath),
-      { log: (message, detail) => console.error(message, detail) },
+      {
+        log: (message, detail) => console.error(message, detail),
+        verify: store => store.quickCheck(),
+        dispose: store => store.close(),
+        onRecovered: () => notifyHistoryRecovered(),
+      },
     )
     if (!mainState.historyStore) throw new Error('History database could not be opened')
     historyStoreRetryAttempt = 0
@@ -2889,6 +2904,7 @@ export function clearPermissionAuditLog(): void {
 export function createPermissionServices(permissionToken: string): void {
   if (mainState.permissionBroker || mainState.permissionRelay || mainState.permissionAdapterServer) return
 
+  trimPermissionAuditOnStartup(permissionAuditPath(), join(app.getPath('userData'), 'permission-audit.json'))
   const relay = new PermissionAdapterRelay()
   const broker = new PermissionBroker({
     onChanged: schedulePermissionUiSync,
@@ -2909,7 +2925,7 @@ export function createPermissionServices(permissionToken: string): void {
     onStatus: permissionHealth.onStatus,
     onPersistentFailure: permissionHealth.onPersistentFailure,
     onListening: () => {
-      if (!app.isPackaged) console.log(`Permission adapter listening on http://127.0.0.1:${PERMISSION_ADAPTER_PORT}`)
+      if (!app.isPackaged) console.log(`Permission adapter listening on http://127.0.0.1:${localPorts().permission}`)
     },
   })
 

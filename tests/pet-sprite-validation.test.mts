@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readImageSize, validateSpriteSheet } from '../electron/pet-sprite-validation.ts'
+import { readImageSize, validateSpriteSheet, SPRITE_MAX_HEIGHT, SPRITE_MAX_WIDTH } from '../electron/pet-sprite-validation.ts'
 
 function png(width: number, height: number): Uint8Array {
   const bytes = new Uint8Array(33)
@@ -40,4 +40,11 @@ test('accepts a v2 atlas and rejects off-grid or short sheets with a code', () =
   assert.deepEqual(validateSpriteSheet(png(1000, 1872)), { ok: false, code: 'E_SIZE' })
   assert.deepEqual(validateSpriteSheet(png(1536, 208 * 4)), { ok: false, code: 'E_ROWS' })
   assert.deepEqual(validateSpriteSheet(new Uint8Array(8)), { ok: false, code: 'E_TYPE' })
+})
+
+test('oversized spritesheet dimensions are rejected from the header alone', () => {
+  assert.deepEqual(validateSpriteSheet(png(192, 208 * 9)).ok, true)
+  assert.deepEqual(validateSpriteSheet(png(SPRITE_MAX_WIDTH + 192, 208 * 9)), { ok: false, code: 'E_SIZE' })
+  assert.deepEqual(validateSpriteSheet(png(192, SPRITE_MAX_HEIGHT + 208)), { ok: false, code: 'E_SIZE' })
+  assert.deepEqual(validateSpriteSheet(png(SPRITE_MAX_WIDTH, SPRITE_MAX_HEIGHT)), { ok: false, code: 'E_SIZE' })
 })

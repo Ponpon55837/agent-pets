@@ -814,6 +814,12 @@ export class HistoryStore {
     })
   }
 
+  /** Lightweight SQLite structural check; false means the file is damaged. */
+  quickCheck(): boolean {
+    const row = this.database.prepare('PRAGMA quick_check(1)').get() as Record<string, unknown> | undefined
+    return !row || Object.values(row)[0] === 'ok'
+  }
+
   close(): void {
     if (this.closed) return
     this.flushQueued()

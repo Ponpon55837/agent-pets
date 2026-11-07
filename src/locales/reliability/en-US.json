@@ -31,5 +31,7 @@
   "reliability.server.summaryBusy": "{count} local service ports are in use; retrying automatically",
   "reliability.server.summaryMixed": "{count} local services are offline",
   "reliability.server.showDetails": "Show details",
-  "reliability.server.hideDetails": "Hide details"
+  "reliability.server.hideDetails": "Hide details",
+  "reliability.history.recoveredTitle": "History database was rebuilt",
+  "reliability.history.recoveredBody": "The history database was damaged. A backup copy was kept and a new database was created; history will build up again from now."
 }

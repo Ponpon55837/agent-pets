@@ -50,8 +50,11 @@ export interface ProjectMcpSetupSummary {
   excluded?: string[]
   /** Written files that Git already tracks, so they cannot be kept local-only. */
   trackedFiles?: string[]
-  warnings?: string[]
+  /** Stable warning codes; the renderer localizes them. */
+  warnings?: ProjectMcpSetupWarning[]
 }
+
+export type ProjectMcpSetupWarning = 'git_outside_project' | 'exclude_write_failed'
 
 export interface ProjectMcpPlanClient {
   client: ProjectMcpClientId
