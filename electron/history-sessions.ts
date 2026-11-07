@@ -70,19 +70,30 @@ export function sanitizeProjectLabel(value: unknown): string {
   return segment.replace(CONTROL_CHARS, '').trim().slice(0, MAX_PROJECT_LABEL_LENGTH)
 }
 
+/**
+ * The outcome describes the latest turn, not the first one: Claude Code and
+ * Codex emit success (Stop) or error (StopFailure) at the end of every turn,
+ * and a new prompt makes the same session active again. So any working or
+ * waiting state reopens the session; idle keeps whatever the turn ended with.
+ */
 export function nextFinalState(
   previous: StoredSessionFinalState | null,
-  terminalState: 'success' | 'error' | null,
   state: AgentState,
 ): StoredSessionFinalState {
-  if (terminalState) return terminalState
-  if (previous === 'success' || previous === 'error') return previous
-  if (state === 'offline') return 'cancelled'
-  // A cancelled session that becomes active again is open once more.
-  if (previous === 'cancelled' && state !== 'thinking' && state !== 'tool-running' && state !== 'waiting-permission') {
-    return 'cancelled'
+  switch (state) {
+    case 'success':
+    case 'error':
+      return state
+    case 'offline':
+      return 'cancelled'
+    case 'thinking':
+    case 'tool-running':
+    case 'waiting-permission':
+    case 'waiting-input':
+      return 'open'
+    default:
+      return previous ?? 'open'
   }
-  return 'open'
 }
 
 function finiteTimestamp(value: unknown, max: number): number | undefined {
@@ -104,9 +115,9 @@ export function normalizeSessionQuery(input: unknown, now: number): HistorySessi
   const to = finiteTimestamp(raw.to, maxTime)
   if (from !== undefined) query.from = from
   if (to !== undefined) query.to = to
+  // A reversed range (picked "to" before "from") means the same span, not all time.
   if (query.from !== undefined && query.to !== undefined && query.from > query.to) {
-    delete query.from
-    delete query.to
+    [query.from, query.to] = [query.to, query.from]
   }
   if (typeof raw.outcome === 'string' && OUTCOMES.has(raw.outcome)) query.outcome = raw.outcome as HistorySessionOutcome
   if (typeof raw.search === 'string') {
@@ -131,12 +142,12 @@ function escapeLike(value: string): string {
 /**
  * Picks the index whose equality prefix covers the most selective filter, so
  * the page is a range scan in ORDER BY order (no temp B-tree sort):
- * project → (pet, project, seen); outcome → (pet, final_state, seen); else (pet, seen).
+ * project → (pet, project, seen); else (pet, seen). The outcome has only four
+ * values, so it stays a residual filter rather than a third index that every
+ * heartbeat (which moves last_seen_at) would have to rewrite.
  */
 export function sessionListIndex(query: HistorySessionQuery): string {
-  if (query.projectId) return 'idx_history_sessions_pet_project_seen'
-  if (query.outcome) return 'idx_history_sessions_pet_final_seen'
-  return 'idx_history_sessions_pet_seen'
+  return query.projectId ? 'idx_history_sessions_pet_project_seen' : 'idx_history_sessions_pet_seen'
 }
 
 export const SESSION_LIST_COLUMNS = `
@@ -157,10 +168,15 @@ export function buildSessionListQuery(
   query: HistorySessionQuery & { limit: number },
   now: number,
   limit = query.limit,
+  /** Search hits from the trigram index; replaces the LIKE scan and drives the lookup by primary key. */
+  matchedIds?: readonly string[],
 ): { sql: string; params: unknown[] } {
-  const where = ['pet_id = ?']
+  // With search hits the primary key drives the lookup (at most a few thousand
+  // rows, then sorted); unary + keeps the planner off the pet/time indexes.
+  const noIndex = matchedIds ? '+' : ''
+  const where = [`${noIndex}pet_id = ?`]
   const params: unknown[] = [petId]
-  if (query.projectId) { where.push('project_id = ?'); params.push(query.projectId) }
+  if (query.projectId) { where.push(`${noIndex}project_id = ?`); params.push(query.projectId) }
   if (query.adapterId) { where.push('adapter_id = ?'); params.push(query.adapterId) }
   if (query.from !== undefined) { where.push('last_seen_at >= ?'); params.push(query.from) }
   if (query.to !== undefined) { where.push('last_seen_at <= ?'); params.push(query.to) }
@@ -182,7 +198,10 @@ export function buildSessionListQuery(
     default:
       break
   }
-  if (query.search) {
+  if (matchedIds) {
+    where.push('session_pk IN (SELECT value FROM json_each(?))')
+    params.push(JSON.stringify(matchedIds))
+  } else if (query.search) {
     const pattern = `%${escapeLike(query.search)}%`
     where.push("(project_label LIKE ? ESCAPE '\\' OR agent_id LIKE ? ESCAPE '\\' OR adapter_id LIKE ? ESCAPE '\\')")
     params.push(pattern, pattern, pattern)
@@ -194,7 +213,7 @@ export function buildSessionListQuery(
   params.push(limit)
   return {
     sql: `SELECT ${SESSION_LIST_COLUMNS} FROM sessions
-      INDEXED BY ${sessionListIndex(query)}
+      ${matchedIds ? '' : `INDEXED BY ${sessionListIndex(query)}`}
       WHERE ${where.join(' AND ')}
       ORDER BY last_seen_at DESC, session_pk DESC
       LIMIT ?`,

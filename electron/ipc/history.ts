@@ -90,7 +90,7 @@ export function registerHistoryIpc(deps: HistoryIpcDependencies): void {
     const historyStore = deps.getHistoryStore()
     if (!historyStore || !isHistorySessionId(sessionId)) return null
     try {
-      return historyStore.getSessionDetail(sessionId)
+      return historyStore.getSessionDetail(deps.activePetId() ?? 'aang-airbender', sessionId)
     } catch {
       return null
     }

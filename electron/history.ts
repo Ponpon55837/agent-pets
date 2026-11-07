@@ -49,7 +49,7 @@ import {
 type SqliteRow = Record<string, unknown>
 
 interface SqliteStatement {
-  run(...params: unknown[]): { changes: number | bigint }
+  run(...params: unknown[]): { changes: number | bigint, lastInsertRowid?: number | bigint }
   get(...params: unknown[]): SqliteRow | undefined
   all(...params: unknown[]): SqliteRow[]
 }
@@ -106,8 +106,9 @@ const PATH_ROOT_SEGMENTS = new Set([
 // 連續 24 小時沒有空檔的極端情況下，區塊起點會從回看窗口內第一筆重新對齊。
 const USAGE_BLOCK_LOOKBACK_MS = 24 * 60 * 60 * 1000
 const MAX_EXPORT_SESSIONS = 1000
+const MAX_SEARCH_MATCHES = 2000
 const SESSION_COLUMNS = `
-  session_pk, adapter_id, agent_id, external_session_id, project_id, pet_id,
+  rowid AS session_rowid, session_pk, adapter_id, agent_id, external_session_id, project_id, pet_id,
   started_at, ended_at, terminal_state, active_ms, token_input, token_output,
   token_quality, last_state, last_seen_at, project_label, usage_key, final_state,
   last_tool, tool_runs, permission_waits, permission_wait_ms, state_since,
@@ -236,6 +237,7 @@ interface SessionRow {
   /** last_state as stored (lastState folds waiting states into idle for the active-time rules). */
   rawLastState: AgentState
   lastSeenAt: number
+  rowid: number
   projectLabel: string
   usageKey: string
   finalState: StoredSessionFinalState
@@ -246,6 +248,10 @@ interface SessionRow {
   stateSince: number
   tracked: boolean
   timelineCount: number
+}
+
+function sessionSearchText(label: string, agentId: string, adapterId: string): string {
+  return `${label}\n${agentId}\n${adapterId}`
 }
 
 const STORED_FINAL_STATES = new Set<string>(['success', 'error', 'cancelled', 'open'])
@@ -277,6 +283,7 @@ function readSession(row: SqliteRow | undefined): SessionRow | null {
       : 'idle',
     lastSeenAt: Math.max(0, asInteger(row.last_seen_at)),
     rawLastState: AGENT_STATES.has(state) ? state : 'idle',
+    rowid: asInteger(row.session_rowid),
     projectLabel: safeText(row.project_label),
     usageKey: safeText(row.usage_key),
     finalState: STORED_FINAL_STATES.has(row.final_state as string) ? row.final_state as StoredSessionFinalState : 'open',
@@ -357,6 +364,8 @@ export class HistoryStore {
   private retryHandle: ReturnType<typeof setTimeout> | null = null
   private flushFailures = 0
   private closed = false
+  /** FTS5 trigram index for session search; false when the SQLite build lacks FTS5. */
+  private sessionSearchIndexed = false
 
   constructor(filePath: string, options: HistoryStoreOptions = {}) {
     mkdirSync(dirname(filePath), { recursive: true })
@@ -535,14 +544,14 @@ export class HistoryStore {
       const nextStateSince = transition ? occurredAt : previous?.stateSince ?? occurredAt
       const nextLastTool = state === 'tool-running' ? (toolName || previous?.lastTool || '') : ''
       const nextTimelineCount = (previous?.timelineCount ?? 0) + (transition ? 1 : 0)
-      const terminalForFinal = sessionTerminalTransition === 'success' || sessionTerminalTransition === 'error'
-        ? sessionTerminalTransition
-        : previous?.terminalState === 'success' || previous?.terminalState === 'error' ? previous.terminalState : null
-      const nextFinal = nextFinalState(previous?.finalState ?? null, terminalForFinal, state)
+      // A late, out-of-order event must not overwrite the latest turn's outcome.
+      const nextFinal = previous && occurredAt < previous.lastSeenAt
+        ? previous.finalState
+        : nextFinalState(previous?.finalState ?? null, state)
       const projectLabel = sanitizeProjectLabel(event.project) || previous?.projectLabel || ''
       if (!previous) {
         const usageSource = localUsageKeySource(adapterId, externalId)
-        this.statement(`
+        const insertedSession = this.statement(`
           INSERT INTO sessions(
             session_pk, adapter_id, agent_id, external_session_id, project_id, pet_id,
             started_at, ended_at, terminal_state, active_ms, token_input, token_output,
@@ -576,6 +585,7 @@ export class HistoryStore {
           nextStateSince,
           nextTimelineCount,
         )
+        this.indexSessionSearch(asInteger(insertedSession.lastInsertRowid), sessionPk, projectLabel, agentId, adapterId, false)
       } else {
         this.statement(`
           UPDATE sessions
@@ -583,7 +593,7 @@ export class HistoryStore {
               terminal_state = CASE WHEN ? IS NOT NULL THEN ? ELSE terminal_state END,
               active_ms = ?, token_input = ?, token_output = ?, token_quality = ?,
               last_state = ?, last_seen_at = MAX(last_seen_at, ?),
-              project_label = ?, final_state = ?, last_tool = ?, tool_runs = ?,
+              final_state = ?, last_tool = ?, tool_runs = ?,
               permission_waits = ?, permission_wait_ms = ?, state_since = ?, timeline_count = ?
           WHERE session_pk = ?
         `).run(
@@ -597,7 +607,6 @@ export class HistoryStore {
           nextQuality,
           state,
           occurredAt,
-          projectLabel,
           nextFinal,
           nextLastTool,
           nextToolRuns,
@@ -607,6 +616,11 @@ export class HistoryStore {
           nextTimelineCount,
           sessionPk,
         )
+        // The label almost never changes: only then rewrite it and its search entry.
+        if (projectLabel !== previous.projectLabel) {
+          this.statement('UPDATE sessions SET project_label = ? WHERE session_pk = ?').run(projectLabel, sessionPk)
+          this.indexSessionSearch(previous.rowid, sessionPk, projectLabel, agentId, adapterId, true)
+        }
       }
       if (transition) this.appendTimeline(sessionPk, nextTimelineCount - 1, occurredAt, state, toolName)
 
@@ -1084,7 +1098,9 @@ export class HistoryStore {
     this.flushQueued()
     const now = this.now()
     const query = normalizeSessionQuery(input, now)
-    const { sql, params } = buildSessionListQuery(safePetId(petId), query, now, query.limit + 1)
+    const matchedIds = this.searchSessionIds(query.search)
+    if (matchedIds && matchedIds.length === 0) return { items: [], nextCursor: null }
+    const { sql, params } = buildSessionListQuery(safePetId(petId), query, now, query.limit + 1, matchedIds ?? undefined)
     // The SQL text comes from a finite set of clause combinations, so the
     // statement cache stays bounded.
     const rows = this.statement(sql).all(...params)
@@ -1098,11 +1114,26 @@ export class HistoryStore {
     }
   }
 
+  /**
+   * Sessions whose label / agent contain `search`, from the trigram index.
+   * null means "filter with the ordered LIKE scan instead": no FTS5, a term
+   * shorter than one trigram, or so many matches that walking the time index
+   * finds a page sooner than sorting every match.
+   */
+  private searchSessionIds(search: string | undefined): string[] | null {
+    if (!search || !this.sessionSearchIndexed || [...search].length < 3) return null
+    const rows = this.statement('SELECT session_pk FROM session_search WHERE session_search MATCH ? LIMIT ?')
+      .all(`"${search.replace(/"/g, '""')}"`, MAX_SEARCH_MATCHES + 1)
+    return rows.length > MAX_SEARCH_MATCHES ? null : rows.map(row => String(row.session_pk))
+  }
+
   /** One session's metadata plus its latest timeline entries (oldest first). */
-  getSessionDetail(sessionId: unknown): HistorySessionDetail | null {
+  getSessionDetail(petId: string, sessionId: unknown): HistorySessionDetail | null {
     if (!isHistorySessionId(sessionId)) return null
     this.flushQueued()
-    const row = this.statement(`SELECT ${SESSION_LIST_COLUMNS} FROM sessions WHERE session_pk = ?`).get(sessionId)
+    // Scoped like the list: a session of another pet is "not found".
+    const row = this.statement(`SELECT ${SESSION_LIST_COLUMNS} FROM sessions WHERE session_pk = ? AND pet_id = ?`)
+      .get(sessionId, safePetId(petId))
     if (!row) return null
     const [session] = this.mapSessionRows([row], this.now())
     // Newest-first on the (session_pk, seq) primary key, then reversed, so the
@@ -1328,6 +1359,7 @@ export class HistoryStore {
     if (this.retryHandle) { clearTimeout(this.retryHandle); this.retryHandle = null }
     this.transaction(() => {
       this.database.exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM daily_stats; DELETE FROM daily_model_stats; DELETE FROM quota_snapshots; DELETE FROM session_timeline; DELETE FROM session_model_usage;')
+      if (this.sessionSearchIndexed) this.database.exec('DELETE FROM session_search')
       this.statement(`
         INSERT INTO history_metadata(key, value) VALUES (?, ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
@@ -1376,18 +1408,20 @@ export class HistoryStore {
           SELECT rowid FROM events WHERE occurred_at < ? LIMIT ?
         )
       `).run(cutoff, bounded))
-      // Timelines go with their session: both statements select the same
-      // oldest `bounded` sessions through the last_seen_at index.
-      this.statement(`
-        DELETE FROM session_timeline WHERE session_pk IN (
-          SELECT session_pk FROM sessions WHERE last_seen_at < ? ORDER BY last_seen_at LIMIT ?
-        )
-      `).run(cutoff, bounded)
-      const sessions = changedCount(this.statement(`
-        DELETE FROM sessions WHERE session_pk IN (
-          SELECT session_pk FROM sessions WHERE last_seen_at < ? ORDER BY last_seen_at LIMIT ?
-        )
-      `).run(cutoff, bounded))
+      // Pick the exact expired set once (per pet, through the pet/last-seen
+      // index), then delete the sessions, their timelines and search entries by
+      // that set, so no batch boundary can leave orphan rows behind.
+      const expired = this.expiredSessions(cutoff, bounded)
+      let sessions = 0
+      if (expired.length > 0) {
+        const pks = JSON.stringify(expired.map(row => row.pk))
+        this.statement('DELETE FROM session_timeline WHERE session_pk IN (SELECT value FROM json_each(?))').run(pks)
+        if (this.sessionSearchIndexed) {
+          this.statement('DELETE FROM session_search WHERE rowid IN (SELECT value FROM json_each(?))')
+            .run(JSON.stringify(expired.map(row => row.rowid)))
+        }
+        sessions = changedCount(this.statement('DELETE FROM sessions WHERE session_pk IN (SELECT value FROM json_each(?))').run(pks))
+      }
       const sessionUsage = changedCount(this.statement(`
         DELETE FROM session_model_usage WHERE rowid IN (
           SELECT rowid FROM session_model_usage WHERE last_at < ? LIMIT ?
@@ -1395,6 +1429,33 @@ export class HistoryStore {
       `).run(cutoff, bounded))
       return { events, sessions, more: events >= bounded || sessions >= bounded || sessionUsage >= bounded }
     })
+  }
+
+  /**
+   * Up to `limit` sessions last seen before `cutoff`, oldest first per pet.
+   * Pets are walked with MIN(pet_id) > ? seeks on the (pet_id, last_seen_at)
+   * index, so retention needs no separate last_seen_at index on the hot table.
+   */
+  private expiredSessions(cutoff: number, limit: number): Array<{ pk: string, rowid: number }> {
+    const expired: Array<{ pk: string, rowid: number }> = []
+    let pet = this.statement('SELECT MIN(pet_id) AS pet FROM sessions').get()?.pet
+    while (typeof pet === 'string' && expired.length < limit) {
+      const rows = this.statement(`
+        SELECT rowid AS session_rowid, session_pk FROM sessions INDEXED BY idx_history_sessions_pet_seen
+        WHERE pet_id = ? AND last_seen_at < ? ORDER BY last_seen_at, session_pk LIMIT ?
+      `).all(pet, cutoff, limit - expired.length)
+      for (const row of rows) expired.push({ pk: String(row.session_pk), rowid: asInteger(row.session_rowid) })
+      pet = this.statement('SELECT MIN(pet_id) AS pet FROM sessions WHERE pet_id > ?').get(pet)?.pet
+    }
+    return expired
+  }
+
+  /** Keeps the FTS5 search row of one session in step with its label. */
+  private indexSessionSearch(rowid: number, sessionPk: string, label: string, agentId: string, adapterId: string, replace: boolean): void {
+    if (!this.sessionSearchIndexed || rowid <= 0) return
+    if (replace) this.statement('DELETE FROM session_search WHERE rowid = ?').run(rowid)
+    this.statement('INSERT INTO session_search(rowid, session_pk, text) VALUES (?, ?, ?)')
+      .run(rowid, sessionPk, sessionSearchText(label, agentId, adapterId))
   }
 
   /** Runtime retention: bounded batches with the event loop yielded in between. */
@@ -1727,8 +1788,10 @@ export class HistoryStore {
       // up), so they keep timeline_tracked = 0 and the UI shows them as unknown.
       this.database.exec(`
         UPDATE sessions SET final_state = CASE
-          WHEN terminal_state IN ('success', 'error') THEN terminal_state
+          WHEN last_state IN ('thinking', 'tool-running', 'waiting-permission', 'waiting-input') THEN 'open'
+          WHEN last_state IN ('success', 'error') THEN last_state
           WHEN last_state = 'offline' THEN 'cancelled'
+          WHEN terminal_state IN ('success', 'error') THEN terminal_state
           ELSE 'open' END;
         DELETE FROM session_model_usage;
       `)
@@ -1797,9 +1860,38 @@ export class HistoryStore {
         ON sessions(pet_id, last_seen_at, session_pk);
       CREATE INDEX IF NOT EXISTS idx_history_sessions_pet_project_seen
         ON sessions(pet_id, project_id, last_seen_at, session_pk);
-      CREATE INDEX IF NOT EXISTS idx_history_sessions_pet_final_seen
-        ON sessions(pet_id, final_state, last_seen_at, session_pk);
+      DROP INDEX IF EXISTS idx_history_sessions_pet_final_seen;
+      DROP INDEX IF EXISTS idx_history_sessions_last_seen;
     `)
+    this.ensureSessionSearchIndex()
+  }
+
+  /**
+   * FTS5 trigram index over "label, agent, adapter" so substring search reads
+   * only matching sessions. Rowids mirror sessions.rowid. Built from sessions
+   * whenever the table is (re)created; optional when FTS5 is missing.
+   */
+  private ensureSessionSearchIndex(): void {
+    const existed = Boolean(this.database.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_search'",
+    ).get())
+    try {
+      this.database.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS session_search USING fts5(
+          session_pk UNINDEXED, text, tokenize = 'trigram'
+        )
+      `)
+    } catch {
+      this.sessionSearchIndexed = false
+      return
+    }
+    this.sessionSearchIndexed = true
+    if (!existed) {
+      this.database.exec(`
+        INSERT INTO session_search(rowid, session_pk, text)
+        SELECT rowid, session_pk, project_label || char(10) || agent_id || char(10) || adapter_id FROM sessions
+      `)
+    }
   }
 
   /**

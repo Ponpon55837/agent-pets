@@ -73,7 +73,7 @@ test('session timeline records state and tool changes, permission waits and the 
   assert.equal(item.tracked, true)
   assert.equal(page.nextCursor, null)
 
-  const detail = store.getSessionDetail(item.id)!
+  const detail = store.getSessionDetail('aang-airbender', item.id)!
   assert.deepEqual(detail.timeline.map(entry => `${entry.state}${entry.toolName ? `(${entry.toolName})` : ''}`), [
     'thinking', 'tool-running(Bash)', 'tool-running(Edit)', 'waiting-permission', 'tool-running(Edit)', 'success',
   ])
@@ -83,8 +83,10 @@ test('session timeline records state and tool changes, permission waits and the 
   assert.equal(serialized.includes('raw-session-1'), false)
   assert.equal(serialized.includes('secret-root'), false)
   assert.equal(serialized.includes('/Users/'), false)
-  assert.equal(store.getSessionDetail('claude-code:claude:ffffffffffffffffffffffff'), null)
-  assert.equal(store.getSessionDetail("x' OR 1=1 --"), null)
+  assert.equal(store.getSessionDetail('aang-airbender', 'claude-code:claude:ffffffffffffffffffffffff'), null)
+  assert.equal(store.getSessionDetail('aang-airbender', "x' OR 1=1 --"), null)
+  // Another pet cannot open this session's timeline.
+  assert.equal(store.getSessionDetail('other-pet', item.id), null)
 })
 
 test('tool names keep only the name and project labels only the last segment', () => {
@@ -110,7 +112,7 @@ test('the stored timeline is capped per session and reports truncation', (t) => 
   const stored = db.prepare('SELECT COUNT(*) AS count, MIN(seq) AS first FROM session_timeline').get()!
   assert.equal(Number(stored.count), SESSION_TIMELINE_STORED_MAX)
   assert.equal(Number(stored.first), total - SESSION_TIMELINE_STORED_MAX)
-  const detail = store.getSessionDetail(item!.id)!
+  const detail = store.getSessionDetail('aang-airbender', item!.id)!
   assert.equal(detail.timeline.length, SESSION_TIMELINE_STORED_MAX)
   assert.equal(detail.truncated, true)
   assert.equal(detail.timeline.at(-1)!.occurredAt, NOW - 1_000_000 + (total - 1) * 10)
@@ -195,9 +197,10 @@ test('query normalisation drops anything invalid and bounds the rest', () => {
   assert.equal(query.search, 'term')
   assert.equal(query.limit, 7)
   assert.ok(query.cursor)
-  const swapped = normalizeSessionQuery({ from: NOW, to: NOW - 1 }, NOW)
-  assert.equal(swapped.from, undefined)
-  assert.equal(swapped.to, undefined)
+  // A reversed range is the same span, never "all time".
+  const swapped = normalizeSessionQuery({ from: NOW, to: NOW - 1000 }, NOW)
+  assert.equal(swapped.from, NOW - 1000)
+  assert.equal(swapped.to, NOW)
   assert.equal(normalizeSessionQuery({ limit: 2.5 }, NOW).limit, 30)
   assert.equal(normalizeSessionQuery({ cursor: { lastSeenAt: 'x', id: 'y' } }, NOW).cursor, undefined)
   assert.equal(isHistorySessionId(`a:b:${'0'.repeat(24)}`), true)
@@ -213,8 +216,8 @@ test('list and timeline queries are index-backed and never sort in a temp B-tree
     [{}, /idx_history_sessions_pet_seen/],
     [{ cursor, search: 'x', adapterId: 'codex', from: 1, to: NOW }, /idx_history_sessions_pet_seen/],
     [{ projectId: PROJECT_A, cursor }, /idx_history_sessions_pet_project_seen/],
-    [{ outcome: 'success', cursor }, /idx_history_sessions_pet_final_seen/],
-    [{ outcome: 'incomplete' }, /idx_history_sessions_pet_final_seen/],
+    [{ outcome: 'success', cursor }, /idx_history_sessions_pet_seen/],
+    [{ outcome: 'incomplete' }, /idx_history_sessions_pet_seen/],
   ]
   for (const [input, index] of cases) {
     const { sql, params } = buildSessionListQuery('aang-airbender', normalizeSessionQuery(input, NOW), NOW)
@@ -281,8 +284,8 @@ test('v9 migration backfills existing sessions additively and is idempotent', (t
   raw.exec(`
     DROP INDEX idx_history_sessions_pet_seen;
     DROP INDEX idx_history_sessions_pet_project_seen;
-    DROP INDEX idx_history_sessions_pet_final_seen;
     DROP TABLE session_timeline;
+    DROP TABLE session_search;
     DROP TABLE session_model_usage;
     DELETE FROM schema_migrations WHERE version = 9;
   `)
@@ -299,7 +302,7 @@ test('v9 migration backfills existing sessions additively and is idempotent', (t
   assert.equal(migrated.tokenSource, 'local')
   assert.equal(migrated.tokenInput, 40)
   assert.equal(migrated.topModel, 'claude-haiku')
-  assert.deepEqual(second.getSessionDetail(migrated.id)!.timeline, [])
+  assert.deepEqual(second.getSessionDetail('aang-airbender', migrated.id)!.timeline, [])
   second.close()
 
   const third = new HistoryStore(filePath, { now: () => NOW })
@@ -343,4 +346,81 @@ test('JSON export carries bounded session metadata without project labels', (t) 
   assert.equal(exported.sessionsTruncated, false)
   assert.equal(exported.sessions?.[0]?.projectLabel, '')
   assert.equal(JSON.stringify(exported).includes('private-project'), false)
+})
+
+test('outcome follows the latest turn of a multi-turn session', (t) => {
+  let now = NOW
+  const { store } = open(t, () => now)
+  const at = (offset: number) => NOW - 600_000 + offset
+  const outcome = () => store.listSessions('aang-airbender', {}).items[0]!.outcome
+  store.recordEvent(event({ state: 'thinking', eventId: 't1', timestamp: at(0) }))
+  store.recordEvent(event({ state: 'success', eventId: 'stop-1', timestamp: at(10_000) }))
+  assert.equal(outcome(), 'success')
+  // The next prompt makes the session active again.
+  store.recordEvent(event({ state: 'thinking', eventId: 't2', timestamp: at(20_000) }))
+  assert.equal(outcome(), 'active')
+  assert.equal(store.listSessions('aang-airbender', { outcome: 'active' }).items.length, 1)
+  assert.equal(store.listSessions('aang-airbender', { outcome: 'success' }).items.length, 0)
+  store.recordEvent(event({ state: 'error', eventId: 'stop-fail', timestamp: at(30_000) }))
+  assert.equal(outcome(), 'error')
+  // One StopFailure does not stick once a later turn succeeds.
+  store.recordEvent(event({ state: 'tool-running', toolName: 'Bash', eventId: 't3', timestamp: at(40_000) }))
+  store.recordEvent(event({ state: 'success', eventId: 'stop-2', timestamp: at(50_000) }))
+  assert.equal(outcome(), 'success')
+  // idle keeps the last turn's outcome; a late, older event cannot rewrite it.
+  store.recordEvent(event({ state: 'idle', eventId: 'idle', timestamp: at(60_000) }))
+  store.recordEvent(event({ state: 'thinking', eventId: 'late', timestamp: at(45_000) }))
+  assert.equal(outcome(), 'success')
+  // Aggregates still count the session once.
+  assert.equal(store.getSummary().totals.sessionsCompleted, 1)
+  now = NOW
+})
+
+test('trigram search reads only matching sessions and agrees with the scan', (t) => {
+  const { store, db } = open(t)
+  const labels = ['alpha-service', 'beta%app', 'gamma_tool', '專案管理工具']
+  labels.forEach((project, index) => {
+    store.recordEvent(event({ sessionId: `s-${index}`, project, projectId: index === 0 ? PROJECT_A : undefined, state: 'success', eventId: `d-${index}`, timestamp: NOW - 1000 * (index + 1) }))
+  })
+  const found = (search: string) => store.listSessions('aang-airbender', { search }).items.map(item => item.projectLabel)
+  assert.deepEqual(found('SERV'), ['alpha-service'])
+  assert.deepEqual(found('a%a'), ['beta%app'])
+  assert.deepEqual(found('a_t'), ['gamma_tool'])
+  assert.deepEqual(found('管理工'), ['專案管理工具'])
+  assert.deepEqual(found('"x" OR alpha'), [])
+  assert.deepEqual(found('claude-code').length, 4)
+  // Short terms fall back to the escaped LIKE scan.
+  assert.deepEqual(found('%'), ['beta%app'])
+  // A renamed workspace label is re-indexed; the old label no longer matches.
+  store.recordEvent(event({ sessionId: 's-0', projectId: PROJECT_A, project: 'omega-service', state: 'thinking', eventId: 'rename', timestamp: NOW - 100 }))
+  assert.deepEqual(found('alpha'), [])
+  assert.deepEqual(found('omega'), ['omega-service'])
+  assert.equal(Number(db.prepare('SELECT COUNT(*) AS count FROM session_search').get()!.count), 4)
+  const { sql, params } = buildSessionListQuery('aang-airbender', normalizeSessionQuery({ search: 'omega' }, NOW), NOW, 31, ['x'])
+  assert.match(plan(db, sql, params), /SEARCH sessions USING INDEX sqlite_autoindex_sessions_1 \(session_pk=\?\)/)
+  assert.match(plan(db, 'SELECT session_pk FROM session_search WHERE session_search MATCH ?', ['"omega"']), /VIRTUAL TABLE INDEX/)
+})
+
+test('retention removes exactly the expired set even when last-seen times tie', (t) => {
+  let now = NOW
+  const { store, db } = open(t, () => now)
+  for (let index = 0; index < 7; index += 1) {
+    store.recordEvent(event({ sessionId: `tie-${index}`, project: 'tie', state: 'tool-running', toolName: 'Bash', timestamp: NOW - 5000 }))
+  }
+  now = NOW + 100 * 24 * 60 * 60 * 1000
+  store.recordEvent(event({ sessionId: 'fresh', state: 'thinking', timestamp: now - 1000 }))
+  const count = (sql: string) => Number(db.prepare(sql).get()!.count)
+  const step = store.pruneBatch(3)
+  assert.equal(step.sessions, 3)
+  // No timeline or search row may outlive its session.
+  assert.equal(count('SELECT COUNT(*) AS count FROM session_timeline WHERE session_pk NOT IN (SELECT session_pk FROM sessions)'), 0)
+  assert.equal(count('SELECT COUNT(*) AS count FROM session_search WHERE rowid NOT IN (SELECT rowid FROM sessions)'), 0)
+  while (store.pruneBatch(3).more) { /* bounded steps */ }
+  assert.equal(count('SELECT COUNT(*) AS count FROM sessions'), 1)
+  assert.equal(count('SELECT COUNT(*) AS count FROM session_timeline'), 1)
+  assert.equal(count('SELECT COUNT(*) AS count FROM session_search'), 1)
+  const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'sessions'").all().map(row => String(row.name))
+  assert.ok(!indexes.includes('idx_history_sessions_last_seen'))
+  assert.ok(!indexes.includes('idx_history_sessions_pet_final_seen'))
+  assert.match(plan(db, 'SELECT MIN(pet_id) AS pet FROM sessions WHERE pet_id > ?', ['a']), /COVERING INDEX idx_history_sessions_pet_seen/)
 })

@@ -14,8 +14,8 @@ function createHistoryIpcHarness() {
       records.sessionQueries.push({ petId, query })
       return { items: [], nextCursor: null }
     },
-    getSessionDetail: (id: string) => {
-      records.detailIds.push(id)
+    getSessionDetail: (petId: string, id: string) => {
+      records.detailIds.push(`${petId}/${id}`)
       return null
     },
     getUsageBlocks: () => [{ adapterId: 'codex', startAt: 1, endAt: 2, firstActivityAt: 1, lastActivityAt: 1, tokenInput: 1, tokenOutput: 0, tokenCacheRead: 0, tokenCacheWrite: 0, records: 1 }],
@@ -148,6 +148,7 @@ test('session detail IPC only forwards well-formed session ids', async () => {
   assert.equal(await detail({}, 'codex:codex:not-a-hash'), null)
   assert.equal(await detail({}, `codex:codex:${'a'.repeat(24)}\n`), null)
   assert.equal(await detail({}, `codex:codex:${'a'.repeat(24)}`), null)
-  assert.deepEqual(harness.records.detailIds, [`codex:codex:${'a'.repeat(24)}`])
+  // Scoped to the active pet, like the list.
+  assert.deepEqual(harness.records.detailIds, [`sample-pet/codex:codex:${'a'.repeat(24)}`])
   assert.equal(harness.records.trusted.length, 4)
 })
