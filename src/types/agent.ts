@@ -1,5 +1,6 @@
 import type { PermissionNotice } from './capabilities'
 import type { AgentAdapterId } from './agent-adapter'
+import type { AgentHost } from './host-app'
 
 export type AgentSource =
   | 'opencode-cli'
@@ -42,6 +43,8 @@ export interface AgentStatusEvent {
   toolName?: string
   tokenUsage?: AgentTokenUsage
   permissionNotice?: PermissionNotice
+  /** Terminal / IDE / desktop app the session runs in (allowlisted id only). */
+  host?: AgentHost
 }
 
 export interface AgentSession {
@@ -55,6 +58,7 @@ export interface AgentSession {
   lastSeenAt: number
   toolName?: string
   permissionNotice?: PermissionNotice
+  host?: AgentHost
 }
 
 export const STATE_PRIORITY: Record<AgentState, number> = {

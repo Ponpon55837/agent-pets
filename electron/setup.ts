@@ -478,6 +478,26 @@ function postJson(port, pathname, tokenHeader, token, value) {
   });
 }
 
+// Which app OpenCode runs in (see integrations/agent-hook.mjs): a few capped env values only.
+function shortEnv(name, pattern) {
+  const value = process.env[name];
+  return typeof value === 'string' && pattern.test(value) ? value : undefined;
+}
+
+function hostHints() {
+  const hints = {
+    termProgram: shortEnv('TERM_PROGRAM', /^[A-Za-z0-9._-]{1,32}$/),
+    bundleId: process.platform === 'darwin' ? shortEnv('__CFBundleIdentifier', /^[A-Za-z0-9.-]{3,128}$/) : undefined,
+    windowsTerminal: process.env.WT_SESSION ? true : undefined,
+    vscode: process.env.VSCODE_INJECTION || process.env.VSCODE_GIT_IPC_HANDLE ? true : undefined,
+    cursor: process.env.CURSOR_TRACE_ID ? true : undefined,
+  };
+  const present = Object.fromEntries(Object.entries(hints).filter(([, value]) => value !== undefined));
+  return Object.keys(present).length > 0 ? present : undefined;
+}
+
+const HOST_HINTS = hostHints();
+
 function sendEvent(sessionId, state, toolName, originalEvent, projectPath) {
   void postJson(17373, '/v1/events', 'X-Agent-Pets-Token', readToken(eventTokenPath), {
     source: SOURCE,
@@ -487,6 +507,7 @@ function sendEvent(sessionId, state, toolName, originalEvent, projectPath) {
     toolName,
     originalEvent,
     project: projectPath,
+    host: HOST_HINTS,
   });
 }
 

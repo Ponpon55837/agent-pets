@@ -32,6 +32,27 @@ if (source === 'claude' && process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-deskto
 }
 
 
+// Which app the agent runs in, so the pet can switch back to it. Only these few environment
+// values are read and sent, each capped and shape-checked again by the app; never an env dump,
+// pid, tty or path. Flags are sent as `true` only, never the variable's value.
+function shortEnv(name, pattern) {
+  const value = process.env[name]
+  return typeof value === 'string' && pattern.test(value) ? value : undefined
+}
+
+function hostHints() {
+  const hints = {
+    termProgram: shortEnv('TERM_PROGRAM', /^[A-Za-z0-9._-]{1,32}$/),
+    bundleId: process.platform === 'darwin' ? shortEnv('__CFBundleIdentifier', /^[A-Za-z0-9.-]{3,128}$/) : undefined,
+    entrypoint: shortEnv('CLAUDE_CODE_ENTRYPOINT', /^[a-z0-9_-]{1,32}$/),
+    windowsTerminal: process.env.WT_SESSION ? true : undefined,
+    vscode: process.env.VSCODE_INJECTION || process.env.VSCODE_GIT_IPC_HANDLE ? true : undefined,
+    cursor: process.env.CURSOR_TRACE_ID ? true : undefined,
+  }
+  const present = Object.fromEntries(Object.entries(hints).filter(([, value]) => value !== undefined))
+  return Object.keys(present).length > 0 ? present : undefined
+}
+
 function mapCodexEvent(eventName) {
   switch (eventName) {
     case 'SessionStart':
@@ -318,6 +339,7 @@ async function main() {
     originalEvent: eventName,
     timestamp: Date.now(),
     toolName,
+    host: hostHints(),
   }
 
   const isClaude = source.startsWith('claude')
