@@ -138,7 +138,7 @@ onBeforeUnmount(() => {
   position: fixed;
   top: var(--space-2);
   left: 50%;
-  z-index: 30;
+  z-index: calc(var(--z-sticky) + 30);
   display: flex;
   flex-direction: column;
   align-items: center;

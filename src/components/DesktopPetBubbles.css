@@ -6,7 +6,7 @@
   left: 50%;
   transform: translateX(-50%);
   transform-origin: 50% calc(100% + 9px);
-  z-index: 5;
+  z-index: calc(var(--z-base) + 5);
   max-height: var(--pet-bubble-max-h);
   max-width: calc(var(--pet-w, 250px) - 10px);
   background: var(--pet-bubble-surface);
@@ -404,7 +404,7 @@
 
 .toast-enter-active,
 .toast-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition: opacity var(--transition-base), transform var(--transition-base);
 }
 
 .toast-enter-from,

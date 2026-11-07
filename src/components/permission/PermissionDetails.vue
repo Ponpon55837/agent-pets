@@ -123,7 +123,16 @@ async function copy(): Promise<void> {
   gap: var(--space-3);
 }
 
+/* Visually compact; the pointer target still reaches --hit-min. */
+.permission-details-link::after {
+  content: '';
+  position: absolute;
+  inset-block: min(0px, calc((100% - var(--hit-min)) / 2));
+  inset-inline: -4px;
+}
+
 .permission-details-link {
+  position: relative;
   min-height: 24px;
   padding: 0;
   border: 0;

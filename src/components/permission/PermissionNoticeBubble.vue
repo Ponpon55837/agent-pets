@@ -57,7 +57,7 @@ const helpOpen = ref(false)
   position: absolute;
   top: 2px;
   left: 50%;
-  z-index: 8;
+  z-index: calc(var(--z-base) + 8);
   display: flex;
   width: min(248px, calc(var(--pet-w, 260px) - 8px));
   flex-direction: column;

@@ -75,7 +75,7 @@
   --accent-on-hover: var(--organic-accent-on-hover);
 
   position: relative;
-  z-index: 9999;
+  z-index: var(--z-system);
   display: flex;
   width: 100%;
   height: 100%;
@@ -909,7 +909,7 @@
   position: absolute;
   right: 0;
   left: 0;
-  z-index: 1;
+  z-index: calc(var(--z-base) + 1);
   height: var(--organic-space-4);
   opacity: 0;
   pointer-events: none;

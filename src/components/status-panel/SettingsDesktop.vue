@@ -11,6 +11,10 @@ import type { PermissionAuditEntry } from '@/types/permission'
 import { permissionSourceName } from '@/utils/permission-source'
 import { playCue, type SoundCue } from '@/utils/sound'
 
+// Product names are proper nouns, not translatable copy.
+const APPROVER_AGENTS = 'OpenCode'
+const REMINDER_AGENTS = 'Codex · Claude'
+
 const store = useAgentStore()
 
 const auditEntries = ref<PermissionAuditEntry[]>([])
@@ -109,11 +113,11 @@ function preview(cue: SoundCue): void {
     <p class="permission-settings-intro">{{ t('permission.settingsIntro') }}</p>
     <ul class="permission-settings-list">
       <li>
-        <strong>OpenCode</strong>
+        <strong>{{ APPROVER_AGENTS }}</strong>
         <span>{{ t('permission.settingsCanApprove') }}</span>
       </li>
       <li>
-        <strong>Codex · Claude</strong>
+        <strong>{{ REMINDER_AGENTS }}</strong>
         <span>{{ t('permission.settingsReminderOnly') }}</span>
       </li>
     </ul>

@@ -586,7 +586,7 @@ html, body, #app {
 
 .wizard-enter-active,
 .wizard-leave-active {
-  transition: all 0.2s ease;
+  transition: all var(--transition-base);
 }
 
 .wizard-enter-from,
