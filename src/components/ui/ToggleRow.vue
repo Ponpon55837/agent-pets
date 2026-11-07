@@ -5,6 +5,7 @@
 withDefaults(defineProps<{
   label: string
   help?: string
+  ariaLabel?: string
   disabled?: boolean
 }>(), {
   disabled: false,
@@ -20,7 +21,7 @@ const model = defineModel<boolean>({ required: true })
       <span v-if="help" class="help">{{ help }}</span>
     </span>
     <span class="switch">
-      <input v-model="model" type="checkbox" :disabled="disabled" />
+      <input v-model="model" type="checkbox" role="switch" :aria-label="ariaLabel" :disabled="disabled" />
       <span class="track"><span class="thumb" /></span>
     </span>
   </label>

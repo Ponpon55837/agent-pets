@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, ref } from 'vue'
+import { computed, nextTick, provide, ref, watch } from 'vue'
 import { t } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
@@ -7,6 +7,7 @@ import ActionMenu from '@/components/ui/ActionMenu.vue'
 import SegmentedTabs from '@/components/ui/SegmentedTabs.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
 import PluginAdvanced from '@/components/plugin-panel/PluginAdvanced.vue'
+import PluginDetail from '@/components/plugin-panel/PluginDetail.vue'
 import PluginCatalog from '@/components/plugin-panel/PluginCatalog.vue'
 import PluginInstalledList from '@/components/plugin-panel/PluginInstalledList.vue'
 import PluginNotificationInbox from '@/components/plugin-panel/PluginNotificationInbox.vue'
@@ -20,7 +21,7 @@ const controller = usePluginPanelController(props)
 provide(PLUGIN_PANEL_CONTROLLER, controller)
 const {
   snapshot, notifications, plugins, catalogItems, busy, loading, errorMessage, statusMessage,
-  panelViewPlugin, panelViewFrame, panelViewContent, pendingPlan, pendingRemove, pendingSecretConsentKey,
+  detailPlugin, panelViewPlugin, panelViewFrame, panelViewContent, pendingPlan, pendingRemove, pendingSecretConsentKey,
   keepData, enabledGlobally, pendingPluginName, pendingPermissions, pendingAddedPermissions,
   displayFingerprint, planKindLabel, pluginName, refreshPanel, selectArchive, selectDeveloperFolder,
   updateGlobalPreferences, confirmInstall, confirmRemove, confirmSecretConsent,
@@ -49,6 +50,21 @@ function onInstallMenu(id: string): void {
   else void selectArchive()
 }
 
+// 進入詳情頁前記住設定頁的捲動位置，返回時還原，並把捲動軸歸零顯示詳情頁頂端。
+const shell = ref<HTMLElement | null>(null)
+let savedScrollTop = 0
+watch(() => detailPlugin.value?.id ?? '', async (id, previousId) => {
+  const container = shell.value?.closest<HTMLElement>('.settings-content') ?? null
+  if (!container) return
+  if (id && !previousId) {
+    savedScrollTop = container.scrollTop
+    container.scrollTop = 0
+  } else if (!id && previousId) {
+    await nextTick()
+    container.scrollTop = savedScrollTop
+  }
+})
+
 function showTab(tab: PluginTab): void {
   activeTab.value = tab
 }
@@ -61,7 +77,9 @@ function showTab(tab: PluginTab): void {
     @content="panelViewContent = $event"
   />
 
-  <div v-else class="plugin-panel">
+  <div v-else ref="shell" class="plugin-panel">
+    <PluginDetail v-if="detailPlugin" />
+    <div v-show="!detailPlugin" class="plugin-main">
     <header class="plugin-header">
       <div class="plugin-header-copy">
         <h2>{{ t('plugins') }}</h2>
@@ -148,6 +166,8 @@ function showTab(tab: PluginTab): void {
       aria-labelledby="plugin-tab-advanced"
     >
       <PluginAdvanced />
+    </div>
+
     </div>
 
     <PluginPanelDialogs

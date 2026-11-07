@@ -26,6 +26,8 @@ import type {
 import type { PluginCatalogPanelItem } from '@/types/plugin-catalog'
 import { DEFAULT_PLUGIN_CATALOG_URL, shouldShowCatalogPermissionCheck } from '@/types/plugin-catalog'
 import { isValidPetId } from '@/utils/pet-id'
+export type PluginDetailSection = 'overview' | 'settings' | 'commands' | 'diagnostics'
+
 export function usePluginPanelController(props: { requestedPluginId?: string }) {
 
 const snapshot = ref<PluginPanelSnapshot | null>(null)
@@ -37,6 +39,8 @@ const pluginSettings = ref<PluginPanelSettingsSnapshot | null>(null)
 const settingsDraft = ref<Record<string, PluginSettingScalar>>({})
 const secretDrafts = ref<Record<string, string>>({})
 const selectedPluginId = ref('')
+const detailPluginId = ref('')
+const detailSection = ref<PluginDetailSection>('overview')
 const panelViewPluginId = ref('')
 const panelViewOpenToken = ref(0)
 const panelViewFrame = ref<HTMLElement | null>(null)
@@ -65,6 +69,7 @@ let panelViewWindowSizeBeforeMaximize: { width: number; height: number } | null 
 
 const plugins = computed(() => snapshot.value?.plugins ?? [])
 const selectedPlugin = computed(() => plugins.value.find(plugin => plugin.id === selectedPluginId.value) ?? null)
+const detailPlugin = computed(() => plugins.value.find(plugin => plugin.id === detailPluginId.value) ?? null)
 const panelViewPlugin = computed(() => plugins.value.find(plugin => plugin.id === panelViewPluginId.value) ?? null)
 const enabledGlobally = computed(() => snapshot.value?.preferences.pluginsEnabled ?? false)
 const onlineCatalogEnabled = computed(() => snapshot.value?.preferences.onlineCatalogEnabled ?? false)
@@ -260,6 +265,18 @@ function handlePluginPanelViewClosed(event: PluginPanelViewClosedEvent): void {
   if (event.reason !== 'hidden') setError(pluginPanelViewCloseError(event.reason))
 }
 
+// 詳情頁是目前插件唯一的來源；診斷、設定、指令都跟著它走，不再由別處的下拉決定。
+function openPluginDetail(pluginId: string, section: PluginDetailSection = 'overview'): void {
+  if (!plugins.value.some(plugin => plugin.id === pluginId)) return
+  detailSection.value = section
+  detailPluginId.value = pluginId
+  selectedPluginId.value = pluginId
+}
+
+function closePluginDetail(): void {
+  detailPluginId.value = ''
+}
+
 function pluginStatusLabel(plugin: PluginPanelPlugin): string {
   if (plugin.status === 'disabled_crashed') return t('pluginStatusCrashed')
   if (plugin.status === 'incompatible' || !plugin.manifest) return t('pluginStatusIncompatible')
@@ -354,7 +371,10 @@ async function refreshPanel(): Promise<void> {
       selectedPluginId.value = requestedPluginId
       void openPluginPanelView(requestedPluginId)
     } else if (!result.value.plugins.some(plugin => plugin.id === selectedPluginId.value)) {
-      selectedPluginId.value = result.value.plugins[0]?.id ?? ''
+      selectedPluginId.value = ''
+    }
+    if (detailPluginId.value && !result.value.plugins.some(plugin => plugin.id === detailPluginId.value)) {
+      detailPluginId.value = ''
     }
     await refreshNotifications()
   } catch {
@@ -979,6 +999,11 @@ onUnmounted(() => {
     settingsDraft,
     secretDrafts,
     selectedPluginId,
+    detailPluginId,
+    detailSection,
+    detailPlugin,
+    openPluginDetail,
+    closePluginDetail,
     panelViewPluginId,
     panelViewOpenToken,
     panelViewFrame,

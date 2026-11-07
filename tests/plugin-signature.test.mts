@@ -297,7 +297,7 @@ test('registry rejects an archive with an invalid signature before creating an i
 
 test('signature-risk confirmation defaults focus to Cancel and shows key fingerprints', () => {
   const dialog = fs.readFileSync(new URL('../src/components/ui/ConfirmDialog.vue', import.meta.url), 'utf8')
-  const panel = fs.readFileSync(new URL('../src/components/plugin-panel/PluginInstalledList.vue', import.meta.url), 'utf8')
+  const panel = fs.readFileSync(new URL('../src/components/plugin-panel/PluginDetail.vue', import.meta.url), 'utf8')
   const dialogs = fs.readFileSync(new URL('../src/components/plugin-panel/PluginPanelDialogs.vue', import.meta.url), 'utf8')
   assert.match(dialog, /props\.focusCancel \? '\[data-cancel\]' : '\[data-confirm\]'/)
   assert.match(dialog, /data-cancel/)
