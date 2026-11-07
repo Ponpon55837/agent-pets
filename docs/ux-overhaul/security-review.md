@@ -188,7 +188,7 @@ Secret 掃描：對 diff 新增行（排除 lockfile 與 tests）以常見金鑰
 - 「全部更新」佇列每一項仍各自進入同意畫面（`installCatalogPlugin` → `pendingPlan`），不會自動確認。
 - 外部連結仍由主行程依 id 開啟（`openPluginFeedLink(itemId)`），renderer 只顯示 hostname；外掛圖示 URL 以 `PLUGIN_ID`/`ICON_PATH` 白名單與 `encodeURIComponent` 組成 `agent-pets://plugin/...`；回報問題主行程仍限制 `https://github.com`。
 - 外掛 host 腳本的變更（`callSafely`、排程上限 16、未處理 rejection 轉為外掛日誌、非重入排程）只增加隔離；CSP 與 worker 限制未變。
-- `plugin-panel-sizes.json`：版本欄位、外掛 id 正規式（排除 `_host`/`_shared`）、尺寸 100–20000、最多 100 筆，壞檔直接忽略；寫入使用 `writeJsonAtomic` 並做 800ms debounce。
+- （已移除）`plugin-panel-sizes.json`：每個外掛各自的面板尺寸已不存在，面板改用單一共用尺寸 `panel-size.json`。
 
 **本機伺服器**
 - 事件伺服器：仍綁定 `127.0.0.1`、64KB 本文上限、POST `/v1/events` 白名單、token（`timingSafeEqual`）在速率限制前檢查、`headersTimeout`/`requestTimeout` 保留；新的限速器為全域請求 2000/10s 加上每 session 一般 500 與終端事件 60；佇列上限 1000 且優先保留終端事件。
@@ -198,7 +198,6 @@ Secret 掃描：對 diff 新增行（排除 lockfile 與 tests）以常見金鑰
 
 **持久化檔案**
 - `onboarding.json`：僅 `version`、`completedAt`、`skippedAt`；讀取經 `readConfigText`（1MB 上限、一般檔案）並逐欄驗證；寫入 `writeTextAtomic` + `0600`。
-- `plugin-panel-sizes.json`：見上。
 - 權限審計 JSONL：每行讀取時重新 `sanitizeAuditRecord`、壞行跳過、`0600`、500 筆上限（缺口見 L-4）。
 - History v6 遷移：欄位以 `PRAGMA table_info` 檢查後 `ALTER TABLE … ADD COLUMN`（表名／欄名為常數，無注入面）；遷移與重建包在 transaction 內；token quality 降級為 `estimated` 直到下次掃描重新匯入；`recordQuotaSnapshot` 刪除 30 天前資料並限制 500 筆。風險在 M-3。
 - 本機用量掃描 `local-usage.ts` 改為非同步後仍保留 `lstat` 拒絕 symlink、`realpath` 包含檢查、`O_NOFOLLOW`、單檔／總量位元組上限與分塊讀取。

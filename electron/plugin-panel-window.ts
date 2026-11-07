@@ -3,11 +3,6 @@ export interface PluginPanelSize {
   height: number
 }
 
-export interface PluginPanelWorkArea {
-  width: number
-  height: number
-}
-
 /** A user drag keeps its flag alive this long after the last 'will-resize'. */
 export const USER_PANEL_RESIZE_WINDOW_MS = 600
 /** setBounds may emit several 'resize' events; all of them within this window are ours. */
@@ -55,63 +50,6 @@ const CHROME_HEADER_MIN_HEIGHT = 48
 
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
-}
-
-export function clampPluginPanelSize(size: PluginPanelSize, workArea: PluginPanelWorkArea): PluginPanelSize {
-  const availableWidth = Math.max(1, Math.floor(workArea.width))
-  const availableHeight = Math.max(1, Math.floor(workArea.height))
-  const minWidth = Math.min(MIN_WIDTH, availableWidth)
-  const minHeight = Math.min(MIN_HEIGHT, availableHeight)
-  return {
-    width: Math.round(Math.max(minWidth, Math.min(MAX_WIDTH, availableWidth, size.width))),
-    height: Math.round(Math.max(minHeight, Math.min(MAX_HEIGHT, availableHeight, size.height))),
-  }
-}
-
-/** Keeps one session's manual window size scoped to its plugin page. */
-export class PluginPanelWindowSizer {
-  private readonly manualSizes = new Map<string, PluginPanelSize>()
-  private onChange: ((sizes: ReadonlyMap<string, PluginPanelSize>) => void) | null = null
-  private baseSize: PluginPanelSize | null = null
-  private activeId: string | null = null
-
-  /** 載入先前保存的尺寸（已驗證）；之後每次手動調整都會通知 listener 持久化。 */
-  restore(sizes: ReadonlyMap<string, PluginPanelSize>, onChange: (sizes: ReadonlyMap<string, PluginPanelSize>) => void): void {
-    for (const [pluginId, size] of sizes) this.manualSizes.set(pluginId, { ...size })
-    this.onChange = onChange
-  }
-
-  activePluginId(): string | null {
-    return this.activeId
-  }
-
-  begin(
-    pluginId: string,
-    currentSize: PluginPanelSize,
-    preferredSize: PluginPanelSize | undefined,
-    workArea: PluginPanelWorkArea,
-  ): PluginPanelSize {
-    if (!this.activeId) this.baseSize = clampPluginPanelSize(currentSize, workArea)
-    this.activeId = pluginId
-    const requested = this.manualSizes.get(pluginId) ?? preferredSize ?? this.baseSize ?? currentSize
-    return clampPluginPanelSize(requested, workArea)
-  }
-
-  recordManualSize(pluginId: string, size: PluginPanelSize, workArea: PluginPanelWorkArea): boolean {
-    if (this.activeId !== pluginId || !finite(size.width) || !finite(size.height)) return false
-    const clamped = clampPluginPanelSize(size, workArea)
-    const previous = this.manualSizes.get(pluginId)
-    this.manualSizes.set(pluginId, clamped)
-    if (!previous || previous.width !== clamped.width || previous.height !== clamped.height) this.onChange?.(this.manualSizes)
-    return true
-  }
-
-  finish(): PluginPanelSize | null {
-    const baseSize = this.baseSize
-    this.activeId = null
-    this.baseSize = null
-    return baseSize
-  }
 }
 
 /** Verifies the native child view stays inside the host-drawn frame and below its header. */
