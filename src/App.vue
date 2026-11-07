@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import DesktopPet from '@/components/DesktopPet.vue'
 import StatusPanel from '@/components/StatusPanel.vue'
@@ -14,6 +14,32 @@ import { HIT_DILATE_PX, decidePassthrough, hasOpaquePixel } from '@/utils/pet-hi
 
 const store = useAgentStore()
 const isPanelWindow = window.location.hash === '#panel'
+
+// First launch: the pet window opens the panel once; the panel then shows the intro wizard.
+// Existing installs that already have a connected tool are marked complete without any prompt.
+const onboardingFirstRun = ref(false)
+
+function closeWizard() {
+  onboardingFirstRun.value = false
+  store.closeSetupWizard()
+}
+
+async function maybeStartOnboarding(): Promise<boolean> {
+  const api = window.electronAPI
+  if (!api?.getOnboardingState) return false
+  try {
+    const state = await api.getOnboardingState()
+    if (!state || state.completedAt !== undefined || state.skippedAt !== undefined) return false
+    const status = await api.checkIntegration()
+    if (status?.adapters.some(adapter => adapter.installable && adapter.installed)) {
+      void api.updateOnboardingState('completed')
+      return false
+    }
+    return true
+  } catch {
+    return false
+  }
+}
 
 let cleanupListener: (() => void) | null = null
 let cleanupPanelOpened: (() => void) | null = null
@@ -289,6 +315,18 @@ onMounted(() => {
       .then((count: unknown) => store.setPluginFeedUnreadCount(count))
       .catch(() => {})
   }
+  if (electronAPI?.getOnboardingState) {
+    void maybeStartOnboarding().then((needed) => {
+      if (!needed) return
+      if (isPanelWindow) {
+        onboardingFirstRun.value = true
+        store.openSetupWizard()
+      } else {
+        // Give the pet a moment to appear, then open the panel (which shows the wizard).
+        window.setTimeout(() => window.electronAPI?.togglePanel(), 1500)
+      }
+    })
+  }
   if (isPanelWindow && electronAPI?.onPanelOpened) {
     cleanupPanelOpened = electronAPI.onPanelOpened((options: { restore: boolean }) => {
       store.handlePanelOpened(options)
@@ -445,7 +483,7 @@ onUnmounted(() => {
     <template v-if="isPanelWindow">
       <StatusPanel />
       <Transition name="wizard">
-        <SetupWizard v-if="store.showWizard" @close="store.closeSetupWizard()" />
+        <SetupWizard v-if="store.showWizard" :first-run="onboardingFirstRun" @close="closeWizard" />
       </Transition>
       <Transition name="wizard">
         <ProjectMcpPanel v-if="store.showProjectMcpPanel" @close="store.closeProjectMcpPanel()" />

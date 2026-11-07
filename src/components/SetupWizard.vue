@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import type {
   AdapterRuntimeStatus,
   AgentAdapterId,
   DiagnosticReport,
+  InstallErrorCode,
+  InstallOutcome,
 } from '@/types/agent-adapter'
 import type { AgentSource } from '@/types/agent'
 import { locale, t, translateBackendError, type TranslationKey } from '@/i18n'
@@ -12,14 +14,39 @@ import Card from '@/components/ui/Card.vue'
 import Icon from '@/components/ui/Icon.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
+const props = defineProps<{
+  /** Opened automatically on the first launch: start with the short intro. */
+  firstRun?: boolean
+}>()
+
 const emit = defineEmits<{
   (e: 'close'): void
 }>()
+
+// intro (what the pet does) -> tools (install hooks). Replays from Settings go straight to tools.
+const step = ref<'intro' | 'tools'>(props.firstRun ? 'intro' : 'tools')
+const anyReady = computed(() => tools.value.some(tool => tool.installable && tool.health === 'ready'))
+
+const INTRO_CARDS = [
+  { icon: 'bell', title: 'onboarding.introStatusTitle', body: 'onboarding.introStatusBody' },
+  { icon: 'lock', title: 'onboarding.introPermissionTitle', body: 'onboarding.introPermissionBody' },
+  { icon: 'growth', title: 'onboarding.introGrowthTitle', body: 'onboarding.introGrowthBody' },
+] as const satisfies ReadonlyArray<{ icon: string, title: TranslationKey, body: TranslationKey }>
+
+// Finishing with at least one connected tool completes onboarding; leaving earlier is remembered as
+// a skip so the wizard does not reopen on its own. Replays never downgrade a completed state.
+function finish() {
+  const action = anyReady.value ? 'completed' : 'skipped'
+  if (props.firstRun || anyReady.value) void window.electronAPI?.updateOnboardingState(action)
+  emit('close')
+}
 
 interface ToolStatus extends AdapterRuntimeStatus {
   verifiedAt?: number
   testError?: string
   diagnosis?: DiagnosticReport
+  /** Result of the last install/repair, shown inside the card until the next one. */
+  outcome?: InstallOutcome
 }
 
 const tools = ref<ToolStatus[]>([])
@@ -50,30 +77,69 @@ function stopElapsedTimer() {
   }
 }
 
+// Re-detect without throwing away what the user already learned: results of tests, diagnoses and
+// the last install outcome survive a refresh. Only the very first load shows the full loader.
 async function detectTools() {
-  loading.value = true
+  const firstLoad = tools.value.length === 0
+  if (firstLoad) loading.value = true
   error.value = ''
-  startElapsedTimer()
+  if (firstLoad) startElapsedTimer()
   try {
     const status = await Promise.race([
       window.electronAPI?.checkIntegration() ?? Promise.resolve(null),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
     ])
     if (status) {
-      tools.value = status.adapters.map(adapter => ({ ...adapter }))
-    } else {
+      const previous = new Map(tools.value.map(tool => [tool.id, tool]))
+      tools.value = status.adapters.map((adapter) => {
+        const old = previous.get(adapter.id)
+        return {
+          ...adapter,
+          verifiedAt: old?.verifiedAt,
+          testError: old?.testError,
+          diagnosis: old?.diagnosis,
+          outcome: old?.outcome,
+        }
+      })
+    } else if (firstLoad) {
       error.value = t('couldNotDetectTools')
     }
   } catch {
-    error.value = t('failedToDetectTools')
+    if (firstLoad) error.value = t('failedToDetectTools')
   }
   loading.value = false
   stopElapsedTimer()
 }
 
+const INSTALL_ERROR_KEYS: Record<InstallErrorCode, TranslationKey> = {
+  config_unparseable: 'onboarding.errorConfigUnparseable',
+  config_unsafe: 'onboarding.errorConfigUnsafe',
+  config_too_large: 'onboarding.errorConfigTooLarge',
+  permission_denied: 'onboarding.errorPermissionDenied',
+  file_busy: 'onboarding.errorFileBusy',
+  read_only: 'onboarding.errorReadOnly',
+  unknown: 'onboarding.errorUnknown',
+}
+
+function outcomeText(outcome: InstallOutcome): string {
+  if (outcome.action === 'failed') {
+    const code = outcome.errorCode ?? 'unknown'
+    const raw = outcome.errorPath ?? ''
+    const isConfigIssue = code.startsWith('config_')
+    return t(INSTALL_ERROR_KEYS[code], { path: isConfigIssue ? raw : raw ? ` (${raw})` : '' })
+  }
+  return t(`onboarding.outcome.${outcome.action}`, { count: outcome.changedFiles.length })
+}
+
+const installSummary = ref('')
+
+// Every selected tool is installed independently; one failure never blocks the others.
 async function install(target?: AgentAdapterId) {
   installing.value = target ?? 'all'
   installError.value = ''
+  installSummary.value = ''
+  let succeeded = 0
+  let failed = 0
   try {
     const targets = target
       ? [target]
@@ -83,18 +149,44 @@ async function install(target?: AgentAdapterId) {
       if (tool) {
         tool.verifiedAt = undefined
         tool.testError = undefined
+        tool.outcome = undefined
       }
-      const result = await window.electronAPI?.installAdapter(adapterId)
-      if (result && !result.ok) {
-        installError.value = translateBackendError(result.error || t('installFailed'))
-        break
+      try {
+        const result = await window.electronAPI?.installAdapter(adapterId)
+        const outcome: InstallOutcome = result?.outcome ?? {
+          adapterId,
+          action: result?.ok ? 'installed' : 'failed',
+          changedFiles: [],
+          backupPaths: [],
+          ...(result?.ok ? {} : { errorCode: 'unknown' as const }),
+        }
+        if (tool) tool.outcome = outcome
+        if (outcome.action === 'failed') failed += 1
+        else succeeded += 1
+      } catch {
+        failed += 1
+        if (tool) tool.outcome = { adapterId, action: 'failed', changedFiles: [], backupPaths: [], errorCode: 'unknown' }
       }
     }
   } catch {
     installError.value = t('installFailed')
   }
+  if (!target) installSummary.value = t('onboarding.installSummary', { ok: succeeded, failed })
   installing.value = null
   await detectTools()
+}
+
+function actionLabel(tool: ToolStatus): string {
+  if (installing.value === tool.id) return t('installing')
+  if (tool.health === 'ready') return t('reinstall')
+  return t(tool.health === 'degraded' ? 'onboarding.repair' : 'install')
+}
+
+const RESTART_KEYS: Record<AgentAdapterId, TranslationKey> = {
+  opencode: 'onboarding.restartOpenCode',
+  codex: 'onboarding.restartCodex',
+  'claude-code': 'onboarding.restartClaudeCode',
+  'generic-http': 'onboarding.restartOpenCode',
 }
 
 function requestRemoval(target: AgentAdapterId | 'all') {
@@ -205,19 +297,30 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="setup-overlay" @click.self="emit('close')">
+  <div class="setup-overlay" @click.self="finish">
     <div class="setup-wizard">
       <div class="wizard-header">
         <div class="wizard-title-copy">
           <h2>{{ t('setupWizardTitle') }}</h2>
           <p>{{ t('setupWizardHelp') }}</p>
         </div>
-        <Button variant="ghost" icon-only :aria-label="t('close')" @click="emit('close')">
+        <Button variant="ghost" icon-only :aria-label="t('close')" @click="finish">
           <Icon name="close" />
         </Button>
       </div>
 
-      <div v-if="loading" class="loading">
+      <div v-if="step === 'intro'" class="intro">
+        <Card v-for="card in INTRO_CARDS" :key="card.title" class="intro-card">
+          <div class="intro-card-head">
+            <Icon :name="card.icon" :size="18" />
+            <strong>{{ t(card.title) }}</strong>
+          </div>
+          <p>{{ t(card.body) }}</p>
+        </Card>
+        <p class="wizard-note">{{ t('onboarding.introNext') }}</p>
+      </div>
+
+      <div v-else-if="loading" class="loading">
         <div class="pixel-loader">
           <span v-for="i in 9" :key="i" class="pixel-cell" :style="{ animationDelay: `${(i % 3) * 0.12}s` }" />
         </div>
@@ -264,14 +367,14 @@ onUnmounted(() => {
                 {{ diagnosing === tool.id ? t('diagnosing') : t('diagnose') }}
               </Button>
               <Button
-                variant="primary"
+                :variant="tool.health === 'ready' ? 'secondary' : 'primary'"
                 size="sm"
                 class="tool-action install-action install-btn"
                 v-if="tool.installable && tool.installTarget"
                 :disabled="installing !== null || testing !== null || diagnosing !== null || removing !== null"
                 @click="install(tool.id)"
               >
-                {{ installing === tool.id ? t('installing') : tool.installed ? t('reinstall') : t('install') }}
+                {{ actionLabel(tool) }}
               </Button>
               <Button
                 variant="secondary"
@@ -292,6 +395,20 @@ onUnmounted(() => {
           <div class="capability-list">
             <span v-for="capability in capabilityLabels(tool)" :key="capability" class="capability-chip">{{ capability }}</span>
           </div>
+          <div
+            v-if="tool.outcome"
+            class="test-result"
+            :class="tool.outcome.action === 'failed' ? 'failed' : 'passed'"
+            :role="tool.outcome.action === 'failed' ? 'alert' : 'status'"
+          >
+            {{ outcomeText(tool.outcome) }}
+            <template v-if="tool.outcome.backupPaths.length">
+              {{ t('onboarding.backupMade', { path: tool.outcome.backupPaths[0] ?? '' }) }}
+            </template>
+            <template v-if="tool.outcome.action === 'installed' || tool.outcome.action === 'repaired'">
+              {{ t(RESTART_KEYS[tool.id]) }}
+            </template>
+          </div>
           <div v-if="tool.verifiedAt" class="test-result passed">
             {{ t('receiverVerifiedAt', { time: new Date(tool.verifiedAt).toLocaleTimeString(locale) }) }}
           </div>
@@ -308,25 +425,38 @@ onUnmounted(() => {
         </Card>
       </div>
 
+      <template v-if="step === 'intro'">
+        <div class="wizard-actions">
+          <Button variant="ghost" @click="finish">{{ t('onboarding.skipForNow') }}</Button>
+          <Button variant="primary" @click="step = 'tools'">{{ t('onboarding.start') }}</Button>
+        </div>
+      </template>
+      <template v-else>
       <p class="wizard-note">{{ t('adapterNote') }}</p>
-
-      <div v-if="installError" class="error-msg" role="alert">{{ installError }}</div>
-      <p v-else-if="removalNotice" class="wizard-note" role="status">{{ removalNotice }}</p>
-
-      <div class="wizard-actions">
-        <Button
-          variant="ghost"
-          class="cleanup-btn"
-          :disabled="installing !== null || removing !== null"
-          @click="requestRemoval('all')"
-        >
-          {{ removing === 'all' ? t('removing') : t('onboarding.cleanupAll') }}
-        </Button>
-        <Button variant="secondary" @click="detectTools">{{ t('refresh') }}</Button>
-        <Button variant="primary" :disabled="installing !== null" @click="install()">
-          {{ installing === 'all' ? t('installing') : t('installAll') }}
-        </Button>
-      </div>
+  
+        <div v-if="installError" class="error-msg" role="alert">{{ installError }}</div>
+        <p v-if="installSummary" class="wizard-note" role="status">{{ installSummary }}</p>
+        <p v-else-if="removalNotice" class="wizard-note" role="status">{{ removalNotice }}</p>
+  
+        <div class="wizard-actions">
+          <Button
+            variant="ghost"
+            class="cleanup-btn"
+            :disabled="installing !== null || removing !== null"
+            @click="requestRemoval('all')"
+          >
+            {{ removing === 'all' ? t('removing') : t('onboarding.cleanupAll') }}
+          </Button>
+          <Button variant="secondary" @click="detectTools">{{ t('refresh') }}</Button>
+          <Button variant="primary" :disabled="installing !== null" @click="install()">
+            {{ installing === 'all' ? t('installing') : t('installAll') }}
+          </Button>
+        </div>
+        <p v-if="anyReady" class="wizard-note" role="status">{{ t('onboarding.nextSteps') }}</p>
+        <div v-if="anyReady" class="wizard-actions">
+          <Button variant="primary" @click="finish">{{ t('onboarding.finish') }}</Button>
+        </div>
+      </template>
     </div>
 
     <ConfirmDialog

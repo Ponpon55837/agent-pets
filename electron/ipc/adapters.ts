@@ -2,6 +2,7 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import type { AgentAdapterRegistry } from '../agent-adapter.ts'
 import { isAgentAdapterId } from '../agent-adapter.ts'
 import { IPC_CHANNELS } from './channels.ts'
+import type { InstallOutcome } from '../../src/types/agent-adapter.ts'
 import type { AdapterDiagnoseIpcResult, AdapterInstallIpcResult, AdapterIntegrationStatusIpcResult, AdapterUninstallIpcResult } from '../../src/types/ipc.ts'
 
 export interface AdapterIpcDependencies {
@@ -30,10 +31,17 @@ export function registerAdapterIpc(deps: AdapterIpcDependencies): void {
       return { ok: false, error: 'Adapter is not installable' }
     }
     try {
-      const status = await deps.getAgentAdapterRegistry()?.install(id)
-      return status ? { ok: true, status } : { ok: false, error: 'Adapter unavailable' }
+      const detection = await deps.getAgentAdapterRegistry()?.install(id)
+      if (!detection) return { ok: false, error: 'Adapter unavailable' }
+      const { outcome, ...status } = detection
+      return { ok: true, status, ...(outcome ? { outcome } : {}) }
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      const outcome = (error as { installOutcome?: InstallOutcome } | null)?.installOutcome
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+        ...(outcome ? { outcome } : {}),
+      }
     }
   })
 
