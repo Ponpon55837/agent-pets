@@ -190,43 +190,9 @@
 
 /* ── Dashboard tabs ───────────────────────────────────────────────────── */
 
-.status-panel :deep(.dashboard-tabs) {
-  display: flex;
-  width: max-content;
-  max-width: calc(100% - (var(--organic-space-4) * 2));
-  flex-shrink: 0;
-  gap: var(--organic-space-1);
-  margin: 0 var(--organic-space-4) var(--organic-space-3);
-  padding: var(--organic-space-1);
-  border-radius: var(--radius-pill);
-  background: var(--organic-surface-2);
-}
-
-.status-panel :deep(.dashboard-tab) {
+.status-panel :deep(.dashboard-nav) {
   flex: 0 0 auto;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-heading);
-  font-size: var(--font-body-md);
-}
-
-.status-panel :deep(.dashboard-tab:hover:not(:disabled)) {
-  border-color: transparent;
-  background: var(--organic-surface-off);
-  color: var(--text-primary);
-}
-
-.status-panel :deep(.dashboard-tab.active) {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-bright);
-}
-
-.status-panel :deep(.dashboard-tab.active:hover:not(:disabled)) {
-  background: var(--accent-hover);
-  color: var(--accent-bright);
+  padding: 0 var(--organic-space-4) var(--organic-space-3);
 }
 
 .status-panel :deep(.tab-panel) {

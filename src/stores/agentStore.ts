@@ -1514,7 +1514,9 @@ export const useAgentStore = defineStore('agent', () => {
   // Called by electron/main.ts whenever the panel window transitions from
   // hidden to visible. A restore keeps the previous screen (including a
   // suspended plugin panel); any other open goes back to the Sessions view.
+  const panelOpenCount = ref(0)
   function handlePanelOpened(options?: { restore?: boolean }) {
+    panelOpenCount.value += 1
     if (options?.restore) return
     panelView.value = 'sessions'
     showWizard.value = false
@@ -1778,6 +1780,7 @@ export const useAgentStore = defineStore('agent', () => {
     backToSessions,
     handlePanelOpened,
     panelPinned,
+    panelOpenCount,
     setPanelPinned,
     setPanelModalLock,
     setPet,

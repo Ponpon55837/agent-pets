@@ -6,14 +6,17 @@ import { t } from '@/i18n'
 import type { PluginEventSourceStatusView } from '@/types/plugin'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
+import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import InlinePermissionCard from '@/components/ui/InlinePermissionCard.vue'
 import PetAnimation from '@/components/PetAnimation.vue'
 import StatusPanelHistory from '@/components/status-panel/StatusPanelHistory.vue'
 import StatusPanelSessions from '@/components/status-panel/StatusPanelSessions.vue'
 import StatusPanelUsage from '@/components/status-panel/StatusPanelUsage.vue'
+import { countByBucket } from '@/utils/session-view'
 import { DEFAULT_SETTINGS_GROUP, SETTINGS_GROUPS, isSettingsGroupId, type SettingsGroupId } from '@/utils/settingsRegistry'
 
 const store = useAgentStore()
+const panelRoot = ref<HTMLElement | null>(null)
 const settingsShortcut = /Mac/i.test(navigator.platform) ? '\u2318,' : 'Ctrl+,'
 
 type DashboardTab = 'sessions' | 'usage' | 'history'
@@ -31,6 +34,8 @@ function readStoredSettingsGroup(): SettingsGroupId {
 // The last-used group is remembered across panel opens.
 const settingsGroup = ref<SettingsGroupId>(readStoredSettingsGroup())
 const dashboardTab = ref<DashboardTab>('sessions')
+// Usage and History mount on first visit, then stay mounted so their state survives tab switches.
+const visitedTabs = ref(new Set<DashboardTab>(['sessions']))
 const requestedPluginViewId = ref('')
 const pluginEventSourceStatuses = ref<PluginEventSourceStatusView[]>([])
 const nowTick = ref(Date.now())
@@ -45,11 +50,12 @@ const settingsGroupLabel = computed(() => {
   const group = SETTINGS_GROUPS.find(item => item.id === settingsGroup.value)
   return group ? t(group.labelKey) : ''
 })
-const dashboardTabs = computed<Array<{ id: DashboardTab; label: string }>>(() => [
-  { id: 'sessions', label: t('sessions') },
-  { id: 'usage', label: t('tokenRemaining') },
-  { id: 'history', label: t('history') },
+const dashboardTabs = computed(() => [
+  { value: 'sessions', label: t('sessions'), badge: attentionCount.value },
+  { value: 'usage', label: t('tokenRemaining') },
+  { value: 'history', label: t('history') },
 ])
+const attentionCount = computed(() => countByBucket(store.sessionList).attention)
 const activePetName = computed(() => store.pets.find(pet => pet.id === store.activePetId)?.displayName ?? t('appName'))
 const evolutionLabels: Record<string, Parameters<typeof t>[0]> = {
   egg: 'evolutionEgg', baby: 'evolutionBaby', teen: 'evolutionTeen', adult: 'evolutionAdult', master: 'evolutionMaster',
@@ -66,16 +72,6 @@ function syncTickTimer(): void {
     return
   }
   if (!tickTimer) tickTimer = setInterval(() => { nowTick.value = Date.now() }, 1000)
-}
-
-function onTabKeydown(event: KeyboardEvent): void {
-  const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
-  if (!step) return
-  event.preventDefault()
-  const ids = dashboardTabs.value.map(tab => tab.id)
-  const next = ids[(ids.indexOf(dashboardTab.value) + step + ids.length) % ids.length]
-  selectDashboardTab(next)
-  document.getElementById(`tab-${next}`)?.focus()
 }
 
 // Esc steps back one level: wizard / MCP, then settings, then hide the panel.
@@ -102,12 +98,22 @@ function openPluginSettings(): void {
 
 function selectDashboardTab(tab: DashboardTab): void {
   dashboardTab.value = tab
+  visitedTabs.value.add(tab)
   if ((tab === 'sessions' || tab === 'usage') && !store.quotaUsage) void store.refreshQuota()
 }
 
 function permissionSourceLabel(agentId: string): string {
   return SOURCE_LABELS[agentId as keyof typeof SOURCE_LABELS] ?? agentId
 }
+
+// Move keyboard focus into the panel whenever it is (re)opened so Tab / arrows work immediately.
+watch(() => store.panelOpenCount, async () => {
+  await nextTick()
+  const target = store.panelView === 'settings'
+    ? panelRoot.value?.querySelector<HTMLElement>('.panel-header button')
+    : document.getElementById(`tab-${dashboardTab.value}`)
+  target?.focus({ preventScroll: true })
+})
 
 watch(settingsGroup, group => {
   try { localStorage.setItem(SETTINGS_GROUP_STORAGE_KEY, group) } catch {}
@@ -152,7 +158,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="status-panel" @click.stop>
+  <div ref="panelRoot" class="status-panel" :inert="store.showWizard || store.showProjectMcpPanel" @click.stop>
     <div class="panel-header">
       <Button v-if="store.panelView === 'settings'" variant="ghost" icon-only :title="t('back')" :aria-label="t('back')" @click="store.backToSessions()">
         <Icon name="back" />
@@ -199,28 +205,19 @@ onUnmounted(() => {
         <Icon name="warning" :size="18" />
         <span><strong>{{ store.permissionNotice.title }}</strong><small>{{ store.permissionNotice.detail }}</small></span>
       </div>
-      <div class="dashboard-tabs" role="tablist" :aria-label="t('dashboardSections')">
-        <Button
-          v-for="tab in dashboardTabs"
-          :key="tab.id"
-          variant="ghost"
-          size="sm"
-          class="dashboard-tab"
-          :class="{ active: dashboardTab === tab.id }"
-          role="tab"
-          :id="`tab-${tab.id}`"
-          :aria-selected="dashboardTab === tab.id"
-          :aria-controls="`panel-${tab.id}`"
-          :tabindex="dashboardTab === tab.id ? 0 : -1"
-          @click="selectDashboardTab(tab.id)"
-          @keydown="onTabKeydown"
-        >
-          {{ tab.label }}
-        </Button>
+      <div class="dashboard-nav">
+        <SegmentedControl
+          :model-value="dashboardTab"
+          :options="dashboardTabs"
+          :ariaLabel="t('dashboardSections')"
+          id-prefix="tab-"
+          panel-id-prefix="panel-"
+          @update:model-value="selectDashboardTab($event as DashboardTab)"
+        />
       </div>
       <StatusPanelSessions v-show="dashboardTab === 'sessions'" :active="dashboardTab === 'sessions'" :now-tick="nowTick" :plugin-event-source-statuses="pluginEventSourceStatuses" @manage-plugins="openPluginSettings" />
-      <StatusPanelUsage v-show="dashboardTab === 'usage'" :now-tick="nowTick" />
-      <StatusPanelHistory v-show="dashboardTab === 'history'" :active="dashboardTab === 'history'" />
+      <StatusPanelUsage v-if="visitedTabs.has('usage')" v-show="dashboardTab === 'usage'" :now-tick="nowTick" />
+      <StatusPanelHistory v-if="visitedTabs.has('history')" v-show="dashboardTab === 'history'" :active="dashboardTab === 'history'" />
     </template>
 
     <SettingsPage v-else v-model:group="settingsGroup" :requested-plugin-id="requestedPluginViewId" />
