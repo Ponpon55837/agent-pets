@@ -398,15 +398,17 @@ async function loadImage() {
   }
 
   const targetId = pet ? id : store.defaultPetId
-  const cacheKey = pet?.pluginSkin?.cacheKey ?? targetId
+  const isCustom = Boolean(pet && !pet.builtIn && !pet.pluginSkin)
+  // A custom sheet's URL carries its modification time, so it is the cache
+  // key: re-importing the same id can never show the previous image.
+  const source = await spriteSourceFor(pet, targetId)
+  if (sequence !== loadSequence) return
+  const cacheKey = pet?.pluginSkin?.cacheKey ?? (isCustom && source ? source : targetId)
   const cached = getCachedSprite(cacheKey)
   if (cached) {
     applyImage(cached, cacheKey)
     return
   }
-
-  const source = await spriteSourceFor(pet, targetId)
-  if (sequence !== loadSequence) return
   const loaded = source ? await loadPetSprite(cacheKey, source) : null
   if (sequence !== loadSequence) return
   if (loaded) {

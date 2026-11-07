@@ -24,7 +24,7 @@
 | `add-custom-pet` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | addCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `rename-custom-pet` | `handle` | 設定面板 main frame | 型別；長度／數量上限；isFile, isSymbolicLink；無效輸入回安全預設或錯誤 | renameCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `remove-custom-pet` | `handle` | 設定面板 main frame | isDirectory, isSymbolicLink；無效輸入回安全預設或錯誤 | removeCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
-| `get-custom-pet-sprite` | `handle` | 受信任寵物或設定面板 main frame | isFile, isSymbolicLink；無效輸入回安全預設或錯誤 | getCustomPetSprite (invoke) | `tests/ipc-pet-assets.test.mts` |
+| `get-custom-pet-sprite` | `handle` | 受信任寵物或設定面板 main frame | 數值範圍；isFile, isSymbolicLink；無效輸入回安全預設或錯誤 | getCustomPetSprite (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `import-pet-zip` | `handle` | 設定面板 main frame | 長度／數量上限；isFile, isSymbolicLink, isSupportedRasterImage；無效輸入回安全預設或錯誤 | importPetZip (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `import-pet-sprite` | `handle` | 設定面板 main frame | 長度／數量上限；isFile, isSymbolicLink, isSupportedRasterImage；無效輸入回安全預設或錯誤 | importPetSprite (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `pet-drag-start` | `on` | 寵物視窗 main frame | handler／controller 驗證 payload；拒絕無效輸入 | startDrag (send) | `tests/ipc-pet-motion.test.mts` |
