@@ -18,6 +18,8 @@ import { playCue, type SoundCue } from '@/utils/sound'
 import { formatDateParts } from '@/utils/intl-format'
 
 const store = useAgentStore()
+// "Switch to app" uses macOS LaunchServices; on Windows it is not offered yet (docs/ux-overhaul/windows-todo.md).
+const isMac = /Mac/i.test(navigator.platform)
 
 // Product names are proper nouns, not translatable copy. Claude Code moves to
 // the approver list only while answering from the pet is turned on.
@@ -107,6 +109,18 @@ function preview(cue: SoundCue): void {
     />
     <ToggleRow :model-value="store.rightClickHideEnabled" :label="t('rightClickHide')" :help="t('rightClickHideHelp')" @update:model-value="store.setRightClickHideEnabled($event)" />
     <ToggleRow :model-value="store.permissionBubbleEnabled" :label="t('permissionBubble')" :help="t('permissionBubbleHelp', { seconds: PERMISSION_DEFAULT_TTL_SECONDS })" @update:model-value="store.setPermissionBubbleEnabled($event)" />
+  </Card>
+
+  <Card :title="t('panel.jumpSettingsHeading')">
+    <ToggleRow :model-value="store.sessionJumpEnabled" :label="t('panel.jumpSetting')" :help="t('panel.jumpSettingHelp')" @update:model-value="store.setSessionJumpEnabled($event)" />
+    <ToggleRow
+      v-if="isMac"
+      :model-value="store.sessionJumpSwitchAppEnabled"
+      :disabled="!store.sessionJumpEnabled"
+      :label="t('panel.jumpSwitchSetting')"
+      :help="t('panel.jumpSwitchSettingHelp')"
+      @update:model-value="store.setSessionJumpSwitchAppEnabled($event)"
+    />
   </Card>
 
   <Card :title="t('permission.soundHeading')">

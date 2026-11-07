@@ -371,6 +371,21 @@
   user-select: text;
 }
 
+.status-panel :deep(.session-jump-actions) {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--organic-space-2);
+  padding-top: var(--organic-space-1);
+}
+
+.status-panel :deep(.session-jump-status) {
+  min-width: 0;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
 .status-panel :deep(.session-filter-bar) {
   display: flex;
   flex: 0 0 auto;

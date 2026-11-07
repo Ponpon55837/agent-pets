@@ -863,6 +863,17 @@
   margin: 0 3px;
 }
 
+/* With several sessions in a family: which one needs you, and how many others there are. */
+.line-project {
+  margin-right: 0.3em;
+  font-weight: 500;
+}
+
+.line-more {
+  margin-left: 0.3em;
+  opacity: 0.75;
+}
+
 .status-line-enter-active,
 .status-line-leave-active {
   transition: opacity var(--transition-base), transform var(--transition-base);

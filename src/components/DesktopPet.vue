@@ -22,6 +22,7 @@ import { useKeyedRefs, usePetBubbleAnchor } from '@/composables/usePetBubbleAnch
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 import { describeTool } from '@/utils/pet-toast'
+import { truncateProject } from '@/utils/session-attention'
 import PermissionBubble from '@/components/permission/PermissionBubble.vue'
 import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
 import { formatDateParts } from '@/utils/intl-format'
@@ -236,7 +237,7 @@ function disposeShimejiEnvironment(): void {
 // to a single line showing the pet's overall (idle/offline) state.
 const displayLines = computed(() => {
   if (store.familyLines.length > 0) return store.familyLines
-  return [{ key: 'overall', label: '', variants: [], state: store.currentState, project: undefined, count: 0, since: undefined, petId: store.activePetId }]
+  return [{ key: 'overall', label: '', variants: [], state: store.currentState, project: undefined, count: 0, since: undefined, petId: store.activePetId, sessionKey: '' }]
 })
 
 // With only one active family, one pet reflects it (and the status lines
@@ -1017,7 +1018,7 @@ watch(() => store.levelUpEvent, (event) => {
               <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
               <span class="line-text">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
-                <span class="line-sep">·</span>{{ stateAriaLabel(line.state) }}
+                <span class="line-sep">·</span><template v-if="line.count > 1 && line.project"><span class="line-project">{{ truncateProject(line.project) }}</span></template>{{ stateAriaLabel(line.state) }}<span v-if="line.count > 1" class="line-more">(+{{ line.count - 1 }})</span>
               </span>
               <span v-if="pluginBadgesVisible" class="plugin-status-badges">
                 <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
@@ -1097,7 +1098,7 @@ watch(() => store.levelUpEvent, (event) => {
               <template v-if="line.label">
                 <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
                 <span class="line-sep">·</span>
-              </template>{{ stateAriaLabel(line.state) }}
+              </template><template v-if="line.count > 1 && line.project"><span class="line-project">{{ truncateProject(line.project) }}</span></template>{{ stateAriaLabel(line.state) }}<span v-if="line.count > 1" class="line-more">(+{{ line.count - 1 }})</span>
             </span>
             <span v-if="pluginBadgesVisible" class="plugin-status-badges">
               <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">

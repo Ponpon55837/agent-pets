@@ -61,5 +61,17 @@
   "panel.dndActive": "勿擾模式已開啟",
   "panel.sizeReset": "面板大小",
   "panel.sizeResetAction": "重設面板大小",
-  "panel.sizeResetHelp": "拖曳面板邊緣可以調整大小，所有畫面共用同一個大小。重設會回到預設尺寸。"
+  "panel.sizeResetHelp": "拖曳面板邊緣可以調整大小，所有畫面共用同一個大小。重設會回到預設尺寸。",
+  "panel.jumpActionsLabel": "回到工作階段",
+  "panel.jumpOpenFolder": "開啟專案資料夾",
+  "panel.jumpCopyPath": "複製專案路徑",
+  "panel.jumpCopied": "已複製路徑",
+  "panel.jumpUnavailable": "這個工作階段沒有可用的專案資料夾。",
+  "panel.jumpFailed": "動作沒有完成，請稍後再試。",
+  "panel.jumpRateLimited": "操作太頻繁，請稍候再試。",
+  "panel.jumpSettingsHeading": "回到工作階段",
+  "panel.jumpSetting": "顯示回到工作階段的動作",
+  "panel.jumpSettingHelp": "在工作階段列提供「開啟專案資料夾」與「複製專案路徑」。完整路徑只保留在 App 主程序。",
+  "panel.jumpSwitchSetting": "切換到 App",
+  "panel.jumpSwitchSettingHelp": "macOS：把工作階段所在的終端機或 IDE 帶到最前面（不會指定視窗或分頁）；點擊只關於一個工作階段的通知也會這樣做。不需要任何系統權限。"
 }
