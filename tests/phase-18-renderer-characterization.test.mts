@@ -133,3 +133,16 @@ test('settings header, numerics, plugins CTA and server banner keep their UI con
   const zh = JSON.parse(read('../src/locales/zh-TW.json')) as Record<string, string>
   assert.doesNotMatch(zh.presentationMcpSection, /[A-Za-z]/)
 })
+
+test('panel header shows overflow menu, settings and close in that order', () => {
+  const source = read('../src/components/StatusPanel.vue')
+  const right = source.slice(source.indexOf('<div class="header-right">'))
+  const more = right.indexOf('<ActionMenu')
+  const settings = right.indexOf('store.openSettings()')
+  const close = right.indexOf('store.closePanel()')
+  assert.ok(more > -1 && more < settings && settings < close)
+  assert.doesNotMatch(right.slice(0, close), /setDndEnabled\(!store|setPanelPinned\(!store/)
+  assert.match(source, /role: 'menuitemcheckbox'/)
+  assert.match(source, /id: 'theme'/)
+  assert.match(source, /header-more-dot/)
+})

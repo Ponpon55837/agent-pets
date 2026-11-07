@@ -13,6 +13,7 @@ import {
   enableCodexHooksFeatureText,
   fileHasAgentPetsHooks,
   isAgentPetsHook,
+  isLegacyElectronHook,
   mergeAgentPetsHooksFile,
   removeAgentPetsHooksFile,
   removeJsonKeyFile,
@@ -797,6 +798,9 @@ function rewriteInstalledAgentPetsHooks(filePath: string, target: 'codex' | 'cla
   const nodeBin = target === 'claude' ? (nodeResolver.resolveSync()?.path ?? '') : ''
   if (target === 'claude' && !nodeBin) return false // cannot repair without a real Node path
   return rewriteAgentPetsHookCommands(filePath, (hook) => {
+    // Never rewrite user config just because the Node path changed: only repair the known-bad
+    // state where the hook runs through the Electron executable.
+    if (!isLegacyElectronHook(hook)) return false
     let changed = false
     if (target === 'codex') {
       if (hook.command !== codexCommand) {

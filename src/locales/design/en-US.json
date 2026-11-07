@@ -1,6 +1,6 @@
 {
   "design.theme.title": "Theme",
-  "design.theme.help": "Colors for the panel and settings. Pet bubbles always stay dark.",
+  "design.theme.help": "Colors for the panel and settings, and for the desktop pet's bubbles, can be set separately.",
   "design.theme.system": "Match system",
   "design.theme.light": "Light",
   "design.theme.dark": "Dark",
@@ -12,5 +12,15 @@
   "design.state.waiting-permission": "Waiting for permission",
   "design.state.waiting-input": "Waiting for input",
   "design.state.success": "Done",
-  "design.state.error": "Error"
+  "design.state.error": "Error",
+  "design.theme.panelRow": "Panel",
+  "design.theme.petRow": "Pet",
+  "design.theme.petDark": "Dark",
+  "design.theme.petLight": "Light",
+  "design.theme.petFollow": "Follow panel",
+  "design.theme.menuLabel": "Appearance",
+  "design.theme.toggleLabel": "Appearance: {current} (click to switch to {next})",
+  "design.theme.cycle": "{current} → {next}",
+  "design.theme.panelEntry": "Panel theme",
+  "design.theme.petEntry": "Pet theme"
 }

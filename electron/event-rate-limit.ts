@@ -8,6 +8,10 @@ export interface EventRateLimiterOptions {
   /** Terminal events (success/error/permission) get their own, separate budget per session. */
   terminalPerSessionLimit?: number
   maxTrackedSessions?: number
+  /** Budget for all ordinary events combined, whatever their session ids (rotating ids cannot bypass it). */
+  globalEventLimit?: number
+  /** Same, for terminal events. */
+  globalTerminalLimit?: number
 }
 
 export interface EventRateLimiter {
@@ -22,9 +26,14 @@ export function createEventRateLimiter(options: EventRateLimiterOptions = {}): E
   const perSession = options.perSessionLimit ?? 500
   const terminalPerSession = options.terminalPerSessionLimit ?? 60
   const maxTracked = options.maxTrackedSessions ?? 500
+  const globalEvents = options.globalEventLimit ?? 2_000
+  const globalTerminal = options.globalTerminalLimit ?? 300
 
   let windowStartedAt = now()
   let requests = 0
+  let normalEvents = 0
+  let terminalEvents = 0
+  const overflow = { normal: 0, terminal: 0 }
   let counters = new Map<string, { normal: number; terminal: number }>()
 
   const roll = () => {
@@ -32,6 +41,10 @@ export function createEventRateLimiter(options: EventRateLimiterOptions = {}): E
     if (current - windowStartedAt >= windowMs) {
       windowStartedAt = current
       requests = 0
+      normalEvents = 0
+      terminalEvents = 0
+      overflow.normal = 0
+      overflow.terminal = 0
       counters = new Map()
     }
   }
@@ -44,12 +57,20 @@ export function createEventRateLimiter(options: EventRateLimiterOptions = {}): E
     },
     allowEvent(sessionKey, terminal) {
       roll()
+      // Global event budgets apply to every caller regardless of the session id they claim.
+      if (terminal) {
+        terminalEvents += 1
+        if (terminalEvents > globalTerminal) return false
+      } else {
+        normalEvents += 1
+        if (normalEvents > globalEvents) return false
+      }
       let entry = counters.get(sessionKey)
       if (!entry) {
-        // Never let an attacker-chosen session id grow the table without bound.
-        if (counters.size >= maxTracked) return true
-        entry = { normal: 0, terminal: 0 }
-        counters.set(sessionKey, entry)
+        // Fail closed: once the table is full, unknown sessions share one overflow bucket
+        // instead of getting a free pass or a fresh budget each.
+        entry = counters.size >= maxTracked ? overflow : { normal: 0, terminal: 0 }
+        if (entry !== overflow) counters.set(sessionKey, entry)
       }
       if (terminal) {
         entry.terminal += 1

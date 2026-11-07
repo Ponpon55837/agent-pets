@@ -1,5 +1,6 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { writeTextAtomic } from './safe-config-write.ts'
 
 // Dependency-free, read-only Git awareness for the project MCP setup. We never spawn git: the
 // index is parsed directly and `.git/info/exclude` is the only file ever written.
@@ -12,6 +13,20 @@ export interface GitLocation {
   gitDir: string
   /** Shared directory (differs from gitDir for linked worktrees). */
   commonDir: string
+  /**
+   * Set when `.git` points (via `gitdir` / `commondir`) outside the picked folder. Such a
+   * location is never read or written; callers report it and skip.
+   */
+  outside?: boolean
+}
+
+function isInside(root: string, target: string): boolean {
+  const relative = path.relative(root, target)
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+}
+
+function realpathOrNull(target: string): string | null {
+  try { return fs.realpathSync(target) } catch { return null }
 }
 
 export function findGitLocation(projectPath: string): GitLocation | null {
@@ -19,22 +34,29 @@ export function findGitLocation(projectPath: string): GitLocation | null {
   let stat: fs.Stats
   try { stat = fs.lstatSync(dotGit) } catch { return null }
   if (stat.isSymbolicLink()) return null
+  const root = realpathOrNull(projectPath)
+  if (!root) return null
   if (stat.isDirectory()) return { gitDir: dotGit, commonDir: dotGit }
   if (!stat.isFile() || stat.size > 4096) return null
   const match = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotGit, 'utf8'))
   if (!match) return null
   const gitDir = path.resolve(projectPath, match[1]!)
-  if (!fs.existsSync(gitDir)) return null
+  const realGitDir = realpathOrNull(gitDir)
+  if (!realGitDir) return null
+  if (!isInside(root, realGitDir)) return { gitDir, commonDir: gitDir, outside: true }
   let commonDir = gitDir
   try {
     const common = fs.readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim()
     if (common) commonDir = path.resolve(gitDir, common)
   } catch { /* plain repository */ }
-  return { gitDir, commonDir }
+  const realCommon = realpathOrNull(commonDir)
+  if (!realCommon || !isInside(root, realCommon)) return { gitDir, commonDir, outside: true }
+  return { gitDir: realGitDir, commonDir: realCommon }
 }
 
 /** Paths (POSIX separators) recorded in the index, or null if the index is absent/unsupported. */
 export function readTrackedPaths(location: GitLocation): Set<string> | null {
+  if (location.outside) return null
   const indexPath = path.join(location.gitDir, 'index')
   let buffer: Buffer
   try {
@@ -72,7 +94,15 @@ export function toPosixRelative(projectPath: string, filePath: string): string {
 
 /** Adds patterns to the repository-local exclude file. Returns the patterns that were newly added. */
 export function addLocalExcludes(location: GitLocation, patterns: string[]): string[] {
-  const excludePath = path.join(location.commonDir, 'info', 'exclude')
+  if (location.outside) throw new Error('Refusing to edit a git directory outside the project folder')
+  const infoDir = path.join(location.commonDir, 'info')
+  const excludePath = path.join(infoDir, 'exclude')
+  // The exclude file may only ever live in a real (non-symlinked) info directory.
+  try {
+    if (fs.lstatSync(infoDir).isSymbolicLink()) throw new Error('Refusing to edit an unsafe .git/info directory')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
   let existing = ''
   try {
     const stat = fs.lstatSync(excludePath)
@@ -87,7 +117,8 @@ export function addLocalExcludes(location: GitLocation, patterns: string[]): str
   const eol = existing.includes('\r\n') ? '\r\n' : '\n'
   const separator = existing.length > 0 && !existing.endsWith('\n') ? eol : ''
   const header = present.has('# Agent Pets local MCP config (contains local paths)') ? '' : `# Agent Pets local MCP config (contains local paths)${eol}`
-  fs.mkdirSync(path.dirname(excludePath), { recursive: true })
-  fs.writeFileSync(excludePath, `${existing}${separator}${header}${added.map(pattern => `/${pattern}`).join(eol)}${eol}`, 'utf8')
+  fs.mkdirSync(infoDir, { recursive: true })
+  if (fs.lstatSync(infoDir).isSymbolicLink()) throw new Error('Refusing to edit an unsafe .git/info directory')
+  writeTextAtomic(excludePath, `${existing}${separator}${header}${added.map(pattern => `/${pattern}`).join(eol)}${eol}`)
   return added
 }

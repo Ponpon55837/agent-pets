@@ -102,10 +102,9 @@ export function backupConfig(filePath: string, keep = MAX_BACKUPS): string | nul
   for (let suffix = 1; fs.existsSync(backupPath); suffix += 1) {
     backupPath = path.join(directory, `${base}-${suffix}`)
   }
-  fs.copyFileSync(source, backupPath, fs.constants.COPYFILE_EXCL)
-  if (process.platform !== 'win32') {
-    try { fs.chmodSync(backupPath, 0o600) } catch { /* best effort */ }
-  }
+  // Created 0600 from the start (a copy-then-chmod leaves a window where a secret-bearing
+  // config backup is readable by others).
+  fs.writeFileSync(backupPath, fs.readFileSync(source), { flag: 'wx', mode: 0o600 })
   const backups = listBackups(source)
   for (const stale of backups.slice(0, Math.max(0, backups.length - keep))) {
     try { fs.rmSync(stale, { force: true }) } catch { /* ignore */ }

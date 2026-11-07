@@ -179,7 +179,7 @@
 
 .pet-toast .plugin-feed-close:hover {
   background: var(--pet-bubble-border);
-  color: white;
+  color: var(--pet-bubble-text);
 }
 
 .presentation-say-icon {
@@ -211,7 +211,7 @@
   place-items: center;
   border-radius: 50%;
   background: color-mix(in srgb, var(--state-warn) 20%, transparent);
-  border: 1px solid color-mix(in srgb, var(--state-warn-bright) 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pet-bubble-warn-accent) 40%, transparent);
   font-size: var(--font-md);
   font-weight: 800;
 }
@@ -275,8 +275,8 @@
 }
 
 .pet-toast.waiting {
-  border-color: color-mix(in srgb, var(--state-warn-bright) 50%, transparent);
-  color: var(--state-warn-bright);
+  border-color: color-mix(in srgb, var(--pet-bubble-warn-accent) 50%, transparent);
+  color: var(--pet-bubble-warn-accent);
 }
 
 .pet-toast.activity {
@@ -448,7 +448,7 @@
   }
 
   .pet-toast.permission-notice {
-    border-color: var(--state-warn-bright);
+    border-color: var(--pet-bubble-warn-accent);
   }
 }
 

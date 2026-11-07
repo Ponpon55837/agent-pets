@@ -25,10 +25,22 @@ const KEY_VALUE_PATTERN =
 // user:password@host inside URLs.
 const URL_CREDENTIALS_PATTERN = /(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi
 
+// Credentials passed as flags/commands without a `name=value` shape.
+const COMMAND_SECRET_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
+  // curl -u user:pass / --user user:pass (no scheme)
+  [/(\s(?:-u|--user)[\s=]+)[^\s:]+:\S+/g, `$1${REDACTED}`],
+  // mysql -psecret / -p secret (mysql family only: `mkdir -p dir` must stay readable)
+  [/\b(mysql\w*|mariadb\w*|mongo\w*|redis-cli)\b([^\n|;&]*?\s)-p\s*(?!-)(\S+)/gi, `$1$2-p ${REDACTED}`],
+  // export FOO_TOKEN abc (space instead of =)
+  [/\b(export|set|setenv)(\s+[A-Za-z0-9_]*(?:password|passwd|secret|token|api[_-]?key|credential)[A-Za-z0-9_]*)\s+(?!=)(\S+)/gi, `$1$2 ${REDACTED}`],
+  // Email addresses
+  [/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g, '[email]'],
+]
+
 const HOME_PATTERNS: ReadonlyArray<RegExp> = [
-  /\/Users\/[^/\s'"]+/g,
-  /\/home\/[^/\s'"]+/g,
-  /\b[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s'"]+/g,
+  /\/Users\/(?:[^/\n'"]{1,64}(?=\/)|[^/\s'"]+)/g,
+  /\/home\/(?:[^/\n'"]{1,64}(?=\/)|[^/\s'"]+)/g,
+  /\b[A-Za-z]:[\\/]+Users[\\/]+(?:[^\\/\n'"]{1,64}(?=[\\/])|[^\\/\s'"]+)/g,
 ]
 
 /** Masks credentials and replaces the home directory prefix with `~`. */
@@ -41,6 +53,7 @@ export function redactSensitiveText(value: string): string {
   }
   result = result.replace(URL_CREDENTIALS_PATTERN, `$1${REDACTED}@`)
   result = result.replace(KEY_VALUE_PATTERN, `$1${REDACTED}`)
+  for (const [pattern, replacement] of COMMAND_SECRET_PATTERNS) result = result.replace(pattern, replacement)
   for (const pattern of HOME_PATTERNS) result = result.replace(pattern, '~')
   return result
 }

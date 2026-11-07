@@ -439,6 +439,9 @@ onMounted(() => {
         <p v-if="setupResult.excluded?.length" class="mcp-review-help">
           {{ t('onboarding.mcpExcluded', { files: setupResult.excluded.join(', ') }) }}
         </p>
+        <div v-for="warning in setupResult.warnings ?? []" :key="warning" class="mcp-inline-error" role="alert">
+          {{ warning === 'git_outside_project' ? t('onboarding.mcpWarnGitOutside') : t('onboarding.mcpWarnExcludeFailed') }}
+        </div>
         <div v-if="setupResult.trackedFiles?.length" class="mcp-inline-error">
           {{ t('onboarding.mcpTrackedResult', { files: setupResult.trackedFiles.join(', ') }) }}
         </div>

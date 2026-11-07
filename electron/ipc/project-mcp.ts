@@ -161,6 +161,10 @@ export function registerProjectMcpIpc(deps: ProjectMcpIpcDependencies): void {
     const requestedPath = typeof projectPath === 'string' ? projectPath : ''
     const registry = deps.getRegistry()
     if (!registry) return { ok: false, projectPath: requestedPath, results: [], error: 'Project MCP registry is unavailable' }
+    // Removal, like apply, may only act on folders that are already tracked.
+    if (!registry.has(requestedPath)) {
+      return { ok: false, projectPath: requestedPath, results: [], error: 'Project folder is not tracked' }
+    }
     try {
       deps.ensurePresentationMcpScript()
       const summary = deps.removeProjectMcp(requestedPath, deps.installOptions())

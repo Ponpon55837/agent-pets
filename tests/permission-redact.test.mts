@@ -31,3 +31,20 @@ test('ordinary commands are left alone', () => {
   assert.equal(redactSensitiveText('git status --short'), 'git status --short')
   assert.equal(redactSensitiveText('rm -rf ./dist && npm run build'), 'rm -rf ./dist && npm run build')
 })
+
+test('command-style secrets, emails and spaced user names are masked', () => {
+  const cases: Array<[string, RegExp]> = [
+    ['curl -u admin:hunter2 https://x.test', /hunter2/],
+    ['curl --user admin:hunter2 https://x.test', /hunter2/],
+    ['mysql -u root -psecret123 db', /secret123/],
+    ['mysql -h host -p hunter2 db', /hunter2/],
+    ['export FOO_TOKEN abcdef', /abcdef/],
+    ['mail jane.doe@example.com', /jane\.doe/],
+    ['cat /Users/Jane Doe/proj/file', /Jane|Doe/],
+    ['cat C:/Users/Jane Doe/proj/file', /Jane|Doe/],
+  ]
+  for (const [input, leaked] of cases) {
+    assert.doesNotMatch(redactSensitiveText(input), leaked, input)
+  }
+  assert.equal(redactSensitiveText('mkdir -p build/out'), 'mkdir -p build/out')
+})
