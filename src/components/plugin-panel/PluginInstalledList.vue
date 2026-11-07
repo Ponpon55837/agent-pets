@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { t } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
+import Input from '@/components/ui/Input.vue'
+import Select from '@/components/ui/Select.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PluginCard from '@/components/plugin-panel/PluginCard.vue'
 import { usePluginController } from '@/composables/plugin/context'
 
 const emit = defineEmits<{ explore: [] }>()
-const { plugins, loading, busy, enabledGlobally, selectArchive, updateGlobalPreferences } = usePluginController()
+const { plugins, filteredPlugins, installedSearch, installedFilter, loading, busy, enabledGlobally, selectArchive, updateGlobalPreferences } = usePluginController()
 </script>
 
 <template>
@@ -25,9 +27,21 @@ const { plugins, loading, busy, enabledGlobally, selectArchive, updateGlobalPref
       <Button :variant="enabledGlobally ? 'primary' : 'secondary'" size="sm" @click="emit('explore')">{{ t('plugins.browseCatalog') }}</Button>
       <Button variant="secondary" size="sm" :disabled="busy" @click="selectArchive">{{ t('plugins.installFromFile') }}</Button>
     </EmptyState>
-    <ul v-else class="plugin-list" :aria-label="t('pluginInstalledHeading')">
-      <PluginCard v-for="plugin in plugins" :key="plugin.id" :plugin="plugin" />
-    </ul>
+    <template v-else>
+      <div v-if="plugins.length > 3" class="plugin-filters">
+        <Input v-model="installedSearch" type="search" size="sm" :aria-label="t('plugins.searchInstalled')" :placeholder="t('plugins.searchInstalled')" />
+        <Select v-model="installedFilter" size="sm" :aria-label="t('plugins.filterLabel')">
+          <option value="all">{{ t('plugins.filterAll') }}</option>
+          <option value="enabled">{{ t('plugins.filterEnabled') }}</option>
+          <option value="updates">{{ t('plugins.filterUpdates') }}</option>
+          <option value="issues">{{ t('plugins.filterIssues') }}</option>
+        </Select>
+      </div>
+      <p v-if="filteredPlugins.length === 0" class="plugin-empty">{{ t('plugins.noMatches') }}</p>
+      <ul v-else class="plugin-list" :aria-label="t('pluginInstalledHeading')">
+        <PluginCard v-for="plugin in filteredPlugins" :key="plugin.id" :plugin="plugin" />
+      </ul>
+    </template>
   </section>
 </template>
 
@@ -45,6 +59,17 @@ const { plugins, loading, busy, enabledGlobally, selectArchive, updateGlobalPref
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.plugin-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.plugin-filters > :first-child {
+  min-width: 160px;
+  flex: 1 1 200px;
 }
 
 .plugin-limit-help {

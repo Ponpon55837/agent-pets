@@ -49,6 +49,8 @@ export interface PermissionGroupView {
   entries: PermissionEntryView[]
 }
 
+export type PluginInstalledFilter = 'all' | 'enabled' | 'updates' | 'issues'
+
 export type PluginDetailSection = 'overview' | 'settings' | 'commands' | 'diagnostics'
 
 export function usePluginPanelController(props: { requestedPluginId?: string }) {
@@ -121,6 +123,20 @@ const panelViewPlugin = computed(() => plugins.value.find(plugin => plugin.id ==
 const enabledGlobally = computed(() => snapshot.value?.preferences.pluginsEnabled ?? false)
 const onlineCatalogEnabled = computed(() => snapshot.value?.preferences.onlineCatalogEnabled ?? false)
 const dailyUpdateCheck = computed(() => snapshot.value?.preferences.dailyUpdateCheck ?? false)
+const installedSearch = ref('')
+const installedFilter = ref<PluginInstalledFilter>('all')
+const filteredPlugins = computed(() => {
+  const query = installedSearch.value.trim().toLocaleLowerCase()
+  const matches = plugins.value.filter(plugin => {
+    if (installedFilter.value === 'enabled' && !plugin.preference.enabled) return false
+    if (installedFilter.value === 'issues' && pluginStatusTone(plugin) !== 'warn') return false
+    if (installedFilter.value === 'updates' && !catalogItems.value.some(item => item.plugin.id === plugin.id && item.updateAvailable)) return false
+    if (!query) return true
+    return [plugin.id, pluginName(plugin), plugin.manifest?.author ?? ''].some(value => value.toLocaleLowerCase().includes(query))
+  })
+  // 需要處理的插件（崩潰、不相容）排在最前面。
+  return [...matches].sort((left, right) => Number(pluginStatusTone(right) === 'warn') - Number(pluginStatusTone(left) === 'warn'))
+})
 const filteredCatalogItems = computed(() => {
   const query = catalogSearch.value.trim().toLocaleLowerCase()
   if (!query) return catalogItems.value
@@ -1179,6 +1195,9 @@ onUnmounted(() => {
     onlineCatalogEnabled,
     dailyUpdateCheck,
     filteredCatalogItems,
+    installedSearch,
+    installedFilter,
+    filteredPlugins,
     hasCompatiblePlan,
     pendingPluginName,
     resourceFields,

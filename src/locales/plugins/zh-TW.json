@@ -118,5 +118,12 @@
   "plugins.detailFingerprint": "簽章金鑰指紋",
   "plugins.catalogSettings": "目錄設定",
   "plugins.applyUrl": "套用網址",
-  "plugins.localInstall": "本機安裝"
+  "plugins.localInstall": "本機安裝",
+  "plugins.searchInstalled": "搜尋已安裝的插件",
+  "plugins.filterLabel": "篩選已安裝的插件",
+  "plugins.filterAll": "全部",
+  "plugins.filterEnabled": "已啟用",
+  "plugins.filterUpdates": "可更新",
+  "plugins.filterIssues": "有問題",
+  "plugins.noMatches": "沒有符合條件的插件。"
 }

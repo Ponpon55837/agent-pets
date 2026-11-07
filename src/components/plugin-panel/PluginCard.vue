@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { t } from '@/i18n'
+import { locale, t } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
 import Chip from '@/components/ui/Chip.vue'
 import Icon from '@/components/ui/Icon.vue'
@@ -54,6 +54,7 @@ function onMenu(id: string): void {
         {{ pluginStatusLabel(plugin) }}
       </Chip>
     </div>
+    <p v-if="catalogItem" class="card-description">{{ catalogItem.plugin.description[locale] }}</p>
     <div v-if="localOnly || catalogItem?.updateAvailable" class="card-update">
       <Chip v-if="localOnly" tone="neutral" icon="info">{{ t('plugins.localInstall') }}</Chip>
       <template v-if="catalogItem?.updateAvailable">
@@ -129,6 +130,7 @@ function onMenu(id: string): void {
 
 .card-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
@@ -167,6 +169,17 @@ function onMenu(id: string): void {
   font-size: var(--font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.card-description {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .card-update {

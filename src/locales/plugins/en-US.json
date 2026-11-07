@@ -118,5 +118,12 @@
   "plugins.detailFingerprint": "Signing key fingerprint",
   "plugins.catalogSettings": "Catalog settings",
   "plugins.applyUrl": "Apply URL",
-  "plugins.localInstall": "Installed locally"
+  "plugins.localInstall": "Installed locally",
+  "plugins.searchInstalled": "Search installed plugins",
+  "plugins.filterLabel": "Filter installed plugins",
+  "plugins.filterAll": "All",
+  "plugins.filterEnabled": "Enabled",
+  "plugins.filterUpdates": "Updates available",
+  "plugins.filterIssues": "Needs attention",
+  "plugins.noMatches": "No plugins match."
 }
