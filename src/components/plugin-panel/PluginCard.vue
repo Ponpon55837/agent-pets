@@ -14,12 +14,14 @@ const props = defineProps<{ plugin: PluginPanelPlugin }>()
 
 const {
   pluginBusy, enabledGlobally, pluginName, pluginIconUrl, hidePluginIcon, pluginStatusLabel, pluginStatusTone,
-  openPluginDetail, openPluginPanelView, updatePluginPreference, requestRemove, reportPluginIssue,
+  catalogItemFor, catalogCheckComplete, installCatalogPlugin, openPluginDetail, openPluginPanelView, updatePluginPreference, requestRemove, reportPluginIssue,
 } = usePluginController()
 
 const name = computed(() => pluginName(props.plugin))
 const tone = computed(() => pluginStatusTone(props.plugin))
 const hasSettings = computed(() => Boolean(props.plugin.manifest?.contributes.settings))
+const catalogItem = computed(() => catalogItemFor(props.plugin.id))
+const localOnly = computed(() => catalogCheckComplete.value && !catalogItem.value)
 const hasPanel = computed(() => Boolean(props.plugin.manifest?.contributes.panelView))
 const needsAttention = computed(() => tone.value === 'warn')
 const menuItems = computed(() => [
@@ -51,6 +53,15 @@ function onMenu(id: string): void {
       <Chip :tone="tone === 'success' ? 'success' : tone === 'warn' ? 'warn' : 'neutral'" :icon="tone === 'success' ? 'check' : tone === 'warn' ? 'warning' : undefined">
         {{ pluginStatusLabel(plugin) }}
       </Chip>
+    </div>
+    <div v-if="localOnly || catalogItem?.updateAvailable" class="card-update">
+      <Chip v-if="localOnly" tone="neutral" icon="info">{{ t('plugins.localInstall') }}</Chip>
+      <template v-if="catalogItem?.updateAvailable">
+        <Chip tone="info" icon="arrow-up">{{ t('plugins.updateTo', { version: catalogItem.latestVersion.version }) }}</Chip>
+        <Button variant="secondary" size="sm" :disabled="pluginBusy(plugin.id)" :aria-label="t('plugins.updateNamed', { name })" @click="installCatalogPlugin(catalogItem)">
+          {{ t('pluginCatalogUpdate') }}
+        </Button>
+      </template>
     </div>
     <div class="card-actions">
       <Button
@@ -156,6 +167,13 @@ function onMenu(id: string): void {
   font-size: var(--font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.card-update {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .card-actions {

@@ -102,5 +102,21 @@
   "plugins.emptyDescription": "從線上目錄挑選，或安裝你信任的本機插件檔案。每個插件安裝前都會列出它要求的權限。",
   "plugins.emptyDescriptionOff": "插件目前已停用。先啟用插件，再從目錄挑選或安裝本機檔案；安裝後的插件預設為停用，仍需你逐一啟用。",
   "plugins.enablePlugins": "啟用插件",
-  "plugins.browseCatalog": "瀏覽插件目錄"
+  "plugins.browseCatalog": "瀏覽插件目錄",
+  "plugins.catalogOffTitle": "線上目錄尚未開啟",
+  "plugins.catalogOffDescription": "開啟後，Agent Pets 會連線到已設定的目錄索引來列出可安裝的插件與更新；只會讀取清單，不會自動下載或安裝。",
+  "plugins.catalogEnable": "開啟線上目錄",
+  "plugins.catalogLastChecked": "上次檢查：{time}",
+  "plugins.catalogEmpty": "目錄目前沒有可用的插件。",
+  "plugins.updateAll": "全部更新（{count}）",
+  "plugins.updateTo": "可更新至 {version}",
+  "plugins.updateNamed": "更新 {name}",
+  "plugins.signaturePinned": "已固定簽章金鑰",
+  "plugins.moreDetails": "更多資訊",
+  "plugins.lessDetails": "收合",
+  "plugins.detailAuthor": "作者",
+  "plugins.detailFingerprint": "簽章金鑰指紋",
+  "plugins.catalogSettings": "目錄設定",
+  "plugins.applyUrl": "套用網址",
+  "plugins.localInstall": "本機安裝"
 }

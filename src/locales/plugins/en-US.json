@@ -102,5 +102,21 @@
   "plugins.emptyDescription": "Pick one from the online catalog or install a local plugin file you trust. You always see the permissions a plugin asks for before it is installed.",
   "plugins.emptyDescriptionOff": "Plugins are turned off. Turn them on, then pick one from the catalog or install a local file. Installed plugins start disabled and you turn each one on yourself.",
   "plugins.enablePlugins": "Turn on plugins",
-  "plugins.browseCatalog": "Browse the catalog"
+  "plugins.browseCatalog": "Browse the catalog",
+  "plugins.catalogOffTitle": "The online catalog is off",
+  "plugins.catalogOffDescription": "When on, Agent Pets contacts the configured catalog index to list plugins and updates. It only reads the list and never downloads or installs anything by itself.",
+  "plugins.catalogEnable": "Turn on the online catalog",
+  "plugins.catalogLastChecked": "Last checked: {time}",
+  "plugins.catalogEmpty": "The catalog has no plugins right now.",
+  "plugins.updateAll": "Update all ({count})",
+  "plugins.updateTo": "Update to {version}",
+  "plugins.updateNamed": "Update {name}",
+  "plugins.signaturePinned": "Signing key pinned",
+  "plugins.moreDetails": "More details",
+  "plugins.lessDetails": "Hide details",
+  "plugins.detailAuthor": "Author",
+  "plugins.detailFingerprint": "Signing key fingerprint",
+  "plugins.catalogSettings": "Catalog settings",
+  "plugins.applyUrl": "Apply URL",
+  "plugins.localInstall": "Installed locally"
 }

@@ -148,7 +148,7 @@ function showTab(tab: PluginTab): void {
       role="tabpanel"
       aria-labelledby="plugin-tab-explore"
     >
-      <PluginCatalog />
+      <PluginCatalog :active="activeTab === 'explore'" />
     </div>
     <div
       v-show="activeTab === 'notifications'"

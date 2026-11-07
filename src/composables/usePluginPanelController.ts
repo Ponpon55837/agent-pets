@@ -100,6 +100,9 @@ const pendingRemove = ref<PluginPanelPlugin | null>(null)
 const pendingSecretConsentKey = ref('')
 const catalogItems = ref<PluginCatalogPanelItem[]>([])
 const catalogCheckComplete = ref(false)
+const catalogLoadedAt = ref<number | null>(null)
+const catalogError = ref('')
+const updateQueue = ref<PluginCatalogPanelItem[]>([])
 const catalogSearch = ref('')
 const catalogUrlDraft = ref('')
 const keepData = ref(false)
@@ -626,6 +629,7 @@ async function updateGlobalPreferences(patch: PluginGlobalPreferencesPatch): Pro
         || (patch.catalogUrl !== undefined && patch.catalogUrl !== previousCatalogUrl)) {
         catalogItems.value = []
         catalogCheckComplete.value = false
+        catalogLoadedAt.value = null
       }
     } catch {
       setError('plugin_action_failed')
@@ -641,30 +645,61 @@ async function saveCatalogUrl(): Promise<void> {
   if (previousUrl !== snapshot.value?.preferences.catalogUrl) {
     catalogItems.value = []
     catalogCheckComplete.value = false
+    catalogLoadedAt.value = null
   }
 }
 
-async function loadPluginCatalog(): Promise<void> {
+// 目錄載入失敗以 inline 錯誤 + 重試呈現（catalogError），不再只丟 Toast。
+// silent：自動載入（進入探索分頁、背景同步）不顯示成功訊息。
+async function loadPluginCatalog(options: { silent?: boolean } = {}): Promise<void> {
   const scope = 'catalog'
-  if (!onlineCatalogEnabled.value || isBusy(scope)) return
+  if (isBusy(scope) || !onlineCatalogEnabled.value) return
   setBusy(scope, true)
+  catalogError.value = ''
   try {
     const result = await window.electronAPI?.listPluginCatalog()
     if (!result?.ok) {
-      if (result && !result.ok) setError(result.error, () => void loadPluginCatalog())
+      catalogError.value = result && !result.ok ? result.error : 'catalog_unavailable'
       return
     }
     catalogItems.value = result.value
     catalogCheckComplete.value = true
-    setStatus(t('pluginCatalogChecked', {
-      entries: String(result.value.length),
-      updates: String(result.value.filter(item => item.updateAvailable).length),
-    }))
+    catalogLoadedAt.value = Date.now()
+    if (!options.silent) {
+      setStatus(t('pluginCatalogChecked', {
+        entries: String(result.value.length),
+        updates: String(result.value.filter(item => item.updateAvailable).length),
+      }))
+    }
   } catch {
-    setError('catalog_unavailable', () => void loadPluginCatalog())
+    catalogError.value = 'catalog_unavailable'
   } finally {
     setBusy(scope, false)
   }
+}
+
+// 進入探索分頁時：目錄已啟用且尚未載入才自動載入一次（已載入的結果沿用，使用者可手動重新檢查）。
+async function ensureCatalogLoaded(): Promise<void> {
+  if (!onlineCatalogEnabled.value || catalogLoadedAt.value !== null || isBusy('catalog')) return
+  await loadPluginCatalog({ silent: true })
+}
+
+// 「全部更新」：逐一為每個可更新項目產生安裝計畫並開啟同一個確認 Sheet，絕不跳過同意。
+async function installNextQueuedUpdate(): Promise<void> {
+  const next = updateQueue.value[0]
+  if (!next) return
+  updateQueue.value = updateQueue.value.slice(1)
+  await installCatalogPlugin(next)
+}
+
+async function updateAllCatalogPlugins(): Promise<void> {
+  if (pendingPlan.value) return
+  updateQueue.value = catalogItems.value.filter(item => item.updateAvailable)
+  await installNextQueuedUpdate()
+}
+
+function catalogItemFor(pluginId: string): PluginCatalogPanelItem | undefined {
+  return catalogItems.value.find(item => item.plugin.id === pluginId)
 }
 
 async function installCatalogPlugin(item: PluginCatalogPanelItem): Promise<void> {
@@ -916,6 +951,7 @@ async function confirmInstall(): Promise<void> {
       return
     }
     pendingPlan.value = null
+    if (catalogLoadedAt.value) void loadPluginCatalog({ silent: true })
     const installed = result.value
     setStatus(
       enabledGlobally.value
@@ -1022,6 +1058,10 @@ function diagnosticCodeLabel(item: PluginBrokerDiagnostic): string {
   return t('pluginDiagnosticRejected', { code: item.code, method: item.method ?? t('pluginDiagnosticUnknownMethod') })
 }
 
+watch(pendingPlan, plan => {
+  if (!plan && updateQueue.value.length) void installNextQueuedUpdate()
+})
+
 watch(selectedPluginId, pluginId => {
   if (panelViewPluginId.value && panelViewPluginId.value !== pluginId) closePluginPanelView()
   void refreshDiagnostics(pluginId)
@@ -1060,6 +1100,7 @@ watch(() => props.requestedPluginId, pluginId => {
 
 onMounted(() => {
   void refreshPanel().then(() => {
+    if (dailyUpdateCheck.value) void ensureCatalogLoaded()
     const requested = props.requestedPluginId
     if (requested && plugins.value.some(plugin => plugin.id === requested)) void openPluginPanelView(requested)
   })
@@ -1118,6 +1159,12 @@ onUnmounted(() => {
     pendingSecretConsentKey,
     catalogItems,
     catalogCheckComplete,
+    catalogLoadedAt,
+    catalogError,
+    updateQueue,
+    ensureCatalogLoaded,
+    updateAllCatalogPlugins,
+    catalogItemFor,
     catalogSearch,
     catalogUrlDraft,
     keepData,
