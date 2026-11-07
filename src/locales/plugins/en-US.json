@@ -218,5 +218,6 @@
   "plugins.presenceBadgeNone": "Badge next to your pet: nothing to show right now",
   "plugins.presenceSkins": "Provides {count} pet skins you can pick in the Pets settings",
   "plugins.presenceEventSource": "The status row \"{name}\" is showing",
-  "plugins.presenceEventSourceNone": "Work status row: nothing reported right now"
+  "plugins.presenceEventSourceNone": "Work status row: nothing reported right now",
+  "plugins.offTitle": "Plugins are off"
 }

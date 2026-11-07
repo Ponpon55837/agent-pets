@@ -8,7 +8,7 @@ import PluginCard from '@/components/plugin-panel/PluginCard.vue'
 import { usePluginController } from '@/composables/plugin/context'
 
 const emit = defineEmits<{ explore: [] }>()
-const { plugins, filteredPlugins, installedSearch, installedFilter, loading, busy, enabledGlobally, selectArchive, updateGlobalPreferences } = usePluginController()
+const { plugins, filteredPlugins, installedSearch, installedFilter, loading, busy, selectArchive } = usePluginController()
 </script>
 
 <template>
@@ -19,12 +19,9 @@ const { plugins, filteredPlugins, installedSearch, installedFilter, loading, bus
       v-else-if="plugins.length === 0"
       icon="plugin"
       :title="t('plugins.emptyTitle')"
-      :description="enabledGlobally ? t('plugins.emptyDescription') : t('plugins.emptyDescriptionOff')"
+      :description="t('plugins.emptyDescription')"
     >
-      <Button v-if="!enabledGlobally" variant="primary" size="sm" :disabled="busy" @click="updateGlobalPreferences({ pluginsEnabled: true })">
-        {{ t('plugins.enablePlugins') }}
-      </Button>
-      <Button :variant="enabledGlobally ? 'primary' : 'secondary'" size="sm" @click="emit('explore')">{{ t('plugins.browseCatalog') }}</Button>
+      <Button variant="primary" size="sm" @click="emit('explore')">{{ t('plugins.browseCatalog') }}</Button>
       <Button variant="secondary" size="sm" :disabled="busy" @click="selectArchive">{{ t('plugins.installFromFile') }}</Button>
     </EmptyState>
     <template v-else>
