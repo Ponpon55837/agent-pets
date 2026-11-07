@@ -10,6 +10,7 @@ function createHistoryIpcHarness() {
   let dialogResult: { canceled: boolean; filePath?: string } = { canceled: true }
   const historyStore = {
     clear() {},
+    getUsageBlocks: () => [{ adapterId: 'codex', startAt: 1, endAt: 2, firstActivityAt: 1, lastActivityAt: 1, tokenInput: 1, tokenOutput: 0, tokenCacheRead: 0, tokenCacheWrite: 0, records: 1 }],
     getExport: (petId: string, _projectId?: string, rangeDays?: number) => ({ petId, rows: [], rangeDays, summary: { localDate: '2026-08-13', days: [{ localDate: '2026-08-13', sessionsCompleted: 1, sessionsFailed: 0, activeMs: 120000, tokenInput: 5, tokenOutput: 6, tokenCacheRead: 7, tokenCacheWrite: 8 }] } }),
   }
 
@@ -47,6 +48,7 @@ test('history IPC registration uses injected services and preserves handler beha
 
   assert.deepEqual([...harness.handlers.keys()], [
     IPC_CHANNELS.historySummary,
+    IPC_CHANNELS.historyUsageBlocks,
     IPC_CHANNELS.historyClear,
     IPC_CHANNELS.historyExport,
     IPC_CHANNELS.historyRevealExport,
@@ -93,4 +95,13 @@ test('export honours format/range, names files by local date and only reveals wh
   assert.deepEqual(harness.records.reveals, ['out/history.csv'])
   // A bogus request degrades to a plain 7-day JSON export.
   assert.deepEqual(await invoke(IPC_CHANNELS.historyExport, { format: 'exe', rangeDays: 5, projectId: '../x' }), { ok: true, path: 'out/history.csv' })
+})
+
+test('usage blocks IPC is sender-checked, takes no input and never starts a log scan', async () => {
+  const harness = createHistoryIpcHarness()
+  const handler = harness.handlers.get(IPC_CHANNELS.historyUsageBlocks)!
+  const blocks = await handler({}, '../../etc', 999) as Array<{ adapterId: string }>
+  assert.deepEqual(blocks.map(block => block.adapterId), ['codex'])
+  assert.equal(harness.records.refreshes, 0)
+  assert.deepEqual(harness.records.trusted, [{ event: {}, requiredWindow: harness.panelWindow }])
 })

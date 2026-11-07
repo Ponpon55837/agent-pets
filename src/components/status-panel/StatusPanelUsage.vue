@@ -32,15 +32,23 @@ const providers = computed(() => store.quotaUsage?.providers ?? [])
 // 服務商額度的 provider id 對應 History 的 adapter id；沒有對應卡片的區塊另外列出。
 const PROVIDER_ADAPTER: Record<string, string> = { claude: 'claude-code', codex: 'codex' }
 const usageBlocks = ref<HistoryUsageBlock[]>([])
-const BLOCK_REFRESH_DEBOUNCE_MS = 500
+const BLOCK_REFRESH_DEBOUNCE_MS = 1_000
 let blockRefreshTimer: ReturnType<typeof setTimeout> | null = null
 let cleanupHistoryUpdated: (() => void) | null = null
 
+let blocksInFlight = false
+
+// Dedicated read-only IPC: never triggers a log scan, so the historyUpdated
+// broadcast a scan sends cannot loop back into another scan.
 async function refreshBlocks(): Promise<void> {
+  if (blocksInFlight) return
+  blocksInFlight = true
   try {
-    const summary = await window.electronAPI?.getHistorySummary(undefined, 7)
-    if (summary) usageBlocks.value = summary.usageBlocks ?? []
-  } catch { /* blocks are supplementary; keep the last reading */ }
+    const blocks = await window.electronAPI?.getUsageBlocks()
+    if (Array.isArray(blocks)) usageBlocks.value = blocks
+  } catch { /* blocks are supplementary; keep the last reading */ } finally {
+    blocksInFlight = false
+  }
 }
 
 function blockFor(provider: UsageProvider) {

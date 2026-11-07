@@ -19,6 +19,7 @@ export const IPC_CHANNELS = {
   historyRevealExport: 'history-reveal-export',
   historySummary: 'history-summary',
   historyUpdated: 'history-updated',
+  historyUsageBlocks: 'history-usage-blocks',
   importPetSprite: 'import-pet-sprite',
   importPetZip: 'import-pet-zip',
   installIntegrations: 'install-integrations',
