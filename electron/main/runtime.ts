@@ -2,6 +2,7 @@ import { IPC_CHANNELS } from '../ipc/channels'
 import { app, BrowserWindow, WebContentsView, screen, ipcMain, dialog, net, session, protocol, globalShortcut, powerMonitor, shell, safeStorage, Notification } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
+import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
 import { join, resolve } from 'path'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
@@ -1613,6 +1614,28 @@ export function applyMacFullscreenVisibilityPolicy(): void {
   }
 }
 
+export function serverHealthTracker(): ServerHealthTracker {
+  if (!mainState.serverHealth) {
+    mainState.serverHealth = createServerHealthTracker({
+      onChange: snapshot => {
+        for (const window of [mainState.petWindow, mainState.panelWindow]) {
+          if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.serverHealthChanged, snapshot)
+        }
+      },
+      onPersistentFailure: health => {
+        try {
+          if (!Notification.isSupported()) return
+          new Notification({
+            title: t('reliability.server.offlineTitle'),
+            body: t(health.code === 'EADDRINUSE' ? 'reliability.server.portBusyBody' : 'reliability.server.failedBody', { port: health.port }),
+          }).show()
+        } catch {}
+      },
+    })
+  }
+  return mainState.serverHealth
+}
+
 const rendererRecoveries = new Map<'pet' | 'panel', RendererRecovery>()
 
 // Re-pushes main-owned state after a renderer crash/reload. Initial load
@@ -2477,12 +2500,16 @@ export function createPresentationServices(presentationToken: string): void {
     token: presentationToken,
     controller: mainState.presentationController,
   })
-  listenOnLocalPort(server, PRESENTATION_MCP_PORT, {
+  const presentationHealth = serverHealthTracker().register('presentation', PRESENTATION_MCP_PORT)
+  const presentationHandle = listenOnLocalPort(server, PRESENTATION_MCP_PORT, {
     label: 'Presentation MCP',
+    onStatus: presentationHealth.onStatus,
+    onPersistentFailure: presentationHealth.onPersistentFailure,
     onListening: () => {
       if (!app.isPackaged) console.log(`Presentation MCP control listening on http://127.0.0.1:${PRESENTATION_MCP_PORT}`)
     },
   })
+  presentationHealth.attach(presentationHandle)
   mainState.presentationMcpServer = server
 }
 
@@ -2629,13 +2656,17 @@ export function createPermissionServices(permissionToken: string): void {
   broker.registerAdapter(relay.createPort('opencode-cli'))
   broker.registerAdapter(relay.createPort('opencode-desktop'))
   const server = createPermissionAdapterServer({ token: permissionToken, broker, relay })
-  listenOnLocalPort(server, PERMISSION_ADAPTER_PORT, {
+  const permissionHealth = serverHealthTracker().register('permission', PERMISSION_ADAPTER_PORT)
+  const permissionHandle = listenOnLocalPort(server, PERMISSION_ADAPTER_PORT, {
     label: 'Permission adapter',
+    onStatus: permissionHealth.onStatus,
+    onPersistentFailure: permissionHealth.onPersistentFailure,
     onListening: () => {
       if (!app.isPackaged) console.log(`Permission adapter listening on http://127.0.0.1:${PERMISSION_ADAPTER_PORT}`)
     },
   })
 
+  permissionHealth.attach(permissionHandle)
   mainState.permissionRelay = relay
   mainState.permissionBroker = broker
   mainState.permissionAdapterServer = server

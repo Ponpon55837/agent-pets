@@ -8,6 +8,7 @@ import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 import InlinePermissionCard from '@/components/ui/InlinePermissionCard.vue'
 import PetAnimation from '@/components/PetAnimation.vue'
+import ServerHealthBanner from '@/components/status-panel/ServerHealthBanner.vue'
 import StatusPanelHistory from '@/components/status-panel/StatusPanelHistory.vue'
 import StatusPanelSessions from '@/components/status-panel/StatusPanelSessions.vue'
 import StatusPanelUsage from '@/components/status-panel/StatusPanelUsage.vue'
@@ -176,6 +177,7 @@ onUnmounted(() => {
     </div>
 
     <template v-if="store.panelView === 'sessions'">
+      <ServerHealthBanner />
       <InlinePermissionCard
         v-if="store.permissionRequest"
         class="panel-inline-permission"

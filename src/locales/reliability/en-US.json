@@ -7,5 +7,16 @@
   "reliability.startup.quit": "Quit",
   "reliability.renderer.gaveUpTitle": "The pet view could not recover",
   "reliability.renderer.gaveUpBody": "Automatic reloads kept failing. Choose \"Reload pet\" from the menu or restart Agent Pets.",
-  "reliability.tray.reloadPet": "Reload pet"
+  "reliability.tray.reloadPet": "Reload pet",
+  "reliability.server.offlineTitle": "Event receiver offline",
+  "reliability.server.portBusyBody": "Local port {port} is held by another program, so agent events cannot arrive. Close the old Agent Pets or the program using it.",
+  "reliability.server.failedBody": "Local port {port} could not start, so agent events cannot arrive. Check system permissions or firewall settings.",
+  "reliability.server.bannerTitle": "Event receiver offline",
+  "reliability.server.bannerBusy": "Port {port} is in use. Retrying automatically (attempt {attempt}).",
+  "reliability.server.bannerBusyAgentPets": "Port {port} is held by another Agent Pets. Close it first.",
+  "reliability.server.bannerFailed": "Port {port} could not start ({code}).",
+  "reliability.server.retry": "Retry now",
+  "reliability.server.name.event": "Event",
+  "reliability.server.name.permission": "Permission relay",
+  "reliability.server.name.presentation": "Presentation MCP"
 }

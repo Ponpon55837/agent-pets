@@ -7,5 +7,16 @@
   "reliability.startup.quit": "結束",
   "reliability.renderer.gaveUpTitle": "寵物畫面無法復原",
   "reliability.renderer.gaveUpBody": "自動重新載入多次仍失敗。請從選單選擇「重新載入寵物」，或重新啟動 Agent Pets。",
-  "reliability.tray.reloadPet": "重新載入寵物"
+  "reliability.tray.reloadPet": "重新載入寵物",
+  "reliability.server.offlineTitle": "事件接收器離線",
+  "reliability.server.portBusyBody": "本機埠 {port} 被其他程式佔用，Agent 事件暫時收不到。請關閉舊的 Agent Pets 或佔用該埠的程式。",
+  "reliability.server.failedBody": "本機埠 {port} 無法啟動，Agent 事件暫時收不到。請檢查系統權限或防火牆設定。",
+  "reliability.server.bannerTitle": "事件接收器離線",
+  "reliability.server.bannerBusy": "埠 {port} 被佔用，正在自動重試（第 {attempt} 次）。",
+  "reliability.server.bannerBusyAgentPets": "埠 {port} 被另一個 Agent Pets 佔用，請先關閉它。",
+  "reliability.server.bannerFailed": "埠 {port} 無法啟動（{code}）。",
+  "reliability.server.retry": "立即重試",
+  "reliability.server.name.event": "事件",
+  "reliability.server.name.permission": "權限轉接",
+  "reliability.server.name.presentation": "演出 MCP"
 }
