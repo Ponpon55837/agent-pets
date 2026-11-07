@@ -17,6 +17,8 @@ export const IPC_CHANNELS = {
   historyClear: 'history-clear',
   historyExport: 'history-export',
   historyRevealExport: 'history-reveal-export',
+  historySessionDetail: 'history-session-detail',
+  historySessions: 'history-sessions',
   historySummary: 'history-summary',
   historyUpdated: 'history-updated',
   historyUsageBlocks: 'history-usage-blocks',

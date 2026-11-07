@@ -6,7 +6,7 @@ import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/d
 import type { PermissionDecisionValue, PermissionRequestView, PermissionAuditEntry } from '../src/types/permission'
 import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
-import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySummary, HistoryUsageBlock } from '../src/types/history'
+import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySessionDetail, HistorySessionPage, HistorySessionQuery, HistorySummary, HistoryUsageBlock } from '../src/types/history'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 import type { PetBehaviorManifest, PluginSkinPetSource } from '../src/types/pet'
 import type { PresentationIntent, PresentationStatusUpdate } from '../src/types/presentation'
@@ -421,6 +421,14 @@ const electronAPI: ElectronAPI = {
 
   getUsageBlocks: (): Promise<HistoryUsageBlock[]> => {
     return ipcRenderer.invoke(IPC_CHANNELS.historyUsageBlocks)
+  },
+
+  listHistorySessions: (query?: HistorySessionQuery): Promise<HistorySessionPage> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.historySessions, query)
+  },
+
+  getHistorySessionDetail: (sessionId: string): Promise<HistorySessionDetail | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.historySessionDetail, sessionId)
   },
 
   listProjectPets: (): Promise<ProjectPetView[]> => {

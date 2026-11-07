@@ -13,6 +13,12 @@ import {
   type HistoryQuotaSnapshot,
   type HistoryQuotaProvider,
   type HistoryQuotaWindow,
+  type HistorySessionDetail,
+  type HistorySessionListItem,
+  type HistorySessionPage,
+  type HistorySessionQuery,
+  type HistorySessionTimelineEntry,
+  HISTORY_SESSION_TIMELINE_MAX,
   type HistorySummary,
   type HistoryTokenUsageRecord,
   type HistoryTokenQuality,
@@ -24,11 +30,26 @@ import { applyWalPragmas, type SqlitePragmaState } from './sqlite-pragmas.ts'
 import { StatementCache } from './sqlite-statements.ts'
 import { eventPipelineStats } from './event-stats.ts'
 import { isValidPetId } from '../src/utils/pet-id.ts'
+import {
+  MAX_PERMISSION_WAIT_MS,
+  SESSION_LIST_COLUMNS,
+  SESSION_TIMELINE_STORED_MAX,
+  buildSessionListQuery,
+  foldSessionUsage,
+  isHistorySessionId,
+  localUsageKeySource,
+  mapSessionRow,
+  nextFinalState,
+  normalizeSessionQuery,
+  sanitizeProjectLabel,
+  sanitizeToolName,
+  type StoredSessionFinalState,
+} from './history-sessions.ts'
 
 type SqliteRow = Record<string, unknown>
 
 interface SqliteStatement {
-  run(...params: unknown[]): { changes: number | bigint }
+  run(...params: unknown[]): { changes: number | bigint, lastInsertRowid?: number | bigint }
   get(...params: unknown[]): SqliteRow | undefined
   all(...params: unknown[]): SqliteRow[]
 }
@@ -84,6 +105,15 @@ const PATH_ROOT_SEGMENTS = new Set([
 // 5 小時區塊要往回找到「≥5 小時空檔」才能定出起點；只回看 24 小時，
 // 連續 24 小時沒有空檔的極端情況下，區塊起點會從回看窗口內第一筆重新對齊。
 const USAGE_BLOCK_LOOKBACK_MS = 24 * 60 * 60 * 1000
+const MAX_EXPORT_SESSIONS = 1000
+const MAX_SEARCH_MATCHES = 2000
+const SESSION_COLUMNS = `
+  rowid AS session_rowid, session_pk, adapter_id, agent_id, external_session_id, project_id, pet_id,
+  started_at, ended_at, terminal_state, active_ms, token_input, token_output,
+  token_quality, last_state, last_seen_at, project_label, usage_key, final_state,
+  last_tool, tool_runs, permission_waits, permission_wait_ms, state_since,
+  timeline_tracked, timeline_count
+`
 const MAX_USAGE_BLOCK_ROWS = 50_000
 
 export function safeModelId(value: unknown): string {
@@ -204,8 +234,30 @@ interface SessionRow {
   tokenOutput: number
   tokenQuality: HistoryTokenQuality
   lastState: AgentState
+  /** last_state as stored (lastState folds waiting states into idle for the active-time rules). */
+  rawLastState: AgentState
   lastSeenAt: number
+  rowid: number
+  projectLabel: string
+  usageKey: string
+  finalState: StoredSessionFinalState
+  lastTool: string
+  toolRuns: number
+  permissionWaits: number
+  permissionWaitMs: number
+  stateSince: number
+  tracked: boolean
+  timelineCount: number
 }
+
+function sessionSearchText(label: string, agentId: string, adapterId: string): string {
+  return `${label}\n${agentId}\n${adapterId}`
+}
+
+const STORED_FINAL_STATES = new Set<string>(['success', 'error', 'cancelled', 'open'])
+const AGENT_STATES = new Set<string>([
+  'offline', 'idle', 'thinking', 'tool-running', 'waiting-permission', 'waiting-input', 'success', 'error',
+])
 
 function readSession(row: SqliteRow | undefined): SessionRow | null {
   if (!row || typeof row.session_pk !== 'string' || typeof row.adapter_id !== 'string') return null
@@ -230,6 +282,18 @@ function readSession(row: SqliteRow | undefined): SessionRow | null {
       ? state
       : 'idle',
     lastSeenAt: Math.max(0, asInteger(row.last_seen_at)),
+    rawLastState: AGENT_STATES.has(state) ? state : 'idle',
+    rowid: asInteger(row.session_rowid),
+    projectLabel: safeText(row.project_label),
+    usageKey: safeText(row.usage_key),
+    finalState: STORED_FINAL_STATES.has(row.final_state as string) ? row.final_state as StoredSessionFinalState : 'open',
+    lastTool: safeText(row.last_tool),
+    toolRuns: Math.max(0, asInteger(row.tool_runs)),
+    permissionWaits: Math.max(0, asInteger(row.permission_waits)),
+    permissionWaitMs: Math.max(0, asInteger(row.permission_wait_ms)),
+    stateSince: Math.max(0, asInteger(row.state_since)),
+    tracked: asInteger(row.timeline_tracked) === 1,
+    timelineCount: Math.max(0, asInteger(row.timeline_count)),
   }
 }
 
@@ -238,6 +302,16 @@ interface ModelBatchEntry {
   projectId: string
   adapterId: string
   model: string
+  tokenInput: number
+  tokenOutput: number
+  tokenCacheRead: number
+  tokenCacheWrite: number
+}
+
+interface SessionUsageBatchEntry {
+  usageKey: string
+  model: string
+  lastAt: number
   tokenInput: number
   tokenOutput: number
   tokenCacheRead: number
@@ -284,11 +358,14 @@ export class HistoryStore {
   private transactionDepth = 0
   private dailyBatch: Map<string, DailyBatchEntry> | null = null
   private modelBatch: Map<string, ModelBatchEntry> | null = null
+  private sessionUsageBatch: Map<string, SessionUsageBatchEntry> | null = null
   private queuedEvents: HistoryQueuedEvent[] = []
   private flushHandle: ReturnType<typeof setImmediate> | null = null
   private retryHandle: ReturnType<typeof setTimeout> | null = null
   private flushFailures = 0
   private closed = false
+  /** FTS5 trigram index for session search; false when the SQLite build lacks FTS5. */
+  private sessionSearchIndexed = false
 
   constructor(filePath: string, options: HistoryStoreOptions = {}) {
     mkdirSync(dirname(filePath), { recursive: true })
@@ -354,10 +431,7 @@ export class HistoryStore {
 
     return this.transaction(() => {
       const previous = readSession(this.statement(`
-        SELECT session_pk, adapter_id, agent_id, external_session_id, project_id, pet_id,
-               started_at, ended_at, terminal_state, active_ms, token_input, token_output,
-               token_quality, last_state, last_seen_at
-        FROM sessions WHERE session_pk = ?
+        SELECT ${SESSION_COLUMNS} FROM sessions WHERE session_pk = ?
       `).get(sessionPk))
       const successAlreadyRecorded = completionKind === 'success' && Boolean(this.statement(`
         SELECT event_id FROM events
@@ -452,13 +526,39 @@ export class HistoryStore {
       const nextInput = (previous?.tokenInput ?? 0) + (usage.input ?? 0)
       const nextOutput = (previous?.tokenOutput ?? 0) + (usage.output ?? 0)
       const nextQuality = mergeTokenQuality(previous?.tokenQuality ?? 'none', usage.quality)
+      // Timeline: one row per state change (or per tool change while running a
+      // tool), so heartbeats that repeat the current state cost nothing extra.
+      const toolName = state === 'tool-running' ? sanitizeToolName(event.toolName) : ''
+      const transition = !previous
+        || previous.rawLastState !== state
+        || (state === 'tool-running' && toolName !== '' && toolName !== previous.lastTool)
+      const leftPermission = transition && previous?.rawLastState === 'waiting-permission' && state !== 'waiting-permission'
+      const waitStartedAt = previous?.stateSince ?? 0
+      const waitedMs = leftPermission && waitStartedAt > 0
+        ? Math.min(MAX_PERMISSION_WAIT_MS, Math.max(0, occurredAt - waitStartedAt))
+        : 0
+      const nextToolRuns = (previous?.toolRuns ?? 0) + (transition && state === 'tool-running' ? 1 : 0)
+      const nextPermissionWaits = (previous?.permissionWaits ?? 0)
+        + (transition && state === 'waiting-permission' ? 1 : 0)
+      const nextPermissionWaitMs = (previous?.permissionWaitMs ?? 0) + waitedMs
+      const nextStateSince = transition ? occurredAt : previous?.stateSince ?? occurredAt
+      const nextLastTool = state === 'tool-running' ? (toolName || previous?.lastTool || '') : ''
+      const nextTimelineCount = (previous?.timelineCount ?? 0) + (transition ? 1 : 0)
+      // A late, out-of-order event must not overwrite the latest turn's outcome.
+      const nextFinal = previous && occurredAt < previous.lastSeenAt
+        ? previous.finalState
+        : nextFinalState(previous?.finalState ?? null, state)
+      const projectLabel = sanitizeProjectLabel(event.project) || previous?.projectLabel || ''
       if (!previous) {
-        this.statement(`
+        const usageSource = localUsageKeySource(adapterId, externalId)
+        const insertedSession = this.statement(`
           INSERT INTO sessions(
             session_pk, adapter_id, agent_id, external_session_id, project_id, pet_id,
             started_at, ended_at, terminal_state, active_ms, token_input, token_output,
-            token_quality, last_state, last_seen_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            token_quality, last_state, last_seen_at, project_label, usage_key, final_state,
+            last_tool, tool_runs, permission_waits, permission_wait_ms, state_since,
+            timeline_tracked, timeline_count
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
         `).run(
           sessionPk,
           adapterId,
@@ -475,14 +575,26 @@ export class HistoryStore {
           nextQuality,
           state,
           occurredAt,
+          projectLabel,
+          usageSource ? digest(usageSource) : '',
+          nextFinal,
+          nextLastTool,
+          nextToolRuns,
+          nextPermissionWaits,
+          nextPermissionWaitMs,
+          nextStateSince,
+          nextTimelineCount,
         )
+        this.indexSessionSearch(asInteger(insertedSession.lastInsertRowid), sessionPk, projectLabel, agentId, adapterId, false)
       } else {
         this.statement(`
           UPDATE sessions
           SET ended_at = CASE WHEN ? IS NOT NULL THEN ? ELSE ended_at END,
               terminal_state = CASE WHEN ? IS NOT NULL THEN ? ELSE terminal_state END,
               active_ms = ?, token_input = ?, token_output = ?, token_quality = ?,
-              last_state = ?, last_seen_at = MAX(last_seen_at, ?)
+              last_state = ?, last_seen_at = MAX(last_seen_at, ?),
+              final_state = ?, last_tool = ?, tool_runs = ?,
+              permission_waits = ?, permission_wait_ms = ?, state_since = ?, timeline_count = ?
           WHERE session_pk = ?
         `).run(
           sessionTerminalTransition,
@@ -495,9 +607,22 @@ export class HistoryStore {
           nextQuality,
           state,
           occurredAt,
+          nextFinal,
+          nextLastTool,
+          nextToolRuns,
+          nextPermissionWaits,
+          nextPermissionWaitMs,
+          nextStateSince,
+          nextTimelineCount,
           sessionPk,
         )
+        // The label almost never changes: only then rewrite it and its search entry.
+        if (projectLabel !== previous.projectLabel) {
+          this.statement('UPDATE sessions SET project_label = ? WHERE session_pk = ?').run(projectLabel, sessionPk)
+          this.indexSessionSearch(previous.rowid, sessionPk, projectLabel, agentId, adapterId, true)
+        }
       }
+      if (transition) this.appendTimeline(sessionPk, nextTimelineCount - 1, occurredAt, state, toolName)
 
       if (
         previous?.terminalState === 'error'
@@ -550,6 +675,7 @@ export class HistoryStore {
       if (!nested) {
         this.dailyBatch = new Map()
         this.modelBatch = new Map()
+        this.sessionUsageBatch = new Map()
       }
       let imported = 0
       try {
@@ -559,11 +685,13 @@ export class HistoryStore {
         if (!nested) {
           this.flushDailyBatch()
           this.flushModelBatch()
+          this.flushSessionUsageBatch()
         }
       } finally {
         if (!nested) {
           this.dailyBatch = null
           this.modelBatch = null
+          this.sessionUsageBatch = null
         }
       }
       return imported
@@ -663,7 +791,7 @@ export class HistoryStore {
     return this.transaction(() => {
       const existing = this.statement(`
         SELECT event_id, local_date, project_id, token_input, token_output,
-               token_cache_read, token_cache_write, token_quality, occurred_at, token_model
+               token_cache_read, token_cache_write, token_quality, occurred_at, token_model, session_id
         FROM events WHERE adapter_id = ? AND source_event_id = ?
       `).get(adapterId, sourceEventId)
       if (existing) {
@@ -718,6 +846,11 @@ export class HistoryStore {
           -previousInput, -previousOutput, -previousCacheRead, -previousCacheWrite,
         )
         this.updateModelStat(localDate, projectId, adapterId, nextModel, input, output, cacheRead, cacheWrite)
+        this.updateSessionUsage(
+          typeof existing.session_id === 'string' ? existing.session_id : null, previousModel, previousOccurredAt,
+          -previousInput, -previousOutput, -previousCacheRead, -previousCacheWrite,
+        )
+        this.updateSessionUsage(sessionId, nextModel, occurredAt, input, output, cacheRead, cacheWrite)
         this.updateDailyStat(
           previousDate,
           safePet,
@@ -774,6 +907,7 @@ export class HistoryStore {
       ))
       if (inserted === 0) return false
       this.updateModelStat(localDate, projectId, adapterId, model, input, output, cacheRead, cacheWrite)
+      this.updateSessionUsage(sessionId, model, occurredAt, input, output, cacheRead, cacheWrite)
       this.updateDailyStat(
         localDate,
         safePet,
@@ -954,8 +1088,160 @@ export class HistoryStore {
     return latestUsageBlocks(entries, this.timezoneOffsetMinutes).filter(block => now - block.lastActivityAt < USAGE_BLOCK_MS)
   }
 
+  /**
+   * One keyset page of past sessions for a pet, newest activity first. The
+   * query is validated here as well as in IPC, so a direct caller cannot pass
+   * an unbounded limit or a raw fragment. Token totals for the page come from
+   * one IN (...) lookup on session_model_usage (no per-row query).
+   */
+  listSessions(petId = DEFAULT_PET_ID, input: unknown = {}): HistorySessionPage {
+    this.flushQueued()
+    const now = this.now()
+    const query = normalizeSessionQuery(input, now)
+    const matchedIds = this.searchSessionIds(query.search)
+    if (matchedIds && matchedIds.length === 0) return { items: [], nextCursor: null }
+    const { sql, params } = buildSessionListQuery(safePetId(petId), query, now, query.limit + 1, matchedIds ?? undefined)
+    // The SQL text comes from a finite set of clause combinations, so the
+    // statement cache stays bounded.
+    const rows = this.statement(sql).all(...params)
+    const hasMore = rows.length > query.limit
+    const pageRows = hasMore ? rows.slice(0, query.limit) : rows
+    const items = this.mapSessionRows(pageRows, now)
+    const last = items.at(-1)
+    return {
+      items,
+      nextCursor: hasMore && last ? { lastSeenAt: last.lastSeenAt, id: last.id } : null,
+    }
+  }
+
+  /**
+   * Sessions whose label / agent contain `search`, from the trigram index.
+   * null means "filter with the ordered LIKE scan instead": no FTS5, a term
+   * shorter than one trigram, or so many matches that walking the time index
+   * finds a page sooner than sorting every match.
+   */
+  private searchSessionIds(search: string | undefined): string[] | null {
+    if (!search || !this.sessionSearchIndexed || [...search].length < 3) return null
+    const rows = this.statement('SELECT session_pk FROM session_search WHERE session_search MATCH ? LIMIT ?')
+      .all(`"${search.replace(/"/g, '""')}"`, MAX_SEARCH_MATCHES + 1)
+    return rows.length > MAX_SEARCH_MATCHES ? null : rows.map(row => String(row.session_pk))
+  }
+
+  /** One session's metadata plus its latest timeline entries (oldest first). */
+  getSessionDetail(petId: string, sessionId: unknown): HistorySessionDetail | null {
+    if (!isHistorySessionId(sessionId)) return null
+    this.flushQueued()
+    // Scoped like the list: a session of another pet is "not found".
+    const row = this.statement(`SELECT ${SESSION_LIST_COLUMNS} FROM sessions WHERE session_pk = ? AND pet_id = ?`)
+      .get(sessionId, safePetId(petId))
+    if (!row) return null
+    const [session] = this.mapSessionRows([row], this.now())
+    // Newest-first on the (session_pk, seq) primary key, then reversed, so the
+    // cap keeps the latest entries.
+    const rows = this.statement(`
+      SELECT seq, occurred_at, state, tool_name FROM session_timeline
+      WHERE session_pk = ? ORDER BY seq DESC LIMIT ?
+    `).all(sessionId, HISTORY_SESSION_TIMELINE_MAX)
+    // seq starts at 0, so an oldest returned row past 0 means older entries
+    // were trimmed (by the stored cap) or are beyond the read cap.
+    const truncated = rows.length > 0 && asInteger(rows[rows.length - 1]!.seq) > 0
+    const timeline: HistorySessionTimelineEntry[] = rows
+      .reverse()
+      .map(entry => {
+        const state = String(entry.state) as AgentState
+        const toolName = sanitizeToolName(entry.tool_name)
+        return {
+          occurredAt: Math.max(0, asInteger(entry.occurred_at)),
+          state,
+          ...(toolName ? { toolName } : {}),
+        }
+      })
+    return { session: session!, timeline, truncated }
+  }
+
+  private mapSessionRows(rows: readonly SqliteRow[], now: number): HistorySessionListItem[] {
+    const keys = [...new Set(rows.map(row => safeText(row.usage_key)).filter(Boolean))]
+    const usage = keys.length > 0
+      // One statement for any page size: the keys travel as one JSON parameter.
+      ? foldSessionUsage(this.statement(`
+          SELECT usage_key, model, token_input, token_output, token_cache_read, token_cache_write
+          FROM session_model_usage WHERE usage_key IN (SELECT value FROM json_each(?))
+        `).all(JSON.stringify(keys)))
+      : new Map()
+    return rows.map(row => mapSessionRow(row, usage.get(safeText(row.usage_key)), now))
+  }
+
+  private appendTimeline(sessionPk: string, seq: number, occurredAt: number, state: AgentState, toolName: string): void {
+    this.statement(`
+      INSERT OR REPLACE INTO session_timeline(session_pk, seq, occurred_at, state, tool_name)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionPk, seq, occurredAt, state, toolName)
+    // Keep at most SESSION_TIMELINE_STORED_MAX rows per session: each append
+    // past the cap drops exactly the oldest one, a primary-key point delete.
+    if (seq >= SESSION_TIMELINE_STORED_MAX) {
+      this.statement('DELETE FROM session_timeline WHERE session_pk = ? AND seq <= ?')
+        .run(sessionPk, seq - SESSION_TIMELINE_STORED_MAX)
+    }
+  }
+
+  /** Per-session (local-log usage key) model totals; batched like daily_model_stats. */
+  private updateSessionUsage(
+    usageKey: string | null,
+    model: string,
+    occurredAt: number,
+    tokenInput: number,
+    tokenOutput: number,
+    tokenCacheRead: number,
+    tokenCacheWrite: number,
+  ): void {
+    if (!usageKey) return
+    if (tokenInput === 0 && tokenOutput === 0 && tokenCacheRead === 0 && tokenCacheWrite === 0) return
+    if (this.sessionUsageBatch) {
+      const key = `${usageKey}\u0000${model}`
+      const entry = this.sessionUsageBatch.get(key) ?? {
+        usageKey, model, lastAt: 0, tokenInput: 0, tokenOutput: 0, tokenCacheRead: 0, tokenCacheWrite: 0,
+      }
+      entry.lastAt = Math.max(entry.lastAt, occurredAt)
+      entry.tokenInput += tokenInput
+      entry.tokenOutput += tokenOutput
+      entry.tokenCacheRead += tokenCacheRead
+      entry.tokenCacheWrite += tokenCacheWrite
+      this.sessionUsageBatch.set(key, entry)
+      return
+    }
+    this.statement(`
+      INSERT INTO session_model_usage(
+        usage_key, model, last_at, token_input, token_output, token_cache_read, token_cache_write
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(usage_key, model) DO UPDATE SET
+        last_at = MAX(last_at, excluded.last_at),
+        token_input = MAX(0, token_input + ?),
+        token_output = MAX(0, token_output + ?),
+        token_cache_read = MAX(0, token_cache_read + ?),
+        token_cache_write = MAX(0, token_cache_write + ?)
+    `).run(
+      usageKey, model, Math.max(0, occurredAt),
+      Math.max(0, tokenInput), Math.max(0, tokenOutput), Math.max(0, tokenCacheRead), Math.max(0, tokenCacheWrite),
+      tokenInput, tokenOutput, tokenCacheRead, tokenCacheWrite,
+    )
+  }
+
+  private flushSessionUsageBatch(): void {
+    const batch = this.sessionUsageBatch
+    this.sessionUsageBatch = null
+    if (!batch) return
+    for (const entry of batch.values()) {
+      this.updateSessionUsage(
+        entry.usageKey, entry.model, entry.lastAt,
+        entry.tokenInput, entry.tokenOutput, entry.tokenCacheRead, entry.tokenCacheWrite,
+      )
+    }
+  }
+
   getExport(petId = DEFAULT_PET_ID, projectId?: string, rangeDays: number = 7, growth?: unknown): HistoryExport {
     const exportedAt = this.now()
+    const span = HISTORY_RANGES.includes(rangeDays) ? rangeDays : 7
+    const sessions = this.exportSessions(petId, projectId, exportedAt - span * 24 * 60 * 60 * 1000)
     return {
       schemaVersion: 1,
       exportedAt,
@@ -967,6 +1253,25 @@ export class HistoryStore {
         dayDefinition: 'A day is the local calendar date (in the time zone above) of the event time',
       },
       ...(growth === undefined ? {} : { growth }),
+      sessions: sessions.items,
+      sessionsTruncated: sessions.truncated,
+    }
+  }
+
+  /**
+   * Bounded keyset walk for the JSON export: at most MAX_EXPORT_SESSIONS rows.
+   * The export never carried project names (only fingerprints), so the
+   * workspace label is blanked here to keep that contract for shared files.
+   */
+  private exportSessions(petId: string, projectId: string | undefined, from: number): { items: HistorySessionListItem[]; truncated: boolean } {
+    const items: HistorySessionListItem[] = []
+    let cursor: HistorySessionQuery['cursor']
+    for (;;) {
+      const page = this.listSessions(petId, { projectId, from, limit: 50, cursor })
+      for (const item of page.items) items.push({ ...item, projectLabel: '' })
+      if (!page.nextCursor) return { items, truncated: false }
+      if (items.length >= MAX_EXPORT_SESSIONS) return { items: items.slice(0, MAX_EXPORT_SESSIONS), truncated: true }
+      cursor = page.nextCursor
     }
   }
 
@@ -1053,7 +1358,8 @@ export class HistoryStore {
     this.queuedEvents = []
     if (this.retryHandle) { clearTimeout(this.retryHandle); this.retryHandle = null }
     this.transaction(() => {
-      this.database.exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM daily_stats; DELETE FROM daily_model_stats; DELETE FROM quota_snapshots;')
+      this.database.exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM daily_stats; DELETE FROM daily_model_stats; DELETE FROM quota_snapshots; DELETE FROM session_timeline; DELETE FROM session_model_usage;')
+      if (this.sessionSearchIndexed) this.database.exec('DELETE FROM session_search')
       this.statement(`
         INSERT INTO history_metadata(key, value) VALUES (?, ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
@@ -1102,13 +1408,54 @@ export class HistoryStore {
           SELECT rowid FROM events WHERE occurred_at < ? LIMIT ?
         )
       `).run(cutoff, bounded))
-      const sessions = changedCount(this.statement(`
-        DELETE FROM sessions WHERE session_pk IN (
-          SELECT session_pk FROM sessions WHERE last_seen_at < ? LIMIT ?
+      // Pick the exact expired set once (per pet, through the pet/last-seen
+      // index), then delete the sessions, their timelines and search entries by
+      // that set, so no batch boundary can leave orphan rows behind.
+      const expired = this.expiredSessions(cutoff, bounded)
+      let sessions = 0
+      if (expired.length > 0) {
+        const pks = JSON.stringify(expired.map(row => row.pk))
+        this.statement('DELETE FROM session_timeline WHERE session_pk IN (SELECT value FROM json_each(?))').run(pks)
+        if (this.sessionSearchIndexed) {
+          this.statement('DELETE FROM session_search WHERE rowid IN (SELECT value FROM json_each(?))')
+            .run(JSON.stringify(expired.map(row => row.rowid)))
+        }
+        sessions = changedCount(this.statement('DELETE FROM sessions WHERE session_pk IN (SELECT value FROM json_each(?))').run(pks))
+      }
+      const sessionUsage = changedCount(this.statement(`
+        DELETE FROM session_model_usage WHERE rowid IN (
+          SELECT rowid FROM session_model_usage WHERE last_at < ? LIMIT ?
         )
       `).run(cutoff, bounded))
-      return { events, sessions, more: events >= bounded || sessions >= bounded }
+      return { events, sessions, more: events >= bounded || sessions >= bounded || sessionUsage >= bounded }
     })
+  }
+
+  /**
+   * Up to `limit` sessions last seen before `cutoff`, oldest first per pet.
+   * Pets are walked with MIN(pet_id) > ? seeks on the (pet_id, last_seen_at)
+   * index, so retention needs no separate last_seen_at index on the hot table.
+   */
+  private expiredSessions(cutoff: number, limit: number): Array<{ pk: string, rowid: number }> {
+    const expired: Array<{ pk: string, rowid: number }> = []
+    let pet = this.statement('SELECT MIN(pet_id) AS pet FROM sessions').get()?.pet
+    while (typeof pet === 'string' && expired.length < limit) {
+      const rows = this.statement(`
+        SELECT rowid AS session_rowid, session_pk FROM sessions INDEXED BY idx_history_sessions_pet_seen
+        WHERE pet_id = ? AND last_seen_at < ? ORDER BY last_seen_at, session_pk LIMIT ?
+      `).all(pet, cutoff, limit - expired.length)
+      for (const row of rows) expired.push({ pk: String(row.session_pk), rowid: asInteger(row.session_rowid) })
+      pet = this.statement('SELECT MIN(pet_id) AS pet FROM sessions WHERE pet_id > ?').get(pet)?.pet
+    }
+    return expired
+  }
+
+  /** Keeps the FTS5 search row of one session in step with its label. */
+  private indexSessionSearch(rowid: number, sessionPk: string, label: string, agentId: string, adapterId: string, replace: boolean): void {
+    if (!this.sessionSearchIndexed || rowid <= 0) return
+    if (replace) this.statement('DELETE FROM session_search WHERE rowid = ?').run(rowid)
+    this.statement('INSERT INTO session_search(rowid, session_pk, text) VALUES (?, ?, ?)')
+      .run(rowid, sessionPk, sessionSearchText(label, agentId, adapterId))
   }
 
   /** Runtime retention: bounded batches with the event loop yielded in between. */
@@ -1432,6 +1779,139 @@ export class HistoryStore {
         VALUES (8, 'history-token-model-breakdown', ?, 'history-token-model-breakdown')
       `).run(this.now())
     })
+    this.ensureSessionTimelineSchema()
+    const hasV9 = Boolean(this.statement('SELECT version FROM schema_migrations WHERE version = 9').get())
+    if (!hasV9) this.transaction(() => {
+      // Additive session browser: outcome, local-log join key and per-session
+      // model totals for sessions recorded before v9. Their tool / permission
+      // counters and timelines cannot be reconstructed (heartbeats were rolled
+      // up), so they keep timeline_tracked = 0 and the UI shows them as unknown.
+      this.database.exec(`
+        UPDATE sessions SET final_state = CASE
+          WHEN last_state IN ('thinking', 'tool-running', 'waiting-permission', 'waiting-input') THEN 'open'
+          WHEN last_state IN ('success', 'error') THEN last_state
+          WHEN last_state = 'offline' THEN 'cancelled'
+          WHEN terminal_state IN ('success', 'error') THEN terminal_state
+          ELSE 'open' END;
+        DELETE FROM session_model_usage;
+      `)
+      this.backfillSessionUsageKeys()
+      this.statement(`
+        INSERT INTO session_model_usage(
+          usage_key, model, last_at, token_input, token_output, token_cache_read, token_cache_write
+        )
+        SELECT session_id, token_model, MAX(occurred_at),
+               SUM(MAX(0, COALESCE(token_input, 0))),
+               SUM(MAX(0, COALESCE(token_output, 0))),
+               SUM(MAX(0, COALESCE(token_cache_read, 0))),
+               SUM(MAX(0, COALESCE(token_cache_write, 0)))
+        FROM events
+        WHERE type = 'agent.token_usage' AND session_id IS NOT NULL AND session_id != ''
+        GROUP BY session_id, token_model
+      `).run()
+      this.statement(`
+        INSERT INTO schema_migrations(version, name, applied_at, checksum)
+        VALUES (9, 'history-session-timeline', ?, 'history-session-timeline')
+      `).run(this.now())
+    })
+  }
+
+  /** Idempotent: columns, tables and indexes for the session list and timelines. */
+  private ensureSessionTimelineSchema(): void {
+    const columns = new Set(
+      this.database.prepare('PRAGMA table_info(sessions)').all().map(row => String(row.name)),
+    )
+    const additions: Array<[string, string]> = [
+      ['project_label', "TEXT NOT NULL DEFAULT ''"],
+      ['usage_key', "TEXT NOT NULL DEFAULT ''"],
+      ['final_state', "TEXT NOT NULL DEFAULT 'open'"],
+      ['last_tool', "TEXT NOT NULL DEFAULT ''"],
+      ['tool_runs', 'INTEGER NOT NULL DEFAULT 0'],
+      ['permission_waits', 'INTEGER NOT NULL DEFAULT 0'],
+      ['permission_wait_ms', 'INTEGER NOT NULL DEFAULT 0'],
+      ['state_since', 'INTEGER NOT NULL DEFAULT 0'],
+      ['timeline_tracked', 'INTEGER NOT NULL DEFAULT 0'],
+      ['timeline_count', 'INTEGER NOT NULL DEFAULT 0'],
+    ]
+    for (const [column, definition] of additions) {
+      if (!columns.has(column)) this.database.exec(`ALTER TABLE sessions ADD COLUMN ${column} ${definition}`)
+    }
+    this.database.exec(`
+      CREATE TABLE IF NOT EXISTS session_timeline (
+        session_pk TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        occurred_at INTEGER NOT NULL,
+        state TEXT NOT NULL,
+        tool_name TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY(session_pk, seq)
+      ) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS session_model_usage (
+        usage_key TEXT NOT NULL,
+        model TEXT NOT NULL DEFAULT '',
+        last_at INTEGER NOT NULL DEFAULT 0,
+        token_input INTEGER NOT NULL DEFAULT 0,
+        token_output INTEGER NOT NULL DEFAULT 0,
+        token_cache_read INTEGER NOT NULL DEFAULT 0,
+        token_cache_write INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(usage_key, model)
+      );
+      CREATE INDEX IF NOT EXISTS idx_session_model_usage_last_at ON session_model_usage(last_at);
+      CREATE INDEX IF NOT EXISTS idx_history_sessions_pet_seen
+        ON sessions(pet_id, last_seen_at, session_pk);
+      CREATE INDEX IF NOT EXISTS idx_history_sessions_pet_project_seen
+        ON sessions(pet_id, project_id, last_seen_at, session_pk);
+      DROP INDEX IF EXISTS idx_history_sessions_pet_final_seen;
+      DROP INDEX IF EXISTS idx_history_sessions_last_seen;
+    `)
+    this.ensureSessionSearchIndex()
+  }
+
+  /**
+   * FTS5 trigram index over "label, agent, adapter" so substring search reads
+   * only matching sessions. Rowids mirror sessions.rowid. Built from sessions
+   * whenever the table is (re)created; optional when FTS5 is missing.
+   */
+  private ensureSessionSearchIndex(): void {
+    const existed = Boolean(this.database.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_search'",
+    ).get())
+    try {
+      this.database.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS session_search USING fts5(
+          session_pk UNINDEXED, text, tokenize = 'trigram'
+        )
+      `)
+    } catch {
+      this.sessionSearchIndexed = false
+      return
+    }
+    this.sessionSearchIndexed = true
+    if (!existed) {
+      this.database.exec(`
+        INSERT INTO session_search(rowid, session_pk, text)
+        SELECT rowid, session_pk, project_label || char(10) || agent_id || char(10) || adapter_id FROM sessions
+      `)
+    }
+  }
+
+  /**
+   * Sessions store only a hash of the external id, but their event rows keep
+   * it, so one pass over the distinct hook identities derives each session's
+   * local-log join key. Runs once (v9); new sessions get the key on insert.
+   */
+  private backfillSessionUsageKeys(): void {
+    const update = this.statement("UPDATE sessions SET usage_key = ? WHERE session_pk = ? AND usage_key = ''")
+    const rows = this.statement(`
+      SELECT DISTINCT adapter_id, agent_id, session_id, project_id FROM events
+      WHERE type != 'agent.token_usage' AND session_id IS NOT NULL AND session_id != ''
+    `).all()
+    for (const row of rows) {
+      const adapterId = safeText(row.adapter_id)
+      const externalId = typeof row.session_id === 'string' ? row.session_id : ''
+      const source = localUsageKeySource(adapterId, externalId)
+      if (!source) continue
+      update.run(digest(source), historySessionPk(adapterId, safeText(row.agent_id), externalId, safeText(row.project_id)))
+    }
   }
 
   private ensureModelSchema(): void {

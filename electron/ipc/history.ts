@@ -1,8 +1,17 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import type { HistoryStore } from '../history'
-import type { HistoryClearResult, HistoryCommandResult, HistoryExportFormat, HistorySummary, HistoryUsageBlock } from '../../src/types/history'
+import type {
+  HistoryClearResult,
+  HistoryCommandResult,
+  HistoryExportFormat,
+  HistorySessionDetail,
+  HistorySessionPage,
+  HistorySummary,
+  HistoryUsageBlock,
+} from '../../src/types/history'
 import { t } from '../../src/i18n.ts'
 import { historyDaysToCsv, historyExportFileName } from '../history-export.ts'
+import { isHistorySessionId, normalizeSessionQuery } from '../history-sessions.ts'
 import { IPC_CHANNELS } from './channels.ts'
 
 type HistoryExportDialogOptions = {
@@ -59,6 +68,31 @@ export function registerHistoryIpc(deps: HistoryIpcDependencies): void {
       return historyStore.getUsageBlocks()
     } catch {
       return []
+    }
+  })
+
+  // Session browser: read-only and metadata-only. The store re-validates the
+  // query (ids, bounds, enum values, page size) and binds every value, and
+  // neither handler starts a log scan, so a historyUpdated refetch cannot loop.
+  deps.ipcMain.handle(IPC_CHANNELS.historySessions, (event, query?: unknown): HistorySessionPage => {
+    deps.assertTrustedIpcSender(event, deps.getPanelWindow())
+    const historyStore = deps.getHistoryStore()
+    if (!historyStore) return { items: [], nextCursor: null }
+    try {
+      return historyStore.listSessions(deps.activePetId() ?? 'aang-airbender', normalizeSessionQuery(query, Date.now()))
+    } catch {
+      return { items: [], nextCursor: null }
+    }
+  })
+
+  deps.ipcMain.handle(IPC_CHANNELS.historySessionDetail, (event, sessionId?: unknown): HistorySessionDetail | null => {
+    deps.assertTrustedIpcSender(event, deps.getPanelWindow())
+    const historyStore = deps.getHistoryStore()
+    if (!historyStore || !isHistorySessionId(sessionId)) return null
+    try {
+      return historyStore.getSessionDetail(deps.activePetId() ?? 'aang-airbender', sessionId)
+    } catch {
+      return null
     }
   })
 

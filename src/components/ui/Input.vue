@@ -11,7 +11,7 @@ const props = withDefaults(defineProps<{
   label?: string
   help?: string
   error?: string
-  type?: 'text' | 'url' | 'search' | 'number' | 'email' | 'password'
+  type?: 'text' | 'url' | 'search' | 'number' | 'email' | 'password' | 'date'
   /** Required when there is no visible label. */
   ariaLabel?: string
   disabled?: boolean

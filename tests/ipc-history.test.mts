@@ -6,10 +6,18 @@ import { registerHistoryIpc } from '../electron/ipc/history.ts'
 function createHistoryIpcHarness() {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const panelWindow = { id: 'panel' }
-  const records = { trusted: [] as Array<unknown>, broadcasts: 0, refreshes: 0, writes: [] as Array<{ path: string; value: unknown }>, reveals: [] as string[] }
+  const records = { trusted: [] as Array<unknown>, broadcasts: 0, refreshes: 0, writes: [] as Array<{ path: string; value: unknown }>, reveals: [] as string[], sessionQueries: [] as Array<{ petId: string; query: unknown }>, detailIds: [] as string[] }
   let dialogResult: { canceled: boolean; filePath?: string } = { canceled: true }
   const historyStore = {
     clear() {},
+    listSessions: (petId: string, query: unknown) => {
+      records.sessionQueries.push({ petId, query })
+      return { items: [], nextCursor: null }
+    },
+    getSessionDetail: (petId: string, id: string) => {
+      records.detailIds.push(`${petId}/${id}`)
+      return null
+    },
     getUsageBlocks: () => [{ adapterId: 'codex', startAt: 1, endAt: 2, firstActivityAt: 1, lastActivityAt: 1, tokenInput: 1, tokenOutput: 0, tokenCacheRead: 0, tokenCacheWrite: 0, records: 1 }],
     getExport: (petId: string, _projectId?: string, rangeDays?: number) => ({ petId, rows: [], rangeDays, summary: { localDate: '2026-08-13', days: [{ localDate: '2026-08-13', sessionsCompleted: 1, sessionsFailed: 0, activeMs: 120000, tokenInput: 5, tokenOutput: 6, tokenCacheRead: 7, tokenCacheWrite: 8 }] } }),
   }
@@ -49,6 +57,8 @@ test('history IPC registration uses injected services and preserves handler beha
   assert.deepEqual([...harness.handlers.keys()], [
     IPC_CHANNELS.historySummary,
     IPC_CHANNELS.historyUsageBlocks,
+    IPC_CHANNELS.historySessions,
+    IPC_CHANNELS.historySessionDetail,
     IPC_CHANNELS.historyClear,
     IPC_CHANNELS.historyExport,
     IPC_CHANNELS.historyRevealExport,
@@ -104,4 +114,41 @@ test('usage blocks IPC is sender-checked, takes no input and never starts a log 
   assert.deepEqual(blocks.map(block => block.adapterId), ['codex'])
   assert.equal(harness.records.refreshes, 0)
   assert.deepEqual(harness.records.trusted, [{ event: {}, requiredWindow: harness.panelWindow }])
+})
+
+test('session list IPC is sender-checked, normalises every field and never scans logs', async () => {
+  const harness = createHistoryIpcHarness()
+  const list = harness.handlers.get(IPC_CHANNELS.historySessions)!
+  assert.deepEqual(await list({}, {
+    projectId: '../../etc',
+    adapterId: 'codex; DROP TABLE sessions',
+    outcome: 'pwned',
+    search: `${'x'.repeat(200)}\u0000`,
+    limit: 10_000,
+    from: Number.NaN,
+    to: 'tomorrow',
+    cursor: { lastSeenAt: 5, id: "' OR 1=1 --" },
+    extra: { nested: true },
+  }), { items: [], nextCursor: null })
+  const { petId, query } = harness.records.sessionQueries[0]!
+  assert.equal(petId, 'sample-pet')
+  assert.deepEqual(Object.keys(query as object).sort(), ['limit', 'search'])
+  assert.equal((query as { limit: number }).limit, 50)
+  assert.equal((query as { search: string }).search.length, 64)
+  await list({}, 'not an object')
+  assert.deepEqual(harness.records.sessionQueries[1]!.query, { limit: 30 })
+  assert.equal(harness.records.refreshes, 0)
+  assert.equal(harness.records.trusted.length, 2)
+})
+
+test('session detail IPC only forwards well-formed session ids', async () => {
+  const harness = createHistoryIpcHarness()
+  const detail = harness.handlers.get(IPC_CHANNELS.historySessionDetail)!
+  assert.equal(await detail({}, 42), null)
+  assert.equal(await detail({}, 'codex:codex:not-a-hash'), null)
+  assert.equal(await detail({}, `codex:codex:${'a'.repeat(24)}\n`), null)
+  assert.equal(await detail({}, `codex:codex:${'a'.repeat(24)}`), null)
+  // Scoped to the active pet, like the list.
+  assert.deepEqual(harness.records.detailIds, [`sample-pet/codex:codex:${'a'.repeat(24)}`])
+  assert.equal(harness.records.trusted.length, 4)
 })
