@@ -97,5 +97,10 @@
   "plugins.ackReasonKeyChanged": "作者的簽章金鑰與先前信任的不同。請確認你信任這位新作者。",
   "plugins.ackReasonRemoved": "這個版本移除了先前的簽章，無法驗證是否出自同一位作者。",
   "plugins.ackReasonNetwork": "此更新新增了網路或外部連結權限。",
-  "plugins.ackReasonSecrets": "此更新新增了密鑰讀取權限。"
+  "plugins.ackReasonSecrets": "此更新新增了密鑰讀取權限。",
+  "plugins.emptyTitle": "插件可為寵物增加提醒、面板與外觀",
+  "plugins.emptyDescription": "從線上目錄挑選，或安裝你信任的本機插件檔案。每個插件安裝前都會列出它要求的權限。",
+  "plugins.emptyDescriptionOff": "插件目前已停用。先啟用插件，再從目錄挑選或安裝本機檔案；安裝後的插件預設為停用，仍需你逐一啟用。",
+  "plugins.enablePlugins": "啟用插件",
+  "plugins.browseCatalog": "瀏覽插件目錄"
 }

@@ -97,5 +97,10 @@
   "plugins.ackReasonKeyChanged": "The author's signing key differs from the one you trusted before. Make sure you trust the new key.",
   "plugins.ackReasonRemoved": "This version drops the earlier signature, so it cannot be verified as coming from the same author.",
   "plugins.ackReasonNetwork": "This update adds network or external link permissions.",
-  "plugins.ackReasonSecrets": "This update adds permission to read secrets."
+  "plugins.ackReasonSecrets": "This update adds permission to read secrets.",
+  "plugins.emptyTitle": "Plugins add reminders, panels and looks to your pet",
+  "plugins.emptyDescription": "Pick one from the online catalog or install a local plugin file you trust. You always see the permissions a plugin asks for before it is installed.",
+  "plugins.emptyDescriptionOff": "Plugins are turned off. Turn them on, then pick one from the catalog or install a local file. Installed plugins start disabled and you turn each one on yourself.",
+  "plugins.enablePlugins": "Turn on plugins",
+  "plugins.browseCatalog": "Browse the catalog"
 }

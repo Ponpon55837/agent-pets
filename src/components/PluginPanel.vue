@@ -125,6 +125,9 @@ function showTab(tab: PluginTab): void {
         :disabled="busy"
         @update:model-value="updateGlobalPreferences({ pluginsEnabled: $event })"
       />
+      <Button v-if="!enabledGlobally" variant="primary" size="sm" :disabled="busy" @click="updateGlobalPreferences({ pluginsEnabled: true })">
+        {{ t('plugins.enablePlugins') }}
+      </Button>
     </Card>
 
     <SegmentedTabs v-model="activeTab" :tabs="tabs" :aria-label="t('plugins.tabsLabel')" id-prefix="plugin" />
@@ -136,7 +139,7 @@ function showTab(tab: PluginTab): void {
       role="tabpanel"
       aria-labelledby="plugin-tab-installed"
     >
-      <PluginInstalledList />
+      <PluginInstalledList @explore="showTab('explore')" />
     </div>
     <div
       v-show="activeTab === 'explore'"
