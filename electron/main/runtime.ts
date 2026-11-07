@@ -921,7 +921,10 @@ export async function createPluginServices(): Promise<void> {
   if (mainState.pluginRegistry || mainState.pluginPreferences || mainState.pluginHostWindow) return
   const userDataDirectory = app.getPath('userData')
   mainState.pluginRegistry = new PluginRegistry(userDataDirectory)
-  mainState.pluginDeveloperModeWatcher = new PluginDeveloperModeWatcher(500)
+  mainState.pluginDeveloperModeWatcher = new PluginDeveloperModeWatcher(500, pluginId => {
+    // Surfaces in the plugin's diagnostics in the manager instead of vanishing.
+    mainState.pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
+  })
   mainState.pluginPreferences = new PluginPreferencesStore(userDataDirectory)
   mainState.pluginSecretsStore = new PluginSecretsStore(userDataDirectory, safeStorage)
   mainState.pluginSecretConsentStore = new PluginSecretConsentStore(userDataDirectory)
