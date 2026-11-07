@@ -1,1 +1,12 @@
-{}
+{
+  "plugins.tabInstalled": "Installed",
+  "plugins.tabExplore": "Explore",
+  "plugins.tabNotifications": "Notifications",
+  "plugins.tabAdvanced": "Advanced",
+  "plugins.tabsLabel": "Plugin sections",
+  "plugins.installFromFile": "Install from file…",
+  "plugins.summaryEnabled": "{enabled} enabled of {total} installed",
+  "plugins.summaryUpdates": "{count} updates available",
+  "plugins.summaryUnread": "{count} unread",
+  "plugins.globalOffBanner": "Plugins are turned off globally, so none of them run."
+}

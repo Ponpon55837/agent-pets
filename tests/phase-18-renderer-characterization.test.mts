@@ -39,7 +39,11 @@ test('status panel preserves dashboard and settings navigation contracts', () =>
 })
 
 test('plugin panel preserves install, settings, diagnostics and notification actions', () => {
-  const source = read('../src/components/PluginPanel.vue')
+  const dir = '../src/components/plugin-panel/'
+  const source = [
+    '../src/components/PluginPanel.vue',
+    ...['PluginInstalledList', 'PluginCatalog', 'PluginAdvanced', 'PluginNotificationInbox'].map(name => `${dir}${name}.vue`),
+  ].map(read).join('\n')
   for (const key of [
     'pluginInstalledHeading', 'pluginCatalogHeading', 'pluginSettingsHeading',
     'pluginDiagnosticsHeading', 'pluginNotificationsHeading', 'pluginCommandsHeading',
@@ -56,6 +60,11 @@ test('renderer panel and extracted component files stay below the 500-line targe
   const components = [
     '../src/components/PluginPanel.vue',
     '../src/components/plugin-panel/PluginPanelDialogs.vue',
+    '../src/components/plugin-panel/PluginInstalledList.vue',
+    '../src/components/plugin-panel/PluginCatalog.vue',
+    '../src/components/plugin-panel/PluginAdvanced.vue',
+    '../src/components/plugin-panel/PluginNotificationInbox.vue',
+    '../src/components/plugin-panel/PluginPanelFrame.vue',
     '../src/components/StatusPanel.vue',
     '../src/components/status-panel/StatusPanelHistory.vue',
     '../src/components/status-panel/StatusPanelSessions.vue',

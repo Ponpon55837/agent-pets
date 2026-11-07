@@ -1,1 +1,12 @@
-{}
+{
+  "plugins.tabInstalled": "已安裝",
+  "plugins.tabExplore": "探索",
+  "plugins.tabNotifications": "通知",
+  "plugins.tabAdvanced": "進階",
+  "plugins.tabsLabel": "插件分頁",
+  "plugins.installFromFile": "安裝本機檔案…",
+  "plugins.summaryEnabled": "已啟用 {enabled} / 已安裝 {total}",
+  "plugins.summaryUpdates": "{count} 個可更新",
+  "plugins.summaryUnread": "{count} 則未讀",
+  "plugins.globalOffBanner": "插件目前已全域停用，所有插件都不會執行。"
+}
