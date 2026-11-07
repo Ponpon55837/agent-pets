@@ -33,12 +33,13 @@ To remove integrations, use **Remove** on a tool's card in the wizard (only that
 | Agent | CLI | Desktop | Permission | Quota | Token usage |
 |-------|-----|---------|------------|-------|-------------|
 | OpenCode | yes | yes | respond | — | estimated |
-| Codex | yes | partial | observe | provider | estimated |
-| Claude Code | yes | yes | observe | provider | estimated |
+| Codex | yes | partial | observe | provider | exact |
+| Claude Code | yes | yes | observe | provider | exact |
 
 - **respond** — the permission request can be allowed once or denied from the pet bubble. Only OpenCode supports this.
 - **observe** — the pet shows Waiting Permission, but you approve inside the tool itself (Codex and Claude Code only report that they are waiting; there is no way to send a decision back).
 - Codex does not report a "waiting for input" state. Codex Desktop shares `~/.codex` with the CLI and has no separate install API, so it works only if that build runs the same hooks; verify with **Wait for real event**.
+- **Token usage: exact** means per-message counts read from the agent's own local session logs (`~/.codex/sessions`, `~/.claude/projects`). **estimated** means the number comes from the event the agent sent, as OpenCode and Generic HTTP integrations do; Codex and Claude Code usage on live events is not counted, so local logs stay the single source.
 - A **Generic HTTP** adapter is available to local integrations through the authenticated `/v1/events` endpoint (see [Event server](#event-server)). It is observe-only.
 
 ## The pet
@@ -75,8 +76,8 @@ Sprite requirements (checked on import):
 Open it with a click on the pet or the Tray. The header shows the pet, its level and the number of running / attention sessions, plus, left to right, a **⋮ menu** (Do Not Disturb, Keep open, and a quick Appearance toggle that cycles system / light / dark; a dot on the button shows Do Not Disturb is on), Settings (`Cmd/Ctrl+,`) and Close. **Esc** steps back one level, then hides the panel. Drag any edge to resize the panel (from 360×420 up to full screen); every view shares that one size and it is remembered, and **Settings → General → Reset panel size** restores the default.
 
 - **Sessions** — grouped into **Needs attention**, **Running** and **Idle & finished**. Filter by All / Needs attention / Running and by tool, and sort by urgency or most recent. Live states show elapsed time; a row expands to show path, tool, last seen and session ID. **Clear offline items** removes ended sessions from view; sessions silent for 15 minutes go stale. A banner appears if a local server port is busy, with **Retry now**.
-- **Quota** — the remaining Codex and Claude Code subscription quota (session and weekly windows, reset times in your local time). Agent Pets has no account system and never asks for agent credentials: it reuses the CLI's local sign-in, queries the provider from the main process and passes only percentages to the UI. If the CLI session is missing or expired, sign in again in that CLI. Results refresh every 2 minutes while the panel is open (**Refresh now** is rate limited); the last good reading stays visible if a refresh fails. A thin quota meter also appears in the pet's status pill while that tool is active.
-- **History** — completed / failed sessions, active time, token usage (fresh input plus output; cache is listed separately) and agent distribution for **7, 30 or 90 days**, optionally filtered by project. **Export JSON** or **Export CSV** writes the sanitized daily summary to a file you choose. **Clear history** removes history and quota snapshots only, never XP, level or achievements. History is built from hook events plus a read-only scan of local Codex / Claude Code session logs; prompts, tool arguments and full paths are not stored. Raw events are retained for 90 days; daily aggregates remain.
+- **Quota** — the remaining Codex and Claude Code subscription quota (session and weekly windows, reset times in your local time). Agent Pets has no account system and never asks for agent credentials: it reuses the CLI's local sign-in, queries the provider from the main process and passes only percentages to the UI. If the CLI session is missing or expired, sign in again in that CLI. Results refresh every 2 minutes while the panel is open (**Refresh now** is rate limited); the last good reading stays visible if a refresh fails. A thin quota meter also appears in the pet's status pill while that tool is active. Below the provider quota, **Current 5-hour block** shows the block computed from local logs (it starts at the first usage after a 5-hour break, rounded down to the hour, and lasts 5 hours): tokens so far, elapsed and remaining time and tokens per minute. It is a local estimate of the window, not the provider's own limit.
+- **History** — completed / failed sessions, active time, token usage (fresh input plus output; cache is listed separately), agent distribution and a per-model breakdown for **7, 30 or 90 days**, optionally filtered by project. **Export JSON** or **Export CSV** writes the sanitized daily summary to a file you choose. **Clear history** removes history and quota snapshots only, never XP, level or achievements. History is built from hook events plus a read-only scan of local Codex / Claude Code session logs; prompts, tool arguments and full paths are not stored. Long logs are read in parts over several scans; a scan never skips a large file. Raw events are retained for 90 days; daily aggregates remain.
 
 - **Plugin tabs** — each enabled plugin adds a tab after History (only while plugins are on and the plugin is installed, enabled and not crashed). A tab shows the plugin's name, icon and an unread badge; with many plugins the tab bar scrolls (wheel, trackpad, ‹ › buttons, arrow keys). A plugin with a panel page shows it inside the tab; any other plugin shows its recent notifications and commands with links to its settings and details. The last tab you used is remembered.
 
@@ -86,7 +87,7 @@ Under **Settings → Pets → Growth**: XP, level, evolution stage and streak, r
 
 - XP is awarded only in the main process, idempotently: +20 per completed session, +10 for the first completion of a local day, +2 per 30 minutes of active work (up to +10 per session) and +5 for each consecutive day. Failed or cancelled work earns no XP.
 - **Mood** starts each day at 10: +4 for a success, −6 for an error, plus capped bonuses for tools and long work. **Reset today's mood** returns it to 10, and **Mood visuals** can turn the aura off without stopping tracking.
-- 14 achievements (one hidden), filterable by All / In progress / Unlocked. Unlocks are saved once per pet and announced with a native notification. **Enable achievements** stops new unlocks only.
+- 14 achievements (one hidden), filterable by All / In progress / Unlocked. Unlocks are saved once per pet and announced with a native notification. Token achievements count exact local-log usage of Codex and Claude Code once per message (shared by every pet, like History), plus event-reported usage of other agents. **Enable achievements** stops new unlocks only.
 
 ## Settings
 
