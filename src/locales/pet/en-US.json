@@ -21,5 +21,11 @@
   "pet.tool.mcp": "MCP: {server}",
   "pet.tool.generic": "Using {name}",
   "pet.toastWaiting": "Waiting for you",
-  "pet.unreadResultsAria": "{count} results while you were away, click to clear"
+  "pet.unreadResultsAria": "{count} results while you were away, click to clear",
+  "pet.miniError": "Failed",
+  "pet.miniPermission": "Waiting for permission",
+  "pet.miniWaiting": "Waiting for you",
+  "pet.miniSuccess": "Done",
+  "pet.miniWorking": "Working",
+  "pet.miniIdle": "Idle"
 }

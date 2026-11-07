@@ -203,7 +203,24 @@ const displayLines = computed(() => {
 // toggle on — showing a single pet forces picking a "winner", so instead
 // show one small pet per family, side by side.
 const isMultiPet = computed(() => store.isMultiPet)
-const petAnimationFrozen = computed(() => shimejiReducedMotion.value || store.petWindowMode.mode === 'mini')
+const petAnimationFrozen = computed(() => shimejiReducedMotion.value)
+const petLowFps = computed(() => store.petWindowMode.mode === 'mini')
+
+// Mini mode shrinks the sprite to fit the fixed small window, whatever the pet size.
+const MINI_FIT_PX = 88
+const miniScale = computed(() => Math.min(0.42, MINI_FIT_PX / (208 * store.petScale)))
+const miniStatus = computed(() => {
+  const state = store.currentState
+  switch (state) {
+    case 'error': return { icon: 'warning', label: t('pet.miniError') }
+    case 'waiting-permission': return { icon: 'lock', label: t('pet.miniPermission') }
+    case 'waiting-input': return { icon: 'bell', label: t('pet.miniWaiting') }
+    case 'success': return { icon: 'check', label: t('pet.miniSuccess') }
+    case 'thinking':
+    case 'tool-running': return { icon: null, label: t('pet.miniWorking') }
+    default: return { icon: null, label: t('pet.miniIdle') }
+  }
+})
 
 const bubbleSelection = computed(() => {
   const permissionRequest = Boolean(store.permissionBubbleActive && (store.permissionRequest || store.permissionOutcome))
@@ -642,7 +659,8 @@ watch(() => store.achievementUnlock, (unlock) => {
   <div
     class="desktop-pet"
     :class="[`mode-${store.petWindowMode.mode}`, store.petWindowMode.edge ? `edge-${store.petWindowMode.edge}` : '']"
-    :data-pet-mode="store.petWindowMode.mode"
+:data-pet-mode="store.petWindowMode.mode"
+    :style="{ '--mini-scale': miniScale }"
   >
     <div
       ref="clickAreaRef"
@@ -677,6 +695,7 @@ watch(() => store.achievementUnlock, (unlock) => {
             :since="store.highestPrioritySession?.lastSeenAt"
             autonomous-behavior="idle"
             :freeze="petAnimationFrozen"
+          :low-fps="petLowFps"
           />
         </span>
         <span class="edge-peek-grip" aria-hidden="true" />
@@ -841,6 +860,21 @@ watch(() => store.achievementUnlock, (unlock) => {
       </Transition>
 
       <span
+        v-if="store.petWindowMode.mode === 'mini'"
+        class="mini-status"
+        role="status"
+        :aria-label="miniStatus.label"
+        :title="miniStatus.label"
+        :style="{ '--mini-ring': STATE_COLORS[store.currentState] }"
+      >
+        <span class="mini-status-badge" :class="{ pulse: store.currentState !== 'idle' && store.currentState !== 'offline' }">
+          <Icon v-if="miniStatus.icon" :name="miniStatus.icon" :size="11" />
+          <span v-else class="mini-status-dot" />
+        </span>
+        <span v-if="store.unreadResults.count > 0" class="mini-status-count">{{ store.unreadResults.count }}</span>
+      </span>
+
+      <span
         v-if="store.unreadResults.count > 0"
         class="unread-badge"
         :class="{ error: store.unreadResults.hasError }"
@@ -865,6 +899,7 @@ watch(() => store.achievementUnlock, (unlock) => {
               :mood="store.moodVisualsEnabled ? store.mood : undefined"
               :autonomous-behavior="shimejiBehavior"
               :freeze="petAnimationFrozen"
+          :low-fps="petLowFps"
             />
             <div
               class="status-line multi-pet-status-line"
@@ -938,6 +973,7 @@ watch(() => store.achievementUnlock, (unlock) => {
           :mood="store.moodVisualsEnabled ? store.mood : undefined"
           :autonomous-behavior="shimejiBehavior"
           :freeze="petAnimationFrozen"
+          :low-fps="petLowFps"
         />
         <TransitionGroup tag="div" name="status-line" class="status-lines">
           <div

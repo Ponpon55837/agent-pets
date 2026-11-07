@@ -12,6 +12,8 @@ const props = defineProps<{
   mood?: number
   autonomousBehavior?: PetAutonomousBehavior
   freeze?: boolean
+  /** Keeps animating but at a few frames per second (mini mode). */
+  lowFps?: boolean
 }>()
 
 // Keep low mood close to the pet's original colors; most of the visible
@@ -257,7 +259,8 @@ function frameDelay(): number {
     // After the fall plays out the pet idles slowly instead of freezing.
     sulking: props.state === 'error' && activeMotion.name === 'idle',
   })
-  return Math.max(80, Math.round(activeMotion.frameDurations[currentFrame] * multiplier))
+  const lowFpsFactor = props.lowFps ? 3 : 1
+  return Math.max(80, Math.round(activeMotion.frameDurations[currentFrame] * multiplier * lowFpsFactor))
 }
 
 function selectStep(index: number) {

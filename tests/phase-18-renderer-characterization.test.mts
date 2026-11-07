@@ -93,7 +93,7 @@ test('pet animation cadence and terminal frame behavior stay fixed', () => {
   assert.match(source, /document\.addEventListener\('visibilitychange', handleDocumentVisibilityChange\)/)
   assert.doesNotMatch(source, /setTimeout\(tick, frameDelay\(\)\)/)
   const desktopPet = read('../src/components/DesktopPet.vue')
-  assert.match(desktopPet, /shimejiReducedMotion\.value \|\| store\.petWindowMode\.mode === 'mini'/)
+  assert.match(desktopPet, /petAnimationFrozen = computed\(\(\) => shimejiReducedMotion\.value\)[\s\S]*petLowFps = computed\(\(\) => store\.petWindowMode\.mode === 'mini'\)/)
   assert.match(desktopPet, /:freeze="petAnimationFrozen"/)
 })
 
