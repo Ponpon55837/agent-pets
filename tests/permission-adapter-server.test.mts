@@ -168,3 +168,23 @@ test('OpenCode decisions never map to permanent allow', () => {
   assert.equal(mapOpenCodeDecision('allow_once'), 'once')
   assert.equal(mapOpenCodeDecision('deny'), 'reject')
 })
+
+test('title and patterns both reach the broker view, redacted and bounded', async () => {
+  await withServer(async ({ broker, post }) => {
+    const created = await post('/v1/permission/request', permission({
+      permissionId: 'per-details',
+      title: 'Run a local command',
+      patterns: ['git push https://user:hunter2@example.com/repo.git', 'cat /Users/alice/.ssh/config', 'x'.repeat(400)],
+    }))
+    assert.equal(created.status, 201)
+    const view = broker.listRequests().find((item) => item.description === 'Run a local command')
+    assert.ok(view)
+    assert.equal(view.details.length, 3)
+    assert.ok(!JSON.stringify(view).includes('hunter2'))
+    assert.ok(!JSON.stringify(view).includes('alice'))
+    assert.ok(view.details[1]?.startsWith('cat ~/.ssh/config'))
+    assert.equal(view.details[2]?.length, 120)
+    assert.equal(view.truncated, true)
+    assert.equal(view.truncatedChars, 280)
+  })
+})

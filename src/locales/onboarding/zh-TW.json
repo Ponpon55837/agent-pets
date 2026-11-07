@@ -1,1 +1,10 @@
-{}
+{
+  "onboarding.removeTitle": "移除 {name} 整合？",
+  "onboarding.removeBody": "只會移除 Agent Pets 自己寫入的 hook 項目。你自己的設定與其他 hook 會保留；若其他工具還在使用共用的 hook script，也會一併保留。",
+  "onboarding.removeFailed": "移除失敗",
+  "onboarding.removeDone": "已移除 Agent Pets 的整合項目，你的其他設定保持原樣。",
+  "onboarding.cleanupAll": "完整清理…",
+  "onboarding.cleanupTitle": "移除所有 Agent Pets 整合？",
+  "onboarding.cleanupBody": "會移除所有 Agent 的 hook 與 plugin、共用 hook script、連線 token 與 ~/.desktop-pet 內的檔案。你自己的設定與其他 hook 會保留。移除後寵物會維持離線，直到重新安裝。",
+  "onboarding.cleanupDone": "已完成清理。要解除安裝 App 前，建議先做這一步。"
+}

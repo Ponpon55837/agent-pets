@@ -39,6 +39,9 @@ import type { WindowBounds } from '../pet-window-mode'
 import type { WindowsFullscreenDetector, WindowsFullscreenState } from '../windows-fullscreen-detector'
 import type { PluginAgentStatusController } from '../plugin-agent-status.ts'
 
+import type { ServerHealthTracker } from './server-health'
+import { SessionSnapshotStore } from './session-snapshot'
+
 export interface PluginSkinFallbackInfo {
   pluginId: string
   pluginName: { 'zh-TW': string; 'en-US': string }
@@ -117,6 +120,9 @@ export const mainState = {
   windowsFullscreenAutoHiddenPet: false,
   windowsFullscreenAutoHiddenPanel: false,
   panelBlurHideHandle: null as ReturnType<typeof setTimeout> | null,
+  // Renderer-reported locks that suspend hide-on-blur: user pin and open modal flows.
+  panelPinned: false,
+  panelModalOpen: false,
   petCaptureProtectionApplied: null as boolean | null,
   petWindowMode: 'normal' as PetWindowMode,
   petWindowEdge: null as PetEdge | null,
@@ -125,6 +131,8 @@ export const mainState = {
   edgeDwellHandle: null as ReturnType<typeof setTimeout> | null,
   edgeDwellCandidate: null as { displayId: number; edge: PetEdge } | null,
   isQuitting: false,
+  serverHealth: null as ServerHealthTracker | null,
+  sessionSnapshot: new SessionSnapshotStore() as SessionSnapshotStore,
   notificationAttentionCount: 0,
   permissionAttentionCount: 0,
   pendingIntegrationTests: new Map<string, () => void>(),

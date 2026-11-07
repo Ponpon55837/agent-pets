@@ -378,6 +378,11 @@
   min-width: 118px;
 }
 
+.wizard-actions .cleanup-btn {
+  margin-right: auto;
+  min-width: 0;
+}
+
 .setup-overlay :focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);

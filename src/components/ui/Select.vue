@@ -58,7 +58,6 @@ const model = defineModel<string>({ required: true })
   -webkit-appearance: none;
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-pill);
-  outline: none;
   background: var(--surface-raised-hover);
   color: var(--text-primary);
   font: inherit;
@@ -86,7 +85,9 @@ const model = defineModel<string>({ required: true })
 
 .select:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 var(--focus-ring-width) var(--accent-glow);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  box-shadow: 0 0 0 calc(var(--focus-ring-width) + 3px) var(--accent-glow);
 }
 
 .select:disabled {
