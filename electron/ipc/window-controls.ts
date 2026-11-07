@@ -26,6 +26,7 @@ export interface WindowControlsIpcDependencies {
   getPetContentHeight(): number | null
   setPetContentHeight(value: number | null): void
   setPanelFullscreenAutoHidden(value: boolean): void
+  setPanelBlurLock(lock: { pinned?: boolean; modal?: boolean }): void
   finiteNumber(value: unknown): number | null
   clamp(value: number, min: number, max: number): number
   computePanelBounds(height: number, width?: number): Bounds
@@ -89,6 +90,15 @@ export function registerWindowControlsIpc(deps: WindowControlsIpcDependencies): 
       ? panelWindow.getBounds().width
       : Math.round(deps.clamp(requestedWidth, deps.panelMinWidth, deps.panelMaxWidth))
     deps.setPanelBounds(deps.computePanelBounds(Math.round(deps.clamp(height, 160, 900)), width))
+  })
+
+  deps.ipcMain.on(IPC_CHANNELS.panelBlurLock, (event, payload: unknown) => {
+    if (!deps.isTrustedIpcSender(event, deps.getPanelWindow())) return
+    const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    const lock: { pinned?: boolean; modal?: boolean } = {}
+    if (typeof data.pinned === 'boolean') lock.pinned = data.pinned
+    if (typeof data.modal === 'boolean') lock.modal = data.modal
+    if (Object.keys(lock).length > 0) deps.setPanelBlurLock(lock)
   })
 
   deps.ipcMain.on(IPC_CHANNELS.panelHide, event => {

@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { STATE_LABELS_SHORT, STATE_COLORS } from '@/types/agent'
-import { locale, t, type TranslationKey } from '@/i18n'
+import { locale, t } from '@/i18n'
 import type { AchievementUnlock } from '@/types/achievement'
 import type { PluginBadgeView } from '@/types/plugin'
 import {
@@ -19,6 +19,7 @@ import PetAnimation from '@/components/PetAnimation.vue'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 import { describeTool } from '@/utils/pet-toast'
+import PermissionBubble from '@/components/permission/PermissionBubble.vue'
 
 const store = useAgentStore()
 const dragOffset = ref({ x: 0, y: 0 })
@@ -205,9 +206,9 @@ const isMultiPet = computed(() => store.isMultiPet)
 const petAnimationFrozen = computed(() => shimejiReducedMotion.value || store.petWindowMode.mode === 'mini')
 
 const bubbleSelection = computed(() => {
-  const permissionRequest = Boolean(store.permissionBubbleActive && store.permissionRequest)
+  const permissionRequest = Boolean(store.permissionBubbleActive && (store.permissionRequest || store.permissionOutcome))
   const permissionNotice = Boolean(store.permissionBubbleActive && store.permissionNotice)
-  const agentBubbleEnabled = !store.permissionRequest && !store.permissionNotice && store.bubbleActive
+  const agentBubbleEnabled = !store.permissionRequest && !store.permissionOutcome && !store.permissionNotice && store.bubbleActive
   const pluginFeed = store.pluginFeedItem
 
   return selectBubble({
@@ -438,22 +439,6 @@ function quotaTitle(familyKey: string): string | undefined {
 }
 
 // --- Permission 泡泡 --------------------------------------------------------
-
-const PERMISSION_RISK_LABEL_KEYS: Record<string, TranslationKey> = {
-  high: 'permissionRiskHigh',
-  medium: 'permissionRiskMedium',
-  low: 'permissionRiskLow',
-}
-
-function permissionRiskLabel(risk: string): string {
-  return t(PERMISSION_RISK_LABEL_KEYS[risk] ?? 'permissionRiskUnknown')
-}
-
-function decidePermission(decision: 'allow_once' | 'deny'): void {
-  const request = store.permissionRequest
-  if (!request || request.status !== 'pending') return
-  void store.decidePermission(request.requestId, decision)
-}
 
 // --- 視窗高度回報（ResizeObserver）------------------------------------------
 
@@ -713,57 +698,8 @@ watch(() => store.achievementUnlock, (unlock) => {
       </div>
 
       <template v-else>
-      <Transition v-if="bubbleSelection === 'permission-request' && store.permissionBubbleActive && store.permissionRequest" name="toast" mode="out-in">
-        <section
-          :key="`permission-${store.permissionRequest.requestId}`"
-          class="permission-request"
-          :class="[`risk-${store.permissionRequest.risk}`, { deciding: store.permissionRequest.status === 'deciding' }]"
-          role="alertdialog"
-          aria-labelledby="permission-request-title"
-          aria-describedby="permission-request-description"
-          data-pet-hit-target="solid"
-          @mousedown.stop
-          @click.stop
-        >
-          <header class="permission-request-header">
-            <span class="permission-request-icon" aria-hidden="true">!</span>
-            <span class="permission-request-heading">
-              <strong id="permission-request-title">{{ store.permissionRequest.action }}</strong>
-              <span>{{ permissionRiskLabel(store.permissionRequest.risk) }}</span>
-            </span>
-            <span class="permission-request-queue">
-              {{ store.permissionRequest.queuePosition }}/{{ store.permissionRequest.queueSize }}
-            </span>
-          </header>
-          <p id="permission-request-description" class="permission-request-description">
-            {{ store.permissionRequest.description }}
-          </p>
-          <p v-if="store.permissionRequest.truncated" class="permission-request-warning">
-            {{ t('permissionWarning') }}
-          </p>
-          <div class="permission-request-actions">
-            <button
-              type="button"
-              class="permission-button deny"
-              :disabled="store.permissionRequest.status !== 'pending'"
-              @mousedown.stop
-              @click.stop="decidePermission('deny')"
-            >
-              Deny
-              <kbd v-if="store.permissionRequest.hotkeyEligible">Ctrl Shift N</kbd>
-            </button>
-            <button
-              type="button"
-              class="permission-button allow"
-              :disabled="store.permissionRequest.status !== 'pending'"
-              @mousedown.stop
-              @click.stop="decidePermission('allow_once')"
-            >
-              {{ store.permissionRequest.status === 'deciding' ? t('sending') : 'Allow once' }}
-              <kbd v-if="store.permissionRequest.hotkeyEligible">Ctrl Shift Y</kbd>
-            </button>
-          </div>
-        </section>
+      <Transition v-if="bubbleSelection === 'permission-request'" name="toast" mode="out-in">
+        <PermissionBubble :key="store.permissionRequest ? `permission-${store.permissionRequest.requestId}` : `permission-outcome-${store.permissionOutcome?.requestId}`" />
       </Transition>
 
       <Transition v-else-if="bubbleSelection === 'permission-notice' && store.permissionBubbleActive && store.permissionNotice" name="toast" mode="out-in">

@@ -242,6 +242,9 @@ onMounted(() => {
       if (cue) playCueIfAllowed(cue)
     })
   }
+  void electronAPI?.getSessionSnapshot?.()
+    .then((entries: unknown) => { store.restoreSessionSnapshot(entries) })
+    .catch(() => {})
   if (electronAPI?.onPresentationIntent) {
     cleanupPresentationIntent = electronAPI.onPresentationIntent((intent: unknown) => {
       store.handlePresentationIntent(intent)

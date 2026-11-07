@@ -285,7 +285,7 @@
   "capabilityInput": "輸入",
   "expandFromEdge": "從螢幕邊緣展開寵物",
   "open": "展開",
-  "permissionWarning": "內容已縮短，請先回到 OpenCode 檢查再允許。",
+  "permissionWarning": "內容已縮短（已省略 {count} 字），請先回到 {source} 檢查完整內容再允許。",
   "sending": "傳送中…",
   "permissionCountdown": "約 3 秒後自動關閉。",
   "fiveHourLimit": "5 小時上限",

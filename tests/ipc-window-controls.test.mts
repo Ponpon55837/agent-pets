@@ -38,6 +38,7 @@ test('window control IPC keeps sender scopes, bounds clamps, and hidden-pet pref
     getPetContentHeight: () => null,
     setPetContentHeight: height => calls.push(`content-height:${height}`),
     setPanelFullscreenAutoHidden: value => calls.push(`panel-auto-hidden:${value}`),
+    setPanelBlurLock: lock => calls.push(`blur-lock:${JSON.stringify(lock)}`),
     finiteNumber: value => typeof value === 'number' && Number.isFinite(value) ? value : null,
     clamp: (value, min, max) => Math.min(max, Math.max(min, value)),
     computePanelBounds: (height, width = 460) => ({ x: 1, y: 2, width, height }),
@@ -58,13 +59,16 @@ test('window control IPC keeps sender scopes, bounds clamps, and hidden-pet pref
     updatePluginAgentStatus: () => calls.push('plugin-status'),
   })
   const send = (channel: string, ...args: unknown[]) => handlers.get(channel)?.({}, ...args)
-  assert.equal(handlers.size, 10)
+  assert.equal(handlers.size, 11)
   send(IPC_CHANNELS.petMousePassthrough, { ignore: true })
   send(IPC_CHANNELS.petHideRequest)
   send(IPC_CHANNELS.panelResize, { width: 960, height: 800 })
   send(IPC_CHANNELS.panelResize, { width: 460, height: 720 })
   send(IPC_CHANNELS.panelResize, { width: 9_999, height: -1 })
   send(IPC_CHANNELS.panelResize, { width: 460, height: Number.NaN })
+  send(IPC_CHANNELS.panelBlurLock, { pinned: true, modal: 'yes', extra: 1 })
+  send(IPC_CHANNELS.panelBlurLock, { modal: false })
+  send(IPC_CHANNELS.panelBlurLock, { pinned: 'x' })
   send(IPC_CHANNELS.panelHide)
   send(IPC_CHANNELS.petResize, { width: 2_000, height: 20 })
   send(IPC_CHANNELS.petContentHeight, { height: 1_800 })
@@ -77,6 +81,8 @@ test('window control IPC keeps sender scopes, bounds clamps, and hidden-pet pref
     'panel-bounds:{"x":1,"y":2,"width":960,"height":800}',
     'panel-bounds:{"x":1,"y":2,"width":460,"height":720}',
     'panel-bounds:{"x":1,"y":2,"width":960,"height":160}',
+    'blur-lock:{"pinned":true}',
+    'blur-lock:{"modal":false}',
     'panel-auto-hidden:false',
     'panel-hide',
     'pet-bounds:{"x":0,"y":120,"width":1600,"height":80}',
@@ -93,6 +99,7 @@ test('window control IPC keeps sender scopes, bounds clamps, and hidden-pet pref
     IPC_CHANNELS.petHideRequest,
     IPC_CHANNELS.panelToggle,
     IPC_CHANNELS.panelResize,
+    IPC_CHANNELS.panelBlurLock,
     IPC_CHANNELS.panelHide,
     IPC_CHANNELS.petResize,
     IPC_CHANNELS.petContentHeight,
