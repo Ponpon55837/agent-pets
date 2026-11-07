@@ -8,6 +8,7 @@ import type { AchievementSnapshot, AchievementUnlock } from './achievement'
 import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySessionDetail, HistorySessionPage, HistorySessionQuery, HistorySummary, HistoryUsageBlock } from './history'
 import type { PetWindowMode, PetWindowModeState } from './pet-window'
 import type { PetBehaviorManifest, PluginSkinPetSource } from './pet'
+import type { PetImportCommitResult, PetImportDecision, PetImportPrepareResult } from './pet-import'
 import type { AgentSession } from './agent'
 import type { AgentAdapterId } from './agent-adapter'
 import type { LocalServerHealthSnapshot, LocalServerId } from './reliability'
@@ -210,5 +211,7 @@ export interface ElectronAPI {
       removeCustomPet: (petId: string) => Promise<boolean>
       getCustomPetSprite: (petId: string) => Promise<string | null>
       importPetSprite: (petId: string, displayName: string) => Promise<string | null>
-      importPetZip: () => Promise<{ ok: boolean; id?: string; displayName?: string; error?: string; code?: string }>
+      prepareImportPetZip: () => Promise<PetImportPrepareResult>
+      commitImportPetZip: (token: string, decision: PetImportDecision, expectedState: string) => Promise<PetImportCommitResult>
+      cancelImportPetZip: (token: string) => Promise<boolean>
     }

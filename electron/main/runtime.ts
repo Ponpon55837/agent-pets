@@ -1,4 +1,5 @@
 import { IPC_CHANNELS } from '../ipc/channels'
+import { sanitizePetId } from '../pet-id.ts'
 import { app, BrowserWindow, WebContentsView, screen, ipcMain, dialog, net, session, protocol, globalShortcut, powerMonitor, shell, safeStorage, Notification } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
@@ -368,13 +369,7 @@ export async function pluginPanelSnapshot(): Promise<PluginPanelResult<PluginPan
 }
 
 
-export function sanitizePetId(id: string): string | null {
-  if (typeof id !== 'string') return null
-  const cleaned = id.replace(/[^a-zA-Z0-9_\-.]/g, '')
-  if (cleaned.length === 0 || cleaned.length > 64) return null
-  if (cleaned.includes('..')) return null
-  return cleaned
-}
+export { sanitizePetId }
 
 export function safeJoin(base: string, ...parts: string[]): string | null {
   const root = resolve(base)
@@ -445,6 +440,12 @@ export async function readRegularFileWithin(root: string, relativePath: string, 
   }
 }
 
+// Hands the file buffer to the Response as-is. Uint8Array.from() walked the
+// iterator and copied up to 20 MB per sprite or preview request.
+function responseBody(data: Buffer): Uint8Array<ArrayBuffer> {
+  return new Uint8Array(data.buffer as ArrayBuffer, data.byteOffset, data.byteLength)
+}
+
 export function configureSecureProtocol(): void {
   protocol.handle('agent-pets', async (request) => {
     if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 })
@@ -471,12 +472,25 @@ export function configureSecureProtocol(): void {
         const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
         const data = await readRegularFileWithin(resolve(join(__dirname, '../dist')), relativePath, 25 * 1024 * 1024)
         if (!data) return new Response('Not found', { status: 404 })
-        return new Response(Uint8Array.from(data), {
+        return new Response(responseBody(data), {
           status: 200,
           headers: {
             'content-type': contentTypeFor(relativePath),
             'x-content-type-options': 'nosniff',
           },
+        })
+      }
+      if (url.hostname === 'import-preview') {
+        // Staged (not yet installed) import, addressed by an unguessable
+        // per-import token; anything else 404s.
+        const match = pathname.match(/^\/([0-9a-f]{32})\/spritesheet$/)
+        const directory = match ? mainState.petImport?.previewDirectory(match[1]) : null
+        const data = directory ? await readRegularFileWithin(directory, 'spritesheet.webp', MAX_PET_IMAGE_BYTES) : null
+        const contentType = data ? rasterContentType(data) : null
+        if (!data || !contentType) return new Response('Not found', { status: 404 })
+        return new Response(responseBody(data), {
+          status: 200,
+          headers: { 'content-type': contentType, 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' },
         })
       }
       if (url.hostname === 'custom') {
@@ -487,7 +501,7 @@ export function configureSecureProtocol(): void {
         const data = await readRegularFileWithin(customRoot, join(safeId, 'spritesheet.webp'), MAX_PET_IMAGE_BYTES)
         const contentType = data ? rasterContentType(data) : null
         if (!data || !contentType) return new Response('Not found', { status: 404 })
-        return new Response(Uint8Array.from(data), {
+        return new Response(responseBody(data), {
           status: 200,
           headers: { 'content-type': contentType, 'x-content-type-options': 'nosniff' },
         })

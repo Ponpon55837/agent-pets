@@ -63,7 +63,7 @@ To remove integrations, use **Remove** on a tool's card in the wizard (only that
 
 ### Custom pets
 
-Under **Settings → Pets**, use **+ Import asset** (`.webp`, `.png` or `.jpg` spritesheet) or **+ Import .zip** (a `.codex-pet.zip` kit, e.g. from [codex-pets.net](https://codex-pets.net), read directly with no manual unzip). Pets can be renamed (pencil icon) and removed (built-in pets are only hidden; the default `aang-airbender` cannot be removed). Imported pets live in `~/.desktop-pet/custom/`.
+Under **Settings → Pets**, use **+ Import asset** (`.webp`, `.png` or `.jpg` spritesheet) or **+ Import .zip** (a `.codex-pet.zip` kit, e.g. from [codex-pets.net](https://codex-pets.net), read directly with no manual unzip). A zip import first shows a preview (idle animation, first frame of each row, atlas version, frame size and warnings) before anything is installed. The atlas version is detected from the image: 9 rows is v1, 11 rows is v2; v2 kits walk on row 1 (running-right) without a `behaviorManifest`, and rows 9–10 are look-direction rows, so sleep still falls back to idle unless the kit declares one. If the pet ID already exists you choose **Replace** or **Keep both** (saved as `<id>-2`); nothing is overwritten silently, and an interrupted install never leaves a half-written folder. Pets can be renamed (pencil icon) and removed (built-in pets are only hidden; the default `aang-airbender` cannot be removed). Imported pets live in `~/.desktop-pet/custom/`.
 
 Sprite requirements (checked on import):
 
@@ -164,7 +164,7 @@ The main-process log is `logs/main.log` inside the app's userData folder (`~/Lib
 - Permission responses use their own port and token, with TTL, one-shot decisions, anti-replay and a redacted audit.
 - Notification text contains only the agent name and project folder name, never prompts, tool arguments or session IDs.
 - Quota requests go only to the exact Codex and Anthropic HTTPS endpoints from the main process; OAuth credentials never reach the renderer.
-- The log reader is read-only, bounded and limited to the known Codex / Claude session roots. Pet imports validate ZIP and image size and type.
+- The log reader is read-only, bounded and limited to the known Codex / Claude session roots. Pet zip imports pre-scan the archive (entry count, total size, compression ratio, overlapping entries, symlinks, unsafe or non-UTF-8 names, duplicates), cap image dimensions from the header before decoding, strip prototype keys from `pet.json`, and install through a private staging folder with atomic renames.
 - Plugins are sandboxed and permission-gated; secrets are stored encrypted with the system secure store and never returned to the UI.
 
 ## Troubleshooting

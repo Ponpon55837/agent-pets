@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { t, translateBackendError, type TranslationKey } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
 import { SOURCE_FAMILIES } from '@/types/agent'
+import type { PetImportDecision, PetImportPreview } from '@/types/pet-import'
 import { useRovingTabs } from '@/composables/useRovingTabs'
 import { PET_NAME_MAX_LENGTH, groupPets, validatePetName } from '@/utils/pet-groups'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import PetImportDialog from '@/components/status-panel/PetImportDialog.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import Icon from '@/components/ui/Icon.vue'
 import Select from '@/components/ui/Select.vue'
@@ -18,6 +20,10 @@ const store = useAgentStore()
 const importing = ref(false)
 const importingZip = ref(false)
 const importZipError = ref('')
+const importPreview = ref<PetImportPreview | null>(null)
+const importCommitting = ref(false)
+const importDialogError = ref('')
+watch(() => importPreview.value !== null, open => store.setPanelModalLock('pets-import', open))
 const editingPetId = ref<string | null>(null)
 const editName = ref('')
 const petQuery = ref('')
@@ -73,16 +79,61 @@ async function importPet(): Promise<void> {
 async function importPetZip(): Promise<void> {
   importingZip.value = true
   importZipError.value = ''
-  const result = await window.electronAPI?.importPetZip()
-  if (result?.ok && result.id) {
-    await store.loadPets()
-    void store.refreshProjectPets()
-    store.setPet(result.id)
-  } else if (result && !result.ok && result.error !== 'cancelled') {
-    importZipError.value = translateBackendError(result.error || t('failed'))
+  try {
+    const result = await window.electronAPI?.prepareImportPetZip()
+    if (result?.ok) {
+      importDialogError.value = ''
+      importPreview.value = result.preview
+    } else if (result && result.error !== 'cancelled') {
+      importZipError.value = translateBackendError(result.error || t('failed'))
+    }
+  } finally {
+    importingZip.value = false
   }
-  importingZip.value = false
 }
+
+async function commitImport(decision: PetImportDecision): Promise<void> {
+  const preview = importPreview.value
+  if (!preview || importCommitting.value) return
+  importCommitting.value = true
+  importDialogError.value = ''
+  try {
+    const result = await window.electronAPI?.commitImportPetZip(preview.token, decision, preview.expectedState)
+    if (!result) return
+    if (result.ok) {
+      importPreview.value = null
+      await store.loadPets()
+      void store.refreshProjectPets()
+      store.setPet(result.id)
+      return
+    }
+    // 主程序發現預覽後狀態有變：換成新的預覽，讓使用者重新選擇，而不是沿用舊的決定。
+    if (result.code === 'E_IMPORT_STATE_CHANGED' && result.preview) {
+      importPreview.value = result.preview
+      importDialogError.value = t('pet.importStateChanged')
+      return
+    }
+    importPreview.value = null
+    importZipError.value = translateBackendError(result.error)
+  } finally {
+    importCommitting.value = false
+  }
+}
+
+function cancelImport(): void {
+  const preview = importPreview.value
+  if (importCommitting.value) return
+  importPreview.value = null
+  if (preview) void window.electronAPI?.cancelImportPetZip(preview.token)
+}
+
+// 面板切走時丟棄尚未確認的預覽，主程序會一併刪除暫存目錄。
+onUnmounted(() => {
+  const preview = importPreview.value
+  importPreview.value = null
+  store.setPanelModalLock('pets-import', false)
+  if (preview) void window.electronAPI?.cancelImportPetZip(preview.token)
+})
 
 function startRename(pet: { id: string; displayName: string }): void {
   editingPetId.value = pet.id
@@ -192,7 +243,7 @@ function projectPetStatusLabel(status: 'unbound' | 'bound' | 'missing-pet'): str
     </div>
     <div class="import-row">
       <Button variant="primary" size="sm" :disabled="importing" @click="importPet">{{ importing ? t('importing') : t('importSprite') }}</Button>
-      <Button variant="primary" size="sm" :disabled="importingZip" @click="importPetZip">{{ importingZip ? t('importing') : t('importZip') }}</Button>
+      <Button variant="primary" size="sm" :disabled="importingZip || importPreview !== null" @click="importPetZip">{{ importingZip ? t('importing') : t('importZip') }}</Button>
     </div>
     <div v-if="importZipError" class="import-error" role="alert">{{ importZipError }}</div>
   </Card>
@@ -241,6 +292,14 @@ function projectPetStatusLabel(status: 'unbound' | 'bound' | 'missing-pet'): str
       <EmptyState v-else icon="pets" :title="t('projectPetsNoProjects')" :description="t('panel.projectPetsEmptyHint')" />
     </template>
   </Card>
+
+  <PetImportDialog
+    :preview="importPreview"
+    :busy="importCommitting"
+    :error="importDialogError"
+    @cancel="cancelImport"
+    @commit="commitImport"
+  />
 
   <ConfirmDialog
     :open="confirmDialog !== null"

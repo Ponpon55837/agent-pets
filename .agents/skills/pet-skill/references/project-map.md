@@ -39,7 +39,7 @@
 - Custom secure `agent-pets://` protocol used instead of privileged renderer file access.
 - External navigation, popups, permission requests, and untrusted IPC senders are rejected.
 - Event server limits body size, text length, rate, sources, and states, and requires a local token.
-- Imported pet archives and raster files have size, count, path, and signature constraints.
+- Imported pet archives and raster files have size, count, path, and signature constraints. Pet zips go through `electron/zip-inspect.ts` (one parser for pre-scan and extraction, CRC-checked) and `electron/pet-import.ts` (private staging, preview token, expected-state commit, atomic rename install, crash recovery that never deletes an unverified backup); image headers are capped and EXIF rotation rejected in `electron/pet-sprite-validation.ts`.
 - electron-builder fuses disable run-as-node, Node options, CLI inspection, and extra file privileges.
 
 ## Current product behavior
