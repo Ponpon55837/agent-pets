@@ -103,7 +103,7 @@ import { t as translate } from '../src/i18n'
 
 import { mainState } from './main/state'
 import { createShutdownCoordinator } from './main/shutdown'
-import { acquireSingleInstanceLock, relaunchApp, sleepSync } from './relaunch'
+import { acquireSingleInstanceLock, relaunchApp } from './relaunch'
 import { disposeMainTimers } from './main/dispose-timers'
 import { flushMainLog, logMain, teeConsoleToLog } from './diagnostics/main-log'
 import { acquireRunMarker } from './diagnostics/session-marker'
@@ -256,18 +256,21 @@ protocol.registerSchemesAsPrivileged([
 // Fixed pane URL; the renderer never supplies a target.
 const MACOS_LOGIN_ITEMS_SETTINGS_URL = 'x-apple.systempreferences:com.apple.LoginItems-Settings.extension'
 
-const hasSingleInstanceLock = acquireSingleInstanceLock(
+// Async so a relaunched instance can wait for the old process to release the lock
+// without blocking the main thread. bootstrapApp awaits it before creating windows.
+const singleInstanceLock: Promise<boolean> = acquireSingleInstanceLock(
   () => app.requestSingleInstanceLock(),
-  { argv: process.argv, sleep: sleepSync },
-)
-
-if (!hasSingleInstanceLock) {
-  app.quit()
-} else {
-  app.on('second-instance', () => {
-    showPetWindow()
-  })
-}
+  { argv: process.argv },
+).then(acquired => {
+  if (!acquired) {
+    app.quit()
+  } else {
+    app.on('second-instance', () => {
+      showPetWindow()
+    })
+  }
+  return acquired
+})
 
 const startupResults: StartupStepResult[] = []
 const startupLog = (level: 'error' | 'warn', message: string, detail?: unknown) => {
@@ -307,7 +310,7 @@ async function showStartupFailureDialog(): Promise<void> {
 }
 
 async function bootstrapApp(): Promise<void> {
-  if (!hasSingleInstanceLock) return
+  if (!(await singleInstanceLock)) return
 
   registerRuntimeDiagnostics(() => startupResults.map(result => ({ name: result.name, ok: result.ok, ...startupTimings.find(timing => timing.name === result.name) })), () => crashGuard.stats(), runMarker.previousRunUnclean)
   if (runMarker.previousRunUnclean) {
