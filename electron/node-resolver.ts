@@ -40,9 +40,11 @@ export interface NodeResolverDeps {
   platform: NodeJS.Platform
   env: NodeJS.ProcessEnv
   exists(target: string): boolean
-  runSync(file: string, args: string[], timeoutMs: number): string
-  run(file: string, args: string[], timeoutMs: number): Promise<string>
+  runSync(file: string, args: string[], timeoutMs: number, cwd?: string): string
+  run(file: string, args: string[], timeoutMs: number, cwd?: string): Promise<string>
   now(): number
+  /** Process working directory; Windows candidates found there are rejected. Defaults to process.cwd(). */
+  cwd?(): string
 }
 
 export function defaultNodeResolverDeps(): NodeResolverDeps {
@@ -50,10 +52,11 @@ export function defaultNodeResolverDeps(): NodeResolverDeps {
     platform: process.platform,
     env: process.env,
     exists: target => fs.existsSync(target),
-    runSync: (file, args, timeout) => execFileSync(file, args, { encoding: 'utf-8', timeout, stdio: ['ignore', 'pipe', 'ignore'] }),
-    run: (file, args, timeout) => new Promise((resolve, reject) => {
-      execFile(file, args, { encoding: 'utf-8', timeout }, (error, stdout) => (error ? reject(error) : resolve(stdout)))
+    runSync: (file, args, timeout, cwd) => execFileSync(file, args, { encoding: 'utf-8', timeout, stdio: ['ignore', 'pipe', 'ignore'], ...(cwd ? { cwd } : {}) }),
+    run: (file, args, timeout, cwd) => new Promise((resolve, reject) => {
+      execFile(file, args, { encoding: 'utf-8', timeout, ...(cwd ? { cwd } : {}) }, (error, stdout) => (error ? reject(error) : resolve(stdout)))
     }),
+    cwd: () => process.cwd(),
     now: () => Date.now(),
   }
 }
@@ -98,10 +101,23 @@ export function createNodeResolver(deps: NodeResolverDeps = defaultNodeResolverD
     return info
   }
 
-  const shellInvocations = (): Array<[string, string[]]> => {
-    if (deps.platform === 'win32') return [['where.exe', ['node.exe']]]
+  // where.exe searches the current directory before PATH, so it always runs from the system
+  // directory, and candidates in the process cwd or a downloads folder are rejected below.
+  const windowsSystemDir = (): string => pathWin32.join(deps.env.SystemRoot || deps.env.windir || 'C:\\Windows', 'System32')
+
+  const shellInvocations = (): Array<[string, string[], string | undefined]> => {
+    if (deps.platform === 'win32') return [[pathWin32.join(windowsSystemDir(), 'where.exe'), ['node.exe'], windowsSystemDir()]]
     const shell = deps.env.SHELL || '/bin/zsh'
-    return [[shell, ['-lc', 'command -v node']], [shell, ['-ilc', 'command -v node']]]
+    return [[shell, ['-lc', 'command -v node'], undefined], [shell, ['-ilc', 'command -v node'], undefined]]
+  }
+
+  const isUntrustedWindowsLocation = (candidate: string): boolean => {
+    const normalize = (value: string) => pathWin32.normalize(value).replace(/[\\/]+$/, '').toLowerCase()
+    const directory = normalize(pathWin32.dirname(candidate))
+    let working = ''
+    try { working = deps.cwd ? deps.cwd() : process.cwd() } catch { /* unknown cwd */ }
+    if (working && directory === normalize(working)) return true
+    return /(^|\\)(downloads|temp|tmp)(\\|$)/.test(directory)
   }
 
   const knownLocations = (): string[] => (
@@ -113,7 +129,8 @@ export function createNodeResolver(deps: NodeResolverDeps = defaultNodeResolverD
       ? output.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
       : [lastLine(output)].filter((line): line is string => Boolean(line))
     const isAbs = deps.platform === 'win32' ? path.win32.isAbsolute : path.posix.isAbsolute
-    return candidates.find(candidate => isAbs(candidate) && deps.exists(candidate)) ?? null
+    return candidates.find(candidate => isAbs(candidate) && deps.exists(candidate)
+      && !(deps.platform === 'win32' && isUntrustedWindowsLocation(candidate))) ?? null
   }
 
   return {
@@ -126,9 +143,9 @@ export function createNodeResolver(deps: NodeResolverDeps = defaultNodeResolverD
     resolveSync(): NodeInfo | null {
       const hit = fresh()
       if (hit) return hit
-      for (const [file, args] of shellInvocations()) {
+      for (const [file, args, cwd] of shellInvocations()) {
         try {
-          const found = pickFromOutput(deps.runSync(file, args, SHELL_TIMEOUT_MS))
+          const found = pickFromOutput(deps.runSync(file, args, SHELL_TIMEOUT_MS, cwd))
           if (found) return remember(found, null)
         } catch { /* try the next strategy */ }
       }
@@ -141,9 +158,9 @@ export function createNodeResolver(deps: NodeResolverDeps = defaultNodeResolverD
       if (hit?.version) return hit
       let found: string | null = hit?.path ?? null
       if (!found) {
-        for (const [file, args] of shellInvocations()) {
+        for (const [file, args, cwd] of shellInvocations()) {
           try {
-            found = pickFromOutput(await deps.run(file, args, SHELL_TIMEOUT_MS))
+            found = pickFromOutput(await deps.run(file, args, SHELL_TIMEOUT_MS, cwd))
             if (found) break
           } catch { /* try the next strategy */ }
         }

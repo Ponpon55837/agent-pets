@@ -55,10 +55,33 @@ test('windows uses where.exe and standard locations', async () => {
     platform: 'win32',
     env: { ProgramFiles: 'C:\\Program Files' },
     files,
-    run: async (file) => { if (file === 'where.exe') throw new Error('missing'); return 'v20.0.0' },
+    run: async (file) => { if (file.endsWith('where.exe')) throw new Error('missing'); return 'v20.0.0' },
   })
   const info = await createNodeResolver(d).resolve()
   assert.ok(info?.path.includes('nodejs'))
+})
+
+test('windows runs where.exe from the system directory and ignores cwd/downloads candidates', async () => {
+  const calls: Array<{ file: string, cwd?: string }> = []
+  const files = new Set([
+    'C:\\Work\\evil\\node.exe',
+    'C:\\Users\\u\\Downloads\\app\\node.exe',
+    'D:\\tools\\node\\node.exe',
+  ])
+  const d = deps({
+    platform: 'win32',
+    env: { SystemRoot: 'C:\\Windows' },
+    files,
+    cwd: () => 'C:\\Work\\evil',
+    run: async (file, args, _timeout, cwd) => {
+      if (args[0] === '--version') return 'v22.0.0'
+      calls.push({ file, cwd })
+      return 'C:\\Work\\evil\\node.exe\r\nC:\\Users\\u\\Downloads\\app\\node.exe\r\nD:\\tools\\node\\node.exe\r\n'
+    },
+  })
+  const info = await createNodeResolver(d).resolve()
+  assert.equal(info?.path, 'D:\\tools\\node\\node.exe')
+  assert.deepEqual(calls, [{ file: 'C:\\Windows\\System32\\where.exe', cwd: 'C:\\Windows\\System32' }])
 })
 
 test('parseNodeMajor', () => {
