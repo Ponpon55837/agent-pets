@@ -36,12 +36,13 @@ test('session jump IPC rejects malformed payloads without running anything', asy
     'switch-app',
     [],
     { action: 'run-command', source: 'claude', sessionId: 'abc' },
-    { action: 'open-folder', source: 'not-a-source', sessionId: 'abc' },
-    { action: 'open-folder', source: 'claude', sessionId: '' },
-    { action: 'open-folder', source: 'claude', sessionId: 'x'.repeat(257) },
-    { action: 'open-folder', source: 'claude', sessionId: 42 },
+    { action: 'open-folder', source: 'claude', sessionId: 'abc' },
+    { action: 'show-folder', source: 'not-a-source', sessionId: 'abc' },
+    { action: 'show-folder', source: 'claude', sessionId: '' },
+    { action: 'show-folder', source: 'claude', sessionId: 'x'.repeat(257) },
+    { action: 'show-folder', source: 'claude', sessionId: 42 },
     // The renderer may not supply a path or bundle id.
-    { action: 'open-folder', source: 'claude', sessionId: 'abc', path: '/Applications/Calculator.app' },
+    { action: 'show-folder', source: 'claude', sessionId: 'abc', path: '/Applications/Calculator.app' },
     { action: 'switch-app', source: 'claude', sessionId: 'abc', bundleId: 'com.apple.Terminal' },
   ]
   for (const payload of invalid) {

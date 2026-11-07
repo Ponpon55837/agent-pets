@@ -11,7 +11,8 @@ export function createSessionJumpService(getPreferences: () => DesktopPreference
     platform: process.platform,
     getPreferences,
     activateBundle: bundleId => activateMacBundle(bundleId),
-    openDirectory: directory => shell.openPath(directory),
+    // Reveal only (Finder / Explorer selects the folder); never shell.openPath, which can launch apps.
+    revealDirectory: directory => shell.showItemInFolder(directory),
     writeClipboard: text => clipboard.writeText(text),
     realpath: target => fs.promises.realpath(target),
     stat: target => fs.promises.stat(target),

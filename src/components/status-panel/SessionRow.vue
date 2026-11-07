@@ -88,11 +88,18 @@ async function jump(action: SessionJumpAction): Promise<void> {
       <div v-if="hasJumpActions" class="session-jump" role="group" :aria-label="t('panel.jumpActionsLabel')">
         <dt class="sr-only">{{ t('panel.jumpActionsLabel') }}</dt>
         <dd class="session-jump-actions">
-          <Button v-if="switchApp" size="sm" :title="t('pet.switchAppHint')" :loading="busy === 'switch-app'" @click="jump('switch-app')">
+          <Button
+            v-if="switchApp"
+            size="sm"
+            :title="t('pet.switchAppHint')"
+            :aria-label="t('pet.switchAppAria', { app: switchApp, project: projectLabel || t('projectUnknown') })"
+            :loading="busy === 'switch-app'"
+            @click="jump('switch-app')"
+          >
             {{ t('pet.switchApp', { app: switchApp }) }}
           </Button>
           <template v-if="folderActions">
-            <Button size="sm" :loading="busy === 'open-folder'" @click="jump('open-folder')">{{ t('panel.jumpOpenFolder') }}</Button>
+            <Button size="sm" :loading="busy === 'show-folder'" @click="jump('show-folder')">{{ t('panel.jumpShowFolder') }}</Button>
             <Button size="sm" :loading="busy === 'copy-path'" @click="jump('copy-path')">{{ t('panel.jumpCopyPath') }}</Button>
           </template>
           <span v-if="jumpStatus" class="session-jump-status" role="status">{{ jumpStatus }}</span>

@@ -9,8 +9,11 @@ export interface NotificationCandidate {
   title: string
   body: string
   terminal: boolean
-  /** The one session this notification is about (lets a click jump back to it). */
-  session: { source: string; sessionId: string }
+  /**
+   * Only for waiting-permission / waiting-input: the one session that is waiting for the user, so a
+   * click on that notification may switch to its app. Completions and errors never switch apps.
+   */
+  session?: { source: string; sessionId: string }
 }
 
 const SOURCE_NAMES: Record<string, string> = {
@@ -69,7 +72,6 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
         title: t('notificationCompleted', { source }),
         body,
         terminal: true,
-        session,
       }
     case 'error':
       return {
@@ -78,7 +80,6 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
         title: t('notificationFailed', { source }),
         body,
         terminal: true,
-        session,
       }
     default:
       return null

@@ -3119,8 +3119,9 @@ export function createPermissionServices(permissionToken: string): void {
 }
 
 /**
- * A notification about exactly one session switches to that session's app when that is allowed
- * (macOS, built-in adapter, allowlisted app, both toggles on); anything else opens the Sessions tab.
+ * A waiting-permission / waiting-input notification about one session (the only kinds that carry a
+ * target) switches to that session's app when allowed (macOS, allowlisted app, both toggles on);
+ * anything else opens the Sessions tab. The click itself is the user action.
  */
 export async function openNotificationTarget(target?: { source: string; sessionId: string }): Promise<void> {
   try {

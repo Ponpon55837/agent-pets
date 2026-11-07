@@ -28,7 +28,7 @@ export type HostAppId =
 export interface AgentHost {
   kind: HostKind
   app: HostAppId
-  /** Main-process verdict: macOS, built-in adapter and an allowlisted bundle id. */
+  /** Main-process verdict: macOS and an allowlisted bundle id (the allowlist is the boundary). */
   switchable?: boolean
 }
 

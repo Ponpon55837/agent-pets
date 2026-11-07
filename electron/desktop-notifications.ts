@@ -38,7 +38,7 @@ interface DesktopNotificationServiceOptions {
   logFilePath: string
   getPreferences: () => DesktopPreferences
   isAppFocused: () => boolean
-  /** `target` is set when the notification is about exactly one session. */
+  /** `target` is set only for a waiting-permission / waiting-input notification about one session. */
   onNotificationClick: (target?: NotificationTarget) => void
   onAttentionChanged: (summary: AttentionSummary) => void
   batchWindowMs?: number
@@ -155,7 +155,7 @@ export class DesktopNotificationService {
     if (candidates.length === 0) return
 
     const message = aggregateTerminalNotifications(candidates)
-    this.deliver(message.title, message.body, candidates[0].kind, candidates.length, undefined, candidates.length === 1 ? candidates[0].session : undefined)
+    this.deliver(message.title, message.body, candidates[0].kind, candidates.length)
   }
 
   private deliver(

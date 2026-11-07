@@ -1,7 +1,7 @@
 // Renderer <-> main contract for the per-session "jump back" actions. The renderer names a session
 // only by its source and session id; the project path and app bundle id never leave main.
 
-export const SESSION_JUMP_ACTIONS = ['switch-app', 'open-folder', 'copy-path'] as const
+export const SESSION_JUMP_ACTIONS = ['switch-app', 'show-folder', 'copy-path'] as const
 
 export type SessionJumpAction = typeof SESSION_JUMP_ACTIONS[number]
 
