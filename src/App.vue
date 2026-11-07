@@ -85,10 +85,12 @@ function isOpaqueCanvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY
   try {
     // Sample a small neighbourhood rather than one pixel so gaps between legs
     // and arms do not make the pet impossible to grab.
-    const left = Math.max(0, x - HIT_DILATE_PX)
-    const top = Math.max(0, y - HIT_DILATE_PX)
-    const right = Math.min(canvas.width, x + HIT_DILATE_PX + 1)
-    const bottom = Math.min(canvas.height, y + HIT_DILATE_PX + 1)
+    // The backing store is denser than CSS pixels; keep the tolerance in CSS px.
+    const radius = Math.max(1, Math.round(HIT_DILATE_PX * canvas.width / rect.width))
+    const left = Math.max(0, x - radius)
+    const top = Math.max(0, y - radius)
+    const right = Math.min(canvas.width, x + radius + 1)
+    const bottom = Math.min(canvas.height, y + radius + 1)
     const block = canvas.getContext('2d')?.getImageData(left, top, right - left, bottom - top).data
     return block ? hasOpaquePixel(block) : false
   } catch {

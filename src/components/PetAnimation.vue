@@ -276,6 +276,29 @@ function selectStep(index: number) {
   activeMotionRow.value = activeMotion.row
 }
 
+// The backing store is an integer multiple of the sprite cell sized to the real
+// device pixels (scale x display density), so nearest-neighbour upscaling stays
+// even and a Retina screen does not blur the pet.
+const devicePixelRatioRef = ref(window.devicePixelRatio || 1)
+const backingK = computed(() => Math.max(1, Math.min(8, Math.round(store.petScale * devicePixelRatioRef.value))))
+const backingW = computed(() => CELL_W * backingK.value)
+const backingH = computed(() => CELL_H * backingK.value)
+let densityQuery: MediaQueryList | null = null
+
+function watchDensity(): void {
+  densityQuery?.removeEventListener('change', onDensityChange)
+  if (typeof window.matchMedia !== 'function') return
+  densityQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+  densityQuery.addEventListener('change', onDensityChange)
+}
+
+function onDensityChange(): void {
+  devicePixelRatioRef.value = window.devicePixelRatio || 1
+  watchDensity()
+}
+
+watch(backingK, () => { void nextTick(draw) })
+
 const canvasW = computed(() => Math.round(CELL_W * store.petScale))
 const canvasH = computed(() => Math.round(CELL_H * store.petScale))
 
@@ -418,18 +441,19 @@ function draw() {
     const ctx = canvas.getContext('2d')
     if (!ctx) continue
 
-    ctx.clearRect(0, 0, CELL_W, CELL_H)
+    ctx.clearRect(0, 0, backingW.value, backingH.value)
+    ctx.imageSmoothingEnabled = false
     ctx.drawImage(
       img,
       frame * CELL_W, row * CELL_H,
       CELL_W, CELL_H,
       0, 0,
-      CELL_W, CELL_H
+      backingW.value, backingH.value
     )
     if (tint) {
       ctx.globalCompositeOperation = 'source-in'
       ctx.fillStyle = auraTint
-      ctx.fillRect(0, 0, CELL_W, CELL_H)
+      ctx.fillRect(0, 0, backingW.value, backingH.value)
       ctx.globalCompositeOperation = 'source-over'
     }
   }
@@ -448,7 +472,7 @@ function startGhostFade(): void {
   if (!source || !ghost || isPaused.value || prefersReducedMotion()) return
   const ctx = ghost.getContext('2d')
   if (!ctx) return
-  ctx.clearRect(0, 0, CELL_W, CELL_H)
+  ctx.clearRect(0, 0, backingW.value, backingH.value)
   ctx.drawImage(source, 0, 0)
   ghostFading.value = false
   requestAnimationFrame(() => {
@@ -602,6 +626,7 @@ function handleDocumentVisibilityChange(): void {
 }
 
 onMounted(() => {
+  watchDensity()
   documentVisible.value = document.visibilityState === 'visible'
   document.addEventListener('visibilitychange', handleDocumentVisibilityChange)
   loadImage()
@@ -615,6 +640,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  densityQuery?.removeEventListener('change', onDensityChange)
   clearFrameTimer()
   document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
   if (reactionTimer !== null) {
@@ -644,8 +670,8 @@ onUnmounted(() => {
     <canvas
       v-if="auraOuterVisible"
       ref="auraOuterRef"
-      :width="CELL_W"
-      :height="CELL_H"
+      :width="backingW"
+      :height="backingH"
       :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
       class="pet-aura-canvas pet-aura-outer"
       aria-hidden="true"
@@ -653,8 +679,8 @@ onUnmounted(() => {
     <canvas
       v-if="auraInnerVisible"
       ref="auraInnerRef"
-      :width="CELL_W"
-      :height="CELL_H"
+      :width="backingW"
+      :height="backingH"
       :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
       class="pet-aura-canvas pet-aura-inner"
       aria-hidden="true"
@@ -662,8 +688,8 @@ onUnmounted(() => {
 
     <canvas
       ref="ghostRef"
-      :width="CELL_W"
-      :height="CELL_H"
+      :width="backingW"
+      :height="backingH"
       :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
       class="pet-ghost-canvas"
       :class="{ fading: ghostFading }"
@@ -672,8 +698,8 @@ onUnmounted(() => {
 
     <canvas
       ref="canvasRef"
-      :width="CELL_W"
-      :height="CELL_H"
+      :width="backingW"
+      :height="backingH"
       :data-animation-action="activeMotionName"
       :data-animation-row="activeMotionRow"
       :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
