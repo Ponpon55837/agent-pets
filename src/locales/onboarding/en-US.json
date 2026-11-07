@@ -42,5 +42,16 @@
   "onboarding.mcpCode.root_not_object": "The top level of this file is not an object, so nothing was changed.",
   "onboarding.mcpCode.too_large": "The file is over the 1 MB limit, so nothing was changed.",
   "onboarding.mcpCode.unsafe_file": "This is not a regular file (it may be a link), so nothing was changed.",
-  "onboarding.mcpCode.write_failed": "Writing failed; check the folder permissions."
+  "onboarding.mcpCode.write_failed": "Writing failed; check the folder permissions.",
+  "onboarding.introStatusTitle": "See what your AI tools are doing",
+  "onboarding.introStatusBody": "The pet reacts to Codex, Claude Code and OpenCode: thinking, running a tool, waiting for you, done or failed.",
+  "onboarding.introPermissionTitle": "A nudge when you are needed",
+  "onboarding.introPermissionBody": "When a tool needs your approval the pet speaks up. Only OpenCode can be allowed or denied right on the pet; other tools show Waiting and you confirm in the tool itself.",
+  "onboarding.introGrowthTitle": "Grow together",
+  "onboarding.introGrowthBody": "Finished work earns XP so your pet levels up, evolves and unlocks achievements. Everything stays on your computer.",
+  "onboarding.introNext": "Next, install the hooks for your tools (about a minute). Agent Pets only adds its own entries and backs up your config files before changing them.",
+  "onboarding.start": "Start setup",
+  "onboarding.skipForNow": "Not now",
+  "onboarding.finish": "Done",
+  "onboarding.nextSteps": "Connected. Restart your AI tools and the pet will start showing their status. You can reopen this wizard from Settings → Advanced."
 }

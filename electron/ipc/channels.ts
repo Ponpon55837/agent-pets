@@ -90,6 +90,8 @@ export const IPC_CHANNELS = {
   progressionInit: 'progression-init',
   progressionSetPet: 'progression-set-pet',
   progressionUpdated: 'progression-updated',
+  onboardingGet: 'onboarding-get',
+  onboardingUpdate: 'onboarding-update',
   projectMcpApply: 'project-mcp-apply',
   projectMcpForget: 'project-mcp-forget',
   projectMcpList: 'project-mcp-list',

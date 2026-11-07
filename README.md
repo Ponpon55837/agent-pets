@@ -47,10 +47,10 @@ Download `AgentPets-<version>-arm64.dmg` (Apple Silicon) or `AgentPets-<version>
 
 ### First Run
 
-1. Launch Agent Pets. A small pet will appear on your screen.
-2. Click the pet, then **⚙ → Setup Wizard**. It will detect which AI tools are installed on your machine.
-3. Click **Install** next to a tool (or **Install All**) to wire up its hooks — the wizard does not do this automatically, you need to click.
-4. Once hooks are installed, restart your coding tools; the pet's appearance will then change to reflect your agents' status.
+1. Launch Agent Pets. A small pet appears and, on the very first launch, the panel opens with a short intro (what the pet shows, when it asks for you, how it grows) followed by the **Setup Wizard**. The wizard reappears on later launches only until you finish it or choose **Not now**; installs that already have a connected tool are never prompted.
+2. In the wizard, click **Install** next to a tool (or **Install all**) to wire up its hooks. Hooks are never installed without your click, existing config files are backed up first, and only Agent Pets' own entries are added.
+3. Once a tool shows as ready, restart it; the pet then reflects your agents' status.
+4. To run the wizard again later, open the panel and choose **⚙ → Advanced → Setup Wizard**.
 
 ### Uninstall / remove the integrations
 

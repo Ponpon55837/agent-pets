@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import type {
   AdapterRuntimeStatus,
   AgentAdapterId,
@@ -12,9 +12,32 @@ import Card from '@/components/ui/Card.vue'
 import Icon from '@/components/ui/Icon.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
+const props = defineProps<{
+  /** Opened automatically on the first launch: start with the short intro. */
+  firstRun?: boolean
+}>()
+
 const emit = defineEmits<{
   (e: 'close'): void
 }>()
+
+// intro (what the pet does) -> tools (install hooks). Replays from Settings go straight to tools.
+const step = ref<'intro' | 'tools'>(props.firstRun ? 'intro' : 'tools')
+const anyReady = computed(() => tools.value.some(tool => tool.installable && tool.health === 'ready'))
+
+const INTRO_CARDS = [
+  { icon: 'bell', title: 'onboarding.introStatusTitle', body: 'onboarding.introStatusBody' },
+  { icon: 'lock', title: 'onboarding.introPermissionTitle', body: 'onboarding.introPermissionBody' },
+  { icon: 'growth', title: 'onboarding.introGrowthTitle', body: 'onboarding.introGrowthBody' },
+] as const satisfies ReadonlyArray<{ icon: string, title: TranslationKey, body: TranslationKey }>
+
+// Finishing with at least one connected tool completes onboarding; leaving earlier is remembered as
+// a skip so the wizard does not reopen on its own. Replays never downgrade a completed state.
+function finish() {
+  const action = anyReady.value ? 'completed' : 'skipped'
+  if (props.firstRun || anyReady.value) void window.electronAPI?.updateOnboardingState(action)
+  emit('close')
+}
 
 interface ToolStatus extends AdapterRuntimeStatus {
   verifiedAt?: number
@@ -205,19 +228,30 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="setup-overlay" @click.self="emit('close')">
+  <div class="setup-overlay" @click.self="finish">
     <div class="setup-wizard">
       <div class="wizard-header">
         <div class="wizard-title-copy">
           <h2>{{ t('setupWizardTitle') }}</h2>
           <p>{{ t('setupWizardHelp') }}</p>
         </div>
-        <Button variant="ghost" icon-only :aria-label="t('close')" @click="emit('close')">
+        <Button variant="ghost" icon-only :aria-label="t('close')" @click="finish">
           <Icon name="close" />
         </Button>
       </div>
 
-      <div v-if="loading" class="loading">
+      <div v-if="step === 'intro'" class="intro">
+        <Card v-for="card in INTRO_CARDS" :key="card.title" class="intro-card">
+          <div class="intro-card-head">
+            <Icon :name="card.icon" :size="18" />
+            <strong>{{ t(card.title) }}</strong>
+          </div>
+          <p>{{ t(card.body) }}</p>
+        </Card>
+        <p class="wizard-note">{{ t('onboarding.introNext') }}</p>
+      </div>
+
+      <div v-else-if="loading" class="loading">
         <div class="pixel-loader">
           <span v-for="i in 9" :key="i" class="pixel-cell" :style="{ animationDelay: `${(i % 3) * 0.12}s` }" />
         </div>
@@ -308,25 +342,37 @@ onUnmounted(() => {
         </Card>
       </div>
 
+      <template v-if="step === 'intro'">
+        <div class="wizard-actions">
+          <Button variant="ghost" @click="finish">{{ t('onboarding.skipForNow') }}</Button>
+          <Button variant="primary" @click="step = 'tools'">{{ t('onboarding.start') }}</Button>
+        </div>
+      </template>
+      <template v-else>
       <p class="wizard-note">{{ t('adapterNote') }}</p>
-
-      <div v-if="installError" class="error-msg" role="alert">{{ installError }}</div>
-      <p v-else-if="removalNotice" class="wizard-note" role="status">{{ removalNotice }}</p>
-
-      <div class="wizard-actions">
-        <Button
-          variant="ghost"
-          class="cleanup-btn"
-          :disabled="installing !== null || removing !== null"
-          @click="requestRemoval('all')"
-        >
-          {{ removing === 'all' ? t('removing') : t('onboarding.cleanupAll') }}
-        </Button>
-        <Button variant="secondary" @click="detectTools">{{ t('refresh') }}</Button>
-        <Button variant="primary" :disabled="installing !== null" @click="install()">
-          {{ installing === 'all' ? t('installing') : t('installAll') }}
-        </Button>
-      </div>
+  
+        <div v-if="installError" class="error-msg" role="alert">{{ installError }}</div>
+        <p v-else-if="removalNotice" class="wizard-note" role="status">{{ removalNotice }}</p>
+  
+        <div class="wizard-actions">
+          <Button
+            variant="ghost"
+            class="cleanup-btn"
+            :disabled="installing !== null || removing !== null"
+            @click="requestRemoval('all')"
+          >
+            {{ removing === 'all' ? t('removing') : t('onboarding.cleanupAll') }}
+          </Button>
+          <Button variant="secondary" @click="detectTools">{{ t('refresh') }}</Button>
+          <Button variant="primary" :disabled="installing !== null" @click="install()">
+            {{ installing === 'all' ? t('installing') : t('installAll') }}
+          </Button>
+        </div>
+        <p v-if="anyReady" class="wizard-note" role="status">{{ t('onboarding.nextSteps') }}</p>
+        <div v-if="anyReady" class="wizard-actions">
+          <Button variant="primary" @click="finish">{{ t('onboarding.finish') }}</Button>
+        </div>
+      </template>
     </div>
 
     <ConfirmDialog

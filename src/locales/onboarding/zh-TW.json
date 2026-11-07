@@ -42,5 +42,16 @@
   "onboarding.mcpCode.root_not_object": "這個檔案的最外層不是物件，因此沒有修改。",
   "onboarding.mcpCode.too_large": "檔案超過大小上限（1 MB），因此沒有修改。",
   "onboarding.mcpCode.unsafe_file": "這不是一般檔案（可能是連結），因此沒有修改。",
-  "onboarding.mcpCode.write_failed": "寫入失敗，請檢查資料夾權限。"
+  "onboarding.mcpCode.write_failed": "寫入失敗，請檢查資料夾權限。",
+  "onboarding.introStatusTitle": "看見 AI 工具的狀態",
+  "onboarding.introStatusBody": "寵物會隨著 Codex、Claude Code、OpenCode 的狀態變化：思考中、執行工具、等待你、完成或出錯。",
+  "onboarding.introPermissionTitle": "必要時叫你一聲",
+  "onboarding.introPermissionBody": "AI 工具需要你確認時，寵物會冒出提示。目前只有 OpenCode 能直接在寵物上允許或拒絕；其他工具會顯示「等待中」，要回到工具本身確認。",
+  "onboarding.introGrowthTitle": "陪你一起成長",
+  "onboarding.introGrowthBody": "完成的工作會累積經驗值，讓寵物升級、進化並解鎖成就。這些都只存在你的電腦上。",
+  "onboarding.introNext": "接下來要為你的工具安裝 hook（約一分鐘）。Agent Pets 只會新增自己的項目，修改前會先備份你的設定檔。",
+  "onboarding.start": "開始設定",
+  "onboarding.skipForNow": "稍後再說",
+  "onboarding.finish": "完成",
+  "onboarding.nextSteps": "已連線。請重新啟動你的 AI 工具，寵物就會開始顯示它的狀態。之後可以在「設定 → 進階」重新開啟精靈。"
 }

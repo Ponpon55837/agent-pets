@@ -400,3 +400,35 @@
     border: 2px solid var(--organic-text);
   }
 }
+
+.intro {
+  display: flex;
+  flex-direction: column;
+  gap: var(--organic-space-2);
+  overflow-y: auto;
+}
+
+.intro-card {
+  gap: var(--organic-space-1);
+  padding: var(--organic-space-3) var(--organic-space-4);
+  border: 0;
+  border-radius: var(--organic-radius-md);
+  background: var(--organic-surface-2);
+  box-shadow: none;
+}
+
+.intro-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--organic-space-2);
+  color: var(--organic-text);
+  font-family: var(--organic-font-heading);
+  font-size: var(--font-heading-md);
+}
+
+.intro-card p {
+  margin: 0;
+  color: var(--organic-text-secondary);
+  font-size: var(--font-body-sm);
+  line-height: 1.5;
+}

@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 
+import type { OnboardingAction, OnboardingState } from './onboarding'
 import type { DesktopPreferences, DesktopPreferencesPatch } from './desktop'
 import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView } from './permission'
 import type { ProgressionSnapshot } from './progression'
@@ -102,6 +103,8 @@ export interface ElectronAPI {
       reportContentHeight: (height: number) => void
       setMousePassthrough: (ignore: boolean) => void
       requestPetHide: () => void
+      getOnboardingState: () => Promise<OnboardingState | null>
+      updateOnboardingState: (action: OnboardingAction) => Promise<OnboardingState | null>
       togglePanel: () => void
       resizePanel: ((size: { height: number; width?: number }) => void) & ((height: number, width?: number) => void)
       setPanelBlurLock: (lock: { pinned?: boolean; modal?: boolean }) => void

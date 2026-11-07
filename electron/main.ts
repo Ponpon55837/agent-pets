@@ -81,6 +81,8 @@ import { registerDesktopIpc } from './ipc/desktop'
 import { registerPermissionIpc } from './ipc/permission'
 import { registerAdapterIpc } from './ipc/adapters'
 import { registerProjectMcpIpc } from './ipc/project-mcp'
+import { registerOnboardingIpc } from './ipc/onboarding'
+import { OnboardingStore } from './onboarding-state'
 import { registerProjectPetsIpc } from './ipc/project-pets'
 
 import { registerPetAssetIpc } from './ipc/pet-assets'
@@ -563,6 +565,13 @@ async function bootstrapApp(): Promise<void> {
     chooseProjectPetTitle: () => t('chooseProjectPet'),
     chooseProjectPetHelp: () => t('chooseProjectPetHelp'),
     logError: (message, error) => console.error(message, error),
+  })
+
+  const onboardingStore = new OnboardingStore(join(app.getPath('userData'), 'onboarding.json'))
+  registerOnboardingIpc({
+    ipcMain,
+    assertTrustedIpcSender: event => assertTrustedIpcSender(event),
+    getStore: () => onboardingStore,
   })
 
   registerProjectMcpIpc({
