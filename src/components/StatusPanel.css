@@ -214,6 +214,7 @@
 
 .status-panel :deep(.session-scroll) {
   min-height: 0;
+  scrollbar-gutter: stable;
   flex: 1;
   overflow-y: auto;
   padding: 0 var(--organic-space-4) var(--organic-space-3);
@@ -1443,5 +1444,30 @@
   .status-panel :deep(.settings-section.flash) {
     animation: none;
     box-shadow: 0 0 0 3px var(--organic-accent-glow);
+  }
+}
+
+/* Short windows (small work areas): compress the header and spacing. */
+@media (max-height: 480px) {
+  .status-panel :deep(.panel-header) {
+    padding-top: var(--organic-space-2);
+    padding-bottom: var(--organic-space-2);
+  }
+
+  .status-panel :deep(.panel-pet-avatar) {
+    width: 36px;
+    height: 36px;
+  }
+
+  .status-panel :deep(.panel-pet-animation) {
+    transform: translate(-50%, -50%) scale(0.2);
+  }
+
+  .status-panel :deep(.panel-subtitle) {
+    display: none;
+  }
+
+  .status-panel :deep(.settings-toolbar) {
+    padding-bottom: var(--organic-space-2);
   }
 }
