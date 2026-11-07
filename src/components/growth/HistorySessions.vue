@@ -61,11 +61,15 @@ let refreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const adapterOptions = AGENT_ADAPTER_REGISTRY.map(entry => ({ id: entry.id, label: entry.displayName }))
 
-/** A YYYY-MM-DD from <input type="date"> as local midnight; NaN when empty or invalid. */
-function localDayStart(value: string): number {
+/**
+ * Local midnight of a YYYY-MM-DD from <input type="date"> plus `dayOffset`
+ * days; NaN when empty or invalid. Day arithmetic goes through Date so a DST
+ * day (23 or 25 hours) still ends at the next local midnight.
+ */
+function localDayStart(value: string, dayOffset = 0): number {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (!match) return Number.NaN
-  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).getTime()
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + dayOffset).getTime()
 }
 
 function currentQuery(): HistorySessionQuery {
@@ -76,9 +80,9 @@ function currentQuery(): HistorySessionQuery {
   if (appliedSearch.value) query.search = appliedSearch.value
   if (customRange.value) {
     const from = localDayStart(fromDate.value)
-    const to = localDayStart(toDate.value)
+    const to = localDayStart(toDate.value, 1)
     if (Number.isFinite(from)) query.from = from
-    if (Number.isFinite(to)) query.to = to + DAY_MS - 1
+    if (Number.isFinite(to)) query.to = to - 1
   } else {
     query.from = Date.now() - props.rangeDays * DAY_MS
   }
@@ -93,14 +97,20 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const error = ref(false)
 const loaded = ref(false)
+const loadMoreFailed = ref(false)
 let requestSeq = 0
+// The query of the first page, reused (with the cursor) for every later page:
+// recomputing it would move the rolling "last N days" bound between pages.
+let pageQuery: HistorySessionQuery = {}
 
 async function reload(): Promise<void> {
   const seq = ++requestSeq
   loading.value = true
   error.value = false
+  loadMoreFailed.value = false
+  pageQuery = currentQuery()
   try {
-    const page = await window.electronAPI?.listHistorySessions(currentQuery())
+    const page = await window.electronAPI?.listHistorySessions(pageQuery)
     if (seq !== requestSeq) return
     items.value = page?.items ?? []
     nextCursor.value = page?.nextCursor ?? null
@@ -117,15 +127,16 @@ async function loadMore(): Promise<void> {
   if (!cursor || loadingMore.value) return
   const seq = requestSeq
   loadingMore.value = true
+  loadMoreFailed.value = false
   try {
-    const page = await window.electronAPI?.listHistorySessions({ ...currentQuery(), cursor })
+    const page = await window.electronAPI?.listHistorySessions({ ...pageQuery, cursor })
     // A filter change while this page was in flight makes it stale.
     if (seq !== requestSeq || !page) return
     const known = new Set(items.value.map(item => item.id))
     items.value = [...items.value, ...page.items.filter(item => !known.has(item.id))]
     nextCursor.value = page.nextCursor
   } catch {
-    error.value = true
+    if (seq === requestSeq) loadMoreFailed.value = true
   } finally {
     loadingMore.value = false
   }
@@ -255,7 +266,10 @@ onUnmounted(() => {
       </ul>
       <div class="sessions-footer">
         <span class="sessions-count" role="status">{{ t('growth.sessionsShown', { count: items.length }) }}</span>
-        <Button v-if="nextCursor" variant="secondary" size="sm" :loading="loadingMore" @click="loadMore">{{ t('growth.sessionsLoadMore') }}</Button>
+        <span v-if="loadMoreFailed" class="sessions-load-error" role="alert">{{ t('growth.sessionsLoadMoreFailed') }}</span>
+        <Button v-if="nextCursor" variant="secondary" size="sm" :loading="loadingMore" @click="loadMore">
+          {{ loadMoreFailed ? t('growth.retry') : t('growth.sessionsLoadMore') }}
+        </Button>
       </div>
     </template>
 
@@ -374,6 +388,12 @@ onUnmounted(() => {
 .sessions-time,
 .sessions-meta {
   color: var(--text-muted);
+  font-size: var(--font-xs);
+}
+
+.sessions-load-error {
+  margin-left: auto;
+  color: var(--text-danger);
   font-size: var(--font-xs);
 }
 

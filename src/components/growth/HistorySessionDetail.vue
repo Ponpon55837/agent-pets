@@ -11,6 +11,7 @@ import {
 } from '@/types/history'
 import { agentDisplayName } from '@/utils/agent-label'
 import { formatDateTime, formatTimeFull } from '@/utils/intl-format'
+import { stateAriaLabel } from '@/utils/state-aria'
 import Dialog from '@/components/ui/Dialog.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
 
@@ -76,6 +77,16 @@ const timeline = computed(() => {
   }))
 })
 
+// Read as one sentence: translated state, tool, time and duration.
+function entryAriaLabel(entry: { occurredAt: number; state: string; toolName?: string; spanMs: number | null }): string {
+  return [
+    stateAriaLabel(entry.state),
+    entry.toolName ?? '',
+    formatTimeFull(entry.occurredAt),
+    entry.spanMs === null ? '' : t('growth.sessionTimelineFor', { duration: duration(entry.spanMs) }),
+  ].filter(Boolean).join(' · ')
+}
+
 function unknownOr(tracked: boolean, value: string): string {
   return tracked ? value : t('growth.sessionUnknown')
 }
@@ -122,7 +133,13 @@ function unknownOr(tracked: boolean, value: string): string {
         <p v-if="detail?.truncated" class="detail-muted">{{ t('growth.sessionTimelineTruncated', { count: HISTORY_SESSION_TIMELINE_MAX }) }}</p>
         <p v-else-if="!current.tracked" class="detail-muted">{{ t('growth.sessionTimelinePartial') }}</p>
         <ol class="detail-timeline">
-          <li v-for="entry in timeline" :key="entry.key" class="detail-entry" :class="`state-${entry.state}`">
+          <li
+            v-for="entry in timeline"
+            :key="entry.key"
+            class="detail-entry"
+            :class="`state-${entry.state}`"
+            :aria-label="entryAriaLabel(entry)"
+          >
             <time class="detail-time" :datetime="new Date(entry.occurredAt).toISOString()">{{ formatTimeFull(entry.occurredAt) }}</time>
             <span class="detail-marker" aria-hidden="true" />
             <span class="detail-state">

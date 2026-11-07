@@ -15,6 +15,7 @@ import {
 } from '@/types/pet'
 import { quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
 import { selectBubble } from '@/utils/feed-arbiter'
+import { stateAriaLabel } from '@/utils/state-aria'
 import { summarizePluginBadgesForPet } from '@/utils/plugin-badges'
 import PetAnimation from '@/components/PetAnimation.vue'
 import { useKeyedRefs, usePetBubbleAnchor } from '@/composables/usePetBubbleAnchor'
@@ -250,21 +251,6 @@ const petAnimationFrozen = computed(() => (
   shimejiReducedMotion.value && (store.currentState === 'idle' || store.currentState === 'offline')
 ))
 const petLowFps = computed(() => store.petWindowMode.mode === 'mini' || shimejiReducedMotion.value)
-
-const STATE_LABEL_KEYS: Record<string, TranslationKey> = {
-  offline: 'pet.stateOffline',
-  idle: 'pet.stateIdle',
-  thinking: 'pet.stateThinking',
-  'tool-running': 'pet.stateWorking',
-  'waiting-permission': 'pet.statePermission',
-  'waiting-input': 'pet.stateWaitingInput',
-  success: 'pet.stateSuccess',
-  error: 'pet.stateError',
-}
-
-function stateAriaLabel(state: string): string {
-  return t(STATE_LABEL_KEYS[state] ?? 'pet.stateIdle')
-}
 
 const petAriaLabel = computed(() => t('pet.ariaLabel', { state: stateAriaLabel(store.currentState) }))
 // Spoken when the visible state changes, not on every session update.

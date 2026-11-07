@@ -194,5 +194,6 @@
   "growth.sessionTimelineTruncated": "Showing the latest {count} entries.",
   "growth.sessionTimelinePartial": "The timeline starts at the upgrade; earlier states were not kept.",
   "growth.sessionTimelineFor": "for {duration}",
-  "growth.sessionDetailError": "Couldn't load this session."
+  "growth.sessionDetailError": "Couldn't load this session.",
+  "growth.sessionsLoadMoreFailed": "Couldn't load more sessions."
 }

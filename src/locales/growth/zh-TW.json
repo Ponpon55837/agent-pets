@@ -194,5 +194,6 @@
   "growth.sessionTimelineTruncated": "只顯示最近 {count} 筆。",
   "growth.sessionTimelinePartial": "時間軸從升級後才開始記錄，較早的狀態沒有保存。",
   "growth.sessionTimelineFor": "持續 {duration}",
-  "growth.sessionDetailError": "無法載入這個工作階段。"
+  "growth.sessionDetailError": "無法載入這個工作階段。",
+  "growth.sessionsLoadMoreFailed": "無法載入更多工作階段。"
 }
