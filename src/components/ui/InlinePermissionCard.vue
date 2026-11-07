@@ -75,6 +75,7 @@ function decide(decision: PermissionDecisionValue): void {
     <PermissionRiskBadge class="inline-permission-risk" :risk="request.risk" :network="request.network" />
     <PermissionDetails :request="request" id-prefix="inline-permission" />
     <PermissionCountdown class="inline-permission-countdown" :request="request" :now="now" />
+    <p v-if="!canAllow()" class="inline-permission-hint">{{ t('permission.allowNeedsFullView', { source: permissionSourceName(request.agentId) }) }}</p>
     <p v-if="alsoAnswerKey" class="inline-permission-hint">{{ t(alsoAnswerKey, { source: permissionSourceName(request.agentId) }) }}</p>
     <p v-if="decideError" class="inline-permission-warning" role="alert">{{ decideError }}</p>
     <div class="inline-permission-actions">

@@ -26,7 +26,7 @@
   "permission.settingsIntro": "Which agents' permission requests can be handled right from the pet bubble:",
   "permission.settingsCanApprove": "Allow once or deny here",
   "permission.settingsReminderOnly": "Reminder only; answer in the original tool",
-  "permission.settingsRiskRules": "Risk is judged conservatively: only read-only tools such as read and search count as low risk; Claude Code file edits (Write, Edit) count as medium; commands, network access and any other tool count as high or unknown, and those requests cannot be approved with the global shortcut.",
+  "permission.settingsRiskRules": "Risk is judged conservatively: only read-only tools such as read and search count as low risk; Claude Code edits to ordinary files inside the project folder (Write, Edit) count as medium, while edits outside it or to .git, .claude, shell start-up files and similar are high; commands, network access and any other tool count as high or unknown. Those requests cannot be approved with the global shortcut, and when their text is cut off they can only be denied here.",
   "permission.hotkeyUnavailable": "The shortcut is taken by another app; use the buttons instead",
   "permission.keyboardHint": "Keyboard: N or Esc denies; hold Y for 0.6 s to allow",
   "permission.keyboardHintLow": "Keyboard: N or Esc denies; Y allows once",
@@ -77,5 +77,7 @@
   "permission.claudeWait": "Wait time (seconds)",
   "permission.claudeWaitHelp": "After this the bubble is taken down; answer in the terminal instead. {min}–{max} seconds.",
   "permission.alsoInTerminal": "You can also answer in the terminal",
-  "permission.alsoInApp": "You can also answer in {source}"
+  "permission.alsoInApp": "You can also answer in {source}",
+  "permission.allowNeedsFullView": "Too long to show in full. Check it in {source} to allow it.",
+  "permission.auditMaybeTerminal": " (the terminal may have answered first)"
 }

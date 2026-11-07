@@ -13,7 +13,7 @@ import Button from '@/components/ui/Button.vue'
 import NumberField from '@/components/ui/NumberField.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import type { PermissionAuditEntry } from '@/types/permission'
-import { permissionSourceName } from '@/utils/permission-source'
+import { alsoAnswerableKey, permissionSourceName } from '@/utils/permission-source'
 import { playCue, type SoundCue } from '@/utils/sound'
 import { formatDateParts } from '@/utils/intl-format'
 
@@ -58,8 +58,11 @@ async function clearAudit(): Promise<void> {
 }
 
 function auditResult(entry: PermissionAuditEntry): string {
-  if (entry.status === 'allowed') return t('permission.auditAllowed')
-  if (entry.status === 'denied') return t('permission.auditDenied')
+  // Claude Code keeps its terminal prompt open, so a decision sent from here may have
+  // arrived after the user had already answered there.
+  const maybeTerminal = alsoAnswerableKey(entry.agentId) ? t('permission.auditMaybeTerminal') : ''
+  if (entry.status === 'allowed') return t('permission.auditAllowed') + maybeTerminal
+  if (entry.status === 'denied') return t('permission.auditDenied') + maybeTerminal
   if (entry.status === 'expired') return t('permission.auditExpired')
   if (entry.status === 'delivery_failed') return t('permission.auditFailed')
   return t('permission.auditCancelled')
@@ -226,6 +229,7 @@ function preview(cue: SoundCue): void {
 
 .permission-audit-list li {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-3);
   font-size: var(--font-sm);
@@ -242,7 +246,9 @@ function preview(cue: SoundCue): void {
 }
 
 .permission-audit-list strong {
+  min-width: 0;
   margin-left: auto;
+  text-align: right;
 }
 
 .permission-sound-volume {

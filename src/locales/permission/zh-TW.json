@@ -26,7 +26,7 @@
   "permission.settingsIntro": "哪些 Agent 的權限請求可以直接在寵物泡泡上處理：",
   "permission.settingsCanApprove": "可在這裡允許一次或拒絕",
   "permission.settingsReminderOnly": "只提醒，需回原工具處理",
-  "permission.settingsRiskRules": "風險判斷採保守原則：只有讀取、搜尋這類唯讀工具視為低風險；Claude Code 的檔案編輯（Write、Edit）視為中風險；指令、網路與其他工具視為高風險或未知，這些請求不能用全域快捷鍵核准。",
+  "permission.settingsRiskRules": "風險判斷採保守原則：只有讀取、搜尋這類唯讀工具視為低風險；Claude Code 編輯專案資料夾內的一般檔案（Write、Edit）視為中風險，編輯專案外、.git、.claude、shell 啟動檔等位置則是高風險；指令、網路與其他工具視為高風險或未知，這些請求不能用全域快捷鍵核准，內容被截斷時也只能在這裡拒絕。",
   "permission.hotkeyUnavailable": "快捷鍵已被其他程式佔用，請直接點選按鈕",
   "permission.keyboardHint": "鍵盤：N 或 Esc 拒絕；按住 Y 約 0.6 秒允許",
   "permission.keyboardHintLow": "鍵盤：N 或 Esc 拒絕；Y 允許一次",
@@ -77,5 +77,7 @@
   "permission.claudeWait": "等待秒數",
   "permission.claudeWaitHelp": "超過這個時間泡泡會撤下，請改在終端機回覆。範圍 {min}–{max} 秒。",
   "permission.alsoInTerminal": "也可以在終端機回覆",
-  "permission.alsoInApp": "也可以在 {source} 回覆"
+  "permission.alsoInApp": "也可以在 {source} 回覆",
+  "permission.allowNeedsFullView": "內容過長、無法完整顯示，請回到 {source} 確認後再允許。",
+  "permission.auditMaybeTerminal": "（終端機可能已先回覆）"
 }
