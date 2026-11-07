@@ -13,5 +13,6 @@
   "permission.collapse": "收合",
   "permission.copy": "複製",
   "permission.copied": "已複製",
-  "permission.argumentsLabel": "要執行的內容"
+  "permission.argumentsLabel": "要執行的內容",
+  "permission.network": "會連線到網路"
 }

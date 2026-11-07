@@ -8,6 +8,7 @@ import {
   type PermissionAdapterPort,
   type PermissionDeliveryResult,
 } from './permission-broker.ts'
+import { classifyPermissionRisk, isNetworkPermission } from './permission-risk.ts'
 
 export const PERMISSION_ADAPTER_PORT = 17_374
 
@@ -185,7 +186,8 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
         action: payload.permission,
         description: describePermission(payload),
         ...(payload.title && payload.patterns?.length ? { details: payload.patterns } : {}),
-        risk: classifyRisk(payload.permission),
+        risk: classifyPermissionRisk(payload.permission),
+        network: isNetworkPermission(payload.permission),
         allowedDecisions: ['allow_once', 'deny'],
         responseHandle: { relayKey } satisfies RelayHandle,
       })
@@ -356,14 +358,6 @@ function describePermission(payload: CreatePayload): string {
   if (payload.title) return payload.title
   if (payload.patterns?.length) return payload.patterns.join(', ')
   return `OpenCode requests ${payload.permission} permission.`
-}
-
-function classifyRisk(permission: string): 'low' | 'medium' | 'high' | 'unknown' {
-  const normalized = permission.toLowerCase()
-  if (normalized.includes('bash') || normalized.includes('edit') || normalized.includes('write')) return 'high'
-  if (normalized.includes('external') || normalized.includes('task')) return 'high'
-  if (normalized.includes('read') || normalized.includes('web')) return 'medium'
-  return 'unknown'
 }
 
 function toExternalKey(source: string, instanceId: string, permissionId: string): string {

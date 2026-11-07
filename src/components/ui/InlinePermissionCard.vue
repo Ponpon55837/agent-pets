@@ -7,6 +7,7 @@ import { permissionSourceName } from '@/utils/permission-source'
 import { formatDuration } from '@/utils/permission-view'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
+import PermissionRiskBadge from '@/components/permission/PermissionRiskBadge.vue'
 import PermissionDetails from '@/components/permission/PermissionDetails.vue'
 import PermissionCountdown from '@/components/permission/PermissionCountdown.vue'
 import { usePermissionClock } from '@/components/permission/usePermissionClock'
@@ -70,6 +71,7 @@ function decide(decision: PermissionDecisionValue): void {
         </span>
       </div>
     </div>
+    <PermissionRiskBadge class="inline-permission-risk" :risk="request.risk" :network="request.network" />
     <PermissionDetails :request="request" id-prefix="inline-permission" />
     <PermissionCountdown class="inline-permission-countdown" :request="request" :now="now" />
     <p v-if="decideError" class="inline-permission-warning" role="alert">{{ decideError }}</p>
@@ -150,6 +152,14 @@ function decide(decision: PermissionDecisionValue): void {
   font-size: var(--font-body-sm, var(--font-sm));
   font-weight: var(--weight-medium);
   line-height: 1.45;
+}
+
+.inline-permission-risk {
+  align-self: flex-start;
+  padding: 1px var(--space-2);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-pill);
+  background: var(--surface-overlay);
 }
 
 .inline-permission-countdown {

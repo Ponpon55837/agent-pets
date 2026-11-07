@@ -13,5 +13,6 @@
   "permission.collapse": "Collapse",
   "permission.copy": "Copy",
   "permission.copied": "Copied",
-  "permission.argumentsLabel": "What will run"
+  "permission.argumentsLabel": "What will run",
+  "permission.network": "connects to the network"
 }

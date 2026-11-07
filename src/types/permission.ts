@@ -27,6 +27,8 @@ export interface PermissionRequestView {
   /** Number of characters dropped from description/details; 0 when nothing was cut. */
   truncatedChars: number
   risk: PermissionRisk
+  /** The tool reaches outside the machine (network or external directory). */
+  network: boolean
   receivedAt: number
   expiresAt: number
   status: PermissionRequestStatus

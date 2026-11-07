@@ -4,6 +4,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { t, type TranslationKey } from '@/i18n'
 import { permissionSourceName } from '@/utils/permission-source'
 import type { PermissionOutcomeKind } from '@/types/permission'
+import PermissionRiskBadge from '@/components/permission/PermissionRiskBadge.vue'
 import PermissionDetails from '@/components/permission/PermissionDetails.vue'
 import PermissionCountdown from '@/components/permission/PermissionCountdown.vue'
 import { usePermissionClock } from '@/components/permission/usePermissionClock'
@@ -13,22 +14,12 @@ const now = usePermissionClock()
 const request = computed(() => store.permissionRequest)
 const outcome = computed(() => store.permissionOutcome)
 
-const RISK_LABEL_KEYS: Record<string, TranslationKey> = {
-  high: 'permissionRiskHigh',
-  medium: 'permissionRiskMedium',
-  low: 'permissionRiskLow',
-}
-
 const OUTCOME_KEYS: Record<PermissionOutcomeKind, TranslationKey> = {
   expired: 'permission.outcomeExpired',
   cancelled: 'permission.outcomeCancelled',
   delivery_failed: 'permission.outcomeDeliveryFailed',
   conflict: 'permission.outcomeConflict',
   error: 'permission.outcomeError',
-}
-
-function riskLabel(risk: string): string {
-  return t(RISK_LABEL_KEYS[risk] ?? 'permissionRiskUnknown')
 }
 
 function outcomeText(kind: PermissionOutcomeKind, agentId: string): string {
@@ -69,7 +60,7 @@ function decide(decision: 'allow_once' | 'deny'): void {
     </header>
     <p class="permission-request-heading">
       <strong id="permission-request-title">{{ request.action }}</strong>
-      <span>{{ riskLabel(request.risk) }}</span>
+      <PermissionRiskBadge :risk="request.risk" :network="request.network" />
     </p>
     <PermissionDetails :request="request" id-prefix="permission-request" />
     <PermissionCountdown :request="request" :now="now" />
@@ -149,6 +140,19 @@ function decide(decision: 'allow_once' | 'deny'): void {
   border: 2px solid var(--state-error);
 }
 
+.permission-request.risk-medium {
+  border-style: dashed;
+}
+
+.permission-request.risk-low {
+  border-color: var(--border-strong);
+}
+
+.permission-request.risk-unknown {
+  border-style: dotted;
+  border-color: var(--text-secondary);
+}
+
 .permission-request-header {
   display: flex;
   align-items: center;
@@ -193,7 +197,6 @@ function decide(decision: 'allow_once' | 'deny'): void {
   white-space: nowrap;
 }
 
-.permission-request-heading span,
 .permission-request-queue {
   color: var(--text-secondary);
   font-size: var(--font-xs);

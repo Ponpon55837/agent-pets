@@ -53,6 +53,8 @@ export interface PermissionRequestInput {
   /** Tool arguments (command, path globs). Bounded and redacted here. */
   details?: ReadonlyArray<string>
   risk?: PermissionRisk
+  /** The tool reaches outside the machine (network / external directory). */
+  network?: boolean
   ttlMs?: number
   allowedDecisions?: ReadonlyArray<PermissionDecisionValue>
   responseHandle: unknown
@@ -115,6 +117,7 @@ interface InternalPermissionRequest {
   details: ReadonlyArray<string>
   truncatedChars: number
   risk: PermissionRisk
+  network: boolean
   receivedAt: number
   expiresAt: number
   status: PermissionRequestStatus
@@ -164,6 +167,12 @@ function isDecisionSource(value: unknown): value is PermissionDecisionSource {
 
 function isRisk(value: unknown): value is PermissionRisk {
   return value === 'low' || value === 'medium' || value === 'high' || value === 'unknown'
+}
+
+// Fail-closed: a risk level must be listed here to be approvable by hotkey, so
+// a level added later (or `unknown`) is excluded by default.
+function isHotkeyRisk(risk: PermissionRisk): boolean {
+  return risk === 'low' || risk === 'medium'
 }
 
 function clampTtl(value: unknown): number {
@@ -309,6 +318,7 @@ export class PermissionBroker {
       details: Object.freeze(details),
       truncatedChars,
       risk: isRisk(candidate.risk) ? candidate.risk : 'unknown',
+      network: candidate.network === true,
       receivedAt,
       expiresAt: receivedAt + clampTtl(candidate.ttlMs),
       status: 'pending',
@@ -474,6 +484,7 @@ export class PermissionBroker {
       details: [...request.details],
       truncatedChars: request.truncatedChars,
       risk: request.risk,
+      network: request.network,
       receivedAt: request.receivedAt,
       expiresAt: request.expiresAt,
       status: request.status,
@@ -481,7 +492,7 @@ export class PermissionBroker {
       queuePosition,
       queueSize,
       hotkeyEligible: request.status === 'pending'
-        && request.risk !== 'high'
+        && isHotkeyRisk(request.risk)
         && !request.truncated,
       truncated: request.truncated,
     }
