@@ -479,6 +479,19 @@ export function configureSecureProtocol(): void {
           },
         })
       }
+      if (url.hostname === 'import-preview') {
+        // Staged (not yet installed) import, addressed by an unguessable
+        // per-import token; anything else 404s.
+        const match = pathname.match(/^\/([0-9a-f]{32})\/spritesheet$/)
+        const directory = match ? mainState.petImport?.previewDirectory(match[1]) : null
+        const data = directory ? await readRegularFileWithin(directory, 'spritesheet.webp', MAX_PET_IMAGE_BYTES) : null
+        const contentType = data ? rasterContentType(data) : null
+        if (!data || !contentType) return new Response('Not found', { status: 404 })
+        return new Response(Uint8Array.from(data), {
+          status: 200,
+          headers: { 'content-type': contentType, 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' },
+        })
+      }
       if (url.hostname === 'custom') {
         const match = pathname.match(/^\/([a-zA-Z0-9_.-]{1,64})\/spritesheet\.webp$/)
         const safeId = match ? sanitizePetId(match[1]) : null

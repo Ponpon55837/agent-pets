@@ -7,7 +7,6 @@ import { join } from 'path'
 
 import * as fs from 'fs'
 import * as path from 'path'
-import { guardArchive } from './archive-guard.ts'
 import { createEventServer } from './event-server'
 import { createAgentAdapterRegistry } from './agent-adapter'
 import { createAgentAdapterOperations } from './agent-adapter-operations'
@@ -88,6 +87,7 @@ import { OnboardingStore } from './onboarding-state'
 import { registerProjectPetsIpc } from './ipc/project-pets'
 
 import { registerPetAssetIpc } from './ipc/pet-assets'
+import { PetImportStaging } from './pet-import.ts'
 import { isIntegrationTarget, registerIntegrationIpc } from './ipc/integrations'
 import { registerWindowControlsIpc } from './ipc/window-controls'
 import { registerQuotaIpc } from './ipc/quota'
@@ -724,6 +724,16 @@ async function bootstrapApp(): Promise<void> {
     pluginVersion: pluginId => mainState.pluginRegistry?.list().find(entry => entry.id === pluginId)?.currentVersion ?? '',
   })
 
+  mainState.petImport = new PetImportStaging({
+    root: hookScriptDeployPath(),
+    sanitizePetId,
+    builtinPetIds: async () => {
+      const raw = JSON.parse(await fs.promises.readFile(getPetsJsonPath(), 'utf-8')) as unknown
+      return Array.isArray(raw) ? raw.flatMap(pet => (pet && typeof pet.id === 'string' ? [pet.id] : [])) : []
+    },
+  })
+  // Crash recovery for interrupted imports; never blocks startup.
+  void mainState.petImport.recoverStale().catch(() => undefined)
   registerPetAssetIpc({
     ipcMain,
     assertTrustedIpcSender,
@@ -738,7 +748,7 @@ async function bootstrapApp(): Promise<void> {
     writeFileEnsured: (filePath, contents) => writeFileWithin(hookScriptDeployPath(), filePath, contents),
     parsePetBehaviorManifest,
     isSupportedRasterImage,
-    guardArchive,
+    petImport: mainState.petImport!,
     fs: fs.promises,
     path,
     customPetDescription: () => t('customPet'),

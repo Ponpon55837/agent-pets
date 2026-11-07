@@ -8,6 +8,7 @@ import type { DesktopTrayController } from '../desktop-tray'
 import type { HistoryStore } from '../history'
 import type { LocalUsageReader } from '../local-usage'
 import type { PermissionBroker } from '../permission-broker'
+import type { PetImportStaging } from '../pet-import.ts'
 import type { PermissionAdapterRelay } from '../permission-adapter-server'
 import type { PluginBadgeController } from '../plugin-badges.ts'
 import type { PluginBroker, PluginBrokerContext } from '../plugin-broker.ts'
@@ -51,6 +52,7 @@ export interface PluginSkinFallbackInfo {
 export const mainState = {
   petWindow: null as BrowserWindow | null,
   panelWindow: null as BrowserWindow | null,
+  petImport: null as PetImportStaging | null,
   anchorBottomCenter: null as { x: number; y: number } | null,
   petContentHeight: null as number | null,
   resizeAnimHandle: null as ReturnType<typeof setInterval> | null,

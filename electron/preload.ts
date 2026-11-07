@@ -9,6 +9,7 @@ import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achiev
 import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySessionDetail, HistorySessionPage, HistorySessionQuery, HistorySummary, HistoryUsageBlock } from '../src/types/history'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 import type { PetBehaviorManifest, PluginSkinPetSource } from '../src/types/pet'
+import type { PetImportDecision } from '../src/types/pet-import'
 import type { PresentationIntent, PresentationStatusUpdate } from '../src/types/presentation'
 import type {
   PluginBadgeView,
@@ -538,8 +539,16 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.importPetSprite, petId, displayName)
   },
 
-  importPetZip: () => {
-    return ipcRenderer.invoke(IPC_CHANNELS.importPetZip)
+  prepareImportPetZip: () => {
+    return ipcRenderer.invoke(IPC_CHANNELS.prepareImportPetZip)
+  },
+
+  commitImportPetZip: (token: string, decision: PetImportDecision, expectedState: string) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.commitImportPetZip, token, decision, expectedState)
+  },
+
+  cancelImportPetZip: (token: string) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.cancelImportPetZip, token)
   },
 }
 
