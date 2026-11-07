@@ -5,6 +5,8 @@ import path from 'node:path'
 import test from 'node:test'
 
 import { installProjectMcp } from '../electron/project-mcp-setup.ts'
+import { installProjectMcp as install2, planProjectMcp, removeProjectMcp } from '../electron/project-mcp-setup.ts'
+import { addLocalExcludes, findGitLocation, readTrackedPaths } from '../electron/git-tracking.ts'
 
 function createProject(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-project-mcp-'))
@@ -191,4 +193,176 @@ test('requires absolute executable and bridge paths', () => {
   } finally {
     cleanup(projectPath)
   }
+})
+
+// A minimal Git index (version 2) listing the given paths.
+function writeGitIndex(projectPath: string, tracked: string[]): void {
+  const gitDir = path.join(projectPath, '.git')
+  fs.mkdirSync(path.join(gitDir, 'info'), { recursive: true })
+  const entries = tracked.map(name => {
+    const nameBytes = Buffer.from(name, 'utf8')
+    const fixed = Buffer.alloc(62)
+    fixed.writeUInt16BE(Math.min(nameBytes.length, 0xfff), 60)
+    const length = Math.ceil((62 + nameBytes.length + 1) / 8) * 8
+    const entry = Buffer.alloc(length)
+    fixed.copy(entry)
+    nameBytes.copy(entry, 62)
+    return entry
+  })
+  const header = Buffer.alloc(12)
+  header.write('DIRC', 0, 'latin1')
+  header.writeUInt32BE(2, 4)
+  header.writeUInt32BE(entries.length, 8)
+  fs.writeFileSync(path.join(gitDir, 'index'), Buffer.concat([header, ...entries]))
+}
+
+test('installs only the selected clients', () => {
+  const projectPath = createProject()
+  try {
+    const summary = install2(projectPath, options(projectPath), { clients: ['claude'] })
+    assert.deepEqual(summary.results.map(item => item.client), ['claude'])
+    assert.equal(fs.existsSync(path.join(projectPath, '.mcp.json')), true)
+    assert.equal(fs.existsSync(path.join(projectPath, 'opencode.json')), false)
+    assert.equal(fs.existsSync(path.join(projectPath, '.codex')), false)
+    assert.throws(() => install2(projectPath, options(projectPath), { clients: [] }), /at least one/)
+  } finally { cleanup(projectPath) }
+})
+
+test('supports project paths with spaces and non-ASCII characters', () => {
+  const base = createProject()
+  try {
+    const projectPath = path.join(base, '我的 專案 with space')
+    fs.mkdirSync(projectPath)
+    const summary = install2(projectPath, options(base))
+    assert.equal(summary.ok, true)
+    const codex = fs.readFileSync(path.join(projectPath, '.codex', 'config.toml'), 'utf8')
+    assert.match(codex, /\[mcp_servers\.agent-pets\]/)
+  } finally { cleanup(base) }
+})
+
+test('keeps other MCP servers, indentation and CRLF line endings', () => {
+  const projectPath = createProject()
+  try {
+    const file = path.join(projectPath, '.mcp.json')
+    const original = '{\r\n    "mcpServers": {\r\n        "other": { "command": "x" }\r\n    }\r\n}\r\n'
+    fs.writeFileSync(file, original)
+    install2(projectPath, options(projectPath), { clients: ['claude'] })
+    const written = fs.readFileSync(file, 'utf8')
+    assert.ok(written.includes('\r\n'))
+    assert.ok(!/[^\r]\n/.test(written), 'every newline stays CRLF')
+    assert.ok(written.includes('\r\n    "mcpServers"'), 'keeps 4-space indentation')
+    const parsed = JSON.parse(written)
+    assert.deepEqual(parsed.mcpServers.other, { command: 'x' })
+    assert.ok(parsed.mcpServers['agent-pets'])
+  } finally { cleanup(projectPath) }
+})
+
+test('JSONC config is left untouched with an actionable code and manual snippet', () => {
+  const projectPath = createProject()
+  try {
+    const file = path.join(projectPath, 'opencode.json')
+    const original = '{\n  // my settings\n  "theme": "dark",\n}\n'
+    fs.writeFileSync(file, original)
+    const summary = install2(projectPath, options(projectPath), { clients: ['opencode'] })
+    const result = summary.results[0]!
+    assert.equal(result.status, 'error')
+    assert.equal(result.code, 'jsonc')
+    assert.match(result.manualSnippet ?? '', /agent-pets/)
+    assert.equal(fs.readFileSync(file, 'utf8'), original)
+  } finally { cleanup(projectPath) }
+})
+
+test('oversized config reports size and limit without modifying the file', () => {
+  const projectPath = createProject()
+  try {
+    const file = path.join(projectPath, '.mcp.json')
+    const big = JSON.stringify({ filler: 'x'.repeat(1_100_000) })
+    fs.writeFileSync(file, big)
+    const result = install2(projectPath, options(projectPath), { clients: ['claude'] }).results[0]!
+    assert.equal(result.code, 'too_large')
+    assert.match(result.message ?? '', /bytes/)
+    assert.equal(fs.readFileSync(file, 'utf8'), big)
+  } finally { cleanup(projectPath) }
+})
+
+test('read-only directory yields a write_failed error and no partial file', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, () => {
+  const projectPath = createProject()
+  try {
+    fs.chmodSync(projectPath, 0o500)
+    const result = install2(projectPath, options(projectPath), { clients: ['claude'] }).results[0]!
+    assert.equal(result.status, 'error')
+    assert.equal(result.code, 'write_failed')
+    fs.chmodSync(projectPath, 0o700)
+    assert.deepEqual(fs.readdirSync(projectPath), [])
+  } finally { fs.chmodSync(projectPath, 0o700); cleanup(projectPath) }
+})
+
+test('plan previews files and Git tracking without writing anything', () => {
+  const projectPath = createProject()
+  const home = createProject()
+  try {
+    fs.mkdirSync(path.join(home, '.claude'))
+    fs.writeFileSync(path.join(projectPath, '.mcp.json'), '{}\n')
+    writeGitIndex(projectPath, ['.mcp.json', 'README.md'])
+    const before = fs.readdirSync(projectPath).sort()
+    const plan = planProjectMcp(projectPath, options(projectPath), home)
+    assert.equal(plan.isGitRepo, true)
+    const byClient = Object.fromEntries((plan.clients ?? []).map(item => [item.client, item]))
+    assert.equal(byClient.claude!.gitTracked, true)
+    assert.equal(byClient.claude!.exists, true)
+    assert.equal(byClient.claude!.suggested, true)
+    assert.equal(byClient.claude!.status, 'not_configured')
+    assert.equal(byClient.codex!.gitTracked, false)
+    assert.equal(byClient.codex!.suggested, false)
+    assert.equal(byClient.opencode!.exists, false)
+    assert.match(byClient.codex!.preview, /mcp_servers\.agent-pets/)
+    assert.deepEqual(fs.readdirSync(projectPath).sort(), before)
+  } finally { cleanup(projectPath); cleanup(home) }
+})
+
+test('local-only mode excludes untracked files and warns about tracked ones', () => {
+  const projectPath = createProject()
+  try {
+    fs.writeFileSync(path.join(projectPath, 'opencode.json'), '{}\n')
+    writeGitIndex(projectPath, ['opencode.json'])
+    const summary = install2(projectPath, options(projectPath), { localOnly: true })
+    assert.deepEqual(summary.trackedFiles, ['opencode.json'])
+    assert.deepEqual([...(summary.excluded ?? [])].sort(), ['.codex/config.toml', '.mcp.json'])
+    const exclude = fs.readFileSync(path.join(projectPath, '.git', 'info', 'exclude'), 'utf8')
+    assert.match(exclude, /^\/\.mcp\.json$/m)
+    assert.match(exclude, /^\/\.codex\/config\.toml$/m)
+    assert.doesNotMatch(exclude, /opencode\.json/)
+    // Idempotent.
+    const again = install2(projectPath, options(projectPath), { localOnly: true })
+    assert.deepEqual(again.excluded, [])
+  } finally { cleanup(projectPath) }
+})
+
+test('git helpers: worktree .git file, index parsing and exclude edits', () => {
+  const base = createProject()
+  try {
+    const real = path.join(base, 'repo.git')
+    fs.mkdirSync(path.join(real, 'info'), { recursive: true })
+    const project = path.join(base, 'wt')
+    fs.mkdirSync(project)
+    fs.writeFileSync(path.join(project, '.git'), `gitdir: ${real}\n`)
+    const location = findGitLocation(project)
+    assert.equal(location?.gitDir, real)
+    assert.equal(readTrackedPaths(location!), null)
+    assert.deepEqual(addLocalExcludes(location!, ['a.json']), ['a.json'])
+    assert.deepEqual(addLocalExcludes(location!, ['a.json']), [])
+    assert.equal(findGitLocation(base), null)
+  } finally { cleanup(base) }
+})
+
+test('removal still deletes only Agent Pets entries and preserves other servers', () => {
+  const projectPath = createProject()
+  try {
+    const file = path.join(projectPath, '.mcp.json')
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { other: { command: 'x' } } }, null, 2))
+    install2(projectPath, options(projectPath), { clients: ['claude'] })
+    const removal = removeProjectMcp(projectPath, options(projectPath))
+    assert.equal(removal.results.find(item => item.client === 'claude')?.status, 'removed')
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { mcpServers: { other: { command: 'x' } } })
+  } finally { cleanup(projectPath) }
 })

@@ -348,6 +348,15 @@ function writeFileEnsured(filePath: string, content: string): void {
   writeTextAtomic(filePath, content)
 }
 
+// Files Agent Pets fully owns (hook script, plugins): rewritten only when the content differs, so
+// the install outcome can report "unchanged" honestly. No backup is needed for our own files.
+function writeManaged(filePath: string, content: string): ConfigWriteResult {
+  const existing = readFile(filePath)
+  if (existing === content) return { status: 'unchanged', path: filePath, backupPath: null }
+  writeTextAtomic(filePath, content)
+  return { status: 'written', path: filePath, backupPath: null }
+}
+
 function fileExists(filePath: string): boolean {
   return fs.existsSync(filePath)
 }
@@ -404,17 +413,18 @@ function hookWrapperContent(): string {
     .replace('__NODE_EXECUTABLE__', resolveNodeBin())
 }
 
-function installHookScript(): void {
+function installHookScript(): ConfigWriteResult[] {
   ensureEventToken()
   const dir = hookScriptDeployPath()
   ensureDir(dir)
-  writeFileEnsured(hookScriptPath(), hookScriptContent())
+  const results = [writeManaged(hookScriptPath(), hookScriptContent())]
   if (IS_WIN) {
-    writeFileEnsured(hookWrapperPath(), hookWrapperContent())
+    results.push(writeManaged(hookWrapperPath(), hookWrapperContent()))
   }
   if (!IS_WIN) {
     try { fs.chmodSync(hookScriptPath(), 0o700) } catch {}
   }
+  return results
 }
 
 // --- OpenCode plugin content ---
@@ -667,11 +677,13 @@ export { DesktopPetPlugin };
 `
 }
 
-function installOpenCode(): void {
+function installOpenCode(): ConfigWriteResult[] {
   ensureEventToken()
   ensurePermissionToken()
-  writeFileEnsured(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop'))
-  writeFileEnsured(openCodeCliPluginPath(), openCodePluginContent('opencode-cli'))
+  return [
+    writeManaged(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop')),
+    writeManaged(openCodeCliPluginPath(), openCodePluginContent('opencode-cli')),
+  ]
 }
 
 function uninstallOpenCode(): void {
@@ -711,8 +723,7 @@ function codexHooksJson(): any {
 }
 
 function installCodex(): ConfigWriteResult[] {
-  installHookScript()
-  const results: ConfigWriteResult[] = []
+  const results: ConfigWriteResult[] = installHookScript()
 
   // Throws ConfigRefusedError (and writes nothing) if hooks.json exists but is not valid JSON.
   const newHooks = codexHooksJson()
@@ -761,8 +772,8 @@ function uninstallCodex(): void {
 
 // --- Claude Desktop ---
 function installClaude(): ConfigWriteResult[] {
-  installHookScript()
-  return [setJsonKeyFile(claudeDesktopConfigPath(), 'agent', hookScriptPath())]
+  const scripts = installHookScript()
+  return [...scripts, setJsonKeyFile(claudeDesktopConfigPath(), 'agent', hookScriptPath())]
 }
 
 function uninstallClaude(): void {
@@ -801,9 +812,9 @@ function claudeCodeHooksJson(): any {
 }
 
 function installClaudeCode(): ConfigWriteResult[] {
-  installHookScript()
+  const scripts = installHookScript()
   // Throws ConfigRefusedError (and writes nothing) if settings.json is not valid JSON.
-  return [mergeAgentPetsHooksFile(claudeCodeSettingsPath(), claudeCodeHooksJson().hooks)]
+  return [...scripts, mergeAgentPetsHooksFile(claudeCodeSettingsPath(), claudeCodeHooksJson().hooks)]
 }
 
 function uninstallClaudeCode(): void {
@@ -884,13 +895,12 @@ export type IntegrationTarget = 'opencode' | 'codex' | 'claude' | 'claudeCode'
 
 function installIntegration(target?: IntegrationTarget): ConfigWriteResult[] {
   switch (target) {
-    case 'opencode': installOpenCode(); return []
+    case 'opencode': return installOpenCode()
     case 'codex': return installCodex()
     case 'claude': return installClaude()
     case 'claudeCode': return installClaudeCode()
     default:
-      installOpenCode()
-      return [...installCodex(), ...installClaude(), ...installClaudeCode()]
+      return [...installOpenCode(), ...installCodex(), ...installClaude(), ...installClaudeCode()]
   }
 }
 

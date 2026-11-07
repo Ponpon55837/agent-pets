@@ -26,7 +26,7 @@ import { ProgressionStore } from './progression'
 
 
 import { ProjectMcpRegistryStore } from './project-mcp-registry'
-import { installProjectMcp, removeProjectMcp } from './project-mcp-setup'
+import { installProjectMcp, planProjectMcp, removeProjectMcp } from './project-mcp-setup'
 
 import { PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES } from './plugin-registry'
 
@@ -81,6 +81,8 @@ import { registerDesktopIpc } from './ipc/desktop'
 import { registerPermissionIpc } from './ipc/permission'
 import { registerAdapterIpc } from './ipc/adapters'
 import { registerProjectMcpIpc } from './ipc/project-mcp'
+import { registerOnboardingIpc } from './ipc/onboarding'
+import { OnboardingStore } from './onboarding-state'
 import { registerProjectPetsIpc } from './ipc/project-pets'
 
 import { registerPetAssetIpc } from './ipc/pet-assets'
@@ -565,6 +567,13 @@ async function bootstrapApp(): Promise<void> {
     logError: (message, error) => console.error(message, error),
   })
 
+  const onboardingStore = new OnboardingStore(join(app.getPath('userData'), 'onboarding.json'))
+  registerOnboardingIpc({
+    ipcMain,
+    assertTrustedIpcSender: event => assertTrustedIpcSender(event),
+    getStore: () => onboardingStore,
+  })
+
   registerProjectMcpIpc({
     ipcMain,
     assertTrustedIpcSender,
@@ -577,6 +586,7 @@ async function bootstrapApp(): Promise<void> {
     installOptions: () => ({ nodeExecutable: resolveNodeBin(), bridgePath: presentationMcpScriptPath() }),
     getRegistry: () => mainState.projectMcpRegistry,
     installProjectMcp,
+    planProjectMcp,
     removeProjectMcp,
   })
 

@@ -9,8 +9,11 @@ import type {
   AgentAdapterId,
   AgentAdapterDefinition,
   DiagnosticReport,
+  InstallOutcome,
+  InstallReport,
 } from '../src/types/agent-adapter'
 import { normalizeAgentStatusEvent } from './event-normalizer.ts'
+import { buildOutcome, failedOutcome } from './install-outcome.ts'
 import { AGENT_ADAPTER_REGISTRY } from '../src/types/agent-adapter.ts'
 
 const ADAPTER_VERSION = '1.0.0'
@@ -25,7 +28,7 @@ export interface AdapterInspection {
 
 export interface AgentAdapterOperations {
   inspect(id: AgentAdapterId): AdapterInspection
-  install(target: AdapterInstallTarget): void
+  install(target: AdapterInstallTarget): InstallReport | void
   uninstall(target: AdapterInstallTarget): void
 }
 
@@ -72,8 +75,18 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
       }
     },
     install: async () => {
-      if (definition.installTarget) operations.install(definition.installTarget)
-      return (await createAdapter(definition, operations).detect(context()))
+      const self = createAdapter(definition, operations)
+      const before = (await self.detect(context())).health
+      let report: InstallReport = { changedFiles: [], backupPaths: [] }
+      try {
+        if (definition.installTarget) report = operations.install(definition.installTarget) ?? report
+      } catch (error) {
+        // Keep the failure structured; the IPC layer turns this into a per-adapter result.
+        throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+          installOutcome: failedOutcome(definition.id, error),
+        })
+      }
+      return { ...(await self.detect(context())), outcome: buildOutcome(definition.id, report, before) }
     },
     uninstall: async () => {
       if (definition.installTarget) operations.uninstall(definition.installTarget)
@@ -106,7 +119,7 @@ export interface AgentAdapterRegistry {
   readonly adapters: ReadonlyArray<AgentAdapter>
   listStatuses(): Promise<ReadonlyArray<AdapterRuntimeStatus>>
   diagnose(id: AgentAdapterId): Promise<DiagnosticReport | null>
-  install(id: AgentAdapterId): Promise<AdapterDetection | null>
+  install(id: AgentAdapterId): Promise<(AdapterDetection & { outcome?: InstallOutcome }) | null>
   uninstall(id: AgentAdapterId): Promise<AdapterDetection | null>
   normalize(input: unknown, receivedAt?: number): Promise<AdapterNormalizeResult>
 }

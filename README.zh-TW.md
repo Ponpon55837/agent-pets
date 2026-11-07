@@ -47,10 +47,10 @@
 
 ### 第一次執行
 
-1. 啟動 Agent Pets，螢幕上會出現一隻小寵物。
-2. 點擊寵物，然後 **⚙ → Setup Wizard**。它會偵測你機器上安裝了哪些 AI 工具。
-3. 點某個工具旁的 **Install**（或 **Install All**）來安裝對應的 hooks——精靈本身不會自動安裝，需要你手動點擊。
-4. Hooks 安裝完後，重新啟動你的編程工具；寵物的外觀就會開始反映你的助手狀態。
+1. 啟動 Agent Pets，螢幕上會出現一隻小寵物。第一次啟動時，面板會自動開啟，先用幾張卡片說明寵物會顯示什麼、何時需要你、如何成長，接著進入 **設定精靈**。之後只有在你還沒完成、也沒按 **稍後再說** 時才會再出現；已經連上工具的既有安裝不會被打擾。
+2. 在精靈中，點某個工具旁的 **安裝**（或 **全部安裝**）來安裝對應的 hooks。不點就不會安裝；既有設定檔會先備份，且只新增 Agent Pets 自己的項目。
+3. 工具顯示為就緒後，重新啟動它；寵物就會開始反映你的助手狀態。
+4. 之後想再跑一次精靈，打開面板，選 **⚙ → 進階 → 設定精靈**。
 
 ### 解除安裝／移除整合
 
@@ -162,11 +162,13 @@ macOS/Linux: ~/.desktop-pet/presentation-mcp.mjs
 
 #### 一鍵安裝到本機專案
 
-在 **Settings → Advanced** 按下 **Setup MCP for a project / 為專案設定 MCP**，於原生資料夾選擇器選擇本機專案；Agent Pets 會一次為三種支援的 project client 寫入展示 bridge：
+在 **Settings → Advanced** 按下 **Setup MCP for a project / 為專案設定 MCP**，於原生資料夾選擇器選擇本機專案。此時還不會寫入任何檔案：確認步驟會列出可設定的工具（看起來正在使用的會先勾好）、每個工具將建立或修改的檔案、該檔案是否已被 Git 追蹤，以及將新增內容的預覽。只會寫入你勾選的 client：
 
 - Codex：`.codex/config.toml`（`mcp_servers.agent-pets`）
 - Claude Code：`.mcp.json`（`mcpServers.agent-pets`）
 - OpenCode：`opencode.json`（`mcp.servers.agent-pets`）
+
+寫入的設定含有**你這台電腦**上 Node.js 與 bridge script 的路徑，對隊友無效，也不應該被 commit。在 Git 專案中，預設開啟的 **僅限本機** 選項會把新檔案加入專案的 `.git/info/exclude`；若目標檔已被 Git 追蹤，確認與結果步驟會提醒你。含有註解或結尾逗號的設定檔（JSONC，`opencode.json` 很常見）或無效 JSON 一律不會被重寫：結果卡片會說明原因，並提供可複製、手動貼上的設定。既有的縮排、換行格式與其他 MCP server 都會保留；結果卡片會顯示每個設定檔路徑（可複製）與下一步：Claude Code 需在 `/mcp` 核准 `agent-pets`、Codex 需信任專案（可用 `codex mcp list` 檢查）、OpenCode 重新啟動即可。
 
 這個操作可重複執行。相同設定會回報「已設定」；同名但內容不同的設定會回報衝突並完全不覆蓋。它只修改選定專案的本機設定，不執行 shell 命令，也不會重新安裝 hooks。設定完成後，請重啟對應的 Agent client，讓它重新載入 MCP 工具目錄。
 
