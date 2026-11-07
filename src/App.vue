@@ -549,12 +549,12 @@ onUnmounted(() => {
   min-height: 28px;
   border: 1px solid transparent;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--scrollbar-thumb);
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.34);
+  background: var(--scrollbar-thumb-hover);
   background-clip: padding-box;
 }
 

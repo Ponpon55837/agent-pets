@@ -105,6 +105,7 @@ export interface ElectronAPI {
       reportContentHeight: (height: number) => void
       setMousePassthrough: (ignore: boolean) => void
       requestPetHide: () => void
+      showPetContextMenu: () => void
       getOnboardingState: () => Promise<OnboardingState | null>
       updateOnboardingState: (action: OnboardingAction) => Promise<OnboardingState | null>
       togglePanel: () => void
@@ -203,5 +204,5 @@ export interface ElectronAPI {
       removeCustomPet: (petId: string) => Promise<boolean>
       getCustomPetSprite: (petId: string) => Promise<string | null>
       importPetSprite: (petId: string, displayName: string) => Promise<string | null>
-      importPetZip: () => Promise<{ ok: boolean; id?: string; displayName?: string; error?: string }>
+      importPetZip: () => Promise<{ ok: boolean; id?: string; displayName?: string; error?: string; code?: string }>
     }

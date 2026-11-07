@@ -39,6 +39,7 @@ export const IPC_CHANNELS = {
   petDragEnd: 'pet-drag-end',
   petDragStart: 'pet-drag-start',
   petHideRequest: 'pet-hide-request',
+  petContextMenu: 'pet-context-menu',
   petMousePassthrough: 'pet-mouse-passthrough',
   petQuit: 'pet-quit',
   petResize: 'pet-resize',

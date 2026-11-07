@@ -1,5 +1,5 @@
 
-import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol, powerMonitor, Notification, shell } from 'electron'
+import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol, powerMonitor, Notification, shell, Menu } from 'electron'
 
 import { join } from 'path'
 
@@ -93,6 +93,8 @@ import { registerPetsIpc } from './ipc/pets'
 import { registerReliabilityIpc } from './ipc/reliability'
 
 import { registerPetMotionIpc } from './ipc/pet-motion'
+import { registerPetContextMenuIpc } from './ipc/pet-context-menu'
+import { t as translate } from '../src/i18n'
 
 
 
@@ -104,7 +106,7 @@ import { flushMainLog, logMain, teeConsoleToLog } from './diagnostics/main-log'
 import { acquireRunMarker } from './diagnostics/session-marker'
 import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
 import { setPluginPanelWindowBounds } from './main/runtime'
-import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, cancelHistoryStoreRetry, localPorts, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog } from './main/runtime'
+import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, cancelHistoryStoreRetry, localPorts, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode } from './main/runtime'
 
 
 
@@ -460,6 +462,31 @@ async function bootstrapApp(): Promise<void> {
     repositionVisiblePanel,
     scheduleEdgeRedock,
     smoothWalk: true,
+  })
+
+  registerPetContextMenuIpc({
+    ipcMain,
+    getPetWindow: () => mainState.petWindow,
+    isTrustedIpcSender,
+    actions: {
+      isDndEnabled: () => currentDesktopPreferences().dndEnabled,
+      setDnd: enabled => { updateDesktopPreferences({ dndEnabled: enabled }) },
+      getPetMode: () => mainState.petWindowMode,
+      toggleMiniMode,
+      openPanel: () => showPanelWindow('restore'),
+      openSettings: () => showPanelWindow('settings'),
+      hidePet: hidePetWindow,
+      quit: () => app.quit(),
+    },
+    labels: () => ({
+      dnd: translate('dnd'),
+      miniMode: translate('miniMode'),
+      openPanel: translate('openControlPanel'),
+      openSettings: translate('openSettings'),
+      hidePet: translate('hidePets'),
+      quit: translate('quit'),
+    }),
+    popup: (template, window) => { Menu.buildFromTemplate(template).popup({ window }) },
   })
 
   registerWindowControlsIpc({

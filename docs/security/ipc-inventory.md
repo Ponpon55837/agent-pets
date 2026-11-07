@@ -1,6 +1,6 @@
 # IPC 安全清單
 
-由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 93 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
+由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 92 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
 
 | 頻道 | 類型 | 允許的寄件者 | 輸入驗證概況 | Preload API | 對應測試 |
 | --- | --- | --- | --- | --- | --- |
@@ -15,23 +15,21 @@
 | `power-save-state` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getPowerSaveState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-summary` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | getHistorySummary (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-clear` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | clearHistory (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `history-export` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | exportHistory (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `history-reveal-export` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | revealHistoryExport (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `history-export` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | exportHistory (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `test-integration` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | testIntegration (invoke) | `tests/ipc-integrations.test.mts` |
 | `install-integrations` | `handle` | 設定面板 main frame | isIntegrationTarget；無效輸入回安全預設或錯誤 | installIntegrations (invoke) | `tests/ipc-integrations.test.mts` |
 | `uninstall-integrations` | `handle` | 設定面板 main frame | isIntegrationTarget；無效輸入回安全預設或錯誤 | uninstallIntegrations (invoke) | `tests/ipc-integrations.test.mts` |
 | `onboarding-get` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getOnboardingState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `onboarding-update` | `handle` | 受信任寵物或設定面板 main frame | isOnboardingAction；無效輸入回安全預設或錯誤 | updateOnboardingState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `permission-requests-init` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | initializePermissionRequests (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `permission-decide` | `handle` | 受信任寵物或設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | decidePermission (invoke) | `tests/phase-18-renderer-characterization.test.mts` |
-| `permission-audit-list` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | listPermissionAudit (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `permission-audit-clear` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | clearPermissionAudit (invoke) | `tests/permission-audit.test.mts` |
+| `permission-decide` | `handle` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | 型別；無效輸入回安全預設或錯誤 | decidePermission (invoke) | `tests/phase-18-renderer-characterization.test.mts` |
 | `add-custom-pet` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | addCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `rename-custom-pet` | `handle` | 設定面板 main frame | 型別；長度／數量上限；isFile, isSymbolicLink；無效輸入回安全預設或錯誤 | renameCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `remove-custom-pet` | `handle` | 設定面板 main frame | isDirectory, isSymbolicLink；無效輸入回安全預設或錯誤 | removeCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
-| `get-custom-pet-sprite` | `handle` | 受信任寵物或設定面板 main frame | isFile, isSymbolicLink；無效輸入回安全預設或錯誤 | getCustomPetSprite (invoke) | `tests/ipc-pet-assets.test.mts` |
+| `get-custom-pet-sprite` | `handle` | 受信任寵物或設定面板 main frame | 數值範圍；isFile, isSymbolicLink；無效輸入回安全預設或錯誤 | getCustomPetSprite (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `import-pet-zip` | `handle` | 設定面板 main frame | 長度／數量上限；isFile, isSymbolicLink, isSupportedRasterImage；無效輸入回安全預設或錯誤 | importPetZip (invoke) | `tests/ipc-pet-assets.test.mts` |
 | `import-pet-sprite` | `handle` | 設定面板 main frame | 長度／數量上限；isFile, isSymbolicLink, isSupportedRasterImage；無效輸入回安全預設或錯誤 | importPetSprite (invoke) | `tests/ipc-pet-assets.test.mts` |
+| `pet-context-menu` | `on` | 寵物視窗 main frame | handler／controller 驗證 payload；拒絕無效輸入 | showPetContextMenu (send) | `tests/pet-context-menu.test.mts` |
 | `pet-drag-start` | `on` | 寵物視窗 main frame | handler／controller 驗證 payload；拒絕無效輸入 | startDrag (send) | `tests/ipc-pet-motion.test.mts` |
 | `pet-drag-end` | `on` | 寵物視窗 main frame | 型別；無效輸入回安全預設或錯誤 | notifyDragEnd (send) | `tests/ipc-pet-motion.test.mts` |
 | `pet-window-hover` | `on` | 寵物視窗 main frame | handler／controller 驗證 payload；拒絕無效輸入 | notifyPetHover (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
@@ -70,7 +68,6 @@
 | `plugin-secret-set` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | setPluginSecret (invoke) | `tests/ipc-plugin-settings.test.mts` |
 | `progression-init` | `handle` | 受信任寵物或設定面板 main frame | 型別；isProgressionPetId；無效輸入回安全預設或錯誤 | initializeProgression (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `progression-set-pet` | `handle` | 受信任寵物或設定面板 main frame | isProgressionPetId；無效輸入回安全預設或錯誤 | setProgressionPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `progression-insights` | `handle` | 受信任寵物或設定面板 main frame | 型別；isProgressionPetId；無效輸入回安全預設或錯誤 | getProgressionInsights (invoke) | `tests/progression.test.mts` |
 | `achievements-init` | `handle` | 受信任寵物或設定面板 main frame | isProgressionPetId；無效輸入回安全預設或錯誤 | initializeAchievements (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `project-mcp-setup` | `handle` | 設定面板 main frame | 長度／數量上限；isDialogOpen；無效輸入回安全預設或錯誤 | setupProjectMcp (invoke) | `tests/project-mcp-registry.test.mts`<br>`tests/project-mcp-setup.test.mts` |
 | `project-mcp-apply` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | applyProjectMcp (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
@@ -83,7 +80,7 @@
 | `project-pets-pick` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | pickProjectPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `project-pets-bind` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | setProjectPetBinding (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `project-pets-archive` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | archiveProjectPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `quota-usage` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getQuotaUsage (invoke) | `tests/ipc-quota.test.mts`<br>`tests/quota.test.mts` |
+| `quota-usage` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getQuotaUsage (invoke) | `tests/ipc-quota.test.mts` |
 | `server-health-get` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getServerHealth (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `session-snapshot-get` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getSessionSnapshot (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `diagnostics-export` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | exportDiagnostics (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |

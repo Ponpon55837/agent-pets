@@ -498,6 +498,23 @@ export const useAgentStore = defineStore('agent', () => {
     localStorage.setItem('agent-pet-mood-version', MOOD_SYSTEM_VERSION)
   }
 
+  // Petting the pet lifts its mood a little, capped per day so it cannot be farmed.
+  const PAT_DAILY_LIMIT = 5
+
+  function patPet(): boolean {
+    let count = 0
+    try {
+      const [day, saved] = (localStorage.getItem('agent-pet-pat') ?? '').split(':')
+      if (day === todayKey()) count = Number(saved) || 0
+    } catch {}
+    if (count >= PAT_DAILY_LIMIT) return false
+    try {
+      localStorage.setItem('agent-pet-pat', `${todayKey()}:${count + 1}`)
+    } catch {}
+    adjustMood(1)
+    return true
+  }
+
   function setMoodVisualsEnabled(enabled: boolean) {
     moodVisualsEnabled.value = enabled
     localStorage.setItem('agent-pet-mood-visuals', enabled ? '1' : '0')
@@ -2194,6 +2211,7 @@ export const useAgentStore = defineStore('agent', () => {
     getPetForFamily,
     resetMood,
     setMoodVisualsEnabled,
+    patPet,
     resizePetWindow,
     loadPets,
     refreshProjectPets,

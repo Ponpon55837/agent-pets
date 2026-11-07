@@ -184,6 +184,10 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.send(IPC_CHANNELS.petHideRequest)
   },
 
+  showPetContextMenu: () => {
+    ipcRenderer.send(IPC_CHANNELS.petContextMenu)
+  },
+
   getOnboardingState: (): Promise<OnboardingState | null> => ipcRenderer.invoke(IPC_CHANNELS.onboardingGet),
 
   updateOnboardingState: (action: OnboardingAction): Promise<OnboardingState | null> => {
