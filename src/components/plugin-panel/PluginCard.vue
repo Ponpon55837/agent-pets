@@ -208,4 +208,11 @@ function onMenu(id: string): void {
 .card-toggle :deep(.label) {
   font-size: var(--font-sm);
 }
+
+@media (forced-colors: active) {
+  .plugin-card {
+    border: 1px solid CanvasText;
+    box-shadow: none;
+  }
+}
 </style>

@@ -344,4 +344,11 @@ function sizeLabel(bytes: number): string {
   display: flex;
   gap: var(--space-2);
 }
+
+@media (forced-colors: active) {
+  .catalog-card {
+    border: 1px solid CanvasText;
+    box-shadow: none;
+  }
+}
 </style>

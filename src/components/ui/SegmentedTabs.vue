@@ -110,6 +110,12 @@ function onKeydown(event: KeyboardEvent): void {
   color: var(--accent);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .segment {
+    transition: none;
+  }
+}
+
 @media (forced-colors: active) {
   .segment.active {
     background: Highlight;
