@@ -121,6 +121,35 @@ export type AdapterNormalizeResult =
  * Implementations own installation, diagnostics and raw-event normalization;
  * Event Core and product projections consume only the returned AgentStatusEvent.
  */
+export type InstallAction = 'installed' | 'repaired' | 'unchanged' | 'failed'
+
+export type InstallErrorCode =
+  | 'config_unparseable'
+  | 'config_unsafe'
+  | 'config_too_large'
+  | 'permission_denied'
+  | 'file_busy'
+  | 'read_only'
+  | 'unknown'
+
+/** Structured result of one install/repair; the renderer localizes it from these codes. */
+export interface InstallOutcome {
+  adapterId: AgentAdapterId
+  action: InstallAction
+  /** Files that were created or modified. */
+  changedFiles: string[]
+  /** Backups made before modifying user config files. */
+  backupPaths: string[]
+  errorCode?: InstallErrorCode
+  /** File the error is about (config problems only). */
+  errorPath?: string
+}
+
+export interface InstallReport {
+  changedFiles: string[]
+  backupPaths: string[]
+}
+
 export interface AgentAdapter {
   readonly id: AgentAdapterId
   readonly displayName: string
@@ -129,7 +158,7 @@ export interface AgentAdapter {
   readonly capabilities: Readonly<AgentCapabilities>
 
   detect(ctx: AdapterContext): Promise<AdapterDetection>
-  install(ctx: AdapterContext): Promise<AdapterDetection>
+  install(ctx: AdapterContext): Promise<AdapterDetection & { outcome?: InstallOutcome }>
   uninstall(ctx: AdapterContext): Promise<AdapterDetection>
   diagnose(ctx: AdapterContext): Promise<DiagnosticReport>
   normalize(input: unknown, ctx: AdapterContext, receivedAt?: number): Promise<AdapterNormalizeResult>

@@ -1,4 +1,7 @@
 .desktop-pet {
+  /* Tallest a bubble may grow: stays inside the headroom reserved above the
+     sprite (QUOTA_TOOLTIP_HEADROOM_H in agentStore) with a little slack. */
+  --pet-bubble-max-h: 176px;
   position: relative;
   width: 100%;
   height: 100%;
@@ -23,9 +26,15 @@
   cursor: grabbing;
 }
 
-.pet-click-area.dragging {
-  transform: translateX(-50%) translateY(-6px) scale(1.05);
+/* Only the sprite lifts and casts a shadow: a filter on this container would
+   make it a backdrop root and flatten the glass status lines while dragging. */
+.pet-click-area.dragging :deep(.pet-visual) {
+  transform: translateY(-6px) scale(1.05);
   filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.35));
+}
+
+.pet-click-area :deep(.pet-visual) {
+  transition: transform 0.15s ease, filter 0.15s ease;
 }
 
 .desktop-pet.mode-mini .status-lines,
@@ -34,12 +43,69 @@
 }
 
 .desktop-pet.mode-mini .pet-click-area {
-  transform: translateX(-50%) scale(0.42);
+  transform: translateX(-50%) scale(var(--mini-scale, 0.42));
   transform-origin: 50% 100%;
 }
 
 .desktop-pet.mode-mini .pet-click-area.dragging {
-  transform: translateX(-50%) translateY(-3px) scale(0.46);
+  transform: translateX(-50%) translateY(-3px) scale(calc(var(--mini-scale, 0.42) * 1.1));
+}
+
+/* Bubbles would be clipped by the small window; mini shows a ring + corner
+   badge instead (shape and icon as well as colour). */
+.desktop-pet.mode-mini .pet-toast,
+.desktop-pet.mode-mini .unread-badge,
+.desktop-pet.mode-mini .status-lines {
+  display: none;
+}
+
+.mini-status {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.mini-status-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 2px solid var(--surface-panel);
+  border-radius: 50%;
+  background: var(--mini-ring, var(--state-idle));
+  color: var(--surface-panel);
+}
+
+.mini-status-badge.pulse {
+  animation: mini-badge-pulse 1.8s ease-in-out infinite;
+}
+
+.mini-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.mini-status-count {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  min-width: 18px;
+  padding: 2px 4px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  font: 700 var(--font-xs)/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  text-align: center;
+}
+
+@keyframes mini-badge-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.14); }
 }
 
 .desktop-pet.mode-edge .pet-click-area {
@@ -121,6 +187,60 @@
   height: 12px;
   border-radius: var(--radius-pill);
   background: var(--border-strong);
+}
+
+.unread-badge {
+  position: absolute;
+  top: 2px;
+  right: calc(50% - 96px * var(--pet-scale, 1) + 2px);
+  z-index: 6;
+  display: inline-flex;
+  min-width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 6px;
+  border: 1px solid var(--surface-panel);
+  border-radius: var(--radius-pill);
+  background: var(--state-success);
+  color: var(--surface-panel);
+  cursor: pointer;
+  font: 700 var(--font-xs)/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  animation: unread-pop 0.28s ease-out;
+}
+
+.unread-badge.error {
+  background: var(--state-error);
+}
+
+.unread-badge:hover {
+  filter: brightness(1.12);
+}
+
+@keyframes unread-pop {
+  from { transform: scale(0.4); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.edge-peek-result-badge {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: grid;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  place-items: center;
+  border: 1px solid var(--surface-panel);
+  border-radius: var(--radius-pill);
+  background: var(--state-success);
+  color: var(--surface-panel);
+  font: 700 var(--font-xs)/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.edge-peek-result-badge.error {
+  background: var(--state-error);
 }
 
 .edge-peek-unread-badge {
@@ -227,8 +347,8 @@
 .multi-pet-status-line {
   /* Keep the same status-pill treatment as single-pet mode, but constrain
      each pill to its own sprite column instead of the full pet window. */
-  width: calc(192px - 12px);
-  max-width: calc(192px - 12px);
+  width: calc(192px * var(--pet-scale, 1) - 12px);
+  max-width: calc(192px * var(--pet-scale, 1) - 12px);
   margin-top: -8px;
 }
 
@@ -728,10 +848,12 @@
 
 .pet-toast {
   position: absolute;
-  top: max(2px, calc(2px * var(--pet-scale, 1)));
+  bottom: calc(100% + 4px);
   left: 50%;
   transform: translateX(-50%);
+  transform-origin: 50% calc(100% + 9px);
   z-index: 5;
+  max-height: var(--pet-bubble-max-h);
   max-width: calc(var(--pet-w, 250px) - 10px);
   background: rgba(30, 30, 40, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -739,11 +861,11 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   color: #f2f2f2;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: max(10px, calc(11px * var(--pet-scale, 1)));
+  font-size: max(var(--font-sm), calc(var(--font-xs) * var(--pet-scale, 1)));
   font-weight: 600;
   line-height: 1.3;
-  padding: max(5px, calc(6px * var(--pet-scale, 1))) max(10px, calc(11px * var(--pet-scale, 1)));
-  border-radius: max(10px, calc(12px * var(--pet-scale, 1)));
+  padding: max(6px, calc(6px * var(--pet-scale, 1))) max(10px, calc(11px * var(--pet-scale, 1)));
+  border-radius: max(var(--radius-md), calc(12px * var(--pet-scale, 1)));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -827,7 +949,7 @@
 .plugin-feed-source {
   overflow: hidden;
   color: rgba(228, 255, 243, 0.64);
-  font-size: max(8px, calc(9px * var(--pet-scale, 1)));
+  font-size: max(var(--font-xs), calc(9px * var(--pet-scale, 1)));
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -850,13 +972,13 @@
 }
 
 .plugin-feed-message strong {
-  font-size: max(10px, calc(11px * var(--pet-scale, 1)));
+  font-size: max(var(--font-xs), calc(11px * var(--pet-scale, 1)));
   font-weight: 700;
 }
 
 .plugin-feed-message span {
   color: rgba(228, 255, 243, 0.84);
-  font-size: max(9px, calc(10px * var(--pet-scale, 1)));
+  font-size: max(var(--font-xs), calc(10px * var(--pet-scale, 1)));
   font-weight: 500;
 }
 
@@ -879,7 +1001,7 @@
   color: inherit;
   cursor: pointer;
   font: inherit;
-  font-size: max(8px, calc(9px * var(--pet-scale, 1)));
+  font-size: max(var(--font-xs), calc(9px * var(--pet-scale, 1)));
 }
 
 .plugin-feed-open-panel:hover {
@@ -908,9 +1030,23 @@
 
 .presentation-say-icon {
   flex: 0 0 auto;
+  margin-top: 2px;
   color: #aab8ff;
-  font-size: var(--font-md);
-  line-height: 1.25;
+}
+
+/* A long message is clamped to four lines and opens up while hovered. */
+.presentation-say-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.pet-toast.presentation-say:hover .presentation-say-text,
+.pet-toast.presentation-say:focus-within .presentation-say-text {
+  display: block;
+  max-height: calc(var(--pet-bubble-max-h) - 24px);
+  overflow-y: auto;
 }
 
 .permission-notice-icon {
@@ -968,6 +1104,27 @@
   color: #ffb3b3;
 }
 
+.pet-toast.coach-mark {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: max-content;
+  max-width: min(240px, calc(var(--pet-w, 250px) - 10px));
+  white-space: normal;
+  text-align: left;
+}
+
+.coach-copy {
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.pet-toast.waiting {
+  border-color: rgba(255, 227, 124, 0.5);
+  color: var(--state-warn-bright);
+}
+
 .pet-toast.activity {
   border-color: rgba(139, 156, 247, 0.35);
   color: var(--accent-bright);
@@ -976,15 +1133,77 @@
 
 .pet-toast.timed-toast {
   display: flex;
-  min-width: 118px;
+  min-width: 150px;
+  max-width: min(260px, calc(var(--pet-w, 250px) - 10px));
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   padding-bottom: max(6px, calc(7px * var(--pet-scale, 1)));
+  cursor: pointer;
 }
 
-.timed-toast-copy {
+.timed-toast-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.timed-toast-icon {
+  flex: 0 0 auto;
+}
+
+.timed-toast-title {
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.timed-toast-meta {
+  min-width: 0;
   overflow: hidden;
+  color: var(--text-secondary);
+  font-weight: 500;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timed-toast-detail {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  font-weight: 500;
+}
+
+.timed-toast-action {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.timed-toast-action:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
+}
+
+.pet-toast.timed-toast.paused .toast-countdown-fill {
+  animation-play-state: paused;
+}
+
+.pet-toast.activity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.activity-icon {
+  flex: 0 0 auto;
 }
 
 .sr-only {
@@ -1030,10 +1249,15 @@
 .toast-enter-from,
 .toast-leave-to {
   opacity: 0;
-  transform: translateX(-50%) scale(0.9) translateY(6px);
+  transform: translateX(-50%) translateY(8px) scale(0.86);
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .unread-badge,
+  .mini-status-badge.pulse {
+    animation: none;
+  }
+
   .toast-enter-active,
   .toast-leave-active {
     transition: none;

@@ -9,11 +9,32 @@ export type ProjectMcpInstallStatus =
   | 'conflict'
   | 'error'
 
+/** Stable machine-readable reason; the renderer localizes it, `message` is an English fallback. */
+export type ProjectMcpResultCode =
+  | 'installed'
+  | 'already_configured'
+  | 'not_configured'
+  | 'removed'
+  | 'already_absent'
+  | 'entry_changed'
+  | 'server_mismatch'
+  | 'servers_not_object'
+  | 'legacy_format'
+  | 'jsonc'
+  | 'invalid_json'
+  | 'root_not_object'
+  | 'too_large'
+  | 'unsafe_file'
+  | 'write_failed'
+
 export interface ProjectMcpInstallResult {
   client: ProjectMcpClientId
   status: ProjectMcpInstallStatus
   configPath: string
+  code?: ProjectMcpResultCode
   message?: string
+  /** Config the user can paste by hand when Agent Pets will not edit the file. */
+  manualSnippet?: string
 }
 
 export interface ProjectMcpSetupSummary {
@@ -22,6 +43,43 @@ export interface ProjectMcpSetupSummary {
   projectPath?: string
   results: ProjectMcpInstallResult[]
   error?: string
+  /** Files added to .git/info/exclude (local-only mode). */
+  excluded?: string[]
+  /** Written files that Git already tracks, so they cannot be kept local-only. */
+  trackedFiles?: string[]
+  warnings?: string[]
+}
+
+export interface ProjectMcpPlanClient {
+  client: ProjectMcpClientId
+  configPath: string
+  relativePath: string
+  exists: boolean
+  /** Current state of the file for this client; 'error' means it cannot be edited as-is. */
+  status: 'not_configured' | 'already_configured' | 'conflict' | 'error'
+  code?: ProjectMcpResultCode
+  message?: string
+  /** true/false when the project is a Git repo with a readable index; null when unknown. */
+  gitTracked: boolean | null
+  /** The client appears to be in use on this machine/project. */
+  suggested: boolean
+  /** What will be added (contains local paths; shown only in this UI). */
+  preview: string
+}
+
+export interface ProjectMcpPlan {
+  ok: boolean
+  cancelled?: boolean
+  projectPath?: string
+  isGitRepo?: boolean
+  clients?: ProjectMcpPlanClient[]
+  error?: string
+}
+
+export interface ProjectMcpApplyRequest {
+  projectPath: string
+  clients: ProjectMcpClientId[]
+  localOnly: boolean
 }
 
 export type ProjectMcpProjectStatus =
@@ -56,6 +114,7 @@ export interface ProjectMcpRemovalResult {
   client: ProjectMcpClientId
   status: ProjectMcpRemovalStatus
   configPath: string
+  code?: ProjectMcpResultCode
   message?: string
 }
 

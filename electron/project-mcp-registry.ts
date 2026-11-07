@@ -150,6 +150,15 @@ export class ProjectMcpRegistryStore {
     writeStoredEntries(this.filePath, next)
   }
 
+  has(projectPath: string): boolean {
+    if (!isSafeAbsolutePath(projectPath)) return false
+    try {
+      return this.entries().some(entry => samePath(entry.projectPath, path.resolve(projectPath)))
+    } catch {
+      return false
+    }
+  }
+
   forget(projectPath: string): boolean {
     if (!isSafeAbsolutePath(projectPath)) return false
     const resolved = path.resolve(projectPath)
