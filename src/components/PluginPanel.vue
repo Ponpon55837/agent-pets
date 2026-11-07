@@ -4,6 +4,7 @@ import { t } from '@/i18n'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import ActionMenu from '@/components/ui/ActionMenu.vue'
+import Toast from '@/components/ui/Toast.vue'
 import SegmentedTabs from '@/components/ui/SegmentedTabs.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
 import PluginAdvanced from '@/components/plugin-panel/PluginAdvanced.vue'
@@ -20,7 +21,7 @@ const props = defineProps<{ requestedPluginId?: string }>()
 const controller = usePluginPanelController(props)
 provide(PLUGIN_PANEL_CONTROLLER, controller)
 const {
-  snapshot, notifications, plugins, catalogItems, busy, loading, errorMessage, statusMessage,
+  snapshot, notifications, plugins, catalogItems, busy, loading, toasts, dismissToast, runToastAction,
   detailPlugin, panelViewPlugin, panelViewFrame, panelViewContent, pendingPlan, pendingRemove, pendingSecretConsentKey,
   keepData, enabledGlobally, pendingPluginName, pendingPermissions, pendingAddedPermissions,
   displayFingerprint, planKindLabel, pluginName, refreshPanel, selectArchive, selectDeveloperFolder,
@@ -126,9 +127,6 @@ function showTab(tab: PluginTab): void {
       />
     </Card>
 
-    <div v-if="errorMessage" class="error-msg plugin-message" role="alert">{{ errorMessage }}</div>
-    <div v-if="statusMessage" class="plugin-message plugin-success" role="status" aria-live="polite">{{ statusMessage }}</div>
-
     <SegmentedTabs v-model="activeTab" :tabs="tabs" :aria-label="t('plugins.tabsLabel')" id-prefix="plugin" />
 
     <div
@@ -189,6 +187,8 @@ function showTab(tab: PluginTab): void {
       @cancel-secret-consent="pendingSecretConsentKey = ''"
     />
   </div>
+
+  <Toast :toasts="toasts" @dismiss="dismissToast" @action="runToastAction" />
 </template>
 
 <style scoped src="./PluginPanel.css"></style>

@@ -186,7 +186,7 @@ watch(plugin, async (value, previous) => {
             :disabled="Boolean(invokingCommandId) || Boolean(commandsDisabledReason)"
             @click="invokePluginCommand(command.id)"
           >
-            {{ commandTitle(command) }}
+            {{ invokingCommandId === command.id ? t('plugins.commandRunning') : commandTitle(command) }}
           </Button>
         </div>
       </Card>

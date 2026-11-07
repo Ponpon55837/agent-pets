@@ -26,6 +26,7 @@ import type {
 import type { PluginCatalogPanelItem } from '@/types/plugin-catalog'
 import { DEFAULT_PLUGIN_CATALOG_URL, shouldShowCatalogPermissionCheck } from '@/types/plugin-catalog'
 import { isValidPetId } from '@/utils/pet-id'
+import { usePluginNotify } from '@/composables/plugin/usePluginNotify'
 export type PluginDetailSection = 'overview' | 'settings' | 'commands' | 'diagnostics'
 
 export function usePluginPanelController(props: { requestedPluginId?: string }) {
@@ -49,8 +50,7 @@ const panelViewMaximized = ref(false)
 const busy = ref(false)
 const invokingCommandId = ref('')
 const loading = ref(false)
-const errorMessage = ref('')
-const statusMessage = ref('')
+const notifier = usePluginNotify()
 const pendingPlan = ref<PluginInstallPlan | null>(null)
 const pendingRemove = ref<PluginPanelPlugin | null>(null)
 const pendingSecretConsentKey = ref('')
@@ -213,7 +213,6 @@ async function openPluginPanelView(pluginId: string): Promise<void> {
   if (requestSequence !== panelViewRequestSequence) return
   selectedPluginId.value = pluginId
   panelViewPluginId.value = pluginId
-  errorMessage.value = ''
   await nextTick()
   if (requestSequence !== panelViewRequestSequence) return
   const bounds = readPluginPanelViewBounds()
@@ -338,9 +337,17 @@ function localizedError(code: string): string {
   return t(keys[code] ?? 'pluginActionFailed')
 }
 
-function setError(code: string): void {
-  errorMessage.value = localizedError(code)
-  statusMessage.value = ''
+function setError(code: string, retry?: () => void): void {
+  notifier.notify({
+    tone: 'error',
+    text: localizedError(code),
+    detail: code,
+    action: retry ? { label: t('plugins.retry'), run: retry } : undefined,
+  })
+}
+
+function setStatus(text: string, action?: { label: string; run: () => void }): void {
+  notifier.notify({ tone: 'success', text, action })
 }
 
 async function refreshNotifications(): Promise<void> {
@@ -356,12 +363,11 @@ async function refreshNotifications(): Promise<void> {
 async function refreshPanel(): Promise<void> {
   if (loading.value) return
   loading.value = true
-  errorMessage.value = ''
   try {
     const result = await window.electronAPI?.getPluginPanelSnapshot()
     if (!result?.ok) {
-      if (result && !result.ok) setError(result.error)
-      else setError('plugin_service_unavailable')
+      if (result && !result.ok) setError(result.error, () => void refreshPanel())
+      else setError('plugin_service_unavailable', () => void refreshPanel())
       return
     }
     snapshot.value = result.value
@@ -434,6 +440,10 @@ async function refreshPluginSettings(pluginId = selectedPluginId.value): Promise
   }
 }
 
+function commandOf(plugin: PluginPanelPlugin, commandId: string) {
+  return plugin.manifest?.contributes.commands?.find(command => command.id === commandId) ?? { title: { 'zh-TW': commandId, 'en-US': commandId } }
+}
+
 function commandTitle(command: { title: { 'zh-TW': string; 'en-US': string } }): string {
   return command.title[locale.value]
 }
@@ -442,15 +452,13 @@ async function invokePluginCommand(commandId: string): Promise<void> {
   const plugin = selectedPlugin.value
   if (!plugin || invokingCommandId.value) return
   invokingCommandId.value = commandId
-  errorMessage.value = ''
-  statusMessage.value = ''
   try {
     const result = await window.electronAPI?.invokePluginCommand(plugin.id, commandId)
     if (!result?.ok) {
       setError(result && !result.ok ? result.error : 'plugin_service_unavailable')
       return
     }
-    statusMessage.value = t('pluginCommandSent')
+    setStatus(t('plugins.commandSentNamed', { command: commandTitle(commandOf(plugin, commandId)), name: pluginName(plugin) }))
   } catch {
     setError('plugin_action_failed')
   } finally {
@@ -477,8 +485,6 @@ async function savePluginSettings(): Promise<void> {
   const pluginId = selectedPluginId.value
   if (!pluginId || busy.value) return
   busy.value = true
-  errorMessage.value = ''
-  statusMessage.value = ''
   try {
     const result = await window.electronAPI?.setPluginSettings(pluginId, settingsDraft.value)
     if (!result?.ok) {
@@ -487,7 +493,7 @@ async function savePluginSettings(): Promise<void> {
     }
     settingsDraft.value = { ...result.value }
     if (pluginSettings.value) pluginSettings.value.values = { ...result.value }
-    statusMessage.value = t('pluginSettingsSaved')
+    setStatus(t('pluginSettingsSaved'))
   } catch {
     setError('plugin_action_failed')
   } finally {
@@ -515,8 +521,6 @@ async function savePluginSecret(key: string): Promise<void> {
     }
   }
   busy.value = true
-  errorMessage.value = ''
-  statusMessage.value = ''
   try {
     const result = await window.electronAPI?.setPluginSecret(pluginId, key, secretDrafts.value[key] ?? '')
     if (!result?.ok) {
@@ -525,7 +529,7 @@ async function savePluginSecret(key: string): Promise<void> {
     }
     if (pluginSettings.value) pluginSettings.value.secrets[key] = result.value.configured
     secretDrafts.value = { ...secretDrafts.value, [key]: '' }
-    statusMessage.value = result.value.configured ? t('pluginSecretSaved') : t('pluginSettingsSaved')
+    setStatus(result.value.configured ? t('pluginSecretSaved') : t('pluginSettingsSaved'))
   } catch {
     setError('plugin_action_failed')
   } finally {
@@ -537,7 +541,6 @@ async function confirmSecretConsent(): Promise<void> {
   const key = pendingSecretConsentKey.value
   if (!key || busy.value) return
   busy.value = true
-  errorMessage.value = ''
   try {
     const result = await window.electronAPI?.acceptPluginSecretConsent()
     if (!result?.ok) {
@@ -557,8 +560,6 @@ async function updateGlobalPreferences(patch: PluginGlobalPreferencesPatch): Pro
   if (busy.value) return
   const previousCatalogUrl = snapshot.value?.preferences.catalogUrl
   busy.value = true
-  errorMessage.value = ''
-  statusMessage.value = ''
   try {
     const result = await window.electronAPI?.setPluginGlobalPreferences(patch)
     if (!result?.ok) {
@@ -591,22 +592,20 @@ async function saveCatalogUrl(): Promise<void> {
 async function loadPluginCatalog(): Promise<void> {
   if (busy.value || !onlineCatalogEnabled.value) return
   busy.value = true
-  errorMessage.value = ''
-  statusMessage.value = ''
   try {
     const result = await window.electronAPI?.listPluginCatalog()
     if (!result?.ok) {
-      if (result && !result.ok) setError(result.error)
+      if (result && !result.ok) setError(result.error, () => void loadPluginCatalog())
       return
     }
     catalogItems.value = result.value
     catalogCheckComplete.value = true
-    statusMessage.value = t('pluginCatalogChecked', {
+    setStatus(t('pluginCatalogChecked', {
       entries: String(result.value.length),
       updates: String(result.value.filter(item => item.updateAvailable).length),
-    })
+    }))
   } catch {
-    setError('catalog_unavailable')
+    setError('catalog_unavailable', () => void loadPluginCatalog())
   } finally {
     busy.value = false
   }
@@ -615,8 +614,6 @@ async function loadPluginCatalog(): Promise<void> {
 async function installCatalogPlugin(item: PluginCatalogPanelItem): Promise<void> {
   if (busy.value) return
   busy.value = true
-  errorMessage.value = ''
-  statusMessage.value = ''
   try {
     const result = await window.electronAPI?.installPluginFromCatalog(item.plugin.id, item.latestVersion.version)
     if (!result?.ok) {
@@ -634,15 +631,13 @@ async function installCatalogPlugin(item: PluginCatalogPanelItem): Promise<void>
 async function reportPluginIssue(pluginId: string): Promise<void> {
   if (busy.value) return
   busy.value = true
-  errorMessage.value = ''
-  statusMessage.value = ''
   try {
     const result = await window.electronAPI?.reportInstalledPluginIssue(pluginId)
     if (!result?.ok) {
       if (result && !result.ok) setError(result.error)
       return
     }
-    statusMessage.value = t('pluginReportOpened')
+    setStatus(t('pluginReportOpened'))
   } catch {
     setError('plugin_action_failed')
   } finally {
@@ -656,8 +651,7 @@ function updateResourceLimit(key: keyof PluginResourceLimits, raw: string): void
   const value = key === 'netMaxResponseBytes' || key === 'storageBytesPerPlugin' ? parsed * 1024 : parsed
   if (!field || !Number.isSafeInteger(value) || value < field.min || value > field.max) {
     if (field) {
-      errorMessage.value = t('pluginResourceRangeInvalid', { min: String(field.min), max: String(field.max) })
-      statusMessage.value = ''
+      notifier.notify({ tone: 'error', text: t('pluginResourceRangeInvalid', { min: String(field.min), max: String(field.max) }) })
     }
     return
   }
@@ -686,8 +680,6 @@ async function updatePluginPreference(
 ): Promise<void> {
   if (busy.value) return
   busy.value = true
-  errorMessage.value = ''
-  statusMessage.value = ''
   try {
     const result = await window.electronAPI?.setPluginInstancePreferences(pluginId, patch)
     if (!result?.ok) {
@@ -706,8 +698,7 @@ async function updatePluginPreference(
 async function updatePluginRate(pluginId: string, raw: string): Promise<void> {
   const value = Number(raw)
   if (!Number.isSafeInteger(value) || value < 1 || value > 30) {
-    errorMessage.value = t('pluginPerPluginRateRange')
-    statusMessage.value = ''
+    notifier.notify({ tone: 'error', text: t('pluginPerPluginRateRange') })
     return
   }
   await updatePluginPreference(pluginId, { rateLimitPer10Min: value })
@@ -726,8 +717,6 @@ async function revokeGrantedHost(plugin: PluginPanelPlugin, host: string): Promi
 async function selectArchive(): Promise<void> {
   if (busy.value) return
   busy.value = true
-  errorMessage.value = ''
-  statusMessage.value = ''
   pendingPlan.value = null
   try {
     const result = await window.electronAPI?.selectPluginArchive()
@@ -747,8 +736,6 @@ async function selectArchive(): Promise<void> {
 async function selectDeveloperFolder(): Promise<void> {
   if (busy.value) return
   busy.value = true
-  errorMessage.value = ''
-  statusMessage.value = ''
   pendingPlan.value = null
   try {
     const result = await window.electronAPI?.selectPluginFolder()
@@ -824,8 +811,6 @@ async function confirmInstall(): Promise<void> {
   const plan = pendingPlan.value
   if (!plan || plan.kind === 'incompatible' || busy.value) return
   busy.value = true
-  errorMessage.value = ''
-  statusMessage.value = ''
   try {
     const result = await window.electronAPI?.installPluginPlan(
       plan.token,
@@ -837,13 +822,25 @@ async function confirmInstall(): Promise<void> {
       return
     }
     pendingPlan.value = null
-    statusMessage.value = t('pluginInstallSucceeded', { name: pluginName(result.value) })
+    const installed = result.value
+    setStatus(
+      enabledGlobally.value
+        ? t('pluginInstallSucceeded', { name: pluginName(installed) })
+        : t('plugins.installSucceededGlobalOff', { name: pluginName(installed) }),
+      { label: t(enabledGlobally.value ? 'plugins.enableNow' : 'plugins.enableAll'), run: () => void enableInstalledPlugin(installed.id) },
+    )
     await refreshPanel()
   } catch {
     setError('plugin_action_failed')
   } finally {
     busy.value = false
   }
+}
+
+// 安裝成功 Toast 的「立即啟用」：全域關閉時一併開啟全域開關。
+async function enableInstalledPlugin(pluginId: string): Promise<void> {
+  if (!enabledGlobally.value) await updateGlobalPreferences({ pluginsEnabled: true })
+  await updatePluginPreference(pluginId, { enabled: true })
 }
 
 function requestRemove(plugin: PluginPanelPlugin): void {
@@ -855,8 +852,6 @@ async function confirmRemove(): Promise<void> {
   const plugin = pendingRemove.value
   if (!plugin || busy.value) return
   busy.value = true
-  errorMessage.value = ''
-  statusMessage.value = ''
   try {
     const result = await window.electronAPI?.removeInstalledPlugin(plugin.id, keepData.value)
     if (!result?.ok) {
@@ -864,7 +859,7 @@ async function confirmRemove(): Promise<void> {
       return
     }
     pendingRemove.value = null
-    statusMessage.value = t('pluginRemoveSucceeded')
+    setStatus(t('pluginRemoveSucceeded'))
     await refreshPanel()
   } catch {
     setError('plugin_action_failed')
@@ -979,6 +974,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  notifier.dispose()
   window.removeEventListener('keydown', onPluginPanelViewKeydown)
   removeNotificationsListener?.()
   removePanelClosedListener?.()
@@ -1012,8 +1008,11 @@ onUnmounted(() => {
     busy,
     invokingCommandId,
     loading,
-    errorMessage,
-    statusMessage,
+    toasts: notifier.toasts,
+    dismissToast: notifier.dismiss,
+    runToastAction: notifier.runAction,
+    notify: notifier.notify,
+    setStatus,
     pendingPlan,
     pendingRemove,
     pendingSecretConsentKey,

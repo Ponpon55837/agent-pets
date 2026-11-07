@@ -42,5 +42,13 @@
   "plugins.removeEllipsis": "移除插件…",
   "plugins.notifyHeading": "{name} 的通知與反應",
   "plugins.targetPetLabel": "通知與反應顯示在哪隻寵物",
-  "plugins.targetPetHelp": "只影響這個插件的通知氣泡與寵物反應；預設為主要寵物。"
+  "plugins.targetPetHelp": "只影響這個插件的通知氣泡與寵物反應；預設為主要寵物。",
+  "plugins.technicalDetails": "技術細節",
+  "plugins.dismiss": "關閉訊息",
+  "plugins.retry": "重試",
+  "plugins.commandSentNamed": "已向 {name} 送出「{command}」。",
+  "plugins.commandRunning": "執行中…",
+  "plugins.installSucceededGlobalOff": "已安裝 {name}。插件目前全域停用，啟用後才會執行。",
+  "plugins.enableNow": "立即啟用",
+  "plugins.enableAll": "啟用插件與此項目"
 }

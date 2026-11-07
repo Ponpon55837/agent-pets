@@ -42,6 +42,7 @@ test('plugin panel preserves install, settings, diagnostics and notification act
   const dir = '../src/components/plugin-panel/'
   const source = [
     '../src/components/PluginPanel.vue',
+    '../src/components/ui/Toast.vue',
     ...readdirSync(new URL(dir, import.meta.url)).filter(name => name.endsWith('.vue')).map(name => `${dir}${name}`),
   ].map(read).join('\n')
   for (const key of [
@@ -52,8 +53,8 @@ test('plugin panel preserves install, settings, diagnostics and notification act
     'openPluginPanel' + 'View', 'invokePlugin' + 'Command', 'savePluginSettings',
     'markNotificationRead', 'requestRemove', 'confirmInstall',
   ]) assert.ok(source.includes(action), `missing action ${action}`)
-  assert.match(source, /role="alert"/)
-  assert.match(source, /aria-live="polite"/)
+  assert.match(source, /role="alert"|'alert'/)
+  assert.match(source, /'status'/)
 })
 
 test('renderer panel and extracted component files stay below the 500-line target', () => {

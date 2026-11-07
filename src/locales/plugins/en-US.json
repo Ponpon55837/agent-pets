@@ -42,5 +42,13 @@
   "plugins.removeEllipsis": "Remove plugin…",
   "plugins.notifyHeading": "{name} notifications and reactions",
   "plugins.targetPetLabel": "Which pet shows notifications and reactions",
-  "plugins.targetPetHelp": "Only affects this plugin's notification bubbles and pet reactions. Defaults to the primary pet."
+  "plugins.targetPetHelp": "Only affects this plugin's notification bubbles and pet reactions. Defaults to the primary pet.",
+  "plugins.technicalDetails": "Technical details",
+  "plugins.dismiss": "Dismiss message",
+  "plugins.retry": "Retry",
+  "plugins.commandSentNamed": "Sent \"{command}\" to {name}.",
+  "plugins.commandRunning": "Running…",
+  "plugins.installSucceededGlobalOff": "Installed {name}. Plugins are off globally, so it will not run until you turn them on.",
+  "plugins.enableNow": "Enable now",
+  "plugins.enableAll": "Turn on plugins and this one"
 }
