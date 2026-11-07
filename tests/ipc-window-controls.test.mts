@@ -101,3 +101,23 @@ test('window control IPC keeps sender scopes, bounds clamps, and hidden-pet pref
     IPC_CHANNELS.presentationStatusUpdate,
   ])
 })
+
+test('click-through is never enabled on Linux where mouse-move cannot be forwarded', () => {
+  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const calls: string[] = []
+  const petWindow = {
+    setIgnoreMouseEvents: (ignore: boolean) => calls.push(`passthrough:${ignore}`),
+  }
+  registerWindowControlsIpc({
+    ipcMain: { on: (channel, handler) => { handlers.set(channel, handler) } },
+    isTrustedIpcSender: () => true,
+    assertTrustedIpcSender: () => undefined,
+    platform: 'linux',
+    getPetWindow: () => petWindow as never,
+    getPanelWindow: () => null,
+  } as never)
+  const handler = handlers.get(IPC_CHANNELS.petMousePassthrough)
+  handler?.({}, { ignore: true })
+  handler?.({}, { ignore: false })
+  assert.deepEqual(calls, ['passthrough:false'])
+})
