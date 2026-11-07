@@ -316,6 +316,7 @@ async function bootstrapApp(): Promise<void> {
     mainState.windowsFullscreenDetector?.refresh()
   })
   await startupStep('power-monitor', () => {
+    powerMonitor.on('resume', () => mainState.pluginHostWindow?.handleSystemResume())
     powerMonitor.on('on-battery', broadcastPowerSaveState)
     powerMonitor.on('on-ac', broadcastPowerSaveState)
     broadcastPowerSaveState()

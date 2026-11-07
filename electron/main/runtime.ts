@@ -1128,6 +1128,7 @@ export async function createPluginServices(): Promise<void> {
     pluginRootForToken: token => mainState.pluginRootsByToken.get(token) ?? null,
     messageGuard: mainState.pluginUiMessageGuard,
     onPluginCrash: (pluginId, consecutiveCrashes, reason) => {
+      logMain('warn', 'plugin-host', `plugin crash reason=${reason} consecutive=${consecutiveCrashes}`, { pluginId })
       mainState.pluginBadgeController?.clearPlugin(pluginId)
       mainState.pluginEventSourceController?.clearPlugin(pluginId)
       if (consecutiveCrashes >= 3) {
@@ -2944,6 +2945,7 @@ export function registerRuntimeDiagnostics(startupResults: () => unknown, crashS
   registerDiagnosticsSection('localServers', () => serverHealthTracker().snapshot().servers.map(server => ({
     id: server.id, port: server.port, state: server.state, attempt: server.attempt, code: server.code ?? null,
   })))
+  registerDiagnosticsSection('pluginHost', () => mainState.pluginHostWindow?.diagnostics() ?? null)
   registerDiagnosticsSection('eventPipeline', () => ({ ...eventPipelineStats }))
   registerDiagnosticsSection('stores', () => ({
     history: mainState.historyStore ? 'ready' : 'unavailable',
