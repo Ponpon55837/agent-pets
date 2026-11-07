@@ -4,6 +4,7 @@ import { locale, t, type TranslationKey } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
 import { HISTORY_RANGE_OPTIONS, type HistoryAgentStat, type HistoryDailyStat, type HistoryRangeDays, type HistorySummary } from '@/types/history'
 import GrowthEmptyState from '@/components/growth/GrowthEmptyState.vue'
+import { localDateKey } from '@/utils/local-date'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -237,12 +238,22 @@ watch(() => store.projectPets, projects => {
     if (props.active) void refreshHistory()
   }
 })
+// A panel left open past midnight must not keep showing yesterday as "today".
+let dayWatchTimer: ReturnType<typeof setInterval> | null = null
+function refreshWhenDayChanges(): void {
+  const summary = historySummary.value
+  if (props.active && summary && summary.localDate !== localDateKey(Date.now())) void refreshHistory()
+}
 onMounted(() => {
+  dayWatchTimer = setInterval(refreshWhenDayChanges, 60_000)
   cleanupHistoryUpdated = window.electronAPI?.onHistoryUpdated(() => {
     if (props.active) void refreshHistory()
   }) ?? null
 })
-onUnmounted(() => cleanupHistoryUpdated?.())
+onUnmounted(() => {
+  cleanupHistoryUpdated?.()
+  if (dayWatchTimer) clearInterval(dayWatchTimer)
+})
 </script>
 
 <template>

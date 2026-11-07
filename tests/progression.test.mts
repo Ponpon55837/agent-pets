@@ -158,3 +158,40 @@ test('insights expose today XP, the claimed daily bonus, recent ledger and a pac
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('a late event for an earlier day pays XP but never resets the streak', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'agent-pets-progression-late-'))
+  const day = 24 * 60 * 60 * 1000
+  const base = Date.UTC(2026, 2, 10, 12)
+  const store = new ProgressionStore(join(directory, 'progression.sqlite'), { now: () => base + 3 * day })
+  try {
+    store.handleEvent(event('success', base, 'd1'))
+    store.handleEvent(event('success', base + day, 'd2'))
+    const head = store.handleEvent(event('success', base + 2 * day, 'd3')).snapshot
+    assert.equal(head.currentStreak, 3)
+    const late = store.handleEvent(event('success', base - 5 * day, 'late'))
+    assert.ok(late.awards.length > 0)
+    assert.equal(late.snapshot.currentStreak, 3)
+    assert.equal(late.snapshot.lastActiveLocalDate, head.lastActiveLocalDate)
+  } finally {
+    store.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('streak continues across a DST change when days are identified by local date', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'agent-pets-progression-dst-'))
+  const dates = ['2026-03-07', '2026-03-08', '2026-03-09']
+  const store = new ProgressionStore(join(directory, 'progression.sqlite'), {
+    now: () => 0,
+    localDate: timestamp => dates[timestamp] ?? '2026-03-09',
+  })
+  try {
+    let last = store.getSnapshot()
+    for (let index = 0; index < dates.length; index += 1) last = store.handleEvent(event('success', index, `dst-${index}`)).snapshot
+    assert.equal(last.currentStreak, 3)
+  } finally {
+    store.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

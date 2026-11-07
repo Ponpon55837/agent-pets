@@ -15,6 +15,7 @@ import {
   type ProgressionLedgerEntry,
   type ProgressionSnapshot,
 } from '../src/types/progression.ts'
+import { localDateKey, previousLocalDate } from '../src/utils/local-date.ts'
 import { StatementCache } from './sqlite-statements.ts'
 
 type SqliteRow = Record<string, unknown>
@@ -87,20 +88,6 @@ function isAgentState(value: unknown): value is AgentState {
 function normalizePetId(value: string | undefined, fallback: string): string {
   if (isValidPetId(value, MAX_PET_ID_LENGTH)) return value
   return fallback
-}
-
-function localDateKey(timestamp: number): string {
-  const date = new Date(timestamp)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function previousLocalDate(key: string): string {
-  const date = new Date(`${key}T12:00:00`)
-  date.setDate(date.getDate() - 1)
-  return localDateKey(date.getTime())
 }
 
 function isActiveState(state: AgentState | undefined): boolean {
@@ -473,6 +460,9 @@ export class ProgressionStore {
 
     const progress = this.readProgress(petId)
     if (progress.lastActiveLocalDate === date) return
+    // A late-arriving event for a day before the current streak head still
+    // earns its XP above, but must never rewind or reset the streak.
+    if (progress.lastActiveLocalDate && date < progress.lastActiveLocalDate) return
 
     const continued = progress.lastActiveLocalDate === previousLocalDate(date)
     const nextStreak = continued ? progress.currentStreak + 1 : 1

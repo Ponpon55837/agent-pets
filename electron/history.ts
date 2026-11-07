@@ -16,6 +16,7 @@ import {
   type HistoryTokenUsageRecord,
   type HistoryTokenQuality,
 } from '../src/types/history.ts'
+import { dateOffset, localDateKey } from '../src/utils/local-date.ts'
 import { StatementCache } from './sqlite-statements.ts'
 import { isValidPetId } from '../src/utils/pet-id.ts'
 
@@ -96,20 +97,6 @@ function historySessionHash(adapterId: string, agentId: string, sessionId: strin
 
 function historySessionPk(adapterId: string, agentId: string, sessionId: string, projectId: string): string {
   return `${adapterId}:${agentId}:${historySessionHash(adapterId, agentId, sessionId, projectId)}`
-}
-
-function localDateKey(timestamp: number): string {
-  const date = new Date(timestamp)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function dateOffset(key: string, offset: number): string {
-  const date = new Date(`${key}T12:00:00`)
-  date.setDate(date.getDate() + offset)
-  return localDateKey(date.getTime())
 }
 
 function changedCount(result: { changes: number | bigint }): number {

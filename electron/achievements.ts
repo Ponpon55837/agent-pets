@@ -14,6 +14,7 @@ import {
   type AchievementTokenQuality,
   type AchievementUnlock,
 } from '../src/types/achievement.ts'
+import { localDateKey, localHour as localHourOf } from '../src/utils/local-date.ts'
 import { StatementCache } from './sqlite-statements.ts'
 
 type SqliteRow = Record<string, unknown>
@@ -147,18 +148,6 @@ function eventTokenKey(event: AgentStatusEvent, petId: string): string {
   ].join(':'))
 }
 
-function defaultLocalDate(timestamp: number): string {
-  const date = new Date(timestamp)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function defaultLocalHour(timestamp: number): number {
-  return new Date(timestamp).getHours()
-}
-
 function rowQuality(row: SqliteRow | undefined): AchievementTokenQuality {
   if (!row || asInteger(row.total) <= 0) return 'none'
   return asInteger(row.estimated) > 0 ? 'estimated' : 'exact'
@@ -178,8 +167,8 @@ export class AchievementStore {
     this.database = new DatabaseSync(filePath)
     this.statements = new StatementCache(sql => this.database.prepare(sql))
     this.now = options.now ?? Date.now
-    this.localDate = options.localDate ?? defaultLocalDate
-    this.localHour = options.localHour ?? defaultLocalHour
+    this.localDate = options.localDate ?? localDateKey
+    this.localHour = options.localHour ?? localHourOf
     try {
       this.migrate()
     } catch (error) {
