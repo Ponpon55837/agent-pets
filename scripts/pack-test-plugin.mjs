@@ -25,8 +25,13 @@ function collect(directory, relativeDirectory = '') {
 }
 
 collect(sourceDirectory)
-if (!files['plugin.json'] || !files['dist/main.js'] || !files['assets/icon.png']) {
-  throw new Error(`Fixture ${pluginId} must contain plugin.json, dist/main.js, and assets/icon.png`)
+if (!files['plugin.json']) throw new Error(`Fixture ${pluginId} must contain plugin.json`)
+// Workerless fixtures (skins, panelThemes) have no entry; only require what the manifest names.
+const manifest = JSON.parse(Buffer.from(files['plugin.json']).toString('utf8'))
+for (const required of [manifest.entry, manifest.icon]) {
+  if (typeof required === 'string' && !files[required]) {
+    throw new Error(`Fixture ${pluginId} is missing ${required}, which plugin.json references`)
+  }
 }
 
 const target = path.resolve(outputPath)
