@@ -47,6 +47,8 @@ function setup() {
     readRegularFileWithin: readWithin,
     send: state => { sent.push(state) },
     rendererOrigin: () => 'agent-pets://app',
+    sendPluginTheme: () => {},
+    schedulePluginTheme: callback => callback(),
     salt: new Uint8Array(32).fill(7),
   })
   const context = (enabled = true, pluginsEnabled = true): PanelThemeRuntimeContext => ({ manifest: parsed.manifest, enabled, pluginsEnabled })

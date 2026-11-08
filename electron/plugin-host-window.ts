@@ -7,6 +7,7 @@ import { PluginHostMemoryMonitor, pluginHostMemoryMb } from './plugin-host-memor
 import { dispatchPluginUiMessage, PluginUiMessageGuard, type PluginUiMessageResult } from './plugin-ui-messages.ts'
 import { join } from 'node:path'
 import { isCurrentPluginRuntimeToken, runPluginRpcForCurrentToken } from './plugin-host-token.ts'
+import type { PluginThemeSnapshot } from '../src/types/plugin-theme.ts'
 
 export interface PluginHostDescriptor {
   id: string
@@ -111,6 +112,12 @@ export class PluginHostWindowController {
   notifySettingsChanged(pluginId: string, value: Record<string, unknown>): void {
     if (!this.desired.has(pluginId) || !isRecord(value)) return
     this.post({ type: 'settings-changed', pluginId, value })
+  }
+
+  /** 所有執行中的 Worker 收到同一份快照；host.js 只轉送給已啟動的 Worker。 */
+  notifyThemeChanged(snapshot: PluginThemeSnapshot): void {
+    if (this.desired.size === 0) return
+    this.post({ type: 'theme-changed', value: snapshot })
   }
 
   invokeCommand(pluginId: string, commandId: string): boolean {

@@ -99,6 +99,7 @@ const electronAPI: ElectronAPI = {
   },
   notifyPluginSkinFallback: (petIds: string[]): Promise<number> => ipcRenderer.invoke(IPC_CHANNELS.pluginSkinFallbackNotify, petIds),
   getPanelThemeState: (): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeStateGet),
+  setPanelThemeAppearance: (appearance: { mode: PanelThemeMode; forcedColors: boolean }): void => ipcRenderer.send(IPC_CHANNELS.panelThemeAppearanceSet, appearance),
   setPanelThemeSlot: (mode: PanelThemeMode, ref: PanelThemeRef | null): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeSlotSet, mode, ref),
   importPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserImageImport, ref, mode),
   clearPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserImageClear, ref, mode),

@@ -16,6 +16,8 @@ import { PanelThemeStore, PANEL_THEME_USER_IMAGE_FILE } from '../panel-theme-sto
 import { panelThemePluginImageDirectory, removePluginImages, sweepOrphanUserImages, deleteUserImage } from '../panel-theme-images.ts'
 import type { PluginLocalizedText, PluginManifest } from '../../src/types/plugin.ts'
 import type { PanelThemeMode, PanelThemeState, PetStatusThemeState } from '../../src/types/panel-theme.ts'
+import type { PluginThemeSnapshot } from '../../src/types/plugin-theme.ts'
+import { buildPluginThemeSnapshot } from '../plugin-theme-tokens.ts'
 
 // Main-process owner of plugin panel themes: the store, the per-session
 // salt, the token -> asset map served by `agent-pets://panel-theme/<token>`,
@@ -58,8 +60,22 @@ export interface PanelThemeRuntimeOptions {
   sendPetStatus(state: PetStatusThemeState): void
   /** Origin allowed to read fonts cross-origin (the trusted panel renderer). */
   rendererOrigin(): string | null
+  /** 插件主題快照有變動時送給所有 Worker 與開啟中的 panelView（已合併、去重）。 */
+  sendPluginTheme(snapshot: PluginThemeSnapshot): void
+  /** 面板 renderer 回報前使用的模式（系統外觀）。 */
+  initialMode?: PanelThemeMode
+  /** 合併短時間內的多次變動；預設延後 PLUGIN_THEME_CHANGE_DELAY_MS 毫秒。 */
+  schedulePluginTheme?: (callback: () => void) => void
   salt?: Uint8Array
 }
+
+export interface PanelAppearance {
+  mode: PanelThemeMode
+  forcedColors: boolean
+}
+
+/** 連續切換（例如快速點淺色／深色、同步多個插件）只會送出最後一份快照。 */
+export const PLUGIN_THEME_CHANGE_DELAY_MS = 100
 
 const TOKEN_PATH = /^\/([0-9a-f]{32})$/
 
@@ -80,11 +96,37 @@ export class PanelThemeRuntime {
   private petStatusHash = JSON.stringify({ light: null, dark: null })
   private installed = new Set<string>()
   private knownManifests = new Set<string>()
+  private appearance: PanelAppearance
+  private pluginTheme: PluginThemeSnapshot
+  private pluginThemeSentHash: string
+  private pluginThemeScheduled = false
+  private readonly schedulePluginTheme: (callback: () => void) => void
 
   constructor(options: PanelThemeRuntimeOptions) {
     this.options = options
     this.salt = options.salt ?? randomBytes(32)
     this.store = new PanelThemeStore(options.userDataDirectory)
+    this.appearance = { mode: options.initialMode ?? 'light', forcedColors: false }
+    this.pluginTheme = buildPluginThemeSnapshot(null, this.appearance.mode)
+    this.pluginThemeSentHash = JSON.stringify(this.pluginTheme)
+    this.schedulePluginTheme = options.schedulePluginTheme
+      ?? (callback => { setTimeout(callback, PLUGIN_THEME_CHANGE_DELAY_MS) })
+  }
+
+  /** 插件可讀的主題快照（凍結物件，所有插件拿到的內容相同）。 */
+  getPluginTheme(): PluginThemeSnapshot {
+    return this.pluginTheme
+  }
+
+  getPanelAppearance(): PanelAppearance {
+    return { ...this.appearance }
+  }
+
+  /** 面板 renderer 回報實際生效的淺色／深色與 forced-colors；沒有變動就不重算。 */
+  setPanelAppearance(next: PanelAppearance): void {
+    if (next.mode === this.appearance.mode && next.forcedColors === this.appearance.forcedColors) return
+    this.appearance = { mode: next.mode, forcedColors: next.forcedColors }
+    this.refreshPluginTheme()
   }
 
   getState(): PanelThemeState {
@@ -171,6 +213,7 @@ export class PanelThemeRuntime {
     this.tokens = tokens
     this.state = state
     this.publishPetStatus(state)
+    this.refreshPluginTheme()
     const hash = JSON.stringify(state)
     if (hash === this.stateHash) return
     this.stateHash = hash
@@ -190,6 +233,26 @@ export class PanelThemeRuntime {
     if (hash === this.petStatusHash) return
     this.petStatusHash = hash
     this.options.sendPetStatus(next)
+  }
+
+  /** 與設定面板看到的一致：槽位 active 才用插件主題，forced-colors 時面板退回內建，插件也一樣。 */
+  private refreshPluginTheme(): void {
+    const { mode, forcedColors } = this.appearance
+    const slot = this.state.slots[mode]
+    const theme = slot.status === 'active' && slot.ref && !forcedColors
+      ? this.sources.find(source => source.pluginId === slot.ref!.pluginId)?.themes.find(candidate => candidate.id === slot.ref!.themeId) ?? null
+      : null
+    this.pluginTheme = buildPluginThemeSnapshot(theme, mode)
+    if (this.pluginThemeScheduled) return
+    this.pluginThemeScheduled = true
+    this.schedulePluginTheme(() => {
+      this.pluginThemeScheduled = false
+      // 去重放在送出時：A→B→A 在合併期間內來回切換不會送出重複的快照。
+      const hash = JSON.stringify(this.pluginTheme)
+      if (hash === this.pluginThemeSentHash) return
+      this.pluginThemeSentHash = hash
+      try { this.options.sendPluginTheme(this.pluginTheme) } catch {}
+    })
   }
 
   /** Plugin removed: drop slots, store entries and its image directory. */

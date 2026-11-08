@@ -180,6 +180,15 @@ export function usePanelTheme(panelRoot: Ref<HTMLElement | null>) {
 
   watch([panelThemeState, mode, panelThemeMedia], () => { void apply() }, { deep: false })
 
+  // 主程序據此決定插件主題 API 的 `mode` 與色盤；只在實際生效的值改變時送出。
+  watch(
+    [mode, () => panelThemeMedia.value.forcedColors],
+    ([currentMode, forcedColors]) => {
+      try { window.electronAPI?.setPanelThemeAppearance?.({ mode: currentMode, forcedColors }) } catch {}
+    },
+    { immediate: true },
+  )
+
   onMounted(() => {
     readMedia()
     for (const query of ['(forced-colors: active)', '(prefers-contrast: more)', '(prefers-reduced-transparency: reduce)']) {

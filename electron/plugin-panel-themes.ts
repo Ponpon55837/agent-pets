@@ -152,9 +152,9 @@ const BASE_FONT_SIZES: ReadonlyArray<readonly [PanelThemeSharedProperty, number]
   ['--organic-font-panel-title', 18], ['--organic-font-display-sm', 22], ['--organic-font-display-md', 22],
 ]
 const FONT_FLOOR_PX = 11
-const DEFAULT_BODY_FAMILY = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-const DEFAULT_HEADING_FAMILY = '"Lining Digits", "Georgia", "Times New Roman", serif'
-const DEFAULT_RADII = { radiusSm: 8, radiusMd: 16, radiusLg: 28 } as const
+export const DEFAULT_BODY_FAMILY = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+export const DEFAULT_HEADING_FAMILY = '"Lining Digits", "Georgia", "Times New Roman", serif'
+export const DEFAULT_RADII = { radiusSm: 8, radiusMd: 16, radiusLg: 28 } as const
 const RADIUS_MAX = { radiusSm: 16, radiusMd: 24, radiusLg: 32 } as const
 
 const THEME_ID = /^[a-z0-9-]{1,32}$/
@@ -1127,6 +1127,13 @@ function slotState(ref: PanelThemeRef | null, mode: PanelThemeMode, sources: Rea
   if (!source || !theme || !theme.modes[mode]) return { ref: { ...ref }, status: 'unavailable', reason: 'theme_removed' }
   if (!source.available) return { ref: { ...ref }, status: 'unavailable', reason: source.unavailableReason ?? 'plugin_disabled' }
   return { ref: { ...ref }, status: 'active' }
+}
+
+/** 某模式完整的內建色盤（解析後的顏色，供插件主題 API 使用）。 */
+export function builtinPanelThemeColors(mode: PanelThemeMode): Record<PluginPanelThemeColorKey, PanelThemeRgba> {
+  const colors = {} as Record<PluginPanelThemeColorKey, PanelThemeRgba>
+  for (const token of PANEL_THEME_COLOR_TOKENS) colors[token.key] = builtinColor(token, mode)
+  return colors
 }
 
 /** The full built-in palette for a mode as canonical properties. */

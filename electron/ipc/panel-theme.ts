@@ -1,11 +1,11 @@
-import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
+import type { BrowserWindow, IpcMain, IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import type { PanelThemeMode, PanelThemeRef, PanelThemeState, PanelThemeStoredUserImage, PetStatusThemeState } from '../../src/types/panel-theme.ts'
 import { isPanelThemeMode } from '../../src/types/panel-theme.ts'
 import type { PanelThemeSourcePlugin } from '../plugin-panel-themes.ts'
 import type { PanelThemeStore } from '../panel-theme-store.ts'
 import { isPanelThemeRef, isPanelThemeUserImageOptions } from '../panel-theme-store.ts'
 import type { UserImagePrepared, UserImageReadError } from '../panel-theme-images.ts'
-import { handleWithSenderGuard } from './trusted.ts'
+import { handleWithSenderGuard, onWithSenderGuard } from './trusted.ts'
 import { IPC_CHANNELS } from './channels.ts'
 
 type DialogOptions = {
@@ -17,8 +17,10 @@ type FilePickerResult = { canceled: boolean; filePaths: string[] }
 type PreparedImage = Extract<UserImagePrepared, { ok: true }>
 
 export interface PanelThemeIpcDependencies {
-  ipcMain: Pick<IpcMain, 'handle'>
-  assertPluginPanelSender(event: IpcMainInvokeEvent): void
+  ipcMain: Pick<IpcMain, 'handle' | 'on'>
+  assertPluginPanelSender(event: IpcMainInvokeEvent | IpcMainEvent): void
+  /** 面板實際生效的淺色／深色與 forced-colors，供插件主題 API 使用。 */
+  setPanelAppearance(appearance: { mode: PanelThemeMode; forcedColors: boolean }): void
   /** Pet window main frame only (the pill is the one themed pet surface). */
   assertPetSender(event: IpcMainInvokeEvent): void
   getPetStatus(): PetStatusThemeState
@@ -47,6 +49,14 @@ function availableMode(sources: readonly PanelThemeSourcePlugin[], ref: PanelThe
   return source.themes.find(theme => theme.id === ref.themeId)?.modes[mode] ?? null
 }
 
+/** 只接受 `{ mode, forcedColors }` 兩個鍵，型別完全正確才採用。 */
+function readPanelAppearance(value: unknown): { mode: PanelThemeMode; forcedColors: boolean } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).length !== 2 || !isPanelThemeMode(record.mode) || typeof record.forcedColors !== 'boolean') return null
+  return { mode: record.mode, forcedColors: record.forcedColors }
+}
+
 function isReferenced(store: PanelThemeStore, pluginId: string, file: string): boolean {
   return store.referencedFiles().has(`${pluginId}/${file}`)
 }
@@ -55,6 +65,12 @@ export function registerPanelThemeIpc(deps: PanelThemeIpcDependencies): void {
   const stateResult = () => ({ ok: true as const, value: deps.getState() })
 
   handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.panelThemeStateGet, deps.assertPluginPanelSender, () => stateResult())
+
+  // 單向通知：設定面板 main frame 才能回報，格式不符就忽略。
+  onWithSenderGuard(deps.ipcMain, IPC_CHANNELS.panelThemeAppearanceSet, deps.assertPluginPanelSender, (_event, payload: unknown) => {
+    const appearance = readPanelAppearance(payload)
+    if (appearance) deps.setPanelAppearance(appearance)
+  })
 
   // No payload: the pet window only reads the resolved pill colours.
   handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.panelThemePetStatusGet, deps.assertPetSender, () => deps.getPetStatus())

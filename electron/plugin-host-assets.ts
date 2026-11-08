@@ -82,6 +82,8 @@ window.addEventListener('message', (event) => {
         workers.get(data.pluginId)?.postMessage({ type: 'settings-changed', value: data.value })
       } else if (data.type === 'status-changed' && typeof data.pluginId === 'string' && Array.isArray(data.value)) {
         workers.get(data.pluginId)?.postMessage({ type: 'status-changed', value: data.value })
+      } else if (data.type === 'theme-changed' && data.value && typeof data.value === 'object' && !Array.isArray(data.value)) {
+        for (const worker of workers.values()) worker.postMessage({ type: 'theme-changed', value: data.value })
       }
   }
 })
@@ -102,6 +104,7 @@ const settingsListeners = new Set()
 const statusListeners = new Set()
 const uiListeners = new Set()
 const commandListeners = new Set()
+const themeListeners = new Set()
 let scheduleSequence = 0
 const blockedApis = [
   'indexedDB', 'caches', 'BroadcastChannel', 'Worker', 'SharedWorker', 'WebSocket',
@@ -242,6 +245,14 @@ const api = Object.freeze({
       return () => commandListeners.delete(callback)
     },
   }),
+  theme: Object.freeze({
+    get: () => rpc('theme.get', []),
+    onDidChange: (callback) => {
+      if (typeof callback !== 'function') throw Object.assign(new Error('invalid_request'), { code: 'invalid_request' })
+      themeListeners.add(callback)
+      return () => themeListeners.delete(callback)
+    },
+  }),
   ui: Object.freeze({
     postMessage: (value) => rpc('ui.postMessage', [value]),
     onMessage: (callback) => {
@@ -282,6 +293,11 @@ scope.onmessage = async ({ data }) => {
     }
   } else if (data.type === 'command-invoke' && typeof data.commandId === 'string' && /^[a-z][a-z0-9-]{0,31}$/.test(data.commandId)) {
     for (const listener of commandListeners) callSafely('commands.onInvoke', listener, data.commandId)
+  } else if (data.type === 'theme-changed' && data.value && typeof data.value === 'object' && !Array.isArray(data.value)) {
+    // 每個回呼拿到各自的凍結複本，一個插件回呼改動內容不會影響下一個。
+    for (const listener of themeListeners) {
+      callSafely('theme.onDidChange', listener, Object.freeze({ ...data.value, tokens: Object.freeze({ ...data.value.tokens }) }))
+    }
   } else if (data.type === 'ui-message') {
     for (const listener of uiListeners) callSafely('ui.onMessage', listener, data.value)
   } else if (data.type === 'ping' && Number.isSafeInteger(data.at)) {
@@ -304,6 +320,7 @@ scope.onmessage = async ({ data }) => {
     clearSchedules()
     uiListeners.clear()
     commandListeners.clear()
+    themeListeners.clear()
     try {
       if (typeof pluginModule?.default?.deactivate === 'function') await pluginModule.default.deactivate()
     } catch {}

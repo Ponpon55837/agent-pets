@@ -470,7 +470,7 @@ test('plugin panel preload bridge exposes only the approved API subset and unwra
     },
     onMessage: listener => { messages.add(listener); return () => messages.delete(listener) },
   })
-  assert.deepEqual(Object.keys(api).sort(), ['feed', 'links', 'log', 'net', 'pet', 'settings', 'storage', 'ui'])
+  assert.deepEqual(Object.keys(api).sort(), ['feed', 'links', 'log', 'net', 'pet', 'settings', 'storage', 'theme', 'ui'])
   assert.equal('secrets' in api, false)
   assert.equal('requestHost' in api.net, false)
   assert.deepEqual(await api.feed.notify({ title: 'test' }), { itemId: 'item-1' })
@@ -531,4 +531,20 @@ test('hiding the settings panel suspends an acknowledged view and restores it on
   assert.equal(fake.views[0]?.visibility.at(-1), true)
   assert.deepEqual(fake.views[0]?.bounds.at(-1), { x: 8, y: 64, width: 504, height: 368 })
   fake.controller.close()
+})
+
+test('theme changes reach only the open panel page, and theme.get is allowed for any sender that owns the view', async () => {
+  const fake = fakeController()
+  const snapshot = { apiVersion: 1, mode: 'dark', tokens: {} }
+  fake.controller.notifyThemeChanged(snapshot as never)
+  assert.deepEqual(fake.sentMessages, [], 'no page open: nothing is sent')
+  await fake.controller.open({ pluginId: 'sample-plugin', entry: 'ui/index.html', openToken: 1, bounds: initialBounds })
+  const contents = fake.addedView?.webContents
+  assert.deepEqual(await fake.controller.handleApiRequest(contents, 'theme.get', []), { ok: true, value: { method: 'theme.get' } })
+  assert.deepEqual(await fake.controller.handleApiRequest({}, 'theme.get', []), { ok: false, error: 'not_permitted' })
+  fake.controller.notifyThemeChanged(snapshot as never)
+  assert.deepEqual(fake.sentMessages, [snapshot])
+  fake.controller.close('closed')
+  fake.controller.notifyThemeChanged(snapshot as never)
+  assert.equal(fake.sentMessages.length, 1)
 })

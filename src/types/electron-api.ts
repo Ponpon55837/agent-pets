@@ -70,6 +70,7 @@ export interface ElectronAPI {
       onPluginSkinsChanged: (callback: (removedPetIds: string[]) => void) => () => void
       notifyPluginSkinFallback: (petIds: string[]) => Promise<number>
       getPanelThemeState: () => Promise<PanelThemeIpcResult>
+      setPanelThemeAppearance: (appearance: { mode: PanelThemeMode; forcedColors: boolean }) => void
       setPanelThemeSlot: (mode: PanelThemeMode, ref: PanelThemeRef | null) => Promise<PanelThemeIpcResult>
       importPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode) => Promise<PanelThemeIpcResult>
       clearPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode) => Promise<PanelThemeIpcResult>

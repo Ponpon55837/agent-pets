@@ -28,7 +28,11 @@ function fixture(options: { available?: boolean; dialog?: string[] | null } = {}
   let dialogOpen = false
   const window = { isDestroyed: () => false } as unknown as BrowserWindow
   const deps: PanelThemeIpcDependencies = {
-    ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) } } as unknown as PanelThemeIpcDependencies['ipcMain'],
+    ipcMain: {
+      handle: (channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) },
+      on: (channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) },
+    } as unknown as PanelThemeIpcDependencies['ipcMain'],
+    setPanelAppearance: appearance => { calls.push(`appearance:${appearance.mode}:${appearance.forcedColors}`) },
     assertPluginPanelSender: event => { if ((event as unknown) !== 'panel') throw new Error('Unauthorized plugin panel IPC sender') },
     assertPetSender: event => { if ((event as unknown) !== 'pet') throw new Error('Unauthorized IPC sender') },
     getPetStatus: () => ({ light: null, dark: null }),
@@ -68,7 +72,7 @@ test('every panel theme channel rejects senders other than the panel main frame'
   try {
     const channels = [
       IPC_CHANNELS.panelThemeStateGet, IPC_CHANNELS.panelThemeSlotSet, IPC_CHANNELS.panelThemeUserImageImport,
-      IPC_CHANNELS.panelThemeUserImageClear, IPC_CHANNELS.panelThemeUserImageOptionsSet,
+      IPC_CHANNELS.panelThemeUserImageClear, IPC_CHANNELS.panelThemeUserImageOptionsSet, IPC_CHANNELS.panelThemeAppearanceSet,
     ]
     assert.deepEqual([...context.handlers.keys()].sort(), [...channels, IPC_CHANNELS.panelThemePetStatusGet].sort())
     for (const channel of channels) {
@@ -82,6 +86,21 @@ test('every panel theme channel rejects senders other than the panel main frame'
       assert.throws(() => context.handlers.get(IPC_CHANNELS.panelThemePetStatusGet)!(sender), /Unauthorized/)
     }
     assert.deepEqual(context.handlers.get(IPC_CHANNELS.panelThemePetStatusGet)!('pet'), { light: null, dark: null })
+  } finally { context.cleanup() }
+})
+
+test('appearance report accepts exactly { mode, forcedColors } from the panel and ignores anything else', () => {
+  const context = fixture()
+  try {
+    const send = (payload: unknown) => context.handlers.get(IPC_CHANNELS.panelThemeAppearanceSet)!('panel', payload)
+    for (const payload of [
+      null, 'dark', [], { mode: 'sepia', forcedColors: false }, { mode: 'dark' }, { mode: 'dark', forcedColors: 'yes' },
+      { mode: 'dark', forcedColors: false, pluginId: 'theme-pack' },
+    ]) send(payload)
+    assert.deepEqual(context.calls, [])
+    send({ mode: 'dark', forcedColors: false })
+    send({ mode: 'light', forcedColors: true })
+    assert.deepEqual(context.calls, ['appearance:dark:false', 'appearance:light:true'])
   } finally { context.cleanup() }
 })
 

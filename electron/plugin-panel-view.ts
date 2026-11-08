@@ -1,8 +1,10 @@
 import { createPluginPanelProtocolHandler, type PluginProtocolRequestLike } from './plugin-protocol.ts'
-import type { PluginPanelApiMethod } from './plugin-panel-view-bridge.ts'
+import { PLUGIN_PANEL_API_METHODS } from './plugin-panel-view-bridge.ts'
 import type { PluginPanelViewClosedEvent, PluginPanelViewCloseReason } from '../src/types/plugin.ts'
 import { isIpcErrorCode, PLUGIN_PANEL_IPC_ERROR_CODES } from '../src/types/ipc.ts'
 import { dispatchPluginUiMessage, PLUGIN_UI_MESSAGE_MAX_BYTES, PluginUiMessageGuard } from './plugin-ui-messages.ts'
+import { IPC_CHANNELS } from './ipc/channels.ts'
+import type { PluginThemeSnapshot } from '../src/types/plugin-theme.ts'
 import { layoutPluginPanelView, type PluginPanelInsets, type PluginPanelSize } from './plugin-panel-window.ts'
 
 export const PLUGIN_PANEL_PARTITION_PREFIX = 'plugin-ui-'
@@ -10,11 +12,7 @@ export const PLUGIN_PANEL_MESSAGE_MAX_BYTES = PLUGIN_UI_MESSAGE_MAX_BYTES
 
 const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 const UUID_TOKEN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
-const PANEL_ENTRY_METHODS = new Set<PluginPanelApiMethod>([
-  'feed.notify', 'pet.status', 'storage.get', 'storage.set', 'storage.remove',
-  'settings.get', 'log.info', 'log.warn', 'log.error', 'net.fetch', 'ui.postMessage',
-  'links.openExternal',
-])
+const PANEL_ENTRY_METHODS: ReadonlySet<string> = new Set(PLUGIN_PANEL_API_METHODS)
 const PANEL_ERROR_CODES: ReadonlySet<string> = new Set(PLUGIN_PANEL_IPC_ERROR_CODES)
 
 export interface PluginPanelViewDescriptor {
@@ -344,8 +342,15 @@ export class PluginPanelViewController {
       value: data,
       guard: this.options.messageGuard,
       targetAvailable: available,
-      deliver: value => active!.view.webContents.send('plugin-panel-ui-message', value),
+      deliver: value => active!.view.webContents.send(IPC_CHANNELS.pluginPanelUiMessage, value),
     })
+  }
+
+  /** 只送給目前開啟中的頁面；快照對所有插件相同，所以不需要依插件過濾。 */
+  notifyThemeChanged(snapshot: PluginThemeSnapshot): void {
+    const contents = this.active?.view.webContents
+    if (!contents || contents.isDestroyed()) return
+    try { contents.send(IPC_CHANNELS.pluginPanelThemeChanged, snapshot) } catch {}
   }
 
   activePluginId(): string | null {
@@ -355,7 +360,7 @@ export class PluginPanelViewController {
   async handleApiRequest(sender: unknown, method: unknown, args: unknown): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
     const active = this.active
     if (!active || active.view.webContents !== sender || active.view.webContents.isDestroyed()) return errorResult('not_permitted')
-    if (typeof method !== 'string' || !PANEL_ENTRY_METHODS.has(method as PluginPanelApiMethod)
+    if (typeof method !== 'string' || !PANEL_ENTRY_METHODS.has(method)
       || !Array.isArray(args) || args.length > 32 || !isJsonValue(args)) return errorResult('not_permitted')
     if (method === 'ui.postMessage' && args.length !== 1) return errorResult('invalid_request')
     if (method === 'links.openExternal' && args.length !== 2) return errorResult('invalid_request')

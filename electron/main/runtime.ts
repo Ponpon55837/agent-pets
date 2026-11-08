@@ -1,6 +1,6 @@
 import { IPC_CHANNELS } from '../ipc/channels'
 import { sanitizePetId } from '../pet-id.ts'
-import { app, BrowserWindow, WebContentsView, screen, ipcMain, dialog, net, session, protocol, globalShortcut, powerMonitor, shell, safeStorage, Notification } from 'electron'
+import { app, BrowserWindow, WebContentsView, screen, ipcMain, dialog, net, session, protocol, globalShortcut, powerMonitor, shell, safeStorage, Notification, nativeTheme } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
 import { logMain, mainLogger } from '../diagnostics/main-log'
@@ -1049,6 +1049,11 @@ export async function createPluginServices(): Promise<void> {
       const window = mainState.petWindow
       if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.panelThemePetStatusChanged, state)
     },
+    sendPluginTheme: snapshot => {
+      mainState.pluginHostWindow?.notifyThemeChanged(snapshot)
+      mainState.pluginPanelViewController?.notifyThemeChanged(snapshot)
+    },
+    initialMode: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
   })
   try { mainState.panelThemeRuntime.sweep() } catch {}
   syncPanelThemes()
@@ -1170,6 +1175,7 @@ export async function createPluginServices(): Promise<void> {
       return mainState.pluginAgentStatusController?.getStatus() ?? { ok: false, error: 'agent_status_unavailable' }
     },
     onAgentEmit: (pluginId, event) => mainState.pluginEventSourceController?.emit(pluginId, event) ?? { ok: false, error: 'disabled' },
+    onThemeGet: () => mainState.panelThemeRuntime?.getPluginTheme() ?? null,
     onBadgeSet: (pluginId, badge) => {
       const result = mainState.pluginBadgeController?.set(pluginId, badge)
       return result?.ok ? result.value : { ok: false, error: result?.error ?? 'disabled' }
@@ -1467,6 +1473,7 @@ export async function createPluginServices(): Promise<void> {
     ipcMain,
     assertPluginPanelSender,
     assertPetSender: event => assertTrustedIpcSender(event, mainState.petWindow),
+    setPanelAppearance: appearance => mainState.panelThemeRuntime?.setPanelAppearance(appearance),
     getPetStatus: () => mainState.panelThemeRuntime?.getPetStatus() ?? { light: null, dark: null },
     getStore: () => mainState.panelThemeRuntime?.store ?? null,
     getSources: () => mainState.panelThemeRuntime?.getSources() ?? [],
