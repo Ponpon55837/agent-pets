@@ -91,6 +91,10 @@
 
 **實測**（隔離執行器，埠 37373–37375；17373–17375 由已安裝的 Agent Pets 使用）：單寵物與多寵物 × 0.6／0.8／1.0／1.2／1.5 倍 × 五種狀態，有額度與四個徽章：50 組全部狀態完整、沒有超出、高度 23.59 px。超大尺寸單寵物顯示 `Claude · Working`、兩個徽章、`+2` 與 `71%`。預設尺寸 Permission 時拿掉 `+N` 與第二個徽章，aria-label 結尾為「deploy：Deploy」「還有 2 個插件徽章」。
 
+## Token 檢查補正
+
+`check:design:strict` 的未使用 token 數從 22 變成 23：`--organic-quota-warning` 只剩 `DesktopPet.vue` 的 `quotaColor()` 以字串回傳，檢查工具看不到（`--organic-quota-error`、`--organic-quota-sage` 原本就是同樣情形）。改為 `quotaTier()` 只回傳等級，狀態列帶 `data-quota-tier`，由 `DesktopPet.css` 依等級把 `--quota-color` 指向對應 token；沒有 Quota 時為 `transparent`。未使用數降為 20，其餘 20 個是 `ui-design-system.md` 指定保留的語意別名與相容別名（`tokens.css` 也提供給插件面板，不刪除）。隔離執行器實測：Codex 40% → `warning`／`#e3b64f`，10% → `low`／`#d64a3a`；Claude → `claude`／`#d98652`；沒有 Quota 的 OpenCode 為 `transparent`，與改動前的顏色相同。
+
 ## 建議版號
 
 修補版（patch，1.11.5）：版面與圖示修正，加上狀態詞顯示方式的調整；沒有變更偏好欄位、IPC 或資料格式。

@@ -395,6 +395,27 @@
   border-radius: var(--organic-status-radius);
 }
 
+/* Quota 顏色依剩餘比例分級（DesktopPet.vue 的 quotaTier）；沒有 Quota 時維持透明。 */
+.status-line {
+  --quota-color: transparent;
+}
+
+.status-line[data-quota-tier='low'] {
+  --quota-color: var(--organic-quota-error);
+}
+
+.status-line[data-quota-tier='warning'] {
+  --quota-color: var(--organic-quota-warning);
+}
+
+.status-line[data-quota-tier='claude'] {
+  --quota-color: var(--organic-accent);
+}
+
+.status-line[data-quota-tier='normal'] {
+  --quota-color: var(--organic-quota-sage);
+}
+
 .status-line:hover {
   z-index: calc(var(--z-sticky) + 20);
 }

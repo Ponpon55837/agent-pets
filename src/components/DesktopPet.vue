@@ -426,16 +426,15 @@ const sayTargetStyle = usePetBubbleAnchor(
   () => store.presentationSay?.petId,
 )
 
-function quotaColor(familyKey: string): string {
-  const quota = store.quotaByFamily[familyKey]
-  if (!quota) return 'transparent'
-  if (quota.remainingPercent < 20) return 'var(--organic-quota-error)'
-  if (quota.remainingPercent < 50) return 'var(--organic-quota-warning)'
-  return familyKey === 'claude' ? 'var(--organic-accent)' : 'var(--organic-quota-sage)'
-}
+// Quota 顏色由 CSS 依 data-quota-tier 選 token（DesktopPet.css），可隨主題調整，也讓 token 檢查看得到用處。
+type QuotaTier = 'low' | 'warning' | 'claude' | 'normal'
 
-function quotaLineStyle(familyKey: string): Record<string, string> {
-  return { '--quota-color': quotaColor(familyKey) }
+function quotaTier(familyKey: string): QuotaTier | undefined {
+  const quota = store.quotaByFamily[familyKey]
+  if (!quota) return undefined
+  if (quota.remainingPercent < 20) return 'low'
+  if (quota.remainingPercent < 50) return 'warning'
+  return familyKey === 'claude' ? 'claude' : 'normal'
 }
 
 function quotaFillStyle(familyKey: string): Record<string, string> {
@@ -1138,7 +1137,7 @@ watch(() => store.levelUpEvent, (event) => {
                 'quota-critical': store.reactionsActive && (store.quotaByFamily[line.key]?.remainingPercent ?? 100) < 10,
                 'quota-drain': store.reactionsActive && draining[line.key],
               }"
-              :style="quotaLineStyle(line.key)"
+              :data-quota-tier="quotaTier(line.key)"
               :aria-label="lineView(line.key).aria"
               :title="store.quotaByFamily[line.key] ? undefined : lineView(line.key).title"
               :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
@@ -1220,7 +1219,7 @@ watch(() => store.levelUpEvent, (event) => {
               'quota-critical': store.reactionsActive && (store.quotaByFamily[line.key]?.remainingPercent ?? 100) < 10,
               'quota-drain': store.reactionsActive && draining[line.key],
             }"
-            :style="quotaLineStyle(line.key)"
+            :data-quota-tier="quotaTier(line.key)"
             :aria-label="lineView(line.key).aria"
             :title="store.quotaByFamily[line.key] ? undefined : lineView(line.key).title"
             :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"

@@ -163,3 +163,17 @@ test('the geometry and fonts match DesktopPet.css and the tokens', () => {
     assert.ok(tokens.includes(`${font.sizeVar}: ${font.sizeFallback};`), `${font.sizeVar} fallback`)
   }
 })
+
+test('quota colours are chosen in CSS by data-quota-tier, not built as strings in script', () => {
+  const css = readFileSync(new URL('../src/components/DesktopPet.css', import.meta.url), 'utf8')
+  const vue = readFileSync(new URL('../src/components/DesktopPet.vue', import.meta.url), 'utf8')
+  const tiers: Record<string, string> = {
+    low: '--organic-quota-error', warning: '--organic-quota-warning', claude: '--organic-accent', normal: '--organic-quota-sage',
+  }
+  for (const [tier, token] of Object.entries(tiers)) {
+    assert.match(css, new RegExp(`\\.status-line\\[data-quota-tier='${tier}'\\] \\{\\n  --quota-color: var\\(${token}\\);`), tier)
+    assert.match(vue, new RegExp(`return [^\\n]*'${tier}'`), `quotaTier returns ${tier}`)
+  }
+  assert.equal(vue.match(/:data-quota-tier="quotaTier\(line\.key\)"/g)?.length, 2)
+  assert.doesNotMatch(vue.split('<template>')[0], /'var\(--/)
+})
