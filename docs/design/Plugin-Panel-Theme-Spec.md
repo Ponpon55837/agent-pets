@@ -3,6 +3,24 @@
 Status: design, ready to implement. Target version: **1.12.0** (minor: new public contract and security boundary).
 Repo baseline: `main` @ 1.11.3 (`6a595e0`).
 
+## 0. Implementation revisions (binding; supersede the sections they name)
+
+Decided during implementation on `feat/panel-themes`. The manifest shape, field names, grammars, limits, consent units and `minAppVersion` semantics are unchanged except for the additive `petStatus` group (§3.7).
+
+| # | Section | Decision |
+|---|---|---|
+| R1 | §3.5 | `accentHover` (when omitted) = `mix(accent, text, t)` for the first `t` in 0.20, 0.25 … 0.60 with `onAccent` ≥ 4.5:1 on it; 0.20 when none passes (then rejected). With only the 10 required built-in light colours a fixed 0.20 gave 4.43:1. |
+| R2 | §2.2, §4.1, §6.1 | Every `overlay.color` must be opaque (alpha 1); `Q_K` assumes it. |
+| R3 | §6.1 | Image backdrops `P_K` and `Q_K` are composited **unrounded** (floats in 0–255). Gradient midpoints use `mix()` and are rounded. Translucent foregrounds are composited unrounded. |
+| R4 | §6.1 | `minOverlay` is suffix-closed: the smallest `a` on the 0.01 grid in [0.50, 0.95] such that **every** step from `a` to 0.95 passes. Identical to §6.1 when contrast is monotonic in `a`; it guarantees any dim the user picks at or above the minimum passes. |
+| R5 | §5.2 | Image diagnostics name the failing pair, ratio and minimum, e.g. `x.light.background.overlay.opacity: 0.6 < minimum 0.86; text 3.87:1 < 4.5:1 on white image pixel` or `… no overlay up to 0.95 passes (textMuted 4.47:1 < 4.5:1 on black image pixel at 0.95)`. |
+| R6 | §8 | Theme selection moved to **Settings → Plugins → <plugin> → Panel themes** (see revised §8). General → Appearance keeps only a status card with *Open plugin settings* and *Restore built-in*. |
+| R7 | §3.7 (new) | Additive `modes.<mode>.petStatus` colours for the pet status pill — the one narrow exception to "the pet window is never themed". |
+| R8 | §4.2, §7.2 | Web fonts are CORS requests and Chromium refuses CORS for custom schemes unless they are `corsEnabled`. The `agent-pets` scheme is now `corsEnabled`; only the `panel-theme` route sends `Access-Control-Allow-Origin`, and only for the trusted panel origin (`agent-pets://app`, or the Vite origin in dev). Verified in the isolated runner: without it the font request is blocked; with it the bytes reach OTS. |
+| R9 | §5.2 | Diagnostics travel on the failed result (`{ ok: false, error: 'invalid_panel_theme', diagnostic }`) of developer-folder installs and are shown in the error toast; there is no plan for an invalid manifest. |
+| R10 | §15 | Verified: `check-contrast.mjs` resolves `--organic-*` → `--builtin-organic-*` aliases including the dark block (no change needed). `ConfirmDialog`/`Dialog` mount inline inside `.status-panel` (no Teleport), so `.host-protected` matters. The packaged-app CSP is the `index.html` meta tag. |
+| R11 | §3.1 | `--panel-theme-background` and the `--pet-status-*` hooks are declared `initial` (guaranteed-invalid) in `tokens.css`, so `var()` fallbacks apply until a theme sets them. |
+
 ## 1. Goals / non-goals
 
 ### Goals
@@ -408,6 +426,26 @@ To allow "reset to built-in" inside protected regions, the themable palette need
 - The `@media (prefers-contrast: more)` block must target `--builtin-organic-border*`.
 - `scripts/check-contrast.mjs` must resolve `var()` aliases per theme block. **Unverified:** whether its current resolver handles an alias in `:root` whose target is overridden in the dark block. Check and adjust it.
 
+### 3.7 Pet status pill (`modes.<mode>.petStatus`, additive)
+
+Optional per mode. Colours only, same grammar and canonical re-emission as §3.3. Set on the pet window's `.desktop-pet` root as `--pet-status-*`; only `.status-line` (single- and multi-pet pills) reads them.
+
+| Key | Property | Required | Alpha | Default when omitted |
+|---|---|---|---|---|
+| `background` | `--pet-status-background` (+ `--pet-status-background-opaque` for reduced transparency / more contrast) | yes | 0.85–1 | — |
+| `text` | `--pet-status-text` | yes | 1 | — |
+| `border` | `--pet-status-border` | no | 0.08–1 | `withAlpha(text, 0.18)` |
+| `textMuted` | `--pet-status-text-muted` (separator, project line) | no | 1 | `mix(text, opaque background, 0.25)` |
+| `quotaFill` | `--pet-status-quota-fill` (≥ 50% remaining, both families) | no | 1 | the mode's `accent` |
+| `quotaTrack` | `--pet-status-quota-track` | no | 0.1–1 | `withAlpha(text, 0.18)` |
+| `quotaWarn` | `--pet-status-quota-warn` (20–50% remaining) | no | 1 | built-in amber `#e3b64f` mixed toward `text` by the first of 0.0, 0.1 … 0.6 that reaches 3:1 on the pill and on the track |
+
+Contrast (the pill floats over arbitrary desktop content): with `S_K = background` composited over K ∈ {black, white} and `T_K = quotaTrack` over `S_K`: `text`, `textMuted` ≥ 4.5 on `S_K`; `quotaFill`, `quotaWarn` ≥ 3 on `S_K` and on `T_K`.
+
+Stays built-in: the critical (< 20%) quota colour, state dots, plugin badges and their tooltips, the quota tooltip, all bubbles (including the permission bubble), completion markers, edge peek, the context menu and the sprite. No images, fonts, radii or blur in the pet window. Why the pill is safe: it carries no decisions or prompts, only status text, and its colours are contrast-checked against worst-case desktops; bubbles carry permission and risk prompts, so a theme must not be able to restyle them.
+
+Mode: the pill uses the slot of the pet appearance (`dark`, `light`, or `follow` the panel, which tracks system/light/dark). Plumbing: main computes `{ light, dark }` (each the full property set of that mode's active theme, or `null`) and sends it to the pet window only on `panel-theme-pet-status-changed`; the pet window reads the initial value with `panel-theme-pet-status-get` (pet main frame only). The renderer accepts the full allowlisted, canonical set or nothing, applies it in one `requestAnimationFrame`, and drops it under `forced-colors`.
+
 ## 4. Background, fonts and user image
 
 ### 4.1 Background model (per mode)
@@ -665,6 +703,14 @@ New `src/composables/usePanelTheme.ts`, initialised in `StatusPanel.vue` for the
 | Corrupt or unsafe `panel-theme.json` | Treated as all built-in. The corrupt file is backed up (same as plugin preferences). Writes return `preferences_unsafe`. |
 
 ## 8. Settings UI
+
+> Revised (R6). Implemented layout:
+> - **Settings → Plugins → <plugin> → Panel themes** (`PluginPanelThemes.vue`, a section of `PluginDetail.vue`, `.host-protected`): every theme of that plugin with light/dark previews (each preview includes a pet pill), badges "In use · Light/Dark" (使用中 · 淺色／深色), "Light mode only"/"Dark mode only" for single-mode themes, buttons **Use in light mode / Use in dark mode / Use for both modes** (用於淺色模式／用於深色模式／兩種模式都使用), the user background image controls for each mode in which this theme is active (**Choose image… / Remove image**, Fit, Position, Dim, Blur), and **Restore built-in** (恢復內建外觀). Applying replaces that mode's slot; there is exactly one slot per mode.
+> - **Settings → General → Appearance** (`SettingsPanelTheme.vue`, `.host-protected`): the existing panel/pet theme switch card, then a **Panel theme** (面板主題) status card: "Light mode / Dark mode: <theme> (from plugin <plugin>)" or "Built-in", **Open plugin settings** (開啟插件設定, to the owning plugin's Panel themes section) and **Restore built-in** (always in this fixed place).
+> - The plugin card shows "Panel themes (N)" and "Panel theme in use"; the detail's overview links to the section.
+> - Settings search entry `panelThemeStyle` (keywords unchanged) opens the owning plugin's Panel themes section when a theme plugin is available, otherwise the Appearance status card.
+>
+> The original text below is kept for history.
 
 - Location: `SETTINGS_GROUPS` → `general` → section `appearance` (`SettingsAppearance.vue`). Add a new card component `src/components/status-panel/SettingsPanelTheme.vue` after the existing Theme card.
 - Search entry in `SETTINGS_ENTRIES`: `{ id: 'panelThemeStyle', section: 'appearance', labelKey: 'design.panelTheme.entry', helpKey: 'design.panelTheme.help', keywords: ['theme','skin','background','wallpaper','font','colour','color','plugin','主題','背景','桌布','字型','字體','顏色','外觀','插件','外掛'] }`.
@@ -956,3 +1002,14 @@ Order: (1) merge the validator change (§10.2), (2) release Agent Pets 1.12.0, (
 - `ConfirmDialog` / `Dialog` mount location (inside `.status-panel` or teleported). If teleported outside, it is unthemed anyway; `.host-protected` is harmless.
 - Precedence between `tokens.css` `.status-panel { --focus-ring-color: var(--focus-ring-color-on-light) }` and `StatusPanel.css` `--focus-ring-color: var(--organic-accent)`. The spec assumes the StatusPanel.css value wins (it loads later), which is why the accent has a 3:1 rule.
 - Prod app CSP comes from the `index.html` meta tag (the protocol handler adds no CSP header for `agent-pets://app`). Dev uses the Vite origin, where `agent-pets://panel-theme` must still be listed explicitly.
+
+## 16. Phase 2 (requested, not yet implemented): one theme for every surface
+
+Requested after this phase was built. It supersedes "panel-only" and "protected regions never themed". Design to implement in a follow-up phase; nothing in this section ships in 1.12.0.
+
+1. **One semantic token layer** for both windows: surface levels (base, raised, sunken, overlay), text levels, accent / onAccent / accentHover, border / divider, focus ring, scrim, input bg/border, state success/warn/error/info with on-colours, tooltip / popover / menu surfaces, toast, pet pill and bubble surfaces. Every `src/**` colour, radius and font goes through it; `check:design:strict` fails on any raw colour outside `tokens.css`.
+2. **Manifest**: `modes.<mode>.colors` grows to the full semantic set (current required core + optional extended keys derived from the core). Typography and shape apply app-wide. Background images stay limited to the panel/dialog backdrop.
+3. **Safety by invariants instead of protected regions**: permission/risk UI is themed, but layout, labels and hold-to-confirm stay host-fixed; danger / success / warn must stay inside OKLCH hue/chroma bands (red, green, amber), risk badges and accent must be separated by a minimum OKLab ΔE, the focus ring ≥ 3:1 on every surface, and every token pair is contrast-checked on every surface it can appear on. Failures reject with pair, measured and required values.
+4. **Read API for plugins**: a versioned public subset `--ap-*` injected into plugin panelView documents and updated live, plus `theme.get()` / `theme.onDidChange` in the worker and panel bridge returning the canonical token map and mode name (no user image, no other plugin ids). No permission (display-only data); documented with a stable token table and d.ts types.
+5. **Performance**: one style recalculation per window per switch (single generated rule set or one batched frame), no per-component watchers, validation cached by theme hash, the pet window receives only its tokens.
+
