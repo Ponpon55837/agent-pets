@@ -166,6 +166,8 @@
   "themeEditor.radiusLg": "大圓角（px）",
   "themeEditor.preview": "預覽",
   "themeEditor.previewLabel": "草稿在{mode}的預覽",
+  "themeEditor.previewHide": "隱藏預覽",
+  "themeEditor.previewShow": "顯示預覽",
   "themeEditor.applyMenu": "使用這個主題",
   "themeEditor.undo": "復原",
   "themeEditor.reset": "重設",

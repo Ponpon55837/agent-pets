@@ -166,6 +166,8 @@
   "themeEditor.radiusLg": "Large radius (px)",
   "themeEditor.preview": "Preview",
   "themeEditor.previewLabel": "Preview of the draft in {mode}",
+  "themeEditor.previewHide": "Hide preview",
+  "themeEditor.previewShow": "Show preview",
   "themeEditor.applyMenu": "Use this theme",
   "themeEditor.undo": "Undo",
   "themeEditor.reset": "Reset",

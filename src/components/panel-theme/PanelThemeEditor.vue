@@ -405,10 +405,27 @@ const previews = computed(() => PANEL_THEME_MODES.map(value => ({
   mode: value,
   label: te('themeEditor.previewLabel', { mode: t(MODE_NAME[value]) }),
 })))
+// --- 預覽區：可收合；固定在頂端時把它的高度交給 scroll-padding-top ---------------
+const previewOpen = ref(true)
+const previewsRef = ref<HTMLElement | null>(null)
+const stickyHeight = ref(0)
+const editorStyle = computed(() => ({ '--editor-sticky-height': `${stickyHeight.value}px` }))
+let previewsObserver: ResizeObserver | null = null
+
+/** 窄版（容器查詢）時預覽不固定，捲動時不會擋住任何東西。 */
+function measureSticky(): void {
+  const element = previewsRef.value
+  stickyHeight.value = element && previewOpen.value && getComputedStyle(element).position === 'sticky' ? Math.ceil(element.getBoundingClientRect().height) : 0
+}
+
 const errorText = computed(() => userActions.error.value || themeActions.error.value)
 const liveStatus = computed(() => status.value || themeActions.status.value || userActions.status.value)
 
+watch(previewOpen, measureSticky, { flush: 'post' })
+
 onMounted(async () => {
+  previewsObserver = new ResizeObserver(measureSticky)
+  if (previewsRef.value) previewsObserver.observe(previewsRef.value)
   await Promise.all([refreshUserPanelThemes(), refreshPanelThemeState()])
   // 清單在開啟後才載入完成：要編輯的主題那時才找得到。
   if (props.request.id && draft.value.id !== props.request.id) {
@@ -418,6 +435,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  previewsObserver?.disconnect()
   clearTimeout(validateTimer)
   // 讓卸載後才回來的驗證回應被丟掉。
   validateSeq += 1
@@ -426,7 +444,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Dialog :open="true" :title="te('themeEditor.title')" size="full" show-close :dismiss-on-scrim="false" initial-focus="[data-editor-name] input" @close="requestClose">
-    <div class="editor" data-testid="panel-theme-editor">
+    <div class="editor" :style="editorStyle" data-testid="panel-theme-editor">
       <div class="editor-top">
         <div class="editor-name" data-editor-name>
           <Input v-model="name" :label="t('design.themeEditor.nameLabel')" :error="nameValid ? '' : t('design.themeEditor.invalidName')" :maxlength="USER_PANEL_THEME_NAME_MAX" data-testid="editor-name" />
@@ -441,12 +459,15 @@ onBeforeUnmount(() => {
         </label>
       </div>
 
-      <section class="editor-previews" :aria-label="te('themeEditor.preview')">
+      <section v-show="previewOpen" id="editor-previews" ref="previewsRef" class="editor-previews" :aria-label="te('themeEditor.preview')" data-testid="editor-previews">
         <PanelThemeEditorPreview v-for="preview in previews" :key="preview.mode" :entry="previewCatalogEntry" :mode="preview.mode" :label="preview.label" :forced-colors="panelThemeMedia.forcedColors" />
       </section>
 
       <div class="editor-mode">
-        <SegmentedControl :model-value="mode" :options="modeOptions" semantics="radio" :ariaLabel="te('themeEditor.modeLabel')" id-prefix="editor-mode-" @update:model-value="value => { mode = value as PanelThemeMode }" />
+        <div class="editor-mode-actions">
+          <SegmentedControl :model-value="mode" :options="modeOptions" semantics="radio" :ariaLabel="te('themeEditor.modeLabel')" id-prefix="editor-mode-" @update:model-value="value => { mode = value as PanelThemeMode }" />
+          <Button size="sm" variant="ghost" aria-controls="editor-previews" :aria-expanded="previewOpen" data-testid="editor-preview-toggle" @click="previewOpen = !previewOpen">{{ te(previewOpen ? 'themeEditor.previewHide' : 'themeEditor.previewShow') }}</Button>
+        </div>
         <div class="editor-summary-row">
           <p class="editor-summary" :class="{ ok: !validationFailed && validationCurrent && validation?.valid }" role="status" data-testid="editor-summary">{{ summary }}</p>
           <Button v-if="validationFailed" size="sm" variant="secondary" data-testid="editor-validate-retry" @click="scheduleValidation">{{ te('themeEditor.checkRetry') }}</Button>
