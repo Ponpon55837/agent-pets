@@ -63,7 +63,8 @@ jobs:
     if: needs.version.outputs.release == 'true'
     timeout-minutes: 45
     strategy:
-      fail-fast: true
+      # 一個平台失敗不要取消其他平台：重跑時只需重跑失敗的那個。發布仍要等全部成功。
+      fail-fast: false
       matrix:
         include:
           # Apple Silicon 與 Intel 拆成兩個平行 job，不再於同一台機器上依序打包
@@ -112,7 +113,26 @@ jobs:
       - name: Check plugin panel tokens bundle
         run: pnpm check:bundle
 
-      - run: pnpm exec electron-builder ${{ matrix.builder-args }} --publish never
+      # electron-builder 打包時會從 GitHub 下載工具；GitHub 偶爾回 504，失敗時重試，
+      # 每次等待加倍（30、60 秒）。已下載的檔案留在快取資料夾，重試不會重新下載。
+      - name: Package
+        shell: bash
+        env:
+          BUILDER_ARGS: ${{ matrix.builder-args }}
+        run: |
+          for attempt in 1 2 3; do
+            # BUILDER_ARGS 是 matrix 內的固定參數，需要拆成多個引數，所以不加引號。
+            # shellcheck disable=SC2086
+            if pnpm exec electron-builder $BUILDER_ARGS --publish never; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              delay=$((30 * attempt))
+              echo "::warning::electron-builder failed (attempt $attempt of 3); retrying in ${delay}s"
+              sleep "$delay"
+            fi
+          done
+          exit 1
 
       - uses: actions/upload-artifact@v7
         with:
