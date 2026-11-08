@@ -79,7 +79,7 @@ export interface ElectronAPI {
       validatePanelTheme: (definition: unknown) => Promise<PanelThemeValidateIpcResult>
       listUserPanelThemes: () => Promise<UserPanelThemeIpcResult>
       createUserPanelTheme: (name: string, definition: UserPanelThemeDefinition) => Promise<UserPanelThemeIpcResult>
-      /** 有 `name` 時與定義在同一次原子寫入中改名。 */
+      /** 有 `name` 時名稱與內容在主程序中一次寫入（原子性的存檔）。 */
       updateUserPanelTheme: (id: string, definition: UserPanelThemeDefinition, name?: string) => Promise<UserPanelThemeIpcResult>
       renameUserPanelTheme: (id: string, name: string) => Promise<UserPanelThemeIpcResult>
       duplicateUserPanelTheme: (id: string, name: string) => Promise<UserPanelThemeIpcResult>
