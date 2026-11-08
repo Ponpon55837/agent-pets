@@ -57,7 +57,9 @@ withDefaults(defineProps<{
   border-radius: var(--radius-sm);
   background: transparent;
   font: inherit;
-  font-family: var(--font-heading);
+  /* 內文字體，不用標題字體：內建的標題字體是 'Lining Digits' + Georgia，只有數字走介面字體，
+     所以「使用建議值 rgb(…)」這種中英混合的標籤會變成三種字體。按鈕標籤是介面文字。 */
+  font-family: var(--font-body);
   font-weight: var(--weight-medium);
   line-height: 1;
   position: relative;
@@ -165,16 +167,19 @@ withDefaults(defineProps<{
 }
 
 /* ── danger ──────────────────────────────────────────────────────────── */
+/* 破壞性動作一律用危險色（不是主題的強調色），外框讓它在任何表面上都看得出是按鈕。
+   懸停底是 12% 的危險色，與驗證器檢查的狀態晶片同一個比例（PANEL_THEME_STATE_TINT_ALPHA），
+   所以插件主題的危險文字在這個底上也保證可讀；內建色盤由 check-contrast.mjs 檢查。 */
 .variant-danger {
-  border-color: transparent;
+  border-color: color-mix(in srgb, var(--text-danger) 45%, transparent);
   background: transparent;
-  color: var(--accent-text, var(--state-error-soft));
+  color: var(--text-danger);
 }
 
 .variant-danger:hover:not(:disabled) {
-  border-color: transparent;
-  background: var(--accent-soft);
-  color: var(--accent-text, var(--state-error));
+  border-color: color-mix(in srgb, var(--text-danger) 45%, transparent);
+  background: color-mix(in srgb, var(--text-danger) 12%, transparent);
+  color: var(--text-danger);
 }
 
 /* ── ghost ───────────────────────────────────────────────────────────── */

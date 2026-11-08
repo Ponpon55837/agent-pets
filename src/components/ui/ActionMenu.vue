@@ -216,7 +216,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 }
 
 .menu-item.danger {
-  color: var(--state-error-soft);
+  color: var(--text-danger);
 }
 
 .menu-item:disabled {

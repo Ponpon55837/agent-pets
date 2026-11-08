@@ -441,7 +441,6 @@
 
 .status-panel :deep(.offline-heading .btn) {
   padding: var(--organic-space-1) var(--organic-space-2);
-  font-family: var(--font-ui);
   font-size: var(--font-body-sm);
 }
 

@@ -120,7 +120,9 @@
   padding: 3px var(--space-2);
   border: 1px solid transparent;
   border-radius: var(--organic-radius-sm);
-  font-family: var(--organic-font-heading);
+  /* 與 Button.vue 相同：按鈕標籤用內文字體。 */
+  font-family: var(--organic-font-body);
+  font-weight: var(--weight-medium);
   white-space: nowrap;
 }
 

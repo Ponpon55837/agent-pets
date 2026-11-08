@@ -273,7 +273,6 @@
      狀態也一律搭配文字標籤或形狀，不只靠顏色。 */
   --state-success: var(--color-success);
   --state-error: var(--color-danger);
-  --state-error-soft: var(--color-danger);
   --state-warn: var(--color-warn);
   --state-warn-bright: var(--color-warn);
   --state-info: var(--color-info);

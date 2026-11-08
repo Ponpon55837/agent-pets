@@ -232,8 +232,10 @@ function commitOklch(): void {
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
   color: var(--text-primary);
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
   font-size: var(--font-xs);
+  font-weight: var(--weight-normal);
 }
 
 .invalid .color-text {
@@ -276,9 +278,12 @@ function commitOklch(): void {
   gap: var(--space-2);
 }
 
+/* 數值和輸入框一樣用內文字體的一般字重，與按鈕標籤的「使用建議值」區分。 */
 .color-fix-value {
   color: var(--text-secondary);
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-normal);
 }
 
 @media (forced-colors: active) {
