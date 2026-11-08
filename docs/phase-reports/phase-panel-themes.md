@@ -1,6 +1,6 @@
 # 階段報告：插件面板主題（`panelThemes`）
 
-分支 `feat/panel-themes`，基準 1.11.5（`f16676e`，第 2 步前重定基底）。分三步完成：第 1 步面板主題與插件讀取 API，第 2 步全介面統一主題與主機不變量，第 3 步 manifest 擴充顏色鍵、共用驗證、快取與最終驗證。規格：`docs/design/Plugin-Panel-Theme-Spec.md`（§0 記錄實作時的決定）。版本尚未變更。
+分支 `feat/panel-themes`，基準 1.11.5（`f16676e`，第 2 步前重定基底）。前三步：第 1 步面板主題與插件讀取 API，第 2 步全介面統一主題與主機不變量，第 3 步 manifest 擴充顏色鍵、共用驗證、快取與最終驗證。規格：`docs/design/Plugin-Panel-Theme-Spec.md`（§0 記錄實作時的決定）。分四步完成後經獨立審查與複審，發布為 1.12.0（minor：新的插件公開契約與安全邊界）。
 
 ## 範圍與結果
 
