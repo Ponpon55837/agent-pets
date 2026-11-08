@@ -25,3 +25,7 @@ The sandbox does not make plugin code trustworthy. Report error codes without ex
 - [ ] The package contains only files you intend to ship, and the final archive is the one you signed and hashed.
 - [ ] The release notes list added permissions. Updates that add network, link or secret permissions, or change the signing key, need extra user acknowledgement.
 - [ ] The private signing key is not in the repository, the package or the registry.
+
+## Panel themes
+
+Themes are data only. The host parses every colour with a closed grammar and re-emits `rgb(R G B / A)`, family names and sizes itself, and the renderer re-checks names against an allowlist before `style.setProperty`; no plugin string, `url()`, `var()` or remote URL reaches CSS. Fonts (`.woff2`, magic-checked) are parsed only by Chromium's sanitiser in the panel renderer. Images are header-checked (dimensions, pixels, animation, orientation) before anything decodes them and are served only through `agent-pets://panel-theme/<token>` with per-session tokens, which plugin pages and Workers cannot reach. User-imported backgrounds are picked in a native dialog, read once and validated in memory, stored as `userData/panel-theme-images/<plugin>/<sha256>` (0o700/0o600), never shown to the plugin, and deleted on clear or plugin removal. Permission and risk prompts, the install sheet, plugin content frames and confirmation dialogs always render built-in; contrast rules and a ≥ 0.50 image overlay keep text legible and pictures of buttons recognisable as wallpaper.

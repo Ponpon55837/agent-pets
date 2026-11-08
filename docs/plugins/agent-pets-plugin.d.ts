@@ -79,6 +79,112 @@ export interface PluginSettingsSchema {
   properties: Record<string, PluginSettingDefinition>
 }
 
+/** sRGB colour string: #hex, rgb()/rgba(), hsl()/hsla() or oklch(). No url(), var(), calc() or named colours. */
+export type PluginPanelThemeColor = string
+export type PluginPanelThemeMode = 'light' | 'dark'
+export type PluginPanelThemeFit = 'cover' | 'contain' | 'tile'
+export type PluginPanelThemePosition =
+  | 'center' | 'top' | 'bottom' | 'left' | 'right'
+  | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
+export interface PluginPanelThemeColors {
+  bg: PluginPanelThemeColor
+  surface: PluginPanelThemeColor
+  surface2: PluginPanelThemeColor
+  text: PluginPanelThemeColor
+  textSecondary: PluginPanelThemeColor
+  textMuted: PluginPanelThemeColor
+  accent: PluginPanelThemeColor
+  accentText: PluginPanelThemeColor
+  onAccent: PluginPanelThemeColor
+  border: PluginPanelThemeColor
+  surfaceWarm?: PluginPanelThemeColor
+  surfaceSage?: PluginPanelThemeColor
+  surfaceSageSoft?: PluginPanelThemeColor
+  surfaceOff?: PluginPanelThemeColor
+  textFaint?: PluginPanelThemeColor
+  accentHover?: PluginPanelThemeColor
+  accentGlow?: PluginPanelThemeColor
+  accentTrack?: PluginPanelThemeColor
+  accentOnHover?: PluginPanelThemeColor
+  sage?: PluginPanelThemeColor
+  sageDeep?: PluginPanelThemeColor
+  sageDark?: PluginPanelThemeColor
+  sageTrack?: PluginPanelThemeColor
+  borderSoft?: PluginPanelThemeColor
+  borderOnAccent?: PluginPanelThemeColor
+  dangerText?: PluginPanelThemeColor
+  successText?: PluginPanelThemeColor
+  warnText?: PluginPanelThemeColor
+  scrim?: PluginPanelThemeColor
+}
+
+export interface PluginPanelThemeOverlay { color: PluginPanelThemeColor; opacity: number }
+export interface PluginPanelThemeGradientStop { color: PluginPanelThemeColor; at: number }
+
+export type PluginPanelThemeBackground =
+  | { type: 'solid' }
+  | { type: 'gradient'; kind: 'linear'; angle?: number; stops: PluginPanelThemeGradientStop[] }
+  | { type: 'gradient'; kind: 'radial'; position?: PluginPanelThemePosition; stops: PluginPanelThemeGradientStop[] }
+  | {
+      type: 'image'
+      /** Package-relative .png or .webp path. */
+      src: string
+      fit?: PluginPanelThemeFit
+      position?: PluginPanelThemePosition
+      opacity?: number
+      blur?: number
+      overlay: PluginPanelThemeOverlay
+    }
+
+export interface PluginPanelThemeUserImage {
+  allowed: true
+  fit?: PluginPanelThemeFit
+  overlay: PluginPanelThemeOverlay
+}
+
+/** Colours of the pet's status pill only (bubbles, permission UI and state dots stay built-in). */
+export interface PluginPanelThemePetStatus {
+  /** Alpha 0.85–1. */
+  background: PluginPanelThemeColor
+  text: PluginPanelThemeColor
+  /** Alpha 0.08–1. Default: text at alpha 0.18. */
+  border?: PluginPanelThemeColor
+  /** Default: mix(text, opaque background, 0.25). */
+  textMuted?: PluginPanelThemeColor
+  /** Default: the mode's accent. */
+  quotaFill?: PluginPanelThemeColor
+  /** Alpha 0.1–1. Default: text at alpha 0.18. */
+  quotaTrack?: PluginPanelThemeColor
+  /** Below 50% remaining. Default: the built-in amber, moved toward text until it reaches 3:1. */
+  quotaWarn?: PluginPanelThemeColor
+}
+
+export interface PluginPanelThemeModeDefinition {
+  colors: PluginPanelThemeColors
+  background?: PluginPanelThemeBackground
+  userImage?: PluginPanelThemeUserImage
+  petStatus?: PluginPanelThemePetStatus
+}
+
+export interface PluginPanelThemeFontFace {
+  id: string
+  /** Package-relative .woff2 path. */
+  src: string
+  weight?: 400 | 600 | 700
+  style?: 'normal' | 'italic'
+}
+
+export interface PluginPanelThemeContribution {
+  id: string
+  displayName: PluginLocalizedText
+  description?: PluginLocalizedText
+  fonts?: PluginPanelThemeFontFace[]
+  typography?: { body?: string[]; heading?: string[]; scale?: number }
+  shape?: { radiusSm?: number; radiusMd?: number; radiusLg?: number }
+  modes: Partial<Record<PluginPanelThemeMode, PluginPanelThemeModeDefinition>>
+}
+
 export interface PluginContributions {
   feed?: boolean
   reaction?: boolean
@@ -89,6 +195,7 @@ export interface PluginContributions {
   badge?: boolean
   skins?: PluginSkinContribution[]
   eventSource?: PluginEventSourceContribution
+  panelThemes?: PluginPanelThemeContribution[]
 }
 
 export interface PetStatusChange {

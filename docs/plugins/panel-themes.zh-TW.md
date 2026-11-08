@@ -1,0 +1,49 @@
+# 面板主題
+
+`contributes.panelThemes` 讓插件改變 Agent Pets 設定／狀態面板與寵物狀態列的外觀：顏色、字型、字級比例、圓角與背景（純色、漸層或套件內圖片）。主題只有資料。只提供主題的插件沒有 Worker、不需要權限，也沒有 Host API。需要 Agent Pets 1.12.0 以上。
+
+正式規格見 [docs/design/Plugin-Panel-Theme-Spec.md](../design/Plugin-Panel-Theme-Spec.md)，本頁是給作者的摘要。
+
+## 使用者在哪裡選主題
+
+設定 → 插件 → *你的插件* → **面板主題**。每個主題都有淺色與深色預覽（含寵物狀態列），以及「用於淺色模式」、「用於深色模式」、「兩種模式都使用」。整個 App 每種模式只有一個主題，套用新的會取代目前的。設定 → 通用 → 外觀只顯示各模式目前使用的主題、「開啟插件設定」與「恢復內建外觀」。
+
+## 可宣告的欄位
+
+範例見英文版 [panel-themes.md](panel-themes.md)。
+
+| 欄位 | 規則 |
+| --- | --- |
+| `id` | `^[a-z0-9-]{1,32}$`，不可重複；每個插件 1–8 個主題 |
+| `displayName`／`description` | `{ "zh-TW", "en-US" }`，各 1–48／1–120 字 |
+| `fonts[]` | 最多 4 個字面，只接受 `.woff2`（≤ 1 MiB、`wOF2` 開頭），`weight` 400／600／700，`style` normal／italic；每個插件最多 8 個字型檔；套件內每個 `.woff2` 都必須被引用 |
+| `typography.body`／`.heading` | 1–5 項：`@字面id`、本機字型名稱（`[A-Za-z0-9 -]`，不可有引號）或通用字族；最後一項必須是通用字族 |
+| `typography.scale` | 0.92–1.15，最多兩位小數；字級不會小於 11 px |
+| `shape` | `radiusSm` 0–16、`radiusMd` 0–24、`radiusLg` 0–32（整數），且 `Sm ≤ Md ≤ Lg` |
+| `modes.light`／`modes.dark` | 至少一個；只有單一模式的主題只會出現在該模式 |
+| `colors` | 10 個必填（`bg`、`surface`、`surface2`、`text`、`textSecondary`、`textMuted`、`accent`、`accentText`、`onAccent`、`border`）與選填鍵，完整表格見規格 §3.2 |
+| `background` | `solid`（預設）、`gradient`（`linear` 搭配 `angle` 0–359，或 `radial` 搭配 `position`；2–5 個不透明且位置不遞減的色標）或 `image`（套件內 `.png`／`.webp`、`fit`、`position`、`opacity` 0.2–1、`blur` 0–24，以及必填且不透明的 `overlay`，`opacity` 0.5–0.95） |
+| `userImage` | `{ "allowed": true, "overlay": {…}, "fit"? }`：允許使用者為該模式匯入自己的背景圖 |
+| `petStatus` | 寵物狀態列顏色：`background`（alpha 0.85–1）與 `text` 必填；`border`、`textMuted`、`quotaFill`、`quotaTrack`、`quotaWarn` 選填 |
+
+顏色只接受 `#rgb`、`#rgba`、`#rrggbb`、`#rrggbbaa`、`rgb()/rgba()`、`hsl()/hsla()` 或 sRGB 範圍內的 `oklch()`；不接受色名、`var()`、`calc()`、`url()` 等其他寫法。主程式會把每個顏色重新輸出為 `rgb(R G B / A)`，插件的字串不會直接進入 CSS。
+
+## 驗證（只拒絕，不自動調整）
+
+每個模式分開檢查，任一項失敗就拒絕整個套件；開發者模式會顯示提示，例如 `sakura.light.colors.textMuted: 3.92:1 < 4.5:1 on surface2`。
+
+- 淺色模式的 `bg` 必須夠亮（亮度 ≥ 0.45）且文字較暗；深色模式的 `bg` 必須夠暗（≤ 0.12）且文字較亮。
+- 主要、次要、淡化與強調文字在 `bg`、每個漸層色標與中間點、以及圖片背景（以最黑與最白像素計算）上都要 ≥ 4.5:1，`accent` ≥ 3:1。
+- 各級文字與危險／成功／警告文字在 `surface`、`surface2` 上 ≥ 4.5:1；`onAccent` 在 `accentHover` 上 ≥ 4.5:1、在 `accent` 上 ≥ 3:1。
+- 圖片遮罩不得低於計算出的最小值（且永遠不低於 0.50），提示會列出失敗的配對與最小值。在圖片上沿用內建淺色文字一定無法通過（`textMuted` 在內建 `bg` 上只有 4.96:1），請改用更深的文字色。
+- 寵物狀態列以最黑與最白桌面計算：`text`、`textMuted` ≥ 4.5:1，`quotaFill`、`quotaWarn` 在狀態列與配額軌道上 ≥ 3:1。
+
+省略的選填顏色會依固定公式推導（規格 §3.5、§3.7）。`accentHover` 是把 `accent` 往 `text` 混合，取 0.20、0.25 … 0.60 中第一個讓 `onAccent` 達到 4.5:1 的比例。
+
+## 永遠維持內建外觀的部分
+
+權限與風險提示、插件安裝確認、插件內容框、確認對話框、伺服器狀態橫幅與主題設定本身永遠使用內建配色。寵物視窗只有狀態列會套用主題顏色；泡泡、權限泡泡、狀態圓點、完成標記、徽章與寵物圖像都不會。配額低於 20% 的警示色維持內建。
+
+## 封裝與線上目錄
+
+含主題的套件屬於素材套件：總計 ≤ 25 MiB、≤ 64 個檔案；背景圖 ≤ 8 MiB、每邊 64–4096 px、≤ 8.39 MP、靜態且 EXIF 方向為 1；字型 ≤ 1 MiB。線上目錄中含 `panelThemes` 的版本必須設定 `"minAppVersion": "1.12.0"`，舊版 App 會隱藏它。授權畫面顯示「提供 N 個面板主題」（低風險），有字型時另顯示「附帶面板用的自訂字型」（中風險）；新增主題或字型時會重新詢問。

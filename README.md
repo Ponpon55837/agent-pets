@@ -122,9 +122,9 @@ When an agent asks for permission, a Liquid Glass bubble appears on the pet and 
 
 ## Plugins
 
-Plugins add pet notifications and reactions, a panel page, Tray commands, badges, pet skins and status rows. They run in a sandbox with no Node.js, filesystem or shell access, and network use is limited to HTTPS hosts you approve.
+Plugins add pet notifications and reactions, a panel page, Tray commands, badges, pet skins, panel themes (colours, fonts, backgrounds for light and dark, plus the pet status pill) and status rows. They run in a sandbox with no Node.js, filesystem or shell access, and network use is limited to HTTPS hosts you approve.
 
-**Settings → Plugins** has four sections: **Installed** (enable, update, settings, details), **Explore** (the opt-in online catalog with signature checks and updates), **Notifications** (an inbox of plugin messages with per-plugin mute) and **Advanced** (developer mode, resource limits, diagnostics). Installing shows a sheet that groups the requested permissions by risk; new high-risk permissions or a changed signing key must be acknowledged. Plugins install disabled and you turn each on yourself.
+**Settings → Plugins** has four sections: **Installed** (enable, update, settings, details), **Explore** (the opt-in online catalog with signature checks and updates), **Notifications** (an inbox of plugin messages with per-plugin mute) and **Advanced** (developer mode, resource limits, diagnostics). Installing shows a sheet that groups the requested permissions by risk; new high-risk permissions or a changed signing key must be acknowledged. Plugins install disabled and you turn each on yourself. A plugin's panel themes are chosen in its detail page (**Panel themes**); **Settings → General → Appearance** shows the theme in use for each mode and always offers **Restore built-in**. Permission and risk prompts keep the built-in look.
 
 To build a plugin, read the [plugin developer handbook](docs/plugins/README.md).
 
