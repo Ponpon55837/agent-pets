@@ -85,6 +85,8 @@ export interface PluginPanelViewControllerOptions {
   pluginRootForToken: (token: string) => string | null
   messageGuard: PluginUiMessageGuard
   onApiRequest: (pluginId: string, request: { id: string; method: string; args: unknown[] }) => unknown | Promise<unknown>
+  /** 目前給插件的主題快照（頁面載入時同步取得）。 */
+  getThemeSnapshot?: () => PluginThemeSnapshot | null
   onClosed?: (event: PluginPanelViewClosedEvent) => void
   onBlockedRequest?: (url: string) => void
   ackTimeoutMs?: number
@@ -347,6 +349,13 @@ export class PluginPanelViewController {
     const contents = this.active?.view.webContents
     if (!contents || contents.isDestroyed()) return
     try { contents.send(IPC_CHANNELS.pluginPanelThemeChanged, snapshot) } catch {}
+  }
+
+  /** 頁面 preload 的第一份主題快照：只回給目前開啟中的 view，其他寄件者一律 null。 */
+  initialTheme(sender: unknown): PluginThemeSnapshot | null {
+    const active = this.active
+    if (!active || active.view.webContents !== sender || active.view.webContents.isDestroyed()) return null
+    return this.options.getThemeSnapshot?.() ?? null
   }
 
   activePluginId(): string | null {

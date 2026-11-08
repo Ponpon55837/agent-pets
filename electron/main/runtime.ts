@@ -1242,6 +1242,7 @@ export async function createPluginServices(): Promise<void> {
   mainState.pluginPanelViewController = new PluginPanelViewController({
     preloadPath: join(__dirname, 'plugin-ui-preload.js'),
     tokensCss,
+    getThemeSnapshot: () => mainState.panelThemeRuntime?.getPluginTheme() ?? null,
     getParentWindow: () => {
       const parent = mainState.panelWindow
       if (!parent || parent.isDestroyed()) return null

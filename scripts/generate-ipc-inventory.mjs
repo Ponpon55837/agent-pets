@@ -39,6 +39,7 @@ function collectPreloadApis() {
     const content = source(path)
     if (path.endsWith('plugin-ui-preload.ts')) {
       apis.set('plugin-panel-api', ['agentPets (createPluginPanelPublicApi)'])
+      apis.set('plugin-panel-theme-initial', ['pluginPanelThemeInitial (sendSync, plugin-ui-preload)'])
       continue
     }
     const properties = [...content.matchAll(/^\s{2}([A-Za-z_$][\w$]*):/gm)]

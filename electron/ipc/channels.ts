@@ -97,6 +97,7 @@ export const IPC_CHANNELS = {
   pluginPanelApi: 'plugin-panel-api',
   pluginPanelSnapshot: 'plugin-panel-snapshot',
   pluginPanelThemeChanged: 'plugin-panel-theme-changed',
+  pluginPanelThemeInitial: 'plugin-panel-theme-initial',
   pluginPanelUiMessage: 'plugin-panel-ui-message',
   pluginPanelViewBounds: 'plugin-panel-view-bounds',
   pluginPanelViewClose: 'plugin-panel-view-close',

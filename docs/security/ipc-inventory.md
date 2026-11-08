@@ -1,6 +1,6 @@
 # IPC 安全清單
 
-由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 123 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
+由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 124 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
 
 | 頻道 | 類型 | 允許的寄件者 | 輸入驗證概況 | Preload API | 對應測試 |
 | --- | --- | --- | --- | --- | --- |
@@ -84,6 +84,7 @@
 | `plugin-panel-view-open-from-pet` | `handle` | 寵物視窗 main frame | isPluginPanelPluginId；無效輸入回安全預設或錯誤 | openPluginPanelFromPet (invoke) | `tests/ipc-plugin-panel-ui.test.mts` |
 | `plugin-panel-view-bounds` | `on` | 設定面板 main frame（共用 sender guard） | 型別；數值範圍；validateBounds；無效輸入回安全預設或錯誤 | setPluginPanelViewBounds (send) | `tests/ipc-plugin-panel-ui.test.mts` |
 | `plugin-panel-view-close` | `on` | 設定面板 main frame（共用 sender guard） | 型別；數值範圍；無效輸入回安全預設或錯誤 | closePluginPanelView (send) | `tests/ipc-plugin-panel-ui.test.mts` |
+| `plugin-panel-theme-initial` | `on` | 受信任的主 frame（再由 controller 驗證 active WebContents） | 無 payload；檢查 sender 並回傳受限狀態 | pluginPanelThemeInitial (sendSync, plugin-ui-preload) | `tests/ipc-plugin-panel-ui.test.mts` |
 | `plugin-panel-api` | `handle` | panelView 主 frame；active WebContents 二次比對 | handler／controller 驗證 payload；拒絕無效輸入 | agentPets (createPluginPanelPublicApi) | `tests/ipc-inventory.test.mts`<br>`tests/ipc-plugin-panel-ui.test.mts` |
 | `plugin-preferences-global-set` | `handle` | 設定面板 main frame（共用 sender guard） | isPluginPanelPreferencePatch；無效輸入回安全預設或錯誤 | setPluginGlobalPreferences (invoke) | `tests/ipc-plugin-preferences.test.mts` |
 | `plugin-preferences-instance-set` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；isPluginPanelPluginId, isPluginPanelPreferencePatch；無效輸入回安全預設或錯誤 | setPluginInstancePreferences (invoke) | `tests/ipc-plugin-preferences.test.mts` |

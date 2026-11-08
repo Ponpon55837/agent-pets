@@ -113,6 +113,7 @@ function fakeController(options: {
       return { ok: true, value: { method: request.method } }
     },
     onClosed: event => closedEvents.push(event),
+    getThemeSnapshot: () => ({ apiVersion: 1, mode: 'dark', tokens: {} }) as never,
     ackTimeoutMs: options.ackTimeoutMs,
     loadTimeoutMs: options.loadTimeoutMs,
     onBlockedRequest: url => {
@@ -547,4 +548,15 @@ test('theme changes reach only the open panel page, and theme.get is allowed for
   fake.controller.close('closed')
   fake.controller.notifyThemeChanged(snapshot as never)
   assert.equal(fake.sentMessages.length, 1)
+})
+
+test('the initial theme snapshot is returned only to the open panel page', async () => {
+  const fake = fakeController()
+  assert.equal(fake.controller.initialTheme({}), null, 'no page open')
+  await fake.controller.open({ pluginId: 'sample-plugin', entry: 'ui/index.html', openToken: 1, bounds: initialBounds })
+  const contents = fake.addedView?.webContents
+  assert.deepEqual(fake.controller.initialTheme(contents), { apiVersion: 1, mode: 'dark', tokens: {} })
+  assert.equal(fake.controller.initialTheme({}), null, 'another sender')
+  fake.controller.close('closed')
+  assert.equal(fake.controller.initialTheme(contents), null, 'after close')
 })
