@@ -46,7 +46,7 @@ onBeforeUnmount(() => { if (slowTimer) clearTimeout(slowTimer) })
   <section
     v-if="panelViewPlugin"
     :ref="(el) => emit('frame', el as HTMLElement | null)"
-    class="plugin-panel-view-frame host-protected"
+    class="plugin-panel-view-frame"
     :class="{ 'is-maximized': panelViewMaximized }"
     role="region"
     :aria-label="title"

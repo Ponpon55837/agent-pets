@@ -13,7 +13,6 @@ import { PANEL_THEME_MODES, type PanelThemeCatalogEntry, type PanelThemeMode } f
 // Plugins -> <plugin> -> Panel themes（spec §8）。列出此插件的主題與
 // light/dark 預覽，並可套用到 Light、Dark 或 Both。所有插件每個模式
 // 只有一個插槽，所以在這裡套用會取代原本啟用的主題。
-// 整個區塊是 .host-protected：一律以內建樣式呈現。
 
 const props = defineProps<{ pluginId: string; pluginEnabled: boolean }>()
 const { busy, status, error, applyTheme, restoreBuiltIn } = usePanelThemeActions()
@@ -54,7 +53,7 @@ onBeforeUnmount(() => observer?.disconnect())
 </script>
 
 <template>
-  <section ref="root" class="plugin-panel-themes host-protected" data-testid="plugin-panel-themes">
+  <section ref="root" class="plugin-panel-themes" data-testid="plugin-panel-themes">
     <p class="themes-help">{{ t('design.panelTheme.help') }}</p>
     <p v-if="panelThemeMedia.forcedColors" class="themes-note" role="status">{{ t('design.panelTheme.suspendedForcedColors') }}</p>
     <p v-if="!pluginEnabled || themes.length === 0" class="themes-note" role="status">{{ t('design.panelTheme.pluginOff') }}</p>

@@ -27,7 +27,6 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>()
 
 <template>
   <Dialog
-    class="host-protected"
     :open="open"
     :title="title"
     :description="message"

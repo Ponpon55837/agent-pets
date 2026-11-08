@@ -108,22 +108,30 @@ test('the renderer applies themes with setProperty in one frame, never cssText o
   }
 })
 
-test('protected regions and the theme controls keep the built-in palette', () => {
+test('no protected regions: every surface reads the semantic layer derived from the palette', () => {
   for (const file of [
     'src/components/ui/InlinePermissionCard.vue', 'src/components/permission/PermissionOutcomeNotice.vue',
     'src/components/plugin-panel/PluginInstallSheet.vue', 'src/components/plugin-panel/PluginPanelFrame.vue',
     'src/components/ui/ConfirmDialog.vue', 'src/components/status-panel/ServerHealthBanner.vue',
     'src/components/status-panel/SettingsPanelTheme.vue', 'src/components/plugin-panel/PluginPanelThemes.vue',
-  ]) assert.match(readFileSync(file, 'utf8'), /host-protected/, file)
+  ]) assert.doesNotMatch(readFileSync(file, 'utf8'), /host-protected/, file)
   const tokens = readFileSync('src/styles/tokens.css', 'utf8')
-  const protectedBlock = tokens.slice(tokens.indexOf('.host-protected {'), tokens.indexOf('}', tokens.indexOf('.host-protected {')))
+  assert.doesNotMatch(tokens, /host-protected/)
   for (const property of PANEL_THEME_CSS_PROPERTIES.filter(name => name !== '--panel-theme-background')) {
-    assert.match(protectedBlock, new RegExp(`${property}: var\\(--builtin${property.slice(1)}\\);`), property)
     assert.match(tokens, new RegExp(`^  ${property}: var\\(--builtin${property.slice(1)}\\);`, 'm'), `${property} aliases the frozen copy`)
   }
-  // 語意層在 :root 衍生，並在受保護區域與預覽上重新解析。
-  assert.match(tokens, /^:root,\n\.host-protected,\n\.panel-theme-preview \{\n  --color-bg: var\(--organic-bg\);/m)
-  assert.doesNotMatch(readFileSync('src/components/StatusPanel.css', 'utf8'), /--surface-panel:|host-protected/)
-  // 寵物視窗永不套主題：只有面板的 StatusPanel 使用這個 composable。
+  // 語意層在 :root 衍生，並在預覽上重新解析（預覽帶入另一組色盤）。
+  assert.match(tokens, /^:root,\n\.panel-theme-preview \{\n  --color-bg: var\(--organic-bg\);/m)
+  assert.doesNotMatch(readFileSync('src/components/StatusPanel.css', 'utf8'), /--surface-panel:/)
+  // 面板主題套在面板視窗的 <html>；寵物視窗不使用這個 composable。
+  assert.match(readFileSync('src/composables/usePanelTheme.ts', 'utf8'), /const element = document\.documentElement/)
   assert.doesNotMatch(readFileSync('src/components/DesktopPet.vue', 'utf8'), /usePanelTheme/)
+})
+
+test('the permission card keeps its text on the overlay surface, never on the accent fill', () => {
+  const card = readFileSync('src/components/ui/InlinePermissionCard.vue', 'utf8')
+  const rule = card.slice(card.indexOf('.inline-permission-card {'), card.indexOf('}', card.indexOf('.inline-permission-card {')))
+  assert.match(rule, /background: var\(--surface-overlay\);/)
+  assert.match(rule, /color: var\(--text-primary\);/)
+  assert.doesNotMatch(card, /opacity: 0\.\d/)
 })

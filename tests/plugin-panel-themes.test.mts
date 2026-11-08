@@ -15,6 +15,10 @@ import {
   PanelThemeValidationError,
   resolvePanelThemes,
   type PanelThemeSourcePlugin,
+  PANEL_THEME_HOST_COLORS,
+  PANEL_THEME_PRESSED_MIX,
+  builtinPanelThemeColors,
+  panelThemeInvariantFailure,
 } from '../electron/plugin-panel-themes.ts'
 import { contrastRatio, parsePanelThemeColor, type PanelThemeRgba } from '../electron/panel-theme-color.ts'
 import { PANEL_THEME_COLOR_PROPERTIES } from '../src/types/panel-theme.ts'
@@ -318,4 +322,27 @@ test('state colours keep their meaning: OKLCH hue bands, minimum chroma and OKLa
   // 危險色若與強調按鈕色幾乎相同（例如紅色強調）也會被拒絕。
   rejects(withState({ accent: '#a62f1e', accentText: '#8a2618', dangerText: '#a62f1e', onAccent: '#ffffff' }), /dangerText: OKLab ΔE 0\.000 to accent\b/)
   assert.doesNotThrow(() => parsePanelThemes(withState({ dangerText: '#a62f1e', successText: '#3f5a1c', warnText: '#7a5200' })))
+})
+
+test('host invariants: every text token on every surface it appears on, bubbles and the pill over black and white desktops', () => {
+  for (const mode of ['light', 'dark'] as const) assert.equal(panelThemeInvariantFailure(builtinPanelThemeColors(mode), mode), null, mode)
+  // 泡泡與膠囊是 surface 疊在桌面上；太透明的組合會在其中一種桌面上失敗。
+  const light = builtinPanelThemeColors('light')
+  const failure = panelThemeInvariantFailure({ ...light, surface: { r: 120, g: 120, b: 120, a: 1 } }, 'light')
+  assert.ok(failure && failure.minimum >= 3, JSON.stringify(failure))
+  // 主機固定的資訊色也必須在主題表面上可讀；失敗時指向表面而不是 info。
+  const black = { r: 0, g: 0, b: 0, a: 1 }
+  const inked = { ...light, text: black, textSecondary: black, textMuted: black, accentText: black, dangerText: black, successText: black, warnText: black }
+  const infoFailure = panelThemeInvariantFailure({ ...inked, surface: { r: 150, g: 170, b: 200, a: 1 } }, 'light')
+  assert.equal(infoFailure?.foreground, 'info (host)')
+  assert.equal(infoFailure?.blame, 'surface')
+  // 主要按鈕懸停（往 text 混 12%）的標籤也要 >= 4.5:1。
+  assert.equal(PANEL_THEME_PRESSED_MIX, 0.12)
+  // 寵物泡泡、膠囊與 tokens.css 用同樣的比例。
+  const tokens = readFileSync('src/styles/tokens.css', 'utf8')
+  assert.match(tokens, new RegExp(`--builtin-organic-info-text: ${PANEL_THEME_HOST_COLORS.light.info};`))
+  assert.match(tokens, new RegExp(`--builtin-organic-info-text: ${PANEL_THEME_HOST_COLORS.dark.info};`))
+  for (const file of ['src/components/ui/Button.vue', 'src/components/ui/InlinePermissionCard.vue']) {
+    assert.match(readFileSync(file, 'utf8'), new RegExp(`var\\(--accent-hover(?:, var\\(--accent\\))?\\) ${100 - PANEL_THEME_PRESSED_MIX * 100}%, var\\(--text-primary\\)`), file)
+  }
 })

@@ -51,16 +51,20 @@ Every mode is checked separately and any failure rejects the whole package, with
 
 - Light mode needs a light `bg` (luminance ≥ 0.45) and darker text; dark mode a dark `bg` (≤ 0.12) and lighter text.
 - Text, secondary, muted and accent text ≥ 4.5:1 and `accent` ≥ 3:1 on `bg`, on every gradient stop and midpoint, and on an image backdrop over a worst-case black and white pixel.
-- Text levels and danger/success/warn text ≥ 4.5:1 on `surface` and `surface2`; `onAccent` ≥ 4.5:1 on `accentHover` and ≥ 3:1 on `accent`.
+- Every text token ≥ 4.5:1 on every surface it can appear on: all text levels, `accentText`, danger/success/warn text and the host's blue info colour on `surface`, `surface2`, `bg`, and on the pet bubble (`surface` at 0.93) and status pill (`surface` at 0.92) over a black and a white desktop; `text` and `accentText` on `surfaceWarm`; `text` on `surfaceSage` and `surfaceSageSoft`.
+- The focus ring is `accentText`: ≥ 3:1 on every one of those surfaces. `accent` ≥ 3:1 on `surface`. `onAccent` ≥ 4.5:1 on `accentHover` and on the hovered button (`accentHover` mixed 12% toward `text`), ≥ 3:1 on `accent`. `bg` ≥ 4.5:1 on danger/success/warn fills (badge labels).
+- On the pet pill the quota fills (`sageDeep`, `accentText`, `warnText`, `dangerText`) are ≥ 3:1 on the pill and on its track.
 - Image overlays must be at least the computed minimum (and never below 0.50). The hint names the failing pair and the minimum. Reusing the built-in light text colours on an image cannot pass (`textMuted` is 4.96:1 on the built-in `bg`); pick darker text.
 - State colours keep their meaning: `dangerText` stays red (OKLCH hue 0–50° or 340–360°), `successText` green (105–170°), `warnText` amber (55–105°), each with chroma ≥ 0.05, at least ΔE 0.08 (OKLab) apart and ≥ 0.06 from the `accent` fill.
 - The pet pill is checked over a black and a white desktop: `text` and `textMuted` ≥ 4.5:1, `quotaFill` and `quotaWarn` ≥ 3:1 on the pill and on the quota track.
 
 Omitted optional colours are derived deterministically (spec §3.5, §3.7). `accentHover` is `accent` mixed toward `text` by the first of 0.20, 0.25 … 0.60 that keeps `onAccent` at 4.5:1.
 
-## What stays built-in
+## Safety: host-enforced invariants
 
-Permission and risk prompts, the plugin install sheet, plugin content frames, confirmation dialogs, the server health banner and the theme controls themselves always use the built-in palette. In the pet window only the status pill takes theme colours; bubbles, the permission bubble, state dots, completion markers, badges and the sprite never do. The critical (< 20%) quota colour stays built-in.
+A theme colours every panel-window surface, including permission and risk prompts, the plugin install sheet, plugin content frames, confirmation dialogs, the server health banner and the theme controls. There are no protected regions; instead the host guarantees what matters for a decision: layout, labels, the risk badge text and hold-to-allow are host code a theme cannot change, every text token is checked on every surface it can appear on (above), state colours must keep their hue, and the focus ring stays visible. A background image only ever paints the panel backdrop, dimmed by an overlay of at least 0.50 and never clickable.
+
+In the pet window only the status pill takes theme colours; bubbles, the permission bubble, state dots, completion markers, badges and the sprite never do. The critical (< 20%) quota colour stays built-in.
 
 ## Reading the theme in your plugin (`--ap-*`, Host API `theme`)
 

@@ -38,7 +38,7 @@ onMounted(() => { void refreshPanelThemeState() })
 </script>
 
 <template>
-  <Card class="host-protected" :title="t('design.panelTheme.title')" data-testid="panel-theme-status">
+  <Card :title="t('design.panelTheme.title')" data-testid="panel-theme-status">
     <p class="status-help">{{ t('design.panelTheme.statusHelp') }}</p>
     <p v-if="panelThemeMedia.forcedColors" class="status-help" role="status">{{ t('design.panelTheme.suspendedForcedColors') }}</p>
     <dl class="status-rows">

@@ -456,22 +456,14 @@ interface Backdrop { name: string; color: PanelThemeRgba }
 type Pair = readonly [PluginPanelThemeColorKey, number]
 
 const BACKDROP_PAIRS: readonly Pair[] = [['text', 4.5], ['textSecondary', 4.5], ['textMuted', 4.5], ['accentText', 4.5], ['accent', 3]]
-const SURFACE_PAIRS: ReadonlyArray<readonly [PluginPanelThemeColorKey, PluginPanelThemeColorKey, number]> = [
-  ...(['surface', 'surface2'] as const).flatMap(surface => (
-    (['text', 'textSecondary', 'textMuted', 'dangerText', 'successText', 'warnText'] as const)
-      .map(fg => [fg, surface, 4.5] as const)
-  )),
-  ['accentText', 'surface', 4.5],
-  ['accentText', 'surfaceWarm', 4.5],
-  ['text', 'surfaceWarm', 4.5],
-  ['text', 'surfaceSage', 4.5],
-  ['textFaint', 'surface', 3],
-  ['accent', 'surface', 3],
-  ['onAccent', 'accentHover', 4.5],
-  ['onAccent', 'accent', 3],
-]
-
-interface ContrastFailure { foreground: string; background: string; ratio: number; minimum: number }
+interface ContrastFailure {
+  foreground: string
+  background: string
+  ratio: number
+  minimum: number
+  /** 診斷要指向的 manifest 鍵；前景是主機固定色（info）時改指向失敗的表面。 */
+  blame?: string
+}
 
 function firstBackdropFailure(colors: ColorSet, backdrops: readonly Backdrop[]): ContrastFailure | null {
   for (const backdrop of backdrops) {
@@ -522,10 +514,114 @@ function stateMeaningFailure(colors: ColorSet): { key: string; problem: string }
   return null
 }
 
-function firstSurfaceFailure(colors: ColorSet): ContrastFailure | null {
-  for (const [foreground, background, minimum] of SURFACE_PAIRS) {
-    const ratio = contrastRatio(colors[foreground], colors[background])
-    if (!(ratio >= minimum)) return { foreground, background, ratio, minimum }
+// ── 主機強制的不變量（spec R14）──────────────────────────────────────
+// 主題會套到每個介面（包含權限與風險 UI），所以不再有「保護區域」；改由主機在
+// 接受主題前證明：每個文字/圖示 token 在它可能出現的每個表面上都夠清楚、焦點環在
+// 每個表面上 >= 3:1、狀態色保有語意（上方的色相與色差規則）。版面、文字標籤與
+// 「按住才允許」由主機程式碼決定，主題無法改變。
+
+/** 主機固定、manifest 無法設定的顏色；必須與 tokens.css 的 --builtin-organic-info-text 相同。 */
+export const PANEL_THEME_HOST_COLORS: Readonly<Record<PanelThemeMode, Readonly<{ info: string }>>> = Object.freeze({
+  light: Object.freeze({ info: '#2e5b8c' }),
+  dark: Object.freeze({ info: '#9cc3f0' }),
+})
+/** 寵物泡泡與狀態膠囊的表面＝ surface 以此 alpha 疊在桌面上（與 tokens.css 的 color-mix 比例相同）。 */
+export const PET_BUBBLE_SURFACE_ALPHA = 0.93
+export const PET_PILL_SURFACE_ALPHA = 0.92
+/** 膠囊額度軌道＝ text 的 alpha（tokens.css --organic-status-track）。 */
+export const PET_PILL_TRACK_ALPHA = 0.14
+/** 主要按鈕懸停＝ accentHover 往 text 混合的比例（Button.vue、InlinePermissionCard.vue）。 */
+export const PANEL_THEME_PRESSED_MIX = 0.12
+
+/** 文字類 token（>= 4.5:1）；焦點環用 accentText（>= 3:1）。 */
+const TEXT_KEYS = ['text', 'textSecondary', 'textMuted', 'accentText', 'dangerText', 'successText', 'warnText'] as const
+type TextKey = typeof TEXT_KEYS[number]
+
+/**
+ * 每個表面會出現哪些文字（依元件實際用法）。一般表面與寵物泡泡、膠囊承載所有文字、
+ * 狀態與資訊色；強調淺底（surfaceWarm：分頁、晶片、徽章）只放主要文字與強調文字；
+ * 鼠尾草底（成就、成長卡）只放主要文字。bg 排在最後：同時失敗時先指出卡片表面。
+ */
+interface Surface { name: string; color: PanelThemeRgba; blame: PluginPanelThemeColorKey; pill: boolean; text: readonly TextKey[]; info: boolean }
+
+const OPAQUE_SURFACES: ReadonlyArray<readonly [PluginPanelThemeColorKey, readonly TextKey[], boolean]> = [
+  ['surface', TEXT_KEYS, true],
+  ['surface2', TEXT_KEYS, true],
+  ['surfaceWarm', ['text', 'accentText'], false],
+  ['surfaceSage', ['text'], false],
+  ['surfaceSageSoft', ['text'], false],
+  ['bg', TEXT_KEYS, true],
+]
+
+function hostInfo(mode: PanelThemeMode): PanelThemeRgba {
+  const parsed = parsePanelThemeColor(PANEL_THEME_HOST_COLORS[mode].info)
+  if (!parsed.ok) throw new TypeError('host info colour is not valid')
+  return parsed.color
+}
+
+/** 文字可能出現的每個表面：不透明的面板表面，以及疊在黑/白桌面上的寵物泡泡與狀態膠囊。 */
+function themeSurfaces(colors: ColorSet): Surface[] {
+  const surfaces: Surface[] = OPAQUE_SURFACES.map(([key, text, info]) => ({ name: key, color: colors[key], blame: key, pill: false, text, info }))
+  const translucent: ReadonlyArray<readonly [string, number, boolean]> = [
+    ['pet bubble', PET_BUBBLE_SURFACE_ALPHA, false],
+    ['pet status pill', PET_PILL_SURFACE_ALPHA, true],
+  ]
+  for (const [label, alpha, pill] of translucent) {
+    for (const [desktop, base] of [['black', PANEL_THEME_BLACK], ['white', PANEL_THEME_WHITE]] as const) {
+      surfaces.push({ name: `${label} over a ${desktop} desktop`, color: compositeColor(withAlphaUnrounded(colors.surface, alpha), base), blame: 'surface', pill, text: TEXT_KEYS, info: true })
+    }
+  }
+  return surfaces
+}
+
+/** 依固定順序找出第一個不符合的配對；同一組輸入一定得到同一個診斷。 */
+export function panelThemeInvariantFailure(colors: ColorSet, mode: PanelThemeMode): ContrastFailure | null {
+  const info = hostInfo(mode)
+  const check = (foreground: PanelThemeRgba, background: PanelThemeRgba, minimum: number, names: { foreground: string; background: string; blame?: string }): ContrastFailure | null => {
+    const ratio = contrastRatio(foreground, background)
+    return ratio >= minimum ? null : { ...names, ratio, minimum }
+  }
+  for (const surface of themeSurfaces(colors)) {
+    for (const key of surface.text) {
+      const failure = check(colors[key], surface.color, 4.5, { foreground: key, background: surface.name })
+      if (failure) return failure
+    }
+    const infoFailure = surface.info ? check(info, surface.color, 4.5, { foreground: 'info (host)', background: surface.name, blame: surface.blame }) : null
+    if (infoFailure) return infoFailure
+    const focus = check(colors.accentText, surface.color, 3, { foreground: 'accentText', background: `${surface.name} (focus ring)` })
+    if (focus) return focus
+    if (surface.pill) {
+      // 膠囊的額度條：一般（sageDeep）、Claude（accentText）、低額度（warnText）、危急（dangerText），
+      // 在膠囊上與疊在額度軌道上都要 >= 3:1。
+      const track = compositeColor(withAlphaUnrounded(colors.text, PET_PILL_TRACK_ALPHA), surface.color)
+      for (const key of ['sageDeep', 'accentText', 'warnText', 'dangerText'] as const) {
+        const failure = check(colors[key], surface.color, 3, { foreground: key, background: `${surface.name} (quota fill)` })
+          ?? check(colors[key], track, 3, { foreground: key, background: `the quota track on the ${surface.name}` })
+        if (failure) return failure
+      }
+    }
+  }
+  const pressed = mixColor(colors.accentHover, colors.text, PANEL_THEME_PRESSED_MIX)
+  const pairs: ReadonlyArray<readonly [PluginPanelThemeColorKey, PanelThemeRgba, number, string]> = [
+    ['textFaint', colors.surface, 3, 'surface'],
+    // 強調填色當圖形使用（外框、核取方塊、進度條）：>= 3:1。
+    ['accent', colors.surface, 3, 'surface'],
+    ['onAccent', colors.accent, 3, 'accent'],
+    ['onAccent', colors.accentHover, 4.5, 'accentHover'],
+    ['onAccent', pressed, 4.5, 'accentHover mixed 12% toward text (hovered primary button)'],
+    // 狀態徽章的標籤（未讀/錯誤/成功徽章）：bg 色字在實心狀態色上。
+    ['bg', colors.dangerText, 4.5, 'dangerText (badge fill)'],
+    ['bg', colors.successText, 4.5, 'successText (badge fill)'],
+    ['bg', colors.warnText, 4.5, 'warnText (badge fill)'],
+  ]
+  for (const [key, background, minimum, name] of pairs) {
+    const failure = check(colors[key], background, minimum, { foreground: key, background: name })
+    if (failure) return failure
+  }
+  // 資訊色與狀態色、強調色保持距離，不會被誤認成風險或按鈕。
+  for (const [key, minimum] of [['dangerText', PANEL_THEME_STATE_MIN_DISTANCE], ['successText', PANEL_THEME_STATE_MIN_DISTANCE], ['warnText', PANEL_THEME_STATE_MIN_DISTANCE], ['accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE]] as const) {
+    const distance = oklabDistance(info, colors[key])
+    if (distance < minimum) return { foreground: key, background: `OKLab ΔE ${distance.toFixed(3)} to the host info colour < ${minimum}`, ratio: distance, minimum, blame: key }
   }
   return null
 }
@@ -647,7 +743,9 @@ function gradientBackdrops(stops: ReadonlyArray<{ color: PanelThemeRgba }>): Bac
 }
 
 function failContrast(path: string, failure: ContrastFailure): never {
-  fail(`${path}.colors.${failure.foreground}`, `${ratioText(failure.ratio)}:1 < ${failure.minimum}:1 on ${failure.background}`)
+  if (failure.background.startsWith('OKLab')) fail(`${path}.colors.${failure.foreground}`, failure.background)
+  const subject = failure.blame ? `${failure.foreground} ${ratioText(failure.ratio)}:1` : `${ratioText(failure.ratio)}:1`
+  fail(`${path}.colors.${failure.blame ?? failure.foreground}`, `${subject} < ${failure.minimum}:1 on ${failure.background}`)
 }
 
 function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contribution: PluginPanelThemeModeDefinition; resolved: ResolvedPanelThemeMode } {
@@ -684,10 +782,10 @@ function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contri
   const background = parseBackground(value.background, `${path}.background`)
   const backdrops: Backdrop[] = [{ name: 'bg', color: colors.bg }]
   if (background.type === 'gradient') backdrops.push(...gradientBackdrops(background.stops))
-  const surfaceFailure = firstSurfaceFailure(colors)
-  if (surfaceFailure) failContrast(path, surfaceFailure)
   const meaningFailure = stateMeaningFailure(colors)
   if (meaningFailure) fail(`${path}.colors.${meaningFailure.key}`, meaningFailure.problem)
+  const invariantFailure = panelThemeInvariantFailure(colors, mode)
+  if (invariantFailure) failContrast(path, invariantFailure)
   const backdropFailure = firstBackdropFailure(colors, backdrops)
   if (backdropFailure) failContrast(path, backdropFailure)
   // 圖片背景：以最小覆蓋層檢查，讓診斷訊息可據以修正。

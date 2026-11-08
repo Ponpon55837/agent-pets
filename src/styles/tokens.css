@@ -84,6 +84,8 @@
      唯一允許寫死顏色的地方（check:design:strict --raw-colors=fail）。
      --organic-* 指向它；插件主題只在 <html> 上以 inline 方式重新指向
      --organic-*（spec §3.1、§16），所以每個衍生 token 都跟著主題走。
+     沒有「保護區域」：權限與風險介面也跟著主題，安全性改由主機強制的不變量
+     保證（驗證器的對比矩陣與狀態色色相規則，spec R14）。
      視窗的模式：面板視窗＝面板外觀；寵物視窗＝寵物外觀（useTheme.ts）。 */
   --builtin-organic-bg: #f5ead8;
   --builtin-organic-surface: #f9f4ed;
@@ -169,11 +171,8 @@
   --builtin-organic-font-display-sm: 22px;
   --builtin-organic-font-display-md: 22px;
 
-  /* 可套主題的色盤。上方的字面值是凍結的內建副本
-     （--builtin-organic-*）；--organic-* 在此指向它，而插件面板主題
-     只會在 .status-panel 上以 inline 方式重新指向 --organic-*（spec
-     docs/design/Plugin-Panel-Theme-Spec.md §3.6）。下方的 .host-protected
-     會重設它們，讓權限/風險 UI 一律以內建樣式呈現。 */
+  /* 可套主題的色盤：--organic-* 指向上方凍結的內建副本（--builtin-organic-*），
+     插件主題在 <html> 上以 inline 方式重新指向它們（spec §3.6、§16）。 */
   --organic-bg: var(--builtin-organic-bg);
   --organic-surface: var(--builtin-organic-surface);
   --organic-surface-2: var(--builtin-organic-surface-2);
@@ -233,7 +232,6 @@
    .panel-theme-preview 上：預覽以 inline 方式帶入另一組色盤，別名必須在該
    元素重新解析（繼承下來的別名已經被代換，spec §3.6）。 */
 :root,
-.host-protected,
 .panel-theme-preview {
   --color-bg: var(--organic-bg);
   --color-surface: var(--organic-surface);
@@ -330,7 +328,6 @@
    主題的字族、字級倍率與圓角只用在面板視窗（與預覽）；寵物視窗維持固定的
    字級與幾何（status-line-fit 依此量測），也不載入主題字型。 */
 :root[data-window='panel'],
-:root[data-window='panel'] .host-protected,
 .panel-theme-preview {
   --surface-blur: none;
   --font-ui: var(--organic-font-body);
@@ -459,56 +456,6 @@
   --organic-status-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.8);
   --organic-status-tooltip-shadow: 0 5px 16px rgba(46, 43, 37, 0.24);
   --shadow-edge-handle: 0 3px 12px rgba(46, 43, 37, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.8);
-}
-
-/* ── 受保護區域 ──────────────────────────────────────────────────
-   權限、風險與同意 UI、插件內容標記，以及面板主題卡片本身，
-   不論啟用哪個面板主題，一律以內建色盤呈現。 */
-.host-protected {
-  --organic-bg: var(--builtin-organic-bg);
-  --organic-surface: var(--builtin-organic-surface);
-  --organic-surface-2: var(--builtin-organic-surface-2);
-  --organic-surface-warm: var(--builtin-organic-surface-warm);
-  --organic-surface-sage: var(--builtin-organic-surface-sage);
-  --organic-surface-sage-soft: var(--builtin-organic-surface-sage-soft);
-  --organic-surface-off: var(--builtin-organic-surface-off);
-  --organic-text: var(--builtin-organic-text);
-  --organic-text-secondary: var(--builtin-organic-text-secondary);
-  --organic-text-muted: var(--builtin-organic-text-muted);
-  --organic-text-faint: var(--builtin-organic-text-faint);
-  --organic-accent: var(--builtin-organic-accent);
-  --organic-accent-hover: var(--builtin-organic-accent-hover);
-  --organic-accent-text: var(--builtin-organic-accent-text);
-  --organic-accent-contrast: var(--builtin-organic-accent-contrast);
-  --organic-accent-glow: var(--builtin-organic-accent-glow);
-  --organic-accent-track: var(--builtin-organic-accent-track);
-  --organic-accent-on-hover: var(--builtin-organic-accent-on-hover);
-  --organic-sage: var(--builtin-organic-sage);
-  --organic-sage-deep: var(--builtin-organic-sage-deep);
-  --organic-sage-dark: var(--builtin-organic-sage-dark);
-  --organic-sage-track: var(--builtin-organic-sage-track);
-  --organic-border: var(--builtin-organic-border);
-  --organic-border-soft: var(--builtin-organic-border-soft);
-  --organic-border-on-accent: var(--builtin-organic-border-on-accent);
-  --organic-danger-text: var(--builtin-organic-danger-text);
-  --organic-success-text: var(--builtin-organic-success-text);
-  --organic-warn-text: var(--builtin-organic-warn-text);
-  --organic-scrim: var(--builtin-organic-scrim);
-  --organic-font-body: var(--builtin-organic-font-body);
-  --organic-font-heading: var(--builtin-organic-font-heading);
-  --organic-font-label: var(--builtin-organic-font-label);
-  --organic-font-body-sm: var(--builtin-organic-font-body-sm);
-  --organic-font-body-md: var(--builtin-organic-font-body-md);
-  --organic-font-body-lg: var(--builtin-organic-font-body-lg);
-  --organic-font-heading-sm: var(--builtin-organic-font-heading-sm);
-  --organic-font-heading-md: var(--builtin-organic-font-heading-md);
-  --organic-font-panel-title: var(--builtin-organic-font-panel-title);
-  --organic-font-display-sm: var(--builtin-organic-font-display-sm);
-  --organic-font-display-md: var(--builtin-organic-font-display-md);
-  --organic-radius-sm: var(--builtin-organic-radius-sm);
-  --organic-radius-md: var(--builtin-organic-radius-md);
-  --organic-radius-lg: var(--builtin-organic-radius-lg);
-  font-family: var(--font-ui);
 }
 
 /* ── 寵物視窗玻璃層 ──────────────────────────────────────────────────────
