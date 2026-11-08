@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, toRef, useId } from 'vue'
+import { computed, inject, provide, ref, toRef, useId } from 'vue'
 import { t } from '@/i18n'
 import { useDialogA11y } from '@/composables/useDialogA11y'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
+import { DIALOG_HOST_KEY, DIALOG_NESTED_KEY, dialogTeleportTarget } from '@/components/ui/dialog-host'
 
 // The one modal shell: scrim, titled surface, optional description and
 // footer, with Esc / Tab trap / initial focus / focus restore / inert
@@ -47,43 +48,51 @@ useDialogA11y({
 })
 
 const describedBy = computed(() => (props.description ? descriptionId : undefined))
+
+// 遮罩掛到面板根元素（見 dialog-host.ts），不受所在卡片或捲動區的範圍限制。
+const host = inject(DIALOG_HOST_KEY, null)
+const nested = inject(DIALOG_NESTED_KEY, false)
+provide(DIALOG_NESTED_KEY, true)
+const teleportTarget = computed(() => dialogTeleportTarget(host?.value, nested))
 </script>
 
 <template>
-  <Transition name="dialog">
-    <div v-if="open" ref="scopeRef" class="scrim" @click.self="dismissOnScrim && emit('close')">
-      <div
-        ref="dialogRef"
-        class="dialog"
-        :class="`size-${size}`"
-        :role="role"
-        aria-modal="true"
-        tabindex="-1"
-        :aria-labelledby="titleId"
-        :aria-describedby="describedBy"
-      >
-        <header class="head">
-          <h2 :id="titleId" class="title">{{ title }}</h2>
-          <Button
-            v-if="showClose"
-            variant="ghost"
-            size="sm"
-            icon-only
-            :aria-label="t('close')"
-            @click="emit('close')"
-          >
-            <Icon name="close" :size="14" />
-          </Button>
-        </header>
-        <p v-if="description" :id="descriptionId" class="description">{{ description }}</p>
-        <slot />
-        <footer v-if="$slots.footer" class="footer"><slot name="footer" /></footer>
+  <Teleport :to="teleportTarget ?? 'body'" :disabled="!teleportTarget">
+    <Transition name="dialog">
+      <div v-if="open" ref="scopeRef" class="scrim" @click.self="dismissOnScrim && emit('close')">
+        <div
+          ref="dialogRef"
+          class="dialog"
+          :class="`size-${size}`"
+          :role="role"
+          aria-modal="true"
+          tabindex="-1"
+          :aria-labelledby="titleId"
+          :aria-describedby="describedBy"
+        >
+          <header class="head">
+            <h2 :id="titleId" class="title">{{ title }}</h2>
+            <Button
+              v-if="showClose"
+              variant="ghost"
+              size="sm"
+              icon-only
+              :aria-label="t('close')"
+              @click="emit('close')"
+            >
+              <Icon name="close" :size="14" />
+            </Button>
+          </header>
+          <p v-if="description" :id="descriptionId" class="description">{{ description }}</p>
+          <slot />
+          <footer v-if="$slots.footer" class="footer"><slot name="footer" /></footer>
+        </div>
+        <!-- A dialog opened from inside this one: inside the scope (so its siblings go inert and this
+             dialog's key handling steps aside) but outside the trapped surface. -->
+        <slot name="overlay" />
       </div>
-      <!-- A dialog opened from inside this one: inside the scope (so its siblings go inert and this
-           dialog's key handling steps aside) but outside the trapped surface. -->
-      <slot name="overlay" />
-    </div>
-  </Transition>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>

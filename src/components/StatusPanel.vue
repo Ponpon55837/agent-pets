@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { t } from '@/i18n'
 import { useProgressionLabels } from '@/composables/useProgressionLabels'
 import type { PluginEventSourceStatusView } from '@/types/plugin'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
+import { DIALOG_HOST_KEY } from '@/components/ui/dialog-host'
 import ActionMenu, { type ActionMenuItem } from '@/components/ui/ActionMenu.vue'
 import { type ThemePreference, nextThemePreference, setThemePreference, themePreference } from '@/composables/useTheme'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
@@ -29,6 +30,8 @@ import { DEFAULT_SETTINGS_GROUP, SETTINGS_GROUPS, isSettingsGroupId, type Settin
 
 const store = useAgentStore()
 const panelRoot = ref<HTMLElement | null>(null)
+// 面板內的對話框都掛到面板根元素，遮罩才會蓋住整個面板（見 dialog-host.ts）。
+provide(DIALOG_HOST_KEY, panelRoot)
 // 插件面板主題：只在此元素上以 inline 設定 --organic-*（spec §7.3）。
 const { backdrop: panelThemeBackdrop } = usePanelTheme()
 const settingsShortcut = /Mac/i.test(navigator.platform) ? '\u2318,' : 'Ctrl+,'
