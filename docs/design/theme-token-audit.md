@@ -6,11 +6,11 @@ Baseline on `feat/panel-themes` after the `--ap-*` read API: **145 raw colours**
 
 ## Enforcement
 
-`package.json` `check:design:strict` = `node scripts/check-design-tokens.mjs --strict --raw-colors=fail`; `shouldFail()` and `tests/check-design-tokens.test.mts` cover the flag. The only literals left are the `--builtin-organic-*` palette entries (themable values plus the host-fixed `info-text`, `shadow` and `highlight`).
+`package.json` `check:design:strict` = `node scripts/check-design-tokens.mjs --strict --raw-colors=fail`; `shouldFail()` and `tests/check-design-tokens.test.mts` cover the flag. The only literals left are the `--builtin-organic-*` palette entries; since step 3 every one of them is themable (`info-text`, `shadow` and `highlight` gained the manifest keys `infoText`, `shadow`, `highlight`; spec R16).
 
 ## Summary by surface
 
-"Target" was the planned palette key; "Result" is what step 2 did (all groups are at 0). Manifest keys for the *new* entries are step 3 (§16.2).
+"Target" was the planned palette key; "Result" is what step 2 did (all groups are at 0). Manifest keys for the *new* entries were added in step 3 (§16.2, spec R16).
 
 | Group | Count | Where it renders | Target | Result |
 | --- | --- | --- | --- | --- |
@@ -62,4 +62,4 @@ Baseline on `feat/panel-themes` after the `--ap-*` read API: **145 raw colours**
 | `--accent-primary`, `--surface-secondary`, `--font-2xs` | Compatibility aliases for references that were removed in the UX overhaul; not in the documented plugin token table. | Delete once step 2 confirms no component or documented plugin token uses them. | Deleted (no component or documented plugin token used them); `--status-error` kept as an alias of `--color-danger` |
 | `--font-floor` | 11 px helper for `max(var(--font-floor), calc(11px * var(--pet-scale)))`; the pet bubbles use `max(var(--font-xs), …)` (also 11 px) instead. | Use it in the pet window's scaled text when that CSS is re-tokenised, otherwise delete. | Adopted in the pet bubbles' scaled text |
 
-Remaining `check:design --verbose` unused tokens (2): `--font-xl` (plugin type scale) and `--organic-border-on-accent` (palette entry of the manifest key `borderOnAccent`, which no host CSS reads since the permission card left the accent fill; its fate belongs to the manifest-key work in step 3). The legacy `--border-on-accent` / `--accent-on-hover` aliases were removed.
+Remaining `check:design --verbose` unused token (1): `--font-xl` (plugin type scale). Step 3 deleted `--organic-border-on-accent` and deprecated its manifest key `borderOnAccent` (accepted and ignored; no host CSS read it since the permission card left the accent fill). `--organic-accent-on-hover` stays as the semantic hover wash `--color-hover` (setup wizard, Project MCP panel). The legacy `--border-on-accent` / `--accent-on-hover` aliases were removed in step 2.

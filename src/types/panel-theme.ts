@@ -18,15 +18,16 @@ export const PANEL_THEME_POSITIONS: readonly PanelThemePosition[] = [
 export const PANEL_THEME_USER_BLURS = [0, 8, 16, 24] as const
 export type PanelThemeUserBlur = typeof PANEL_THEME_USER_BLURS[number]
 
-/** 29 個可套主題的顏色屬性，依表格順序（spec §3.2）。 */
+/** 31 個可套主題的顏色屬性，依表格順序（spec §3.2、§16.2）。 */
 export const PANEL_THEME_COLOR_PROPERTIES = [
   '--organic-bg', '--organic-surface', '--organic-surface-2', '--organic-surface-warm', '--organic-surface-sage',
   '--organic-surface-sage-soft', '--organic-surface-off', '--organic-text', '--organic-text-secondary',
   '--organic-text-muted', '--organic-text-faint', '--organic-accent', '--organic-accent-hover',
   '--organic-accent-text', '--organic-accent-contrast', '--organic-accent-glow', '--organic-accent-track',
   '--organic-accent-on-hover', '--organic-sage', '--organic-sage-deep', '--organic-sage-dark',
-  '--organic-sage-track', '--organic-border', '--organic-border-soft', '--organic-border-on-accent',
+  '--organic-sage-track', '--organic-border', '--organic-border-soft',
   '--organic-danger-text', '--organic-success-text', '--organic-warn-text', '--organic-scrim',
+  '--organic-info-text', '--organic-shadow', '--organic-highlight',
 ] as const
 export type PanelThemeColorProperty = typeof PANEL_THEME_COLOR_PROPERTIES[number]
 
@@ -56,6 +57,7 @@ export const PET_THEME_COLOR_PROPERTIES = [
   '--organic-text-muted', '--organic-text-faint', '--organic-accent', '--organic-accent-hover', '--organic-accent-text',
   '--organic-accent-contrast', '--organic-sage', '--organic-sage-deep', '--organic-sage-dark', '--organic-border',
   '--organic-border-soft', '--organic-danger-text', '--organic-success-text', '--organic-warn-text',
+  '--organic-info-text', '--organic-shadow', '--organic-highlight',
 ] as const satisfies readonly PanelThemeColorProperty[]
 export type PetThemeColorProperty = typeof PET_THEME_COLOR_PROPERTIES[number]
 

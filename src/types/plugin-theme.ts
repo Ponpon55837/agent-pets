@@ -12,7 +12,7 @@ export const PLUGIN_THEME_COLOR_TOKENS = [
   '--ap-accent', '--ap-accent-hover', '--ap-accent-text', '--ap-on-accent',
   '--ap-border', '--ap-border-soft', '--ap-focus',
   '--ap-danger', '--ap-success', '--ap-warn', '--ap-info',
-  '--ap-scrim',
+  '--ap-scrim', '--ap-shadow', '--ap-highlight',
 ] as const
 export const PLUGIN_THEME_RADIUS_TOKENS = ['--ap-radius-sm', '--ap-radius-md', '--ap-radius-lg'] as const
 export const PLUGIN_THEME_FAMILY_TOKENS = ['--ap-font-body', '--ap-font-heading'] as const

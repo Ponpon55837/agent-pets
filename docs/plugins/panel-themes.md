@@ -38,7 +38,7 @@ Settings → Plugins → *your plugin* → **Panel themes**. Each theme shows a 
 | `typography.scale` | 0.92–1.15, at most 2 decimals; sizes never go below 11 px |
 | `shape` | `radiusSm` 0–16, `radiusMd` 0–24, `radiusLg` 0–32 (integers), `Sm ≤ Md ≤ Lg` |
 | `modes.light` / `modes.dark` | At least one. A single-mode theme only appears for that mode |
-| `colors` | 10 required keys (`bg`, `surface`, `surface2`, `text`, `textSecondary`, `textMuted`, `accent`, `accentText`, `onAccent`, `border`) plus optional ones; see the token table in the spec §3.2 |
+| `colors` | 10 required keys (`bg`, `surface`, `surface2`, `text`, `textSecondary`, `textMuted`, `accent`, `accentText`, `onAccent`, `border`) plus optional ones (spec §3.2): `surfaceWarm`, `surfaceSage`, `surfaceSageSoft`, `surfaceOff`, `textFaint`, `accentHover`, `accentGlow`, `accentTrack`, `accentOnHover`, `sage`, `sageDeep`, `sageDark`, `sageTrack`, `borderSoft`, `dangerText`, `successText`, `warnText`, `scrim`, `infoText`, `shadow`, `highlight`. `borderOnAccent` is deprecated: still accepted and checked, then ignored |
 | `background` | `solid` (default), `gradient` (`linear` with `angle` 0–359 or `radial` with `position`; 2–5 opaque, non-decreasing stops) or `image` (package `.png`/`.webp`, `fit`, `position`, `opacity` 0.2–1, `blur` 0–24, required opaque `overlay` with `opacity` 0.5–0.95) |
 | `userImage` | `{ "allowed": true, "overlay": {…}, "fit"? }` lets the user import their own background for that mode |
 | `petStatus` | Pet status pill colours: `background` (alpha 0.85–1) and `text` required; `border`, `textMuted`, `quotaFill`, `quotaTrack`, `quotaWarn` optional |
@@ -51,14 +51,16 @@ Every mode is checked separately and any failure rejects the whole package, with
 
 - Light mode needs a light `bg` (luminance ≥ 0.45) and darker text; dark mode a dark `bg` (≤ 0.12) and lighter text.
 - Text, secondary, muted and accent text ≥ 4.5:1 and `accent` ≥ 3:1 on `bg`, on every gradient stop and midpoint, and on an image backdrop over a worst-case black and white pixel.
-- Every text token ≥ 4.5:1 on every surface it can appear on: all text levels, `accentText`, danger/success/warn text and the host's blue info colour on `surface`, `surface2`, `bg`, and on the pet bubble (`surface` at 0.93) and status pill (`surface` at 0.92) over a black and a white desktop; `text` and `accentText` on `surfaceWarm`; `text` on `surfaceSage` and `surfaceSageSoft`.
-- The focus ring is `accentText`: ≥ 3:1 on every one of those surfaces. `accent` ≥ 3:1 on `surface`. `onAccent` ≥ 4.5:1 on `accentHover` and on the hovered button (`accentHover` mixed 12% toward `text`), ≥ 3:1 on `accent`. `bg` ≥ 4.5:1 on danger/success/warn fills (badge labels).
+- Every text token ≥ 4.5:1 on every surface it can appear on: all text levels, `accentText`, danger/success/warn/info text on `surface`, `surface2`, `bg`, and on the pet bubble (`surface` at 0.93) and status pill (`surface` at 0.92) over a black and a white desktop; `sageDeep` and `sageDark` on `surface`, `surface2`, `bg`; `text` and `accentText` on `surfaceWarm`; `text`, `sageDeep` and `sageDark` on `surfaceSage`, `text` and `sageDark` on `surfaceSageSoft`.
+- Translucent backgrounds behind text are checked composited: the hover wash `accentOnHover` over `surface` (every text token), `surface2` (`text`, `textSecondary`), `surfaceWarm` (`text`, `accentText`) and `surfaceSage` (`text`, `sageDark`); each state chip (danger/success/warn text on its own colour at 12 %) over `surface`, `surface2` and `bg`.
+- The focus ring is `accentText`: ≥ 3:1 on every one of those surfaces except the state chips. `textFaint` (decoration only) ≥ 3:1 on `surface` and `bg`. `accent` ≥ 3:1 on `surface`. `onAccent` ≥ 4.5:1 on `accentHover` and on the hovered button (`accentHover` mixed 12% toward `text`), ≥ 3:1 on `accent`. `bg` ≥ 4.5:1 on danger/success/warn fills (badge labels).
 - On the pet pill the quota fills (`sageDeep`, `accentText`, `warnText`, `dangerText`) are ≥ 3:1 on the pill and on its track.
 - Image overlays must be at least the computed minimum (and never below 0.50). The hint names the failing pair and the minimum. Reusing the built-in light text colours on an image cannot pass (`textMuted` is 4.96:1 on the built-in `bg`); pick darker text.
-- State colours keep their meaning: `dangerText` stays red (OKLCH hue 0–50° or 340–360°), `successText` green (105–170°), `warnText` amber (55–105°), each with chroma ≥ 0.05, at least ΔE 0.08 (OKLab) apart and ≥ 0.06 from the `accent` fill.
+- State colours keep their meaning: `dangerText` stays red (OKLCH hue 0–50° or 340–360°), `successText` green (105–170°), `warnText` amber (55–105°), `infoText` blue (200–290°), each with chroma ≥ 0.05, at least ΔE 0.08 (OKLab) apart and ≥ 0.06 from the `accent` fill.
+- `shadow` must be dark (relative luminance ≤ 0.05) and `highlight` light (≥ 0.7); both are opaque. The host mixes them at fixed per-mode strengths for elevation shadows, glass sheens and the pet pill.
 - The pet pill is checked over a black and a white desktop: `text` and `textMuted` ≥ 4.5:1, `quotaFill` and `quotaWarn` ≥ 3:1 on the pill and on the quota track.
 
-Omitted optional colours are derived deterministically (spec §3.5, §3.7). `accentHover` is `accent` mixed toward `text` by the first of 0.20, 0.25 … 0.60 that keeps `onAccent` at 4.5:1.
+Omitted optional colours are derived deterministically or take the mode's built-in value (spec §3.2, §3.5, §3.7): `dangerText`, `successText`, `warnText`, `scrim`, `infoText`, `shadow`, `highlight` and the `sage` family use the built-in value; the rest are derived from your required colours. `accentHover` is `accent` mixed toward `text` by the first of 0.20, 0.25 … 0.60 that keeps `onAccent` at 4.5:1.
 
 ## Safety: host-enforced invariants
 
@@ -85,8 +87,10 @@ Any plugin can follow the theme the user is looking at; this needs no permission
 | `--ap-border`, `--ap-border-soft` | Borders and dividers | Translucent |
 | `--ap-focus` | Focus ring | Equals `accent-text`, the app's own focus ring (≥ 3:1 on every surface) |
 | `--ap-danger`, `--ap-success`, `--ap-warn` | State text | ≥ 4.5:1 on `surface`/`surface-2`; hue stays red / green / amber |
-| `--ap-info` | Informational text | The host's fixed blue info colour (same as the app's), ≥ 4.5:1 on `surface`/`surface-2`/`bg` |
+| `--ap-info` | Informational text | The theme's `infoText` (built-in blue when omitted), ≥ 4.5:1 on `surface`/`surface-2`/`bg`; hue stays blue |
 | `--ap-scrim` | Modal backdrop | Alpha ≥ 0.3 |
+| `--ap-shadow` | Shadow colour (mix it with your own alpha, e.g. `color-mix(in srgb, var(--ap-shadow) 30%, transparent)`) | Opaque, relative luminance ≤ 0.05 |
+| `--ap-highlight` | Glass highlight / sheen colour | Opaque, relative luminance ≥ 0.7 |
 | `--ap-radius-sm`, `--ap-radius-md`, `--ap-radius-lg` | Corner radii | `Npx`, sm ≤ md ≤ lg |
 | `--ap-font-body`, `--ap-font-heading` | Font-family lists | Local and generic families only |
 | `--ap-font-scale` | Font-size multiplier | Unitless, 0.92–1.15 |

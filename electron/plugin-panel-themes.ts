@@ -104,12 +104,23 @@ export const PANEL_THEME_COLOR_TOKENS: readonly ColorToken[] = Object.freeze([
   { key: 'sageTrack', property: '--organic-sage-track', kind: 'derived', alpha: 'translucent', light: 'rgba(61,71,43,.16)', dark: 'rgba(201,214,173,.18)' },
   { key: 'border', property: '--organic-border', kind: 'required', alpha: 'border', light: 'rgba(32,30,29,.16)', dark: 'rgba(243,237,228,.18)' },
   { key: 'borderSoft', property: '--organic-border-soft', kind: 'derived', alpha: 'translucent', light: 'rgba(32,30,29,.1)', dark: 'rgba(243,237,228,.1)' },
-  { key: 'borderOnAccent', property: '--organic-border-on-accent', kind: 'derived', alpha: 'translucent', light: 'rgba(255,242,235,.55)', dark: 'rgba(32,30,29,.4)' },
   { key: 'dangerText', property: '--organic-danger-text', kind: 'builtin', alpha: 'opaque', light: '#a62f1e', dark: '#ff9a8a' },
   { key: 'successText', property: '--organic-success-text', kind: 'builtin', alpha: 'opaque', light: '#3f5a1c', dark: '#b6d48a' },
   { key: 'warnText', property: '--organic-warn-text', kind: 'builtin', alpha: 'opaque', light: '#7a5200', dark: '#f0c866' },
   { key: 'scrim', property: '--organic-scrim', kind: 'builtin', alpha: 'scrim', light: 'rgba(46,43,37,.42)', dark: 'rgba(0,0,0,.55)' },
+  // 擴充組（spec §16.2）：省略時取該模式的內建值，與 tokens.css 的 --builtin-organic-* 相同。
+  { key: 'infoText', property: '--organic-info-text', kind: 'builtin', alpha: 'opaque', light: '#2e5b8c', dark: '#9cc3f0' },
+  { key: 'shadow', property: '--organic-shadow', kind: 'builtin', alpha: 'opaque', light: '#2e2b25', dark: '#000000' },
+  { key: 'highlight', property: '--organic-highlight', kind: 'builtin', alpha: 'opaque', light: '#ffffff', dark: '#ffffff' },
 ])
+
+/**
+ * 已停用但仍接受的 manifest 鍵：照樣檢查文法與 alpha（原本合法的 manifest 依舊合法），
+ * 但不推導、不輸出。`borderOnAccent` 從權限卡離開強調色填色後就沒有任何介面讀取（1.12.0）。
+ */
+export const PANEL_THEME_DEPRECATED_COLOR_KEYS: Readonly<Record<string, AlphaClass>> = Object.freeze({
+  borderOnAccent: 'translucent',
+})
 
 // ── 寵物狀態膠囊 token（spec §3.7）─────────────────────────────────────
 // 「寵物視窗永不套主題」的唯一窄幅例外：寵物下方狀態膠囊的
@@ -433,7 +444,6 @@ export function derivePanelThemeColors(
   derive('accentOnHover', () => withAlpha(colors.text, 0.05))
   derive('sageTrack', () => withAlpha(colors.sageDark, 0.16))
   derive('borderSoft', () => withAlpha(colors.border, round3(colors.border.a * 0.625)))
-  derive('borderOnAccent', () => withAlpha(colors.onAccent, 0.55))
   return colors
 }
 
@@ -475,13 +485,15 @@ function firstBackdropFailure(colors: ColorSet, backdrops: readonly Backdrop[]):
   return null
 }
 
-// 狀態色必須維持語意：危險是紅、成功是綠、警告是琥珀（OKLCH 色相區間與最低色度），
+// 狀態色必須維持語意：危險是紅、成功是綠、警告是琥珀、資訊是藍（OKLCH 色相區間與最低色度），
 // 彼此之間以及與強調色之間要有最小 OKLab 色差，避免主題把「危險」畫得像「成功」或像一般按鈕。
 type HueRange = readonly [number, number]
-export const PANEL_THEME_STATE_HUES: Readonly<Record<'dangerText' | 'successText' | 'warnText', readonly HueRange[]>> = Object.freeze({
+export const PANEL_THEME_STATE_HUES: Readonly<Record<'dangerText' | 'successText' | 'warnText' | 'infoText', readonly HueRange[]>> = Object.freeze({
   dangerText: [[0, 50], [340, 360]],
   successText: [[105, 170]],
   warnText: [[55, 105]],
+  // 資訊色是藍（青藍到藍紫）；內建淺色與深色都在 252° 左右。
+  infoText: [[200, 290]],
 })
 export const PANEL_THEME_STATE_MIN_CHROMA = 0.05
 export const PANEL_THEME_STATE_MIN_DISTANCE = 0.08
@@ -503,9 +515,13 @@ function stateMeaningFailure(colors: ColorSet): { key: string; problem: string }
     ['dangerText', 'successText', PANEL_THEME_STATE_MIN_DISTANCE],
     ['dangerText', 'warnText', PANEL_THEME_STATE_MIN_DISTANCE],
     ['successText', 'warnText', PANEL_THEME_STATE_MIN_DISTANCE],
+    ['infoText', 'dangerText', PANEL_THEME_STATE_MIN_DISTANCE],
+    ['infoText', 'successText', PANEL_THEME_STATE_MIN_DISTANCE],
+    ['infoText', 'warnText', PANEL_THEME_STATE_MIN_DISTANCE],
     ['dangerText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
     ['successText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
     ['warnText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
+    ['infoText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
   ]
   for (const [first, second, minimum] of pairs) {
     const distance = oklabDistance(colors[first], colors[second])
@@ -520,11 +536,6 @@ function stateMeaningFailure(colors: ColorSet): { key: string; problem: string }
 // 每個表面上 >= 3:1、狀態色保有語意（上方的色相與色差規則）。版面、文字標籤與
 // 「按住才允許」由主機程式碼決定，主題無法改變。
 
-/** 主機固定、manifest 無法設定的顏色；必須與 tokens.css 的 --builtin-organic-info-text 相同。 */
-export const PANEL_THEME_HOST_COLORS: Readonly<Record<PanelThemeMode, Readonly<{ info: string }>>> = Object.freeze({
-  light: Object.freeze({ info: '#2e5b8c' }),
-  dark: Object.freeze({ info: '#9cc3f0' }),
-})
 /** 寵物泡泡與狀態膠囊的表面＝ surface 以此 alpha 疊在桌面上（與 tokens.css 的 color-mix 比例相同）。 */
 export const PET_BUBBLE_SURFACE_ALPHA = 0.93
 export const PET_PILL_SURFACE_ALPHA = 0.92
@@ -532,63 +543,90 @@ export const PET_PILL_SURFACE_ALPHA = 0.92
 export const PET_PILL_TRACK_ALPHA = 0.14
 /** 主要按鈕懸停＝ accentHover 往 text 混合的比例（Button.vue、InlinePermissionCard.vue）。 */
 export const PANEL_THEME_PRESSED_MIX = 0.12
+/** 陰影色必須夠暗、高光色必須夠亮（相對亮度），才不會變成一層有色的霧蓋住文字。 */
+export const PANEL_THEME_SHADOW_MAX_LUMINANCE = 0.05
+export const PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE = 0.7
+
+/** 主機在半透明狀態色底上放同色文字（Chip、Badge 的 tone-success/warn/danger）時的底色比例。 */
+export const PANEL_THEME_STATE_TINT_ALPHA = 0.12
 
 /** 文字類 token（>= 4.5:1）；焦點環用 accentText（>= 3:1）。 */
-const TEXT_KEYS = ['text', 'textSecondary', 'textMuted', 'accentText', 'dangerText', 'successText', 'warnText'] as const
-type TextKey = typeof TEXT_KEYS[number]
+const TEXT_KEYS = ['text', 'textSecondary', 'textMuted', 'accentText', 'dangerText', 'successText', 'warnText', 'infoText'] as const
+type ColorKey = PluginPanelThemeColorKey
 
 /**
  * 每個表面會出現哪些文字（依元件實際用法）。一般表面與寵物泡泡、膠囊承載所有文字、
- * 狀態與資訊色；強調淺底（surfaceWarm：分頁、晶片、徽章）只放主要文字與強調文字；
- * 鼠尾草底（成就、成長卡）只放主要文字。bg 排在最後：同時失敗時先指出卡片表面。
+ * 狀態與資訊色；強調淺底（surfaceWarm：分頁、晶片、徽章、精靈與 Project MCP 的待處理列）
+ * 只放主要文字與強調文字；鼠尾草底（成就、成長卡、精靈與 Project MCP 的就緒列）放主要文字與
+ * sageDeep／sageDark。bg 排在最後：同時失敗時先指出卡片表面。
  */
-interface Surface { name: string; color: PanelThemeRgba; blame: PluginPanelThemeColorKey; pill: boolean; text: readonly TextKey[]; info: boolean }
+interface Surface { name: string; color: PanelThemeRgba; blame?: ColorKey; pill: boolean; focus: boolean; text: readonly ColorKey[] }
 
-const OPAQUE_SURFACES: ReadonlyArray<readonly [PluginPanelThemeColorKey, readonly TextKey[], boolean]> = [
-  ['surface', TEXT_KEYS, true],
-  ['surface2', TEXT_KEYS, true],
-  ['surfaceWarm', ['text', 'accentText'], false],
-  ['surfaceSage', ['text'], false],
-  ['surfaceSageSoft', ['text'], false],
-  ['bg', TEXT_KEYS, true],
+/** 鼠尾草文字（通過的測試結果、統計數字、額度重設時間、就緒列）。只出現在面板，不在寵物介面。 */
+const PANEL_TEXT_KEYS: readonly ColorKey[] = [...TEXT_KEYS, 'sageDeep', 'sageDark']
+const OPAQUE_SURFACES: ReadonlyArray<readonly [ColorKey, readonly ColorKey[]]> = [
+  ['surface', PANEL_TEXT_KEYS],
+  ['surface2', PANEL_TEXT_KEYS],
+  ['surfaceWarm', ['text', 'accentText']],
+  ['surfaceSage', ['text', 'sageDeep', 'sageDark']],
+  ['surfaceSageSoft', ['text', 'sageDark']],
+  ['bg', PANEL_TEXT_KEYS],
 ]
+/**
+ * 懸停底（accentOnHover）：精靈與 Project MCP 的懸停按鈕與來源晶片，文字繼承自所在列，
+ * 所以依列的實際組合檢查（錯誤列＝ surface2 上的次要文字、待處理列＝ surfaceWarm 上的強調文字、
+ * 就緒與已連線列＝ surfaceSage 上的 sageDark）。失敗時指向 accentOnHover。
+ */
+const HOVER_WASH_SURFACES: ReadonlyArray<readonly [ColorKey, readonly ColorKey[]]> = [
+  ['surface', TEXT_KEYS],
+  ['surface2', ['text', 'textSecondary']],
+  ['surfaceWarm', ['text', 'accentText']],
+  ['surfaceSage', ['text', 'sageDark']],
+]
+const STATE_TINT_KEYS = ['dangerText', 'successText', 'warnText'] as const
+const STATE_TINT_BASES: readonly ColorKey[] = ['surface', 'surface2', 'bg']
 
-function hostInfo(mode: PanelThemeMode): PanelThemeRgba {
-  const parsed = parsePanelThemeColor(PANEL_THEME_HOST_COLORS[mode].info)
-  if (!parsed.ok) throw new TypeError('host info colour is not valid')
-  return parsed.color
-}
-
-/** 文字可能出現的每個表面：不透明的面板表面，以及疊在黑/白桌面上的寵物泡泡與狀態膠囊。 */
+/** 文字可能出現的每個表面：不透明的面板表面、懸停底，以及疊在黑/白桌面上的寵物泡泡與狀態膠囊。 */
 function themeSurfaces(colors: ColorSet): Surface[] {
-  const surfaces: Surface[] = OPAQUE_SURFACES.map(([key, text, info]) => ({ name: key, color: colors[key], blame: key, pill: false, text, info }))
+  const surfaces: Surface[] = OPAQUE_SURFACES.map(([key, text]) => ({ name: key, color: colors[key], pill: false, focus: true, text }))
+  for (const [base, text] of HOVER_WASH_SURFACES) {
+    surfaces.push({ name: `accentOnHover over ${base}`, color: compositeColor(colors.accentOnHover, colors[base]), blame: 'accentOnHover', pill: false, focus: true, text })
+  }
+  // 狀態色晶片：同色文字放在 12% 的同色底上；底愈濃對比愈低，所以以上限檢查。
+  for (const key of STATE_TINT_KEYS) {
+    for (const base of STATE_TINT_BASES) {
+      surfaces.push({ name: `${key} at ${PANEL_THEME_STATE_TINT_ALPHA} over ${base} (state chip)`, color: compositeColor(withAlphaUnrounded(colors[key], PANEL_THEME_STATE_TINT_ALPHA), colors[base]), pill: false, focus: false, text: [key] })
+    }
+  }
   const translucent: ReadonlyArray<readonly [string, number, boolean]> = [
     ['pet bubble', PET_BUBBLE_SURFACE_ALPHA, false],
     ['pet status pill', PET_PILL_SURFACE_ALPHA, true],
   ]
   for (const [label, alpha, pill] of translucent) {
     for (const [desktop, base] of [['black', PANEL_THEME_BLACK], ['white', PANEL_THEME_WHITE]] as const) {
-      surfaces.push({ name: `${label} over a ${desktop} desktop`, color: compositeColor(withAlphaUnrounded(colors.surface, alpha), base), blame: 'surface', pill, text: TEXT_KEYS, info: true })
+      surfaces.push({ name: `${label} over a ${desktop} desktop`, color: compositeColor(withAlphaUnrounded(colors.surface, alpha), base), pill, focus: true, text: TEXT_KEYS })
     }
   }
   return surfaces
 }
 
 /** 依固定順序找出第一個不符合的配對；同一組輸入一定得到同一個診斷。 */
-export function panelThemeInvariantFailure(colors: ColorSet, mode: PanelThemeMode): ContrastFailure | null {
-  const info = hostInfo(mode)
+export function panelThemeInvariantFailure(colors: ColorSet): ContrastFailure | null {
   const check = (foreground: PanelThemeRgba, background: PanelThemeRgba, minimum: number, names: { foreground: string; background: string; blame?: string }): ContrastFailure | null => {
     const ratio = contrastRatio(foreground, background)
     return ratio >= minimum ? null : { ...names, ratio, minimum }
   }
   for (const surface of themeSurfaces(colors)) {
+    // 懸停底是半透明的：失敗時指向 accentOnHover（文字色本身在底下的不透明表面上已通過）。
+    const blame = surface.blame
     for (const key of surface.text) {
-      const failure = check(colors[key], surface.color, 4.5, { foreground: key, background: surface.name })
+      const failure = check(colors[key], surface.color, 4.5, { foreground: key, background: surface.name, ...(blame ? { blame } : {}) })
       if (failure) return failure
     }
-    const infoFailure = surface.info ? check(info, surface.color, 4.5, { foreground: 'info (host)', background: surface.name, blame: surface.blame }) : null
-    if (infoFailure) return infoFailure
-    const focus = check(colors.accentText, surface.color, 3, { foreground: 'accentText', background: `${surface.name} (focus ring)` })
+    // 焦點環不會畫在狀態晶片上（晶片不可聚焦）。
+    const focus = surface.focus
+      ? check(colors.accentText, surface.color, 3, { foreground: 'accentText', background: `${surface.name} (focus ring)`, ...(blame ? { blame } : {}) })
+      : null
     if (focus) return focus
     if (surface.pill) {
       // 膠囊的額度條：一般（sageDeep）、Claude（accentText）、低額度（warnText）、危急（dangerText），
@@ -603,7 +641,9 @@ export function panelThemeInvariantFailure(colors: ColorSet, mode: PanelThemeMod
   }
   const pressed = mixColor(colors.accentHover, colors.text, PANEL_THEME_PRESSED_MIX)
   const pairs: ReadonlyArray<readonly [PluginPanelThemeColorKey, PanelThemeRgba, number, string]> = [
+    // textFaint 只用於裝飾（狀態點、分隔）：>= 3:1。
     ['textFaint', colors.surface, 3, 'surface'],
+    ['textFaint', colors.bg, 3, 'bg'],
     // 強調填色當圖形使用（外框、核取方塊、進度條）：>= 3:1。
     ['accent', colors.surface, 3, 'surface'],
     ['onAccent', colors.accent, 3, 'accent'],
@@ -617,11 +657,6 @@ export function panelThemeInvariantFailure(colors: ColorSet, mode: PanelThemeMod
   for (const [key, background, minimum, name] of pairs) {
     const failure = check(colors[key], background, minimum, { foreground: key, background: name })
     if (failure) return failure
-  }
-  // 資訊色與狀態色、強調色保持距離，不會被誤認成風險或按鈕。
-  for (const [key, minimum] of [['dangerText', PANEL_THEME_STATE_MIN_DISTANCE], ['successText', PANEL_THEME_STATE_MIN_DISTANCE], ['warnText', PANEL_THEME_STATE_MIN_DISTANCE], ['accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE]] as const) {
-    const distance = oklabDistance(info, colors[key])
-    if (distance < minimum) return { foreground: key, background: `OKLab ΔE ${distance.toFixed(3)} to the host info colour < ${minimum}`, ratio: distance, minimum, blame: key }
   }
   return null
 }
@@ -743,7 +778,6 @@ function gradientBackdrops(stops: ReadonlyArray<{ color: PanelThemeRgba }>): Bac
 }
 
 function failContrast(path: string, failure: ContrastFailure): never {
-  if (failure.background.startsWith('OKLab')) fail(`${path}.colors.${failure.foreground}`, failure.background)
   const subject = failure.blame ? `${failure.foreground} ${ratioText(failure.ratio)}:1` : `${ratioText(failure.ratio)}:1`
   fail(`${path}.colors.${failure.blame ?? failure.foreground}`, `${subject} < ${failure.minimum}:1 on ${failure.background}`)
 }
@@ -754,6 +788,14 @@ function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contri
   if (!isRecord(value.colors)) fail(`${path}.colors`, 'is required')
   const declared: Partial<Record<PluginPanelThemeColorKey, PanelThemeRgba>> = {}
   for (const [key, raw] of Object.entries(value.colors)) {
+    const deprecated = Object.hasOwn(PANEL_THEME_DEPRECATED_COLOR_KEYS, key) ? PANEL_THEME_DEPRECATED_COLOR_KEYS[key]! : null
+    if (deprecated) {
+      // 停用的鍵只檢查、不保留（見 PANEL_THEME_DEPRECATED_COLOR_KEYS）。
+      const [min, max] = ALPHA_RANGES[deprecated]
+      const alpha = colorAt(raw, `${path}.colors.${key}`).a
+      if (alpha < min || alpha > max) fail(`${path}.colors.${key}`, `alpha must be ${min}-${max}`)
+      continue
+    }
     const token = TOKEN_BY_KEY.get(key)
     if (!token) fail(`${path}.colors`, 'unknown key')
     declared[token.key] = colorAt(raw, `${path}.colors.${token.key}`)
@@ -778,13 +820,21 @@ function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contri
   if (mode === 'dark' && !(textLuminance > bgLuminance && bgLuminance <= 0.12)) {
     fail(`${path}.colors.bg`, 'dark mode needs a dark bg (luminance <= 0.12) and lighter text')
   }
+  const shadowLuminance = relativeLuminance(colors.shadow)
+  if (shadowLuminance > PANEL_THEME_SHADOW_MAX_LUMINANCE) {
+    fail(`${path}.colors.shadow`, `luminance ${shadowLuminance.toFixed(3)} > ${PANEL_THEME_SHADOW_MAX_LUMINANCE} (a shadow must be dark)`)
+  }
+  const highlightLuminance = relativeLuminance(colors.highlight)
+  if (highlightLuminance < PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE) {
+    fail(`${path}.colors.highlight`, `luminance ${highlightLuminance.toFixed(3)} < ${PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE} (a highlight must be light)`)
+  }
 
   const background = parseBackground(value.background, `${path}.background`)
   const backdrops: Backdrop[] = [{ name: 'bg', color: colors.bg }]
   if (background.type === 'gradient') backdrops.push(...gradientBackdrops(background.stops))
   const meaningFailure = stateMeaningFailure(colors)
   if (meaningFailure) fail(`${path}.colors.${meaningFailure.key}`, meaningFailure.problem)
-  const invariantFailure = panelThemeInvariantFailure(colors, mode)
+  const invariantFailure = panelThemeInvariantFailure(colors)
   if (invariantFailure) failContrast(path, invariantFailure)
   const backdropFailure = firstBackdropFailure(colors, backdrops)
   if (backdropFailure) failContrast(path, backdropFailure)

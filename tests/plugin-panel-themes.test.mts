@@ -15,7 +15,8 @@ import {
   PanelThemeValidationError,
   resolvePanelThemes,
   type PanelThemeSourcePlugin,
-  PANEL_THEME_HOST_COLORS,
+  PANEL_THEME_DEPRECATED_COLOR_KEYS,
+  PANEL_THEME_STATE_TINT_ALPHA,
   PANEL_THEME_PRESSED_MIX,
   builtinPanelThemeColors,
   panelThemeInvariantFailure,
@@ -74,7 +75,7 @@ test('derived tokens follow the documented formulas', () => {
   assert.equal(colors.accentOnHover.a, 0.05)
   assert.equal(colors.sageTrack.a, 0.16)
   assert.equal(colors.borderSoft.a, Math.round(0.18 * 0.625 * 1000) / 1000)
-  assert.equal(colors.borderOnAccent.a, 0.55)
+  assert.equal('borderOnAccent' in colors, false)
   // "B" token 會退回該模式的內建值。
   assert.deepEqual(colors.dangerText, color('#a62f1e'))
   assert.deepEqual(derivePanelThemeColors(declared, 'dark').dangerText, color('#ff9a8a'))
@@ -235,7 +236,7 @@ test('structure: ids, counts, bilingual text, unknown keys and duplicates', () =
   assert.doesNotMatch(diagnostic, /onerror|</)
 })
 
-test('resolved themes always carry all 29 colour properties and the built-in palette is canonical', () => {
+test('resolved themes always carry all 31 colour properties and the built-in palette is canonical', () => {
   const themes = resolvePanelThemes([theme()])!
   const state = buildPanelThemeState([source(themes)], emptyStore(), resolver())
   assert.deepEqual(Object.keys(state.themes[0]!.modes.light!.properties), [...PANEL_THEME_COLOR_PROPERTIES])
@@ -325,24 +326,96 @@ test('state colours keep their meaning: OKLCH hue bands, minimum chroma and OKLa
 })
 
 test('host invariants: every text token on every surface it appears on, bubbles and the pill over black and white desktops', () => {
-  for (const mode of ['light', 'dark'] as const) assert.equal(panelThemeInvariantFailure(builtinPanelThemeColors(mode), mode), null, mode)
+  for (const mode of ['light', 'dark'] as const) assert.equal(panelThemeInvariantFailure(builtinPanelThemeColors(mode)), null, mode)
   // 泡泡與膠囊是 surface 疊在桌面上；太透明的組合會在其中一種桌面上失敗。
   const light = builtinPanelThemeColors('light')
-  const failure = panelThemeInvariantFailure({ ...light, surface: { r: 120, g: 120, b: 120, a: 1 } }, 'light')
+  const failure = panelThemeInvariantFailure({ ...light, surface: { r: 120, g: 120, b: 120, a: 1 } })
   assert.ok(failure && failure.minimum >= 3, JSON.stringify(failure))
-  // 主機固定的資訊色也必須在主題表面上可讀；失敗時指向表面而不是 info。
+  // 資訊色和其他文字色一樣要在主題表面上可讀；失敗時指向 infoText（省略時是內建值，作者可以自行宣告）。
   const black = { r: 0, g: 0, b: 0, a: 1 }
   const inked = { ...light, text: black, textSecondary: black, textMuted: black, accentText: black, dangerText: black, successText: black, warnText: black }
-  const infoFailure = panelThemeInvariantFailure({ ...inked, surface: { r: 150, g: 170, b: 200, a: 1 } }, 'light')
-  assert.equal(infoFailure?.foreground, 'info (host)')
-  assert.equal(infoFailure?.blame, 'surface')
+  const infoFailure = panelThemeInvariantFailure({ ...inked, surface: { r: 150, g: 170, b: 200, a: 1 } })
+  assert.equal(infoFailure?.foreground, 'infoText')
+  // 懸停底（accentOnHover）疊在表面上後，文字仍要 >= 4.5:1；失敗時指向 accentOnHover。
+  const washed = panelThemeInvariantFailure({ ...light, accentOnHover: { ...light.text, a: 0.6 } })
+  assert.equal(washed?.blame, 'accentOnHover')
+  assert.match(washed!.background, /^accentOnHover over surface/)
   // 主要按鈕懸停（往 text 混 12%）的標籤也要 >= 4.5:1。
   assert.equal(PANEL_THEME_PRESSED_MIX, 0.12)
-  // 寵物泡泡、膠囊與 tokens.css 用同樣的比例。
-  const tokens = readFileSync('src/styles/tokens.css', 'utf8')
-  assert.match(tokens, new RegExp(`--builtin-organic-info-text: ${PANEL_THEME_HOST_COLORS.light.info};`))
-  assert.match(tokens, new RegExp(`--builtin-organic-info-text: ${PANEL_THEME_HOST_COLORS.dark.info};`))
   for (const file of ['src/components/ui/Button.vue', 'src/components/ui/InlinePermissionCard.vue']) {
     assert.match(readFileSync(file, 'utf8'), new RegExp(`var\\(--accent-hover(?:, var\\(--accent\\))?\\) ${100 - PANEL_THEME_PRESSED_MIX * 100}%, var\\(--text-primary\\)`), file)
   }
+})
+
+test('the built-in token table matches the --builtin-organic-* values in tokens.css for both modes', () => {
+  const css = readFileSync('src/styles/tokens.css', 'utf8')
+  const block = (selector: string) => {
+    const start = css.indexOf(`${selector} {`)
+    return css.slice(start, css.indexOf('\n}', start))
+  }
+  const light = block(':root')
+  const dark = block(":root[data-theme='dark']")
+  const value = (source: string, name: string) => new RegExp(`\\n  ${name}: ([^;]+);`).exec(source)?.[1]
+  for (const token of PANEL_THEME_COLOR_TOKENS) {
+    const name = token.property.replace('--organic-', '--builtin-organic-')
+    const lightCss = value(light, name)
+    const darkCss = value(dark, name) ?? lightCss
+    assert.ok(lightCss, name)
+    assert.deepEqual(color(lightCss!), color(token.light), `${name} light`)
+    assert.deepEqual(color(darkCss!), color(token.dark), `${name} dark`)
+  }
+})
+
+test('extended keys: infoText keeps its hue and distance, shadow stays dark and highlight light', () => {
+  const withColors = (overrides: Record<string, string>) => [lightTheme({ colors: { ...LIGHT_COLORS, ...overrides } })]
+  const [declared] = parsePanelThemes(withColors({ infoText: '#1f5f99', shadow: '#10202a', highlight: '#f4fbff' })).themes
+  assert.deepEqual(declared!.modes.light!.colors.infoText, color('#1f5f99'))
+  assert.deepEqual(declared!.modes.light!.colors.shadow, color('#10202a'))
+  assert.deepEqual(declared!.modes.light!.colors.highlight, color('#f4fbff'))
+  // 省略時取該模式的內建值。
+  const [omitted] = parsePanelThemes([theme()]).themes
+  assert.deepEqual(omitted!.modes.dark!.colors.infoText, color('#9cc3f0'))
+  assert.deepEqual(omitted!.modes.dark!.colors.shadow, color('#000000'))
+  rejects(withColors({ infoText: '#a62f1e' }), /colors\.infoText: OKLCH hue \d+° is outside 200–290°/)
+  rejects(withColors({ infoText: '#555b66' }), /colors\.infoText: chroma/)
+  rejects(withColors({ infoText: '#7fa6cc' }), /colors\.infoText: \d\.\d\d:1 < 4\.5:1 on surface/)
+  rejects(withColors({ infoText: 'rgb(31 95 153 / 0.5)' }), /colors\.infoText: must be opaque/)
+  rejects(withColors({ shadow: '#8a8070' }), /colors\.shadow: luminance 0\.\d+ > 0\.05/)
+  rejects(withColors({ highlight: '#8a8070' }), /colors\.highlight: luminance 0\.\d+ < 0\.7/)
+  rejects(withColors({ shadow: 'rgb(0 0 0 / 0.4)' }), /colors\.shadow: must be opaque/)
+})
+
+test('deprecated borderOnAccent is accepted, checked like before and never emitted', () => {
+  assert.deepEqual(Object.keys(PANEL_THEME_DEPRECATED_COLOR_KEYS), ['borderOnAccent'])
+  const { contributions, themes } = parsePanelThemes([lightTheme({ colors: { ...LIGHT_COLORS, borderOnAccent: 'rgb(255 255 255 / 0.55)' } })])
+  assert.equal('borderOnAccent' in contributions[0]!.modes.light!.colors, false)
+  assert.equal('borderOnAccent' in themes[0]!.modes.light!.colors, false)
+  rejects([lightTheme({ colors: { ...LIGHT_COLORS, borderOnAccent: 'red' } })], /colors\.borderOnAccent: not an allowed colour/)
+  rejects([lightTheme({ colors: { ...LIGHT_COLORS, borderOnAccent: '#ffffff' } })], /colors\.borderOnAccent: alpha must be 0\.02-0\.95/)
+  // 它的屬性已從允許清單移除。
+  assert.equal(PANEL_THEME_COLOR_PROPERTIES.includes('--organic-border-on-accent' as never), false)
+})
+
+test('the schema fragment and the public d.ts list exactly the runtime colour keys plus the deprecated ones', () => {
+  const runtime = [...PANEL_THEME_COLOR_TOKENS.map(token => token.key), ...Object.keys(PANEL_THEME_DEPRECATED_COLOR_KEYS)].sort()
+  const schema = JSON.parse(readFileSync('docs/plugins/plugin.schema.json', 'utf8')) as { $defs: { panelThemeColors: { properties: Record<string, { deprecated?: boolean }>; required: string[] } } }
+  const colors = schema.$defs.panelThemeColors
+  assert.deepEqual(Object.keys(colors.properties).sort(), runtime)
+  assert.deepEqual([...colors.required].sort(), PANEL_THEME_COLOR_TOKENS.filter(token => token.kind === 'required').map(token => token.key).sort())
+  for (const key of Object.keys(PANEL_THEME_DEPRECATED_COLOR_KEYS)) assert.equal(colors.properties[key]!.deprecated, true, key)
+  const declaration = readFileSync('docs/plugins/agent-pets-plugin.d.ts', 'utf8')
+  const block = declaration.slice(declaration.indexOf('export interface PluginPanelThemeColors {'), declaration.indexOf('export interface PluginPanelThemeOverlay'))
+  assert.deepEqual([...block.matchAll(/^ {2}([a-zA-Z0-9]+)\??: PluginPanelThemeColor$/gm)].map(match => match[1]).sort(), runtime)
+})
+
+test('state chips tint at the validated alpha and the components that host sage text use validated pairs', () => {
+  for (const file of ['src/components/ui/Chip.vue', 'src/components/ui/Badge.vue']) {
+    for (const match of readFileSync(file, 'utf8').matchAll(/color-mix\(in srgb, var\(--state-[a-z-]+\) (\d+)%, transparent\)/g)) {
+      assert.equal(Number(match[1]) / 100, PANEL_THEME_STATE_TINT_ALPHA, file)
+    }
+  }
+  // 狀態晶片的底愈濃對比愈低：在 12% 的同色底上不足 4.5:1 的狀態色會被拒絕。
+  const light = builtinPanelThemeColors('light')
+  const failure = panelThemeInvariantFailure({ ...light, warnText: color('#8a6100') })
+  assert.match(failure?.background ?? '', /^warnText at 0\.12 over surface \(state chip\)$/)
 })

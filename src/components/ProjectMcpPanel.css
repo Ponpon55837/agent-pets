@@ -173,7 +173,8 @@
 }
 
 .mcp-project-status.status-warn {
-  background: var(--organic-accent-contrast);
+  /* accentText 在 surface 上 >= 4.5:1；在 onAccent 上沒有保證。 */
+  background: var(--organic-surface);
   color: var(--organic-accent-text);
 }
 
@@ -199,7 +200,7 @@
 .mcp-client-list span {
   padding: 2px 10px;
   border-radius: var(--radius-pill);
-  background: var(--organic-accent-on-hover);
+  background: var(--color-hover);
 }
 
 .mcp-project-actions {
@@ -220,7 +221,7 @@
 .mcp-project-card.project-connected,
 .mcp-project-card.project-partial {
   background: var(--organic-surface-sage);
-  color: var(--organic-sage-deep);
+  color: var(--organic-sage-dark);
 }
 
 .mcp-project-card.project-conflict,

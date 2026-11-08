@@ -23,6 +23,7 @@ Decided during implementation on `feat/panel-themes`. The manifest shape, field 
 | R13 | §16.4 | Implemented in 1.12.0 (step 1 of §16): the `--ap-*` read API. 24 tokens (`src/types/plugin-theme.ts`, table in `docs/plugins/panel-themes.md`) built in main from the active slot for the panel's effective mode (`panel-theme-appearance-set`, panel main frame only, `{ mode, forcedColors }`), built-in under `forced-colors` or without an active slot. Host font aliases are dropped from the family lists (they are registered only in the settings panel and are salt-derived identifiers). `theme.get()` / `theme.onDidChange` in the Worker and panel bridge, no permission; pushes are coalesced (100 ms) and de-duplicated at send time; panel pages also get the tokens on `<html>`. `--ap-focus` = accent, `--ap-info` = accentText until the manifest gains an info colour (changed by R14: `--ap-focus` = accentText like the app's focus ring, `--ap-info` = the host info colour). |
 | R14 | §3.6, §6.1, §8, §9, §16.3 | Implemented in 1.12.0 (step 2 of §16): one semantic layer for every surface and **host-enforced invariants instead of protected regions**. `.host-protected` is removed; the theme is applied on the panel window's `<html>` and `tokens.css` derives `--color-*` and the legacy `--surface/--text/--accent/--border/--state-*` names from `--organic-*` on `:root`. Invariants (`panelThemeInvariantFailure`, per mode, after the R12 hue rules): every text token (`text`, `textSecondary`, `textMuted`, `accentText`, `dangerText`, `successText`, `warnText`, host `info`) ≥ 4.5 on `surface`, `surface2`, `bg` and on the pet bubble (`surface` α 0.93) and pill (`surface` α 0.92) composited over black and white; `text`/`accentText` on `surfaceWarm`; `text` on `surfaceSage`/`surfaceSageSoft`; focus ring = `accentText` ≥ 3 on all of them; pill quota fills (`sageDeep`, `accentText`, `warnText`, `dangerText`) ≥ 3 on the pill and its track (`text` α 0.14); `accent` ≥ 3 on `surface`; `onAccent` ≥ 4.5 on `accentHover` and on `mix(accentHover, text, 0.12)` (hovered primary button), ≥ 3 on `accent`; `bg` ≥ 4.5 on danger/success/warn fills (badges); host `info` at OKLab ΔE ≥ 0.08 from the state colours and ≥ 0.06 from `accent`. A host-colour failure names the surface key. Layout, labels, risk badge text and hold-to-allow stay host code. |
 | R15 | §3.7, §16.1, §16.5 | Implemented in 1.12.0 (step 2 of §16): the pet window is themed. Bubbles (`surface` α 0.93), the pill (`surface` α 0.92, track `text` α 0.14), the glass layer, badges (`bg` label on state fills), state dots (`STATE_COLORS` are `var(--state-*)`: success/danger/warn text, thinking/tool `accentText`, idle `textMuted`, offline `textFaint`) and quota bars (normal `sageDeep`, Claude `accentText`, low `warnText`, critical `dangerText`) derive from the palette of the pet appearance's mode; the R14 invariants cover them over black and white desktops. Agent brand: Claude uses the `sage` family (identity, always labelled), not a theme-proof constant. The sprite aura falls back to `--organic-highlight`. Only colours reach the pet window (`PET_THEME_COLOR_PROPERTIES` + `petStatus`). |
+| R16 | §2.3, §2.4, §3.2, §3.5, §6.1, §16.2 | Implemented in 1.12.0 (step 3 of §16): extended manifest keys `infoText`, `shadow`, `highlight` (optional, opaque, "B": the mode's built-in value when omitted; the host palette entries `info-text`, `shadow`, `highlight` are now themable, 31 colour properties). `infoText` joins the R12 rules (OKLCH hue 200–290°, chroma ≥ 0.05, ΔE ≥ 0.08 from danger/success/warn, ≥ 0.06 from `accent`) and the R14 text matrix; `shadow` relative luminance ≤ 0.05, `highlight` ≥ 0.7. `borderOnAccent` is deprecated: accepted, grammar- and alpha-checked, never emitted (`PANEL_THEME_DEPRECATED_COLOR_KEYS`). `accentOnHover` stays: it is the hover wash `--color-hover` of the setup wizard and Project MCP panel. The R14 matrix gains every pair the components actually render (audited from `background`/`color` rules): `sageDeep`/`sageDark` text on `surface`, `surface2`, `bg`, `surfaceSage` (+ `sageDark` on `surfaceSageSoft`); the `accentOnHover` wash over `surface`/`surface2`/`surfaceWarm`/`surfaceSage` with the text of those rows; danger/success/warn chips (own colour at 0.12, `PANEL_THEME_STATE_TINT_ALPHA`) over `surface`/`surface2`/`bg`; `textFaint` ≥ 3 on `bg`. Components that drew text on unvalidated pairs now use validated ones (badge on an active segment = `accentHover` on `onAccent`; "new" achievement badge = `onAccent` on `accentHover`; wizard/MCP pending chips = `accentText` on `surface`). `--ap-info` = the theme's `infoText`; `--ap-shadow` and `--ap-highlight` are added (26 tokens). |
 | R11 | §3.1 | `--panel-theme-background` and the `--pet-status-*` hooks are declared `initial` (guaranteed-invalid) in `tokens.css`, so `var()` fallbacks apply until a theme sets them. |
 
 ## 1. Goals / non-goals
@@ -367,11 +368,14 @@ Internal (`src/types/plugin.ts`): add `panelThemes: { implementationFile: 'elect
 | `sageTrack` | `--organic-sage-track` | D | no | `rgba(61,71,43,.16)` | `rgba(201,214,173,.18)` |
 | `border` | `--organic-border` | R | no | `rgba(32,30,29,.16)` | `rgba(243,237,228,.18)` |
 | `borderSoft` | `--organic-border-soft` | D | no | `rgba(32,30,29,.1)` | `rgba(243,237,228,.1)` |
-| `borderOnAccent` | `--organic-border-on-accent` | D | no | `rgba(255,242,235,.55)` | `rgba(32,30,29,.4)` |
+| `borderOnAccent` | (none; deprecated, R16) | — | no | accepted and ignored | accepted and ignored |
 | `dangerText` | `--organic-danger-text` | B | yes | `#a62f1e` | `#ff9a8a` |
 | `successText` | `--organic-success-text` | B | yes | `#3f5a1c` | `#b6d48a` |
 | `warnText` | `--organic-warn-text` | B | yes | `#7a5200` | `#f0c866` |
 | `scrim` | `--organic-scrim` | B | no (alpha ≥ 0.3) | `rgba(46,43,37,.42)` | `rgba(0,0,0,.55)` |
+| `infoText` (R16) | `--organic-info-text` | B | yes | `#2e5b8c` | `#9cc3f0` |
+| `shadow` (R16) | `--organic-shadow` | B | yes (luminance ≤ 0.05) | `#2e2b25` | `#000000` |
+| `highlight` (R16) | `--organic-highlight` | B | yes (luminance ≥ 0.7) | `#ffffff` | `#ffffff` |
 
 Translucent tokens have alpha 0.02–0.95, except `border` 0.08–1 and `scrim` 0.3–0.9.
 
@@ -417,9 +421,9 @@ Not themable: `--organic-space-*`, weights, shadows (`--organic-*-shadow` keep b
 - `accentHover = mix(accent, text, 0.2)` (darker in light mode, lighter in dark mode, like the built-in values)
 - `accentGlow = withAlpha(accent, 0.22)`; `accentTrack = withAlpha(text, 0.08)`; `accentOnHover = withAlpha(text, 0.05)`
 - `sageTrack = withAlpha(sageDark, 0.16)`
-- `borderSoft = withAlpha(border, round3(alpha(border) × 0.625))`; `borderOnAccent = withAlpha(onAccent, 0.55)`
+- `borderSoft = withAlpha(border, round3(alpha(border) × 0.625))` (`borderOnAccent` is no longer derived, R16)
 
-The resolved set always contains all 29 colour properties, plus 2 family, 9 size and 3 radius properties. The renderer sets exactly this allowlisted set (`PANEL_THEME_CSS_PROPERTIES` in `src/types/panel-theme.ts`).
+The resolved set always contains all 31 colour properties (R16), plus 2 family, 9 size and 3 radius properties. The renderer sets exactly this allowlisted set (`PANEL_THEME_CSS_PROPERTIES` in `src/types/panel-theme.ts`).
 
 ### 3.6 Required `tokens.css` refactor (protected scopes)
 
@@ -1009,7 +1013,7 @@ Order: (1) merge the validator change (§10.2), (2) release Agent Pets 1.12.0, (
 
 ## 16. Phase 2 (in progress): one theme for every surface
 
-Requested after this phase was built. It supersedes "panel-only" and "protected regions never themed". Item 4 is implemented (R13); items 1, 3 and 5 are implemented (R14, R15). Item 2 (manifest keys for the extended set) is the next step of the same 1.12.0 release and work from the raw-colour inventory in `docs/design/theme-token-audit.md`.
+Requested after this phase was built. It supersedes "panel-only" and "protected regions never themed". All five items are implemented in 1.12.0: item 4 (R13), items 1, 3 and 5 (R14, R15), item 2 (R16).
 
 1. **One semantic token layer** for both windows: surface levels (base, raised, sunken, overlay), text levels, accent / onAccent / accentHover, border / divider, focus ring, scrim, input bg/border, state success/warn/error/info with on-colours, tooltip / popover / menu surfaces, toast, pet pill and bubble surfaces. Every `src/**` colour, radius and font goes through it; `check:design:strict` fails on any raw colour outside `tokens.css`.
 2. **Manifest**: `modes.<mode>.colors` grows to the full semantic set (current required core + optional extended keys derived from the core). Typography and shape apply app-wide. Background images stay limited to the panel/dialog backdrop.

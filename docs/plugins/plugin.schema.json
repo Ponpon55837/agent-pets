@@ -661,6 +661,8 @@
           "$ref": "#/$defs/panelThemeColor"
         },
         "borderOnAccent": {
+          "description": "Deprecated in 1.12.0 and ignored: no surface reads it. Still accepted (and grammar-checked) so existing manifests stay valid.",
+          "deprecated": true,
           "$ref": "#/$defs/panelThemeColor"
         },
         "dangerText": {
@@ -673,6 +675,18 @@
           "$ref": "#/$defs/panelThemeColor"
         },
         "scrim": {
+          "$ref": "#/$defs/panelThemeColor"
+        },
+        "infoText": {
+          "description": "Opaque informational (blue) text. Optional; defaults to the built-in value for the mode. OKLCH hue 200–290°, chroma ≥ 0.05.",
+          "$ref": "#/$defs/panelThemeColor"
+        },
+        "shadow": {
+          "description": "Opaque shadow colour (relative luminance ≤ 0.05). Optional; defaults to the built-in value for the mode.",
+          "$ref": "#/$defs/panelThemeColor"
+        },
+        "highlight": {
+          "description": "Opaque glass highlight colour (relative luminance ≥ 0.7). Optional; defaults to white.",
           "$ref": "#/$defs/panelThemeColor"
         }
       }

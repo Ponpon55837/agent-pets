@@ -107,16 +107,15 @@
   --builtin-organic-text-faint: #8a8070; /* decorative only (>= 3:1); never for text */
   --builtin-organic-border: rgba(32, 30, 29, 0.16);
   --builtin-organic-border-soft: rgba(32, 30, 29, 0.1);
-  --builtin-organic-border-on-accent: rgba(255, 242, 235, 0.55);
   --builtin-organic-sage-track: rgba(61, 71, 43, 0.16);
   --builtin-organic-accent-track: rgba(32, 30, 29, 0.08);
   --builtin-organic-accent-glow: rgba(198, 113, 57, 0.2);
   --builtin-organic-accent-on-hover: rgba(32, 30, 29, 0.05);
   --builtin-organic-scrim: rgba(46, 43, 37, 0.42);
-  /* 主機固定、主題不能設定的色盤項目（尚無 manifest 鍵）：
-     info-text 是資訊色（藍），與危險/成功/警告及強調色保持 OKLab 距離；
-     shadow 是陰影色、highlight 是玻璃高光（白）。驗證器以同一組內建值檢查
-     主題的對比（electron/plugin-panel-themes.ts PANEL_THEME_HOST_COLORS）。 */
+  /* 擴充組（manifest 鍵 infoText、shadow、highlight，省略時用這裡的值）：
+     info-text 是資訊色（藍，色相受限並與危險/成功/警告及強調色保持 OKLab 距離）；
+     shadow 是陰影色（必須夠暗）、highlight 是玻璃高光（必須夠亮）。
+     與 electron/plugin-panel-themes.ts PANEL_THEME_COLOR_TOKENS 的內建值相同（有測試比對）。 */
   --builtin-organic-info-text: #2e5b8c;
   --builtin-organic-shadow: #2e2b25;
   --builtin-organic-highlight: #ffffff;
@@ -181,7 +180,6 @@
   --organic-sage-track: var(--builtin-organic-sage-track);
   --organic-border: var(--ap-border, var(--builtin-organic-border));
   --organic-border-soft: var(--ap-border-soft, var(--builtin-organic-border-soft));
-  --organic-border-on-accent: var(--builtin-organic-border-on-accent);
   --organic-danger-text: var(--ap-danger, var(--builtin-organic-danger-text));
   --organic-success-text: var(--ap-success, var(--builtin-organic-success-text));
   --organic-warn-text: var(--ap-warn, var(--builtin-organic-warn-text));
@@ -201,8 +199,8 @@
   --organic-radius-md: var(--builtin-organic-radius-md);
   --organic-radius-lg: var(--builtin-organic-radius-lg);
   --organic-info-text: var(--ap-info, var(--builtin-organic-info-text));
-  --organic-shadow: var(--builtin-organic-shadow);
-  --organic-highlight: var(--builtin-organic-highlight);
+  --organic-shadow: var(--ap-shadow, var(--builtin-organic-shadow));
+  --organic-highlight: var(--ap-highlight, var(--builtin-organic-highlight));
   --organic-panel-shadow: 0 12px 32px color-mix(in srgb, var(--organic-shadow) 32%, transparent);
   --organic-card-shadow: 0 1px 2px color-mix(in srgb, var(--organic-shadow) 14%, transparent);
   --organic-hero-shadow: 0 3px 10px color-mix(in srgb, var(--organic-shadow) 16%, transparent);
@@ -242,6 +240,8 @@
   --color-focus: var(--organic-accent-text);
   --color-shadow: var(--organic-shadow);
   --color-highlight: var(--organic-highlight);
+  /* 懸停／晶片的淡色底（文字繼承自所在列；驗證器檢查每個文字色疊在 surface、surface2、bg 上的結果）。 */
+  --color-hover: var(--organic-accent-on-hover);
 
   /* 舊名稱：元件與插件頁面（_shared/tokens.css）仍使用這些名稱，一律指向語意層。 */
   --surface-panel: var(--color-bg);
@@ -357,6 +357,8 @@
   --ap-warn: initial;
   --ap-info: initial;
   --ap-scrim: initial;
+  --ap-shadow: initial;
+  --ap-highlight: initial;
 }
 
 /* ── 寵物狀態膠囊主題掛鉤 ─────────────────────────────────────────
@@ -473,7 +475,6 @@
   --builtin-organic-text-faint: #8d8374;
   --builtin-organic-border: rgba(243, 237, 228, 0.18);
   --builtin-organic-border-soft: rgba(243, 237, 228, 0.1);
-  --builtin-organic-border-on-accent: rgba(32, 30, 29, 0.4);
   --builtin-organic-sage-track: rgba(201, 214, 173, 0.18);
   --builtin-organic-accent-track: rgba(243, 237, 228, 0.1);
   --builtin-organic-accent-glow: rgba(217, 134, 82, 0.28);

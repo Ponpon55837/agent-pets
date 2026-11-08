@@ -21,7 +21,7 @@
 | `typography.scale` | 0.92–1.15，最多兩位小數；字級不會小於 11 px |
 | `shape` | `radiusSm` 0–16、`radiusMd` 0–24、`radiusLg` 0–32（整數），且 `Sm ≤ Md ≤ Lg` |
 | `modes.light`／`modes.dark` | 至少一個；只有單一模式的主題只會出現在該模式 |
-| `colors` | 10 個必填（`bg`、`surface`、`surface2`、`text`、`textSecondary`、`textMuted`、`accent`、`accentText`、`onAccent`、`border`）與選填鍵，完整表格見規格 §3.2 |
+| `colors` | 10 個必填（`bg`、`surface`、`surface2`、`text`、`textSecondary`、`textMuted`、`accent`、`accentText`、`onAccent`、`border`）與選填鍵（規格 §3.2）：`surfaceWarm`、`surfaceSage`、`surfaceSageSoft`、`surfaceOff`、`textFaint`、`accentHover`、`accentGlow`、`accentTrack`、`accentOnHover`、`sage`、`sageDeep`、`sageDark`、`sageTrack`、`borderSoft`、`dangerText`、`successText`、`warnText`、`scrim`、`infoText`、`shadow`、`highlight`。`borderOnAccent` 已停用：仍接受並檢查，但會被忽略 |
 | `background` | `solid`（預設）、`gradient`（`linear` 搭配 `angle` 0–359，或 `radial` 搭配 `position`；2–5 個不透明且位置不遞減的色標）或 `image`（套件內 `.png`／`.webp`、`fit`、`position`、`opacity` 0.2–1、`blur` 0–24，以及必填且不透明的 `overlay`，`opacity` 0.5–0.95） |
 | `userImage` | `{ "allowed": true, "overlay": {…}, "fit"? }`：允許使用者為該模式匯入自己的背景圖 |
 | `petStatus` | 寵物狀態列顏色：`background`（alpha 0.85–1）與 `text` 必填；`border`、`textMuted`、`quotaFill`、`quotaTrack`、`quotaWarn` 選填 |
@@ -34,14 +34,16 @@
 
 - 淺色模式的 `bg` 必須夠亮（亮度 ≥ 0.45）且文字較暗；深色模式的 `bg` 必須夠暗（≤ 0.12）且文字較亮。
 - 主要、次要、淡化與強調文字在 `bg`、每個漸層色標與中間點、以及圖片背景（以最黑與最白像素計算）上都要 ≥ 4.5:1，`accent` ≥ 3:1。
-- 每個文字 token 在它可能出現的每個表面上都 ≥ 4.5:1：各級文字、`accentText`、危險／成功／警告文字與主機固定的藍色資訊色，在 `surface`、`surface2`、`bg`，以及疊在最黑與最白桌面上的寵物泡泡（`surface` 0.93）與狀態列（`surface` 0.92）上；`text` 與 `accentText` 在 `surfaceWarm` 上；`text` 在 `surfaceSage`、`surfaceSageSoft` 上。
-- 焦點環使用 `accentText`：在上述每個表面上 ≥ 3:1。`accent` 在 `surface` 上 ≥ 3:1。`onAccent` 在 `accentHover` 與懸停中的按鈕（`accentHover` 往 `text` 混合 12%）上 ≥ 4.5:1、在 `accent` 上 ≥ 3:1。`bg` 在危險／成功／警告填色上 ≥ 4.5:1（徽章文字）。
+- 每個文字 token 在它可能出現的每個表面上都 ≥ 4.5:1：各級文字、`accentText`、危險／成功／警告／資訊文字，在 `surface`、`surface2`、`bg`，以及疊在最黑與最白桌面上的寵物泡泡（`surface` 0.93）與狀態列（`surface` 0.92）上；`sageDeep` 與 `sageDark` 在 `surface`、`surface2`、`bg` 上；`text` 與 `accentText` 在 `surfaceWarm` 上；`text`、`sageDeep`、`sageDark` 在 `surfaceSage` 上，`text` 與 `sageDark` 在 `surfaceSageSoft` 上。
+- 文字後方的半透明底以合成後的顏色檢查：懸停底 `accentOnHover` 疊在 `surface`（所有文字 token）、`surface2`（`text`、`textSecondary`）、`surfaceWarm`（`text`、`accentText`）與 `surfaceSage`（`text`、`sageDark`）上；狀態晶片（危險／成功／警告文字放在 12% 的同色底上）疊在 `surface`、`surface2`、`bg` 上。
+- 焦點環使用 `accentText`：在上述每個表面（狀態晶片除外）上 ≥ 3:1。`textFaint`（只用於裝飾）在 `surface` 與 `bg` 上 ≥ 3:1。`accent` 在 `surface` 上 ≥ 3:1。`onAccent` 在 `accentHover` 與懸停中的按鈕（`accentHover` 往 `text` 混合 12%）上 ≥ 4.5:1、在 `accent` 上 ≥ 3:1。`bg` 在危險／成功／警告填色上 ≥ 4.5:1（徽章文字）。
 - 寵物狀態列上的配額條（`sageDeep`、`accentText`、`warnText`、`dangerText`）在狀態列與配額軌道上 ≥ 3:1。
 - 圖片遮罩不得低於計算出的最小值（且永遠不低於 0.50），提示會列出失敗的配對與最小值。在圖片上沿用內建淺色文字一定無法通過（`textMuted` 在內建 `bg` 上只有 4.96:1），請改用更深的文字色。
-- 狀態色必須保持語意：`dangerText` 維持紅色（OKLCH 色相 0–50° 或 340–360°）、`successText` 綠色（105–170°）、`warnText` 琥珀色（55–105°），色度皆 ≥ 0.05，三者之間的 OKLab 色差 ≥ 0.08，與 `accent` 填色 ≥ 0.06。
+- 狀態色必須保持語意：`dangerText` 維持紅色（OKLCH 色相 0–50° 或 340–360°）、`successText` 綠色（105–170°）、`warnText` 琥珀色（55–105°）、`infoText` 藍色（200–290°），色度皆 ≥ 0.05，彼此之間的 OKLab 色差 ≥ 0.08，與 `accent` 填色 ≥ 0.06。
+- `shadow` 必須夠暗（相對亮度 ≤ 0.05）、`highlight` 必須夠亮（≥ 0.7），兩者都必須不透明。主機以各模式固定的比例把它們混進陰影、玻璃高光與寵物狀態列。
 - 寵物狀態列以最黑與最白桌面計算：`text`、`textMuted` ≥ 4.5:1，`quotaFill`、`quotaWarn` 在狀態列與配額軌道上 ≥ 3:1。
 
-省略的選填顏色會依固定公式推導（規格 §3.5、§3.7）。`accentHover` 是把 `accent` 往 `text` 混合，取 0.20、0.25 … 0.60 中第一個讓 `onAccent` 達到 4.5:1 的比例。
+省略的選填顏色會依固定公式推導，或取該模式的內建值（規格 §3.2、§3.5、§3.7）：`dangerText`、`successText`、`warnText`、`scrim`、`infoText`、`shadow`、`highlight` 與 `sage` 色系取內建值，其餘由必填顏色推導。`accentHover` 是把 `accent` 往 `text` 混合，取 0.20、0.25 … 0.60 中第一個讓 `onAccent` 達到 4.5:1 的比例。
 
 ## 安全：由主機強制的不變量
 
@@ -68,8 +70,10 @@
 | `--ap-border`、`--ap-border-soft` | 邊框與分隔線 | 半透明 |
 | `--ap-focus` | 焦點框 | 等於 `accent-text`，與 App 自己的焦點框相同（在每個表面上 ≥ 3:1） |
 | `--ap-danger`、`--ap-success`、`--ap-warn` | 狀態文字 | 在 `surface`／`surface-2` 上 ≥ 4.5:1；色相維持紅／綠／琥珀 |
-| `--ap-info` | 資訊文字 | 主機固定的藍色資訊色（與 App 相同），在 `surface`／`surface-2`／`bg` 上 ≥ 4.5:1 |
+| `--ap-info` | 資訊文字 | 主題的 `infoText`（省略時為內建藍色），在 `surface`／`surface-2`／`bg` 上 ≥ 4.5:1；色相維持藍色 |
 | `--ap-scrim` | 對話框遮罩 | 透明度 ≥ 0.3 |
+| `--ap-shadow` | 陰影色（自行加透明度，例如 `color-mix(in srgb, var(--ap-shadow) 30%, transparent)`） | 不透明，相對亮度 ≤ 0.05 |
+| `--ap-highlight` | 玻璃高光色 | 不透明，相對亮度 ≥ 0.7 |
 | `--ap-radius-sm`、`--ap-radius-md`、`--ap-radius-lg` | 圓角 | `Npx`，sm ≤ md ≤ lg |
 | `--ap-font-body`、`--ap-font-heading` | 字族清單 | 只含本機字型與通用字族 |
 | `--ap-font-scale` | 字級倍率 | 無單位，0.92–1.15 |

@@ -379,9 +379,10 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
   line-height: 1.4;
 }
 
+/* 主動分頁上的數字徽章：accentHover 字在 onAccent 底上 >= 4.5:1（accent 只保證 3:1）。 */
 .active .segment-badge {
   background: var(--accent-bright);
-  color: var(--accent);
+  color: var(--accent-hover);
 }
 
 .segment-dot {

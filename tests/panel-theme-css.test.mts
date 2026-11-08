@@ -32,7 +32,7 @@ function state(slots: PanelThemeState['slots'] = { light: { ref: { pluginId: 'th
 test('the allowlist matches the main token table and has no duplicates', () => {
   assert.deepEqual(PANEL_THEME_COLOR_TOKENS.map(token => token.property), [...PANEL_THEME_COLOR_PROPERTIES])
   assert.equal(new Set(PANEL_THEME_CSS_PROPERTIES).size, PANEL_THEME_CSS_PROPERTIES.length)
-  assert.equal(PANEL_THEME_CSS_PROPERTIES.length, 29 + 2 + 9 + 3 + 1)
+  assert.equal(PANEL_THEME_CSS_PROPERTIES.length, 31 + 2 + 9 + 3 + 1)
 })
 
 test('target properties: shared + mode colours + gradient, suspended under forced colours', () => {
@@ -40,7 +40,7 @@ test('target properties: shared + mode colours + gradient, suspended under force
   const entry = activePanelTheme(current, 'light')
   const plan = panelThemeTargetProperties(entry, 'light', { forcedColors: false, highContrast: false })
   assert.deepEqual(plan.rejected, [])
-  assert.equal(plan.properties.size, 29 + 14 + 1)
+  assert.equal(plan.properties.size, 31 + 14 + 1)
   assert.equal(plan.properties.get('--panel-theme-background'), 'radial-gradient(ellipse at left top, rgb(238 246 246 / 1) 0%, rgb(248 252 252 / 1) 100%)')
   assert.equal(panelThemeTargetProperties(entry, 'light', { forcedColors: true, highContrast: false }).properties.size, 0)
   assert.equal(activePanelTheme(current, 'dark'), null)

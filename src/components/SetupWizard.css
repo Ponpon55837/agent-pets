@@ -163,7 +163,7 @@
 
 .tool-action:hover:not(:disabled) {
   border-color: currentColor;
-  background: var(--organic-accent-on-hover);
+  background: var(--color-hover);
   color: inherit;
 }
 
@@ -223,7 +223,8 @@
 
 .health-needs_install .tool-health,
 .health-needs_approval .tool-health {
-  background: var(--organic-accent-contrast);
+  /* accentText 在 surface 上 >= 4.5:1；在 onAccent 上沒有保證。 */
+  background: var(--organic-surface);
   color: var(--organic-accent-text);
 }
 
@@ -251,7 +252,7 @@
 .source-chip {
   padding: 2px 10px;
   border-radius: var(--radius-pill);
-  background: var(--organic-accent-on-hover);
+  background: var(--color-hover);
   color: inherit;
   font-size: var(--font-label);
   line-height: var(--leading-tight);

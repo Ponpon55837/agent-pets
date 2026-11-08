@@ -9,8 +9,7 @@ import { PluginFeedController } from '../electron/plugin-feed.ts'
 import { parsePluginManifest } from '../electron/plugin-manifest.ts'
 import { createPluginPanelPublicApi } from '../electron/plugin-panel-view-bridge.ts'
 import { pluginHostAssets } from '../electron/plugin-host-assets.ts'
-import { builtinPanelThemeProperties, PANEL_THEME_HOST_COLORS, resolvePanelThemes } from '../electron/plugin-panel-themes.ts'
-import { formatPanelThemeColor, parsePanelThemeColor } from '../electron/panel-theme-color.ts'
+import { builtinPanelThemeProperties, resolvePanelThemes } from '../electron/plugin-panel-themes.ts'
 import { buildPluginThemeSnapshot } from '../electron/plugin-theme-tokens.ts'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import type { PluginManifest } from '../src/types/plugin.ts'
@@ -51,9 +50,13 @@ test('a theme snapshot maps the validated palette and never exposes host font al
   assert.ok(isPluginThemeSnapshot(snapshot))
   assert.equal(snapshot.tokens['--ap-bg'], 'rgb(238 246 246 / 1)')
   assert.equal(snapshot.tokens['--ap-on-accent'], 'rgb(255 255 255 / 1)')
-  // 資訊色由主機固定，與 tokens.css 的 --builtin-organic-info-text 相同。
-  assert.match(fs.readFileSync('src/styles/tokens.css', 'utf8'), /--builtin-organic-info-text: #2e5b8c;/)
+  // 主題沒有宣告 infoText／shadow／highlight 時取該模式的內建值（tokens.css 的 --builtin-organic-*）。
   assert.equal(snapshot.tokens['--ap-info'], 'rgb(46 91 140 / 1)')
+  assert.equal(snapshot.tokens['--ap-shadow'], 'rgb(46 43 37 / 1)')
+  assert.equal(snapshot.tokens['--ap-highlight'], 'rgb(255 255 255 / 1)')
+  const [declared] = resolvePanelThemes([theme({ modes: { light: { colors: { ...LIGHT_COLORS, infoText: '#1f5f99', shadow: '#10202a' } } } })])!
+  assert.equal(buildPluginThemeSnapshot(declared!, 'light').tokens['--ap-info'], 'rgb(31 95 153 / 1)')
+  assert.equal(buildPluginThemeSnapshot(declared!, 'light').tokens['--ap-shadow'], 'rgb(16 32 42 / 1)')
   assert.equal(snapshot.tokens['--ap-font-body'], '"PingFang TC", sans-serif')
   assert.equal(snapshot.tokens['--ap-font-heading'], 'serif')
   assert.equal(snapshot.tokens['--ap-font-scale'], '1.05')
@@ -266,15 +269,10 @@ test('the theme reader fixture is a valid permission-free panel plugin that styl
 test('tokens.css legacy colours follow --ap-* in plugin pages: each alias names the matching palette colour', () => {
   const tokens = fs.readFileSync('src/styles/tokens.css', 'utf8')
   const aliases = [...tokens.matchAll(/^ {2}(--organic-[a-z0-9-]+): var\((--ap-[a-z0-9-]+), var\(--builtin-organic-[a-z0-9-]+\)\);$/gm)]
-  assert.equal(aliases.length, 17)
-  const hostInfo = (mode: 'light' | 'dark') => {
-    const parsed = parsePanelThemeColor(PANEL_THEME_HOST_COLORS[mode].info)
-    assert.ok(parsed.ok)
-    return formatPanelThemeColor(parsed.color)
-  }
+  assert.equal(aliases.length, 19)
   for (const mode of ['light', 'dark'] as const) {
     const snapshot = buildPluginThemeSnapshot(null, mode)
-    const builtin: Record<string, string> = { ...builtinPanelThemeProperties(mode), '--organic-info-text': hostInfo(mode) }
+    const builtin: Record<string, string> = builtinPanelThemeProperties(mode)
     for (const [, organic, ap] of aliases) {
       assert.equal(snapshot.tokens[ap as keyof typeof snapshot.tokens], builtin[organic!], `${mode} ${organic} ↔ ${ap}`)
     }

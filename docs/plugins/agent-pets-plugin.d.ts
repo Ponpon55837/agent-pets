@@ -112,11 +112,18 @@ export interface PluginPanelThemeColors {
   sageDark?: PluginPanelThemeColor
   sageTrack?: PluginPanelThemeColor
   borderSoft?: PluginPanelThemeColor
+  /** @deprecated 1.12.0: accepted for compatibility and ignored; no surface reads it. */
   borderOnAccent?: PluginPanelThemeColor
   dangerText?: PluginPanelThemeColor
   successText?: PluginPanelThemeColor
   warnText?: PluginPanelThemeColor
   scrim?: PluginPanelThemeColor
+  /** Opaque informational (blue) text; OKLCH hue 200–290°. Defaults to the built-in value for the mode. */
+  infoText?: PluginPanelThemeColor
+  /** Opaque shadow colour, relative luminance ≤ 0.05. Defaults to the built-in value for the mode. */
+  shadow?: PluginPanelThemeColor
+  /** Opaque glass highlight colour, relative luminance ≥ 0.7. Defaults to white. */
+  highlight?: PluginPanelThemeColor
 }
 
 export interface PluginPanelThemeOverlay { color: PluginPanelThemeColor; opacity: number }
@@ -234,7 +241,7 @@ export type PluginThemeToken =
   | '--ap-accent' | '--ap-accent-hover' | '--ap-accent-text' | '--ap-on-accent'
   | '--ap-border' | '--ap-border-soft' | '--ap-focus'
   | '--ap-danger' | '--ap-success' | '--ap-warn' | '--ap-info'
-  | '--ap-scrim'
+  | '--ap-scrim' | '--ap-shadow' | '--ap-highlight'
   | '--ap-radius-sm' | '--ap-radius-md' | '--ap-radius-lg'
   | '--ap-font-body' | '--ap-font-heading' | '--ap-font-scale'
 

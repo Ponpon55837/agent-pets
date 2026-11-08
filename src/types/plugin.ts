@@ -89,8 +89,9 @@ export type PluginPanelThemeColorKey =
   | 'text' | 'textSecondary' | 'textMuted' | 'textFaint'
   | 'accent' | 'accentHover' | 'accentText' | 'onAccent' | 'accentGlow' | 'accentTrack' | 'accentOnHover'
   | 'sage' | 'sageDeep' | 'sageDark' | 'sageTrack'
-  | 'border' | 'borderSoft' | 'borderOnAccent'
+  | 'border' | 'borderSoft'
   | 'dangerText' | 'successText' | 'warnText' | 'scrim'
+  | 'infoText' | 'shadow' | 'highlight'
 
 /** 正規化後的 manifest 顏色：主機標準的 `rgb(R G B / A)` 字串（spec §3.3）。 */
 export type PluginPanelThemeColors = Partial<Record<PluginPanelThemeColorKey, string>>
