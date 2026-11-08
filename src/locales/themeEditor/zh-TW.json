@@ -129,6 +129,8 @@
   "themeEditor.issueSummary": "{mode}有 {count} 個問題",
   "themeEditor.allPass": "所有顏色都通過檢查。",
   "themeEditor.checking": "檢查中…",
+  "themeEditor.checkFailed": "無法檢查這份草稿，所以還不能儲存。",
+  "themeEditor.checkRetry": "重試",
   "themeEditor.schemaError": "這份草稿無法檢查（{path}）。",
   "themeEditor.background": "背景",
   "themeEditor.backgroundType": "背景類型",

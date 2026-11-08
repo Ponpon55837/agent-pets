@@ -129,6 +129,8 @@
   "themeEditor.issueSummary": "{count} problems in {mode}",
   "themeEditor.allPass": "Every colour passes.",
   "themeEditor.checking": "Checking…",
+  "themeEditor.checkFailed": "The draft couldn’t be checked, so it can’t be saved yet.",
+  "themeEditor.checkRetry": "Try again",
   "themeEditor.schemaError": "This draft can’t be checked ({path}).",
   "themeEditor.background": "Background",
   "themeEditor.backgroundType": "Background type",

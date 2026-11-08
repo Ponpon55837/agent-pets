@@ -101,9 +101,36 @@ test('drafts track changes, undo the last steps, reset to the starting point and
   assert.equal(hasUnsavedChanges({ ...fresh, name: 'Other' }), true)
   assert.equal(hasUnsavedChanges(commitChange(fresh, changed)), true)
   assert.equal(hasUnsavedChanges(draft), isDirty(draft))
-  const saved = markSaved(fresh, 'u-ffffffffffff', 'New')
+  const saved = markSaved(fresh, 'u-ffffffffffff', { name: 'New', definition: fresh.definition })
   assert.equal(isDirty(saved), false)
   assert.equal(isDirty({ ...saved, name: 'Renamed' }), true)
+  assert.equal(isDirty({ ...saved, name: '  New ' }), false, 'surrounding spaces are not a rename (the saved name is trimmed)')
+})
+
+test('saving keeps edits made while the save was in flight: only the id and baseline move', () => {
+  const opened = createDraft('u-0123456789ab', 'Mine', builtinDefinition())
+  // 存檔先取快照，送出 IPC；回應回來之前使用者又改了一個顏色與名稱。
+  const firstEdit = structuredClone(opened.definition)
+  firstEdit.modes.light.colors.accent = 'rgb(10 120 200 / 1)'
+  const beforeSave = commitChange(opened, firstEdit)
+  const snapshot = { name: beforeSave.name.trim(), definition: structuredClone(beforeSave.definition) }
+  const secondEdit = structuredClone(beforeSave.definition)
+  secondEdit.modes.dark.colors.accent = 'rgb(200 120 10 / 1)'
+  const during = { ...commitChange(beforeSave, secondEdit), name: 'Mine, renamed' }
+
+  const saved = markSaved(during, 'u-0123456789ab', snapshot)
+  assert.equal(saved.definition.modes.dark.colors.accent, 'rgb(200 120 10 / 1)', 'the edit made during the round trip is kept')
+  assert.equal(saved.name, 'Mine, renamed', 'a name typed during the round trip is kept')
+  assert.equal(definitionKey(saved.baseline.definition), definitionKey(snapshot.definition), 'the baseline is what was actually saved')
+  assert.equal(saved.baseline.name, 'Mine')
+  assert.equal(isDirty(saved), true, 'the unsaved edit still counts as unsaved')
+  assert.equal(hasUnsavedChanges(saved), true)
+  assert.equal(saved.undo.length, during.undo.length, 'undo history survives a save')
+  // 基準是複本：之後改動快照不會改到草稿。
+  snapshot.definition.modes.light.colors.accent = 'rgb(0 0 0 / 1)'
+  assert.equal(saved.baseline.definition.modes.light.colors.accent, 'rgb(10 120 200 / 1)')
+  // 沒有在途變更時，存檔後就是乾淨的。
+  assert.equal(isDirty(markSaved(beforeSave, 'u-0123456789ab', { name: 'Mine', definition: beforeSave.definition })), false)
 })
 
 test('save and apply are gated on a current, fully valid validation', () => {

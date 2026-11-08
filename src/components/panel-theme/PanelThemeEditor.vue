@@ -48,6 +48,7 @@ import {
   USER_PANEL_THEME_NAME_MAX,
   USER_PANEL_THEME_OWNER,
   USER_PANEL_THEME_PET_STATUS_KEYS,
+  type PanelThemeValidateIpcResult,
   type PanelThemeValidation,
   type UserPanelThemeDefinition,
   type UserPanelThemePetStatusKey,
@@ -121,18 +122,35 @@ const nameValid = computed(() => {
 // --- 驗證（debounce）---------------------------------------------------------
 const validation = shallowRef<PanelThemeValidation | null>(null)
 const validatedKey = ref('')
+/** 目前草稿的驗證請求失敗（IPC 拒絕或回傳 ok:false）；顯示錯誤與「重試」，而不是一直「檢查中」。 */
+const validationFailed = ref(false)
 let validateTimer: ReturnType<typeof setTimeout> | undefined
+/** 每次排程遞增；回應回來時序號不是最新的就丟掉（較舊草稿的回應可能比新的晚到）。 */
+let validateSeq = 0
+
+async function runValidation(seq: number): Promise<void> {
+  const key = currentKey.value
+  let result: PanelThemeValidateIpcResult | undefined
+  try {
+    result = await window.electronAPI?.validatePanelTheme(structuredClone(draft.value.definition))
+  } catch {
+    result = undefined
+  }
+  if (seq !== validateSeq || key !== currentKey.value) return
+  if (!result?.ok) {
+    validationFailed.value = true
+    return
+  }
+  validation.value = result.value
+  validatedKey.value = key
+}
 
 function scheduleValidation(): void {
   clearTimeout(validateTimer)
-  validateTimer = setTimeout(async () => {
-    const key = currentKey.value
-    const result = await window.electronAPI?.validatePanelTheme(structuredClone(draft.value.definition))
-    // 請求期間草稿又變了：丟掉過期的結果，等下一次。
-    if (!result?.ok || key !== currentKey.value) return
-    validation.value = result.value
-    validatedKey.value = key
-  }, VALIDATE_DEBOUNCE_MS)
+  validateSeq += 1
+  validationFailed.value = false
+  const seq = validateSeq
+  validateTimer = setTimeout(() => { void runValidation(seq) }, VALIDATE_DEBOUNCE_MS)
 }
 
 watch(currentKey, scheduleValidation, { immediate: true })
@@ -142,6 +160,7 @@ const saveEnabled = computed(() => canSave({ validationCurrent: validationCurren
 const modeIssues = computed(() => issuesByPath(validationCurrent.value ? validation.value : null, mode.value))
 
 const summary = computed(() => {
+  if (validationFailed.value) return te('themeEditor.checkFailed')
   if (!validationCurrent.value || !validation.value) return te('themeEditor.checking')
   if (validation.value.schemaError) return te('themeEditor.schemaError', { path: validation.value.schemaError.path })
   if (validation.value.valid) return te('themeEditor.allPass')
@@ -310,24 +329,21 @@ async function save(): Promise<string | null> {
     status.value = te('themeEditor.fixFirst')
     return null
   }
-  const definition = structuredClone(draft.value.definition)
-  const cleanName = name.value.trim()
+  // 送出的快照。IPC 往返期間輸入框沒有停用，使用者可能繼續修改；存檔完成後只移動基準，
+  // 不覆寫目前的內容與名稱，那些新的修改仍算未儲存（markSaved）。
+  const typedName = name.value
+  const saved = { name: typedName.trim(), definition: structuredClone(draft.value.definition) }
   const id = draft.value.id
-  let result
-  if (id === null) {
-    result = await userActions.run(() => window.electronAPI?.createUserPanelTheme(cleanName, definition), t('design.themeEditor.saved'))
-  } else {
-    if (cleanName !== draft.value.baseline.name) {
-      const renamed = await userActions.run(() => window.electronAPI?.renameUserPanelTheme(id, cleanName))
-      if (!renamed?.ok) return null
-    }
-    result = await userActions.run(() => window.electronAPI?.updateUserPanelTheme(id, definition), t('design.themeEditor.saved'))
-  }
+  // 既有主題：名稱與內容由主程序一次寫入（同一個 IPC），不會出現只改了名稱、內容卻存失敗的半套狀態。
+  const result = id === null
+    ? await userActions.run(() => window.electronAPI?.createUserPanelTheme(saved.name, saved.definition), t('design.themeEditor.saved'))
+    : await userActions.run(() => window.electronAPI?.updateUserPanelTheme(id, saved.definition, saved.name !== draft.value.baseline.name ? saved.name : undefined), t('design.themeEditor.saved'))
   if (!result?.ok) return null
   const savedId = result.value.id ?? id
   if (!savedId) return null
-  draft.value = markSaved({ ...draft.value, definition }, savedId, cleanName)
-  name.value = cleanName
+  draft.value = markSaved(draft.value, savedId, saved)
+  // 只有在往返期間沒有再改名稱時，才把輸入框換成去空白後的名稱。
+  if (name.value === typedName) name.value = saved.name
   status.value = t('design.themeEditor.saved')
   return savedId
 }
@@ -384,9 +400,10 @@ function discard(): void {
 }
 
 const modeOptions = computed(() => PANEL_THEME_MODES.map(value => ({ value, label: t(MODE_SHORT[value]) })))
+// 兩個模式的預覽共用同一個目錄項目（previewEntry 本身就含兩個模式），只算一次。
+const previewCatalogEntry = computed(() => previewEntry(draft.value.definition, name.value, savedEntry.value))
 const previews = computed(() => PANEL_THEME_MODES.map(value => ({
   mode: value,
-  entry: previewEntry(draft.value.definition, name.value, savedEntry.value),
   label: te('themeEditor.previewLabel', { mode: t(MODE_NAME[value]) }),
 })))
 const errorText = computed(() => userActions.error.value || themeActions.error.value)
@@ -401,7 +418,11 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(() => clearTimeout(validateTimer))
+onBeforeUnmount(() => {
+  clearTimeout(validateTimer)
+  // 讓卸載後才回來的驗證回應被丟掉。
+  validateSeq += 1
+})
 </script>
 
 <template>
@@ -422,12 +443,15 @@ onBeforeUnmount(() => clearTimeout(validateTimer))
       </div>
 
       <section class="editor-previews" :aria-label="te('themeEditor.preview')">
-        <PanelThemeEditorPreview v-for="preview in previews" :key="preview.mode" :entry="preview.entry" :mode="preview.mode" :label="preview.label" :forced-colors="panelThemeMedia.forcedColors" />
+        <PanelThemeEditorPreview v-for="preview in previews" :key="preview.mode" :entry="previewCatalogEntry" :mode="preview.mode" :label="preview.label" :forced-colors="panelThemeMedia.forcedColors" />
       </section>
 
       <div class="editor-mode">
         <SegmentedControl :model-value="mode" :options="modeOptions" semantics="radio" :ariaLabel="te('themeEditor.modeLabel')" id-prefix="editor-mode-" @update:model-value="value => { mode = value as PanelThemeMode }" />
-        <p class="editor-summary" :class="{ ok: validationCurrent && validation?.valid }" role="status" data-testid="editor-summary">{{ summary }}</p>
+        <div class="editor-summary-row">
+          <p class="editor-summary" :class="{ ok: !validationFailed && validationCurrent && validation?.valid }" role="status" data-testid="editor-summary">{{ summary }}</p>
+          <Button v-if="validationFailed" size="sm" variant="secondary" data-testid="editor-validate-retry" @click="scheduleValidation">{{ te('themeEditor.checkRetry') }}</Button>
+        </div>
       </div>
 
       <section class="editor-section" aria-labelledby="editor-generate-title">
