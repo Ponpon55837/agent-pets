@@ -8,7 +8,6 @@ import {
   PANEL_THEME_FONT_MAX_BYTES,
   PANEL_THEME_IMAGE_MAX_BYTES,
   PANEL_THEME_USER_IMAGE_MAX_BYTES,
-  resolvePanelThemes,
   type PanelThemeSourcePlugin,
   type ResolvedPanelTheme,
 } from '../plugin-panel-themes.ts'
@@ -18,6 +17,7 @@ import type { PluginLocalizedText, PluginManifest } from '../../src/types/plugin
 import { PET_THEME_COLOR_PROPERTIES, type PanelThemeMode, type PanelThemeState, type PetThemeModeState, type PetThemeState } from '../../src/types/panel-theme.ts'
 import type { PluginThemeSnapshot } from '../../src/types/plugin-theme.ts'
 import { buildPluginThemeSnapshot } from '../plugin-theme-tokens.ts'
+import { PanelThemeResolveCache } from './panel-theme-cache.ts'
 
 // 主程序中插件面板主題的擁有者：store、每個工作階段的
 // salt、由 `agent-pets://panel-theme/<token>` 提供的 token -> 資產對應表、
@@ -67,6 +67,8 @@ export interface PanelThemeRuntimeOptions {
   /** 合併短時間內的多次變動；預設延後 PLUGIN_THEME_CHANGE_DELAY_MS 毫秒。 */
   schedulePluginTheme?: (callback: () => void) => void
   salt?: Uint8Array
+  /** 測試用：注入解析快取以觀察命中與上限。 */
+  resolveCache?: PanelThemeResolveCache
 }
 
 export interface PanelAppearance {
@@ -87,7 +89,9 @@ export class PanelThemeRuntime {
   readonly store: PanelThemeStore
   private readonly options: PanelThemeRuntimeOptions
   private readonly salt: Uint8Array
-  private readonly resolvedCache = new Map<string, ResolvedPanelTheme[] | null>()
+  private readonly resolvedCache: PanelThemeResolveCache
+  /** `id@version` → 最後一次解析的內容鍵；插件暫時沒有 manifest（載入失敗）時沿用。 */
+  private lastKeyByVersion = new Map<string, string>()
   private sources: PanelThemeSourcePlugin[] = []
   private tokens = new Map<string, TokenAsset>()
   private state: PanelThemeState = emptyPanelThemeState()
@@ -105,6 +109,7 @@ export class PanelThemeRuntime {
   constructor(options: PanelThemeRuntimeOptions) {
     this.options = options
     this.salt = options.salt ?? randomBytes(32)
+    this.resolvedCache = options.resolveCache ?? new PanelThemeResolveCache()
     this.store = new PanelThemeStore(options.userDataDirectory)
     this.appearance = { mode: options.initialMode ?? 'light', forcedColors: false }
     this.pluginTheme = buildPluginThemeSnapshot(null, this.appearance.mode)
@@ -146,20 +151,25 @@ export class PanelThemeRuntime {
   sync(input: PanelThemeSyncInput): void {
     const sources: PanelThemeSourcePlugin[] = []
     const liveKeys = new Set<string>()
+    const keyByVersion = new Map<string, string>()
     this.installed = new Set(input.registry.map(entry => entry.id))
     this.knownManifests = new Set()
     for (const entry of input.registry) {
       const context = input.contexts.get(entry.id)
-      const cacheKey = `${entry.id}@${entry.currentVersion}`
-      liveKeys.add(cacheKey)
-      let themes: ResolvedPanelTheme[] | null | undefined = this.resolvedCache.get(cacheKey)
+      const versionKey = `${entry.id}@${entry.currentVersion}`
+      let themes: ResolvedPanelTheme[] | null | undefined
+      let key: string | undefined
       if (context) {
         this.knownManifests.add(entry.id)
-        if (themes === undefined) {
-          const declared = context.manifest.contributes.panelThemes
-          themes = declared?.length ? resolvePanelThemes(declared) : null
-          this.resolvedCache.set(cacheKey, themes)
-        }
+        const declared = context.manifest.contributes.panelThemes
+        if (declared?.length) ({ key, themes } = this.resolvedCache.get(declared))
+      } else {
+        key = this.lastKeyByVersion.get(versionKey)
+        themes = key === undefined ? undefined : this.resolvedCache.peek(key)
+      }
+      if (key !== undefined) {
+        liveKeys.add(key)
+        keyByVersion.set(versionKey, key)
       }
       if (!themes?.length) continue
       const statusOk = entry.status === 'installed' || entry.status === 'enabled'
@@ -173,10 +183,9 @@ export class PanelThemeRuntime {
         themes,
       })
     }
-    // 上限受已安裝插件約束：已移除或被取代版本的項目會被丟棄。
-    for (const key of this.resolvedCache.keys()) {
-      if (!liveKeys.has(key)) this.resolvedCache.delete(key)
-    }
+    // 只保留仍安裝中的插件用到的內容：已移除或被不同內容取代的項目會被丟棄。
+    this.resolvedCache.retain(liveKeys)
+    this.lastKeyByVersion = keyByVersion
     this.sources = sources
     this.prune()
     this.publish()
