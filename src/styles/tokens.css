@@ -320,6 +320,21 @@
   --font-body: var(--font-ui);
 }
 
+/* ── Pet status pill theme hooks ─────────────────────────────────────────
+   Unset (guaranteed-invalid) by default so every var() falls back to the
+   built-in --organic-status-* look. A plugin panel theme may set them on the
+   pet root (usePetStatusTheme); only .status-line reads them (spec §3.7). */
+:root {
+  --pet-status-background: initial;
+  --pet-status-background-opaque: initial;
+  --pet-status-border: initial;
+  --pet-status-text: initial;
+  --pet-status-text-muted: initial;
+  --pet-status-quota-fill: initial;
+  --pet-status-quota-track: initial;
+  --pet-status-quota-warn: initial;
+}
+
 /* ── Pet bubbles ───────────────────────────────────────────────────────
    One material for every bubble the pet shows (result toast, say, plugin feed,
    notices). The pet layer is dark by default; `data-pet-theme='light'` (below) swaps in a
@@ -379,6 +394,15 @@
 }
 
 :root[data-pet-theme='light'] .desktop-pet {
+  /* The permission bubble reads these dark-layer text/state tokens; without a
+     light value its command, details and links were near-white on cream. */
+  --text-bright: #2a2622;
+  --text-secondary: #5a5248;
+  --text-muted: #645c50;
+  --state-warn-bright: #7a4f00;
+  --state-error-soft: #a3261f;
+  --state-success: #17683a;
+  --surface-raised: rgba(32, 30, 29, 0.05);
   --surface-panel: rgba(252, 249, 243, 0.92);
   --surface-overlay: rgba(252, 249, 243, 0.98);
   --surface-raised-hover: rgba(255, 255, 255, 0.6);
