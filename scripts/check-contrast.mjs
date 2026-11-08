@@ -58,6 +58,8 @@ export const PET_BUBBLE_PAIRS = [
   ['--organic-status-text', '--organic-status-surface-fallback', 4.5, 'pet status line text'],
   ['--organic-status-tooltip-text', '--organic-status-surface-fallback', 4.5, 'pet quota tooltip text'],
   ['--text-primary', '--organic-status-surface-fallback', 4.5, 'pet mini badge text'],
+  ['--pet-bubble-info-accent', '--organic-status-surface-fallback', 4.5, 'pet plugin badge info text'],
+  ['--pet-bubble-warn-accent', '--organic-status-surface-fallback', 4.5, 'pet plugin badge warning text'],
 ]
 
 // The dark layer renders over an arbitrary wallpaper; this is the opaque

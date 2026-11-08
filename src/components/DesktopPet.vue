@@ -24,7 +24,8 @@ import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 import { describeTool } from '@/utils/pet-toast'
 import { statusLineText, type StatusLineSource } from '@/utils/session-attention'
-import { fitStatusLine, statusLineContentWidth, type MeasureText, type StatusLineFit, type StatusLinePart } from '@/utils/status-line-fit'
+import { fitStatusLine, statusLineContentWidth, STATUS_TEXT_FONTS, type MeasureText, type StatusLineFit, type StatusLinePart } from '@/utils/status-line-fit'
+import { resolvedPetTheme } from '@/composables/useTheme'
 import PermissionBubble from '@/components/permission/PermissionBubble.vue'
 import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
 import { formatDateParts } from '@/utils/intl-format'
@@ -534,15 +535,11 @@ function lineText(line: StatusLineSource & { state: AgentState }): string {
   return statusLineText(line, line.label ? stateAriaLabel(line.state) : stateLineLabel(line.state))
 }
 
-// 以 canvas 量字寬（不觸發版面計算），結果依字串快取；字型載入完成後清快取重算。
-const STATUS_TEXT_FONTS: Record<StatusLinePart, [weight: number, sizeVar: string, sizeFallback: string, familyVar: string]> = {
-  label: [600, '--font-sm', '12px', '--organic-font-body'],
-  state: [400, '--font-sm', '12px', '--organic-font-body'],
-  badge: [600, '--font-xs', '11px', '--organic-font-body'],
-  readout: [400, '--organic-font-body-lg', '15px', '--organic-font-heading'],
-}
+// 以 canvas 量字寬（不觸發版面計算），結果依字串快取；字型載入完成或主題切換時清快取重算。
 // 沒有 canvas 時的保守估計（每字 8px），寧可多拿掉東西也不讓狀態被截斷。
 const STATUS_TEXT_FALLBACK_CHAR_W = 8
+// 快取的鍵含插件徽章文字，數量沒有上限；超過時整批清掉重量（量一次只要微秒級）。
+const STATUS_TEXT_CACHE_MAX = 256
 const statusFontEpoch = ref(0)
 const statusTextWidths = new Map<string, number>()
 let statusTextContext: CanvasRenderingContext2D | null | undefined
@@ -552,8 +549,8 @@ function statusFonts(): Record<StatusLinePart, string> {
   if (statusFontSpecs) return statusFontSpecs
   const root = getComputedStyle(document.documentElement)
   const token = (name: string, fallback: string) => root.getPropertyValue(name).trim() || fallback
-  statusFontSpecs = Object.fromEntries(Object.entries(STATUS_TEXT_FONTS).map(([part, [weight, sizeVar, sizeFallback, familyVar]]) => (
-    [part, `${weight} ${token(sizeVar, sizeFallback)} ${token(familyVar, 'sans-serif')}`]
+  statusFontSpecs = Object.fromEntries(Object.entries(STATUS_TEXT_FONTS).map(([part, font]) => (
+    [part, `${font.weight} ${token(font.sizeVar, font.sizeFallback)} ${token(font.familyVar, 'sans-serif')}`]
   ))) as Record<StatusLinePart, string>
   return statusFontSpecs
 }
@@ -568,18 +565,22 @@ const measureStatusText: MeasureText = (text, part) => {
     statusTextContext.font = statusFonts()[part]
     width = statusTextContext.measureText(text).width
   }
+  if (statusTextWidths.size >= STATUS_TEXT_CACHE_MAX) statusTextWidths.clear()
   statusTextWidths.set(cacheKey, width)
   return width
 }
 
-function onStatusFontsLoaded() {
+function resetStatusTextMetrics() {
   statusTextWidths.clear()
+  statusFontSpecs = null
   statusFontEpoch.value += 1
 }
 
 interface StatusLineView {
   text: string
   aria: string
+  /** 沒有 Quota 提示框時的 title；含被寬度預算拿掉的徽章。 */
+  title: string
   fit: StatusLineFit
   /** 寬度預算內放得下的徽章。 */
   badges: PluginBadgeView[]
@@ -590,6 +591,7 @@ interface StatusLineView {
 const EMPTY_STATUS_LINE_VIEW: StatusLineView = {
   text: '',
   aria: '',
+  title: '',
   fit: { showLabel: true, showReadout: true, badgeCount: 0, showOverflow: false },
   badges: [],
   overflowCount: 0,
@@ -601,7 +603,7 @@ const statusLineViews = computed<Record<string, StatusLineView>>(() => {
   void statusFontEpoch.value
   const multi = isMultiPet.value
   const lines = multi ? store.familyLines : displayLines.value
-  const contentWidth = statusLineContentWidth(multi, store.petScale)
+  const contentWidth = statusLineContentWidth(multi, store.petScale, store.scaledW)
   const badgesByPet = new Map<string, ReturnType<typeof pluginBadgeSummary>>()
   const views: Record<string, StatusLineView> = {}
   for (const line of lines) {
@@ -620,9 +622,13 @@ const statusLineViews = computed<Record<string, StatusLineView>>(() => {
       hiddenCount: summary.hiddenCount,
     }, measureStatusText)
     const text = lineText(line)
+    // 被拿掉的徽章與「+N」不能從可存取名稱裡消失。
+    const dropped = summary.badges.slice(fit.badgeCount).map(pluginBadgeTooltip)
+    if (!fit.showOverflow && summary.hiddenCount > 0) dropped.push(t('pluginBadgeOverflow', { count: summary.hiddenCount }))
     views[line.key] = {
       text,
-      aria: [text, quotaTitle(line.key) ?? ''].filter(Boolean).join('\n'),
+      aria: [text, quotaTitle(line.key) ?? '', ...dropped].filter(Boolean).join('\n'),
+      title: [text, ...dropped].join('\n'),
       fit,
       badges: summary.badges.slice(0, fit.badgeCount),
       overflowCount: fit.showOverflow ? summary.hiddenCount : 0,
@@ -636,13 +642,15 @@ function lineView(key: string): StatusLineView {
 }
 
 onMounted(() => {
-  document.fonts?.addEventListener('loadingdone', onStatusFontsLoaded)
-  void document.fonts?.ready.then(onStatusFontsLoaded)
+  document.fonts?.addEventListener('loadingdone', resetStatusTextMetrics)
+  void document.fonts?.ready.then(resetStatusTextMetrics)
 })
 
 onBeforeUnmount(() => {
-  document.fonts?.removeEventListener('loadingdone', onStatusFontsLoaded)
+  document.fonts?.removeEventListener('loadingdone', resetStatusTextMetrics)
 })
+
+watch(resolvedPetTheme, resetStatusTextMetrics)
 
 // --- Permission 泡泡 --------------------------------------------------------
 
@@ -919,8 +927,8 @@ watch(() => store.levelUpEvent, (event) => {
             :since="store.highestPrioritySession?.lastSeenAt"
             autonomous-behavior="idle"
             :freeze="petAnimationFrozen"
-          :low-fps="petLowFps"
-          :facing="shimejiFacing"
+            :low-fps="petLowFps"
+            :facing="shimejiFacing"
           />
         </span>
         <span class="edge-peek-grip" aria-hidden="true" />
@@ -1118,8 +1126,8 @@ watch(() => store.levelUpEvent, (event) => {
               :mood="store.moodVisualsEnabled ? store.mood : undefined"
               :autonomous-behavior="shimejiBehavior"
               :freeze="petAnimationFrozen"
-          :low-fps="petLowFps"
-          :facing="shimejiFacing"
+              :low-fps="petLowFps"
+              :facing="shimejiFacing"
             />
             <div
               class="status-line multi-pet-status-line"
@@ -1132,7 +1140,7 @@ watch(() => store.levelUpEvent, (event) => {
               }"
               :style="quotaLineStyle(line.key)"
               :aria-label="lineView(line.key).aria"
-            :title="store.quotaByFamily[line.key] ? undefined : lineView(line.key).text"
+              :title="store.quotaByFamily[line.key] ? undefined : lineView(line.key).title"
               :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
               data-pet-hit-target="solid"
             >
@@ -1214,7 +1222,7 @@ watch(() => store.levelUpEvent, (event) => {
             }"
             :style="quotaLineStyle(line.key)"
             :aria-label="lineView(line.key).aria"
-            :title="store.quotaByFamily[line.key] ? undefined : lineView(line.key).text"
+            :title="store.quotaByFamily[line.key] ? undefined : lineView(line.key).title"
             :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
             data-pet-hit-target="solid"
           >

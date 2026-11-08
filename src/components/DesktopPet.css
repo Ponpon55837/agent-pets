@@ -428,12 +428,13 @@
   display: none;
 }
 
+/* 寬度隨文字、最寬 42px（status-line-fit.ts 的 badgeMax 以同樣方式計算）。 */
 .plugin-badge-anchor {
   position: relative;
   display: inline-flex;
-  flex: 0 1 42px;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: 100%;
+  max-width: 42px;
   overflow: visible;
   border-radius: 999px;
 }
@@ -462,13 +463,15 @@
   white-space: nowrap;
 }
 
+/* 用寵物外觀（深／淺）各自調過對比的強調色：原本的 --state-info／--organic-quota-warning
+   在淺色寵物底上只有約 1.4–1.8:1。 */
 .plugin-badge-pill.tone-info {
-  color: var(--state-info);
+  color: var(--pet-bubble-info-accent);
 }
 
 .plugin-badge-pill.tone-warning {
-  border-color: color-mix(in srgb, var(--organic-quota-warning) 45%, var(--organic-status-border));
-  color: var(--organic-quota-warning);
+  border-color: var(--pet-bubble-warn-border);
+  color: var(--pet-bubble-warn-accent);
 }
 
 .plugin-badge-overflow {
