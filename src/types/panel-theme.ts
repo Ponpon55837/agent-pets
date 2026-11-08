@@ -31,6 +31,22 @@ export const PANEL_THEME_COLOR_PROPERTIES = [
 ] as const
 export type PanelThemeColorProperty = typeof PANEL_THEME_COLOR_PROPERTIES[number]
 
+/**
+ * manifest 顏色鍵 → 可套主題的 CSS 屬性（與主程序 PANEL_THEME_COLOR_TOKENS 相同，測試比對）。
+ * 主題編輯器以此把目錄裡的屬性對應回可編輯的鍵，或把草稿畫成預覽。
+ */
+export const PANEL_THEME_COLOR_KEY_PROPERTIES = {
+  bg: '--organic-bg', surface: '--organic-surface', surface2: '--organic-surface-2', surfaceWarm: '--organic-surface-warm',
+  surfaceSage: '--organic-surface-sage', surfaceSageSoft: '--organic-surface-sage-soft', surfaceOff: '--organic-surface-off',
+  text: '--organic-text', textSecondary: '--organic-text-secondary', textMuted: '--organic-text-muted', textFaint: '--organic-text-faint',
+  accent: '--organic-accent', accentHover: '--organic-accent-hover', accentText: '--organic-accent-text', onAccent: '--organic-accent-contrast',
+  accentGlow: '--organic-accent-glow', accentTrack: '--organic-accent-track', accentOnHover: '--organic-accent-on-hover',
+  sage: '--organic-sage', sageDeep: '--organic-sage-deep', sageDark: '--organic-sage-dark', sageTrack: '--organic-sage-track',
+  border: '--organic-border', borderSoft: '--organic-border-soft',
+  dangerText: '--organic-danger-text', successText: '--organic-success-text', warnText: '--organic-warn-text', scrim: '--organic-scrim',
+  infoText: '--organic-info-text', shadow: '--organic-shadow', highlight: '--organic-highlight',
+} as const satisfies Record<import('./plugin').PluginPanelThemeColorKey, PanelThemeColorProperty>
+
 export const PANEL_THEME_FAMILY_PROPERTIES = ['--organic-font-body', '--organic-font-heading'] as const
 export const PANEL_THEME_SIZE_PROPERTIES = [
   '--organic-font-label', '--organic-font-body-sm', '--organic-font-body-md', '--organic-font-body-lg',

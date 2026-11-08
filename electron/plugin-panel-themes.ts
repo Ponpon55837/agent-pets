@@ -215,7 +215,8 @@ function assertKeys(value: Record<string, unknown>, allowed: readonly string[], 
   }
 }
 
-function normalizePlainText(value: unknown, maxLength: number): string | null {
+/** 顯示用的純文字：NFKC、移除控制字元與角括號、合併空白；長度不符時為 null。 */
+export function normalizePanelThemePlainText(value: unknown, maxLength: number): string | null {
   if (typeof value !== 'string') return null
   const text = value
     .normalize('NFKC')
@@ -228,8 +229,8 @@ function normalizePlainText(value: unknown, maxLength: number): string | null {
 function parseLocalized(value: unknown, maxLength: number, path: string): PluginLocalizedText {
   if (!isRecord(value)) fail(path, 'must be { "zh-TW", "en-US" }')
   assertKeys(value, ['zh-TW', 'en-US'], path)
-  const zhTW = normalizePlainText(value['zh-TW'], maxLength)
-  const enUS = normalizePlainText(value['en-US'], maxLength)
+  const zhTW = normalizePanelThemePlainText(value['zh-TW'], maxLength)
+  const enUS = normalizePanelThemePlainText(value['en-US'], maxLength)
   if (!zhTW || !enUS) fail(path, `each locale needs 1-${maxLength} characters`)
   return { 'zh-TW': zhTW, 'en-US': enUS }
 }
@@ -887,7 +888,15 @@ export function* panelThemeModeIssues(input: PanelThemeModeCheckInput): Generato
   if (input.petStatus) yield* petStatusIssues(input.petStatus)
 }
 
-function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contribution: PluginPanelThemeModeDefinition; resolved: ResolvedPanelThemeMode } {
+interface ParsedModeGrammar {
+  input: PanelThemeModeCheckInput
+  declared: Partial<Record<PluginPanelThemeColorKey, PanelThemeRgba>>
+  userImageFit?: PluginPanelThemeFit
+  petStatusContribution?: Partial<Record<PetStatusColorKey, string>>
+}
+
+/** 一個模式的文法與結構（不含任何對比或語意檢查）；違規時拋出 PanelThemeValidationError。 */
+function parseModeGrammar(value: unknown, mode: PanelThemeMode, path: string): ParsedModeGrammar {
   if (!isRecord(value)) fail(path, 'must be an object')
   assertKeys(value, ['colors', 'background', 'userImage', 'petStatus'], path)
   if (!isRecord(value.colors)) fail(`${path}.colors`, 'is required')
@@ -911,18 +920,15 @@ function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contri
   const colors = derivePanelThemeColors(declared, mode)
   const background = parseBackground(value.background, `${path}.background`)
 
-  let userImage: ResolvedPanelThemeMode['userImage']
-  let userImageContribution: PluginPanelThemeModeDefinition['userImage']
+  let userImageFit: PluginPanelThemeFit | undefined
   let userImageOverlay: { color: PanelThemeRgba; opacity: number } | undefined
   if (value.userImage !== undefined) {
     const userPath = `${path}.userImage`
     if (!isRecord(value.userImage)) fail(userPath, 'must be an object')
     assertKeys(value.userImage, ['allowed', 'fit', 'overlay'], userPath)
     if (value.userImage.allowed !== true) fail(`${userPath}.allowed`, 'must be true')
-    const fit = enumOf<PluginPanelThemeFit>(value.userImage.fit, FITS, 'cover', `${userPath}.fit`)
+    userImageFit = enumOf<PluginPanelThemeFit>(value.userImage.fit, FITS, 'cover', `${userPath}.fit`)
     userImageOverlay = parseOverlay(value.userImage.overlay, `${userPath}.overlay`)
-    userImageContribution = { allowed: true, fit, overlay: { color: formatPanelThemeColor(userImageOverlay.color), opacity: userImageOverlay.opacity } }
-    userImage = { fit, overlayColor: userImageOverlay.color, defaultDim: userImageOverlay.opacity, minDim: PANEL_THEME_OVERLAY_FLOOR }
   }
 
   let petStatus: Record<PetStatusColorKey, PanelThemeRgba> | undefined
@@ -933,11 +939,31 @@ function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contri
     petStatusContribution = parsed.contribution
   }
 
-  const issue = firstOf(panelThemeModeIssues({ mode, colors, background, ...(userImageOverlay ? { userImageOverlay } : {}), ...(petStatus ? { petStatus } : {}) }))
+  return {
+    input: { mode, colors, background, ...(userImageOverlay ? { userImageOverlay } : {}), ...(petStatus ? { petStatus } : {}) },
+    declared,
+    ...(userImageFit ? { userImageFit } : {}),
+    ...(petStatusContribution ? { petStatusContribution } : {}),
+  }
+}
+
+/** 只解析文法，回傳語意檢查需要的輸入（主題編輯器的診斷用）；文法錯誤時拋出。 */
+export function panelThemeModeCheckInput(value: unknown, mode: PanelThemeMode): PanelThemeModeCheckInput {
+  return parseModeGrammar(value, mode, mode).input
+}
+
+function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contribution: PluginPanelThemeModeDefinition; resolved: ResolvedPanelThemeMode } {
+  const { input, declared, userImageFit, petStatusContribution } = parseModeGrammar(value, mode, path)
+  const { colors, background, userImageOverlay, petStatus } = input
+  const issue = firstOf(panelThemeModeIssues(input))
   if (issue) fail(`${path}.${issue.path}`, issue.problem)
-  if (userImage && userImageOverlay) {
-    // 上面已確認存在且不高於宣告值。
-    userImage.minDim = minimumPanelThemeOverlay(colors, userImageOverlay.color, 1)!
+  let userImage: ResolvedPanelThemeMode['userImage']
+  let userImageContribution: PluginPanelThemeModeDefinition['userImage']
+  if (userImageOverlay) {
+    const fit = userImageFit ?? 'cover'
+    // 上面的覆蓋層檢查已確認最小值存在且不高於宣告值。
+    userImage = { fit, overlayColor: userImageOverlay.color, defaultDim: userImageOverlay.opacity, minDim: minimumPanelThemeOverlay(colors, userImageOverlay.color, 1)! }
+    userImageContribution = { allowed: true, fit, overlay: { color: formatPanelThemeColor(userImageOverlay.color), opacity: userImageOverlay.opacity } }
   }
 
   const contributionColors: PluginPanelThemeColors = {}

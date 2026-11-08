@@ -255,3 +255,34 @@ export function oklabDistance(first: PanelThemeRgba, second: PanelThemeRgba): nu
   const y = rgbToOklab(second)
   return Math.hypot(x.l - y.l, x.a - y.a, x.b - y.b)
 }
+
+/**
+ * OKLCH -> sRGB（整數通道）。超出色域時以二分法降低色度（與瀏覽器的色域對應方式相同），
+ * 所以一定有結果；固定 16 次迭代，結果是確定性的。主題編輯器的微調與色盤產生器使用。
+ */
+export function oklchToRgb(lightness: number, chroma: number, hueDegrees: number, alpha = 1): PanelThemeRgba {
+  const l = Math.min(1, Math.max(0, lightness))
+  const hue = ((hueDegrees % 360) + 360) % 360
+  const toRgba = (linear: [number, number, number]): PanelThemeRgba => ({
+    r: channel(encodeSrgb(linear[0]) * 255),
+    g: channel(encodeSrgb(linear[1]) * 255),
+    b: channel(encodeSrgb(linear[2]) * 255),
+    a: roundAlpha(Math.min(1, Math.max(0, alpha))),
+  })
+  const direct = oklchToLinearSrgb(l, Math.max(0, chroma), hue)
+  if (direct) return toRgba(direct)
+  let low = 0
+  let high = Math.max(0, chroma)
+  let best = oklchToLinearSrgb(l, 0, hue) ?? [l, l, l]
+  for (let step = 0; step < 16; step += 1) {
+    const middle = (low + high) / 2
+    const candidate = oklchToLinearSrgb(l, middle, hue)
+    if (candidate) {
+      best = candidate
+      low = middle
+    } else {
+      high = middle
+    }
+  }
+  return toRgba(best)
+}

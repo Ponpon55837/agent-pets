@@ -1,4 +1,8 @@
 import { deflateSync } from 'node:zlib'
+import { formatPanelThemeColor } from '../../electron/panel-theme-color.ts'
+import { builtinPanelThemeColors } from '../../electron/plugin-panel-themes.ts'
+import type { PanelThemeMode } from '../../src/types/panel-theme.ts'
+import { USER_PANEL_THEME_COLOR_KEYS, type UserPanelThemeDefinition } from '../../src/types/panel-theme-user.ts'
 
 // 面板主題測試共用的建構器：一個有效的雙模式主題，以及
 // 檔頭正確的圖片位元組（PNG、APNG、WebP、JPEG），不需要真正的解碼器。
@@ -131,3 +135,18 @@ export function woff2(size = 64): Uint8Array {
   bytes.set([0x77, 0x4f, 0x46, 0x32])
   return bytes
 }
+
+/** 以內建淺色與深色色盤組成的「我的主題」定義（每個鍵都明確宣告）。 */
+export function builtinDefinition(): UserPanelThemeDefinition {
+  const mode = (name: PanelThemeMode) => {
+    const colors = builtinPanelThemeColors(name)
+    return {
+      colors: Object.fromEntries(USER_PANEL_THEME_COLOR_KEYS.map(key => [key, formatPanelThemeColor(colors[key])])) as UserPanelThemeDefinition['modes']['light']['colors'],
+      background: { type: 'solid' as const },
+      image: null,
+      petStatus: null,
+    }
+  }
+  return { typography: { body: 'builtin', heading: 'builtin', scale: 1 }, shape: { radiusSm: 8, radiusMd: 16, radiusLg: 28 }, modes: { light: mode('light'), dark: mode('dark') } }
+}
+
