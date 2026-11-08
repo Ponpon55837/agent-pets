@@ -72,3 +72,11 @@ test('raw-color inventories literal colours by surface outside the theme palette
   const clean = analyze(fixture({ 'src/styles/tokens.css': ':root {\n  --builtin-organic-bg: #f5ead8;\n}', 'src/a.css': '.a { color: var(--builtin-organic-bg); }' }))
   assert.equal(shouldFail(clean, { strict: true, rawColorsFail: true }), false)
 })
+
+test('raw-color reads whole declarations, so multi-line values and their start line are reported', () => {
+  const root = fixture({
+    'src/styles/tokens.css': ':root {\n  --shadow-panel:\n    0 18px 40px rgba(0, 0, 0, 0.4),\n    inset 0 1px 0 var(--x);\n  --icon: url("data:image/svg+xml;utf8,<svg/>");\n}',
+  })
+  const rows = analyze(root).info.rawColors.map((entry: { token: string; line: number; value: string }) => `${entry.token}|${entry.line}|${entry.value}`)
+  assert.deepEqual(rows, ['--shadow-panel|2|0 18px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 var(--x)'])
+})

@@ -92,6 +92,38 @@ function rawColorGroup(entry) {
   return RAW_COLOR_GROUPS.find(rule => rule.test(entry))?.group ?? 'other'
 }
 
+/**
+ * 依宣告（而非逐行）切開 CSS：跨多行的值（例如多層 box-shadow）也會完整檢查。
+ * 括號內的 `;`、`{`、`}`（如 data: URL）不算分隔。回傳每筆宣告的起始行與所屬選擇器。
+ */
+export function cssDeclarations(css) {
+  const out = []
+  const selectors = []
+  let buffer = ''
+  let start = 1
+  let line = 1
+  let parens = 0
+  for (const ch of css) {
+    if (ch === '(') parens += 1
+    else if (ch === ')') parens = Math.max(0, parens - 1)
+    if (parens === 0 && (ch === '{' || ch === ';' || ch === '}')) {
+      const text = buffer.trim()
+      if (ch === '{') selectors.push(text)
+      else if (text) {
+        const m = text.match(/^(--[a-z0-9-]+|[a-z-]+)\s*:\s*([\s\S]+)$/i)
+        if (m) out.push({ property: m[1], value: m[2].replace(/\s+/g, ' ').trim(), line: start, selector: selectors.at(-1) ?? '' })
+      }
+      if (ch === '}') selectors.pop()
+      buffer = ''
+    } else {
+      if (!buffer.trim() && ch.trim()) start = line
+      buffer += ch
+    }
+    if (ch === '\n') line += 1
+  }
+  return out
+}
+
 /** TS／Vue script 只看字串字面值；註解先去掉，避免把文件裡的格式說明算進來。 */
 function scriptColorLines(text) {
   const code = text.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:'"`])\/\/.*$/gm, '$1')
@@ -213,20 +245,12 @@ export function analyze(root = defaultRoot) {
   const rawColors = []
   for (const [file, raw] of allText) {
     const isTokens = file === tokensPath
-    const css = stripComments(styleOnly(file, raw))
-    const selectors = []
-    css.split('\n').forEach((line, i) => {
-      const open = line.match(/^([^{}]*)\{/)
-      if (open) selectors.push(open[1].trim())
-      for (const m of line.matchAll(/(?:^|[;{\s])(--[a-z0-9-]+|[a-z-]+)\s*:\s*([^;{}]+)/gi)) {
-        const [, property, value] = m
-        if (!cssValueHasColor(property, value)) continue
-        if (isTokens && PALETTE_SOURCE.test(property)) continue
-        const entry = { file: rel(file), line: i + 1, token: property.startsWith('--') ? property : null, selector: selectors.at(-1) ?? '', value: value.trim() }
-        rawColors.push({ ...entry, group: rawColorGroup(entry) })
-      }
-      for (const _ of line.matchAll(/\}/g)) selectors.pop()
-    })
+    for (const { property, value, line, selector } of cssDeclarations(stripComments(styleOnly(file, raw)))) {
+      if (!cssValueHasColor(property, value)) continue
+      if (isTokens && PALETTE_SOURCE.test(property)) continue
+      const entry = { file: rel(file), line, token: property.startsWith('--') ? property : null, selector, value }
+      rawColors.push({ ...entry, group: rawColorGroup(entry) })
+    }
   }
   for (const file of walk(srcDir, /\.(ts|vue)$/)) {
     let text = allText.get(file) ?? readFileSync(file, 'utf8')

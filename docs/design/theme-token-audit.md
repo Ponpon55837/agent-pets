@@ -2,7 +2,7 @@
 
 Work list for spec §16 (one theme for every surface). Generated from `node scripts/check-design-tokens.mjs --raw-colors`, which lists every literal colour (hex, `rgb()`/`hsl()`/`oklch()` and other colour functions, CSS named colours in colour properties, colour strings in TS and Vue scripts) in `src/**`. The only allowed source of literal colours is the theme palette layer `--builtin-organic-*` in `src/styles/tokens.css` (the built-in values that plugin themes replace).
 
-Baseline on `feat/panel-themes` after the `--ap-*` read API: **141 raw colours**, 129 in `tokens.css` and 12 elsewhere. Every component stylesheet already reads colours through `var()`; the literals sit in token blocks that are not driven by the theme, plus three component literals and two TS/Vue colour tables.
+Baseline on `feat/panel-themes` after the `--ap-*` read API: **145 raw colours**, 133 in `tokens.css` and 12 elsewhere (141 before the scanner read multi-line declarations; the four it missed are `--shadow-panel`, `--shadow-edge-handle` and the two `--pet-bubble-shadow` values). Every component stylesheet already reads colours through `var()`; the literals sit in token blocks that are not driven by the theme, plus three component literals and two TS/Vue colour tables.
 
 ## Enforcement
 
