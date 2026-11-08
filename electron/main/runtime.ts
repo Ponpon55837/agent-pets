@@ -113,6 +113,9 @@ import { registerPluginSettingsIpc } from '../ipc/plugin-settings'
 import { registerPluginPreferencesIpc } from '../ipc/plugin-preferences'
 import { registerPluginCatalogIpc } from '../ipc/plugin-catalog'
 import { registerPluginInstallIpc } from '../ipc/plugin-install'
+import { registerPanelThemeIpc } from '../ipc/panel-theme'
+import { PanelThemeRuntime } from './panel-theme-runtime'
+import { deleteUserImage, prepareUserImage, readUserImageSource, storeUserImage } from '../panel-theme-images'
 import { mainState, type PluginSkinFallbackInfo } from './state'
 import { EMPTY_ATTENTION } from '../attention-tracker'
 import { attachHotkeyInfo, PermissionHotkeys } from '../permission-hotkeys'
@@ -470,6 +473,11 @@ export function configureSecureProtocol(): void {
           },
         })
       }
+      if (url.hostname === 'panel-theme') {
+        return mainState.panelThemeRuntime
+          ? await mainState.panelThemeRuntime.handleRequest(request.url, request.method)
+          : new Response('Not found', { status: 404 })
+      }
       if (url.hostname === 'app') {
         const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
         const data = await readRegularFileWithin(resolve(join(__dirname, '../dist')), relativePath, 25 * 1024 * 1024)
@@ -669,9 +677,28 @@ export function broadcastPluginSkinsChanged(removedPetIds: string[]): void {
   }
 }
 
+export function syncPanelThemes(): void {
+  mainState.panelThemeRuntime?.sync({
+    registry: mainState.pluginRegistry?.list() ?? [],
+    contexts: mainState.pluginRuntimeContexts,
+    pluginsEnabled: mainState.pluginPreferencesSnapshot?.pluginsEnabled === true,
+  })
+}
+
+/** The trusted panel renderer origin (fonts are fetched cross-origin from agent-pets://panel-theme). */
+function panelRendererOrigin(): string | null {
+  try {
+    if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) return new URL(process.env.VITE_DEV_SERVER_URL).origin
+  } catch {
+    return null
+  }
+  return 'agent-pets://app'
+}
+
 export async function syncPluginHost(): Promise<void> {
   const previousSkins = enabledPluginSkinRecords()
   await refreshPluginRuntimeContexts()
+  syncPanelThemes()
   const currentSkins = enabledPluginSkinRecords()
   const removedPetIds: string[] = []
   for (const [petId, info] of previousSkins) {
@@ -916,7 +943,7 @@ export function checkPluginCatalogUpdates(): Promise<number> {
       || !isPluginCatalogUrl(preferences.catalogUrl)) throw new Error('Plugin catalog auto-check disabled')
     const result = await createMainPluginCatalogGateway().load(preferences.catalogUrl)
     if (!result.ok) throw new Error('Plugin catalog check failed')
-    const items = buildPluginCatalogPanelItems(result.value, mainState.pluginRegistry.list())
+    const items = buildPluginCatalogPanelItems(result.value, mainState.pluginRegistry.list(), app.getVersion())
     return items.filter(item => item.updateAvailable).length
   })()
 }
@@ -1008,6 +1035,18 @@ export async function createPluginServices(): Promise<void> {
     },
   })
   await refreshPluginRuntimeContexts()
+  mainState.panelThemeRuntime = new PanelThemeRuntime({
+    userDataDirectory,
+    pluginRoot: (pluginId, version) => resolve(userDataDirectory, 'plugins', pluginId, version),
+    readRegularFileWithin,
+    send: state => {
+      const window = mainState.panelWindow
+      if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.panelThemeChanged, state)
+    },
+    rendererOrigin: panelRendererOrigin,
+  })
+  try { mainState.panelThemeRuntime.sweep() } catch {}
+  syncPanelThemes()
   mainState.pluginFeedController = new PluginFeedController({
     emit: item => {
       if (mainState.petWindow && !mainState.petWindow.isDestroyed()) {
@@ -1378,9 +1417,9 @@ export async function createPluginServices(): Promise<void> {
     getCatalogCache: () => mainState.pluginCatalogCache,
     setCatalogCache: value => { mainState.pluginCatalogCache = value },
     createCatalogGateway: createMainPluginCatalogGateway,
-    buildCatalogItems: buildPluginCatalogPanelItems,
+    buildCatalogItems: (document, installed) => buildPluginCatalogPanelItems(document, installed, app.getVersion()),
     isPluginCatalogUrl,
-    selectLatestVersion: selectLatestCompatiblePluginVersion,
+    selectLatestVersion: (plugin, apiVersion) => selectLatestCompatiblePluginVersion(plugin, apiVersion, app.getVersion()),
     catalogFingerprintMatches,
     pendingPlanIds: mainState.pendingPluginPlanIds,
     pendingDeveloperFolders: mainState.pendingDeveloperFolders,
@@ -1416,6 +1455,27 @@ export async function createPluginServices(): Promise<void> {
     pluginPanelError,
     syncPluginHost,
     pluginPanelSnapshot,
+    onPluginRemoved: pluginId => mainState.panelThemeRuntime?.removePlugin(pluginId),
+  })
+
+  registerPanelThemeIpc({
+    ipcMain,
+    assertPluginPanelSender,
+    getStore: () => mainState.panelThemeRuntime?.store ?? null,
+    getSources: () => mainState.panelThemeRuntime?.getSources() ?? [],
+    getState: () => mainState.panelThemeRuntime?.getState() ?? { slots: { light: { ref: null, status: 'builtin' }, dark: { ref: null, status: 'builtin' } }, themes: [] },
+    publish: () => mainState.panelThemeRuntime?.publish(),
+    getPanelWindow: () => mainState.panelWindow,
+    isDialogOpen: () => mainState.dialogOpen,
+    setDialogOpen: value => { mainState.dialogOpen = value },
+    showOpenDialog: (window, options) => dialog.showOpenDialog(window, options),
+    translate: key => t(key),
+    readUserImage: readUserImageSource,
+    prepareUserImage,
+    storeUserImage: (pluginId, prepared) => storeUserImage(app.getPath('userData'), pluginId, prepared),
+    deleteUserImage: (pluginId, file) => deleteUserImage(app.getPath('userData'), pluginId, file),
+    pluginPanelError,
+    now: Date.now,
   })
 
 }

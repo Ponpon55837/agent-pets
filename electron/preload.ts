@@ -30,6 +30,7 @@ import type {
   PluginSettingScalar,
 } from '../src/types/plugin.ts'
 import type { PluginCatalogPanelItem } from '../src/types/plugin-catalog.ts'
+import type { PanelThemeIpcResult, PanelThemeMode, PanelThemeRef, PanelThemeState, PanelThemeUserImageOptions } from '../src/types/panel-theme.ts'
 import type {
   ProjectMcpApplyRequest,
   ProjectMcpPlan,
@@ -97,6 +98,16 @@ const electronAPI: ElectronAPI = {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.pluginSkinsChanged, handler)
   },
   notifyPluginSkinFallback: (petIds: string[]): Promise<number> => ipcRenderer.invoke(IPC_CHANNELS.pluginSkinFallbackNotify, petIds),
+  getPanelThemeState: (): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeStateGet),
+  setPanelThemeSlot: (mode: PanelThemeMode, ref: PanelThemeRef | null): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeSlotSet, mode, ref),
+  importPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserImageImport, ref, mode),
+  clearPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserImageClear, ref, mode),
+  setPanelThemeUserImageOptions: (ref: PanelThemeRef, mode: PanelThemeMode, options: PanelThemeUserImageOptions): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserImageOptionsSet, ref, mode, options),
+  onPanelThemeChanged: (callback: (state: PanelThemeState) => void) => {
+    const handler = (_event: unknown, state: PanelThemeState) => callback(state)
+    ipcRenderer.on(IPC_CHANNELS.panelThemeChanged, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.panelThemeChanged, handler)
+  },
   completePluginFeed: (itemId: string): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.pluginFeedComplete, itemId),
   openPluginFeedLink: (itemId: string): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.pluginFeedOpenLink, itemId),
   getPluginPanelSnapshot: (): Promise<PluginPanelResult<PluginPanelSnapshot>> => ipcRenderer.invoke(IPC_CHANNELS.pluginPanelSnapshot),
