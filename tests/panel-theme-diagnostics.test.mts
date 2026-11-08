@@ -3,9 +3,10 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import test from 'node:test'
-import { panelThemeModeCheckInput, panelThemeModeIssues, panelThemeModeIssuesReading, type PanelThemeModeCheckInput } from '../electron/plugin-panel-themes.ts'
+import { panelThemeModeCheckInput, panelThemeModeIssues, panelThemeModeIssuesReading, type PanelThemeIssue, type PanelThemeModeCheckInput } from '../electron/plugin-panel-themes.ts'
 import { userPanelThemeContribution } from '../electron/panel-theme-user.ts'
-import { validateUserPanelTheme } from '../electron/panel-theme-diagnostics.ts'
+import { PANEL_THEME_STATE_PREFERRED_HUES, validateUserPanelTheme } from '../electron/panel-theme-diagnostics.ts'
+import { formatPanelThemeColor, oklchToRgb, rgbToOklch } from '../electron/panel-theme-color.ts'
 import { canonicalJson, CANONICAL_JSON_MAX_DEPTH, ContentHashCache } from '../electron/main/panel-theme-cache.ts'
 import { PanelThemeRuntime } from '../electron/main/panel-theme-runtime.ts'
 import { UserPanelThemeStore, UserPanelThemeStoreError } from '../electron/panel-theme-user-store.ts'
@@ -55,6 +56,9 @@ test('changing one key changes only the checks that read it (the invariant the s
   for (let round = 0; round < 40; round += 1) {
     const definition = round % 2 === 0 ? builtinDefinition() : midGrey()
     definition.modes.dark.petStatus = { background: 'rgb(20 20 20 / 0.95)', text: 'rgb(240 240 240 / 1)', textMuted: 'rgb(200 200 200 / 1)', border: 'rgb(255 255 255 / 0.2)', quotaFill: 'rgb(120 200 160 / 1)', quotaTrack: 'rgb(255 255 255 / 0.2)', quotaWarn: 'rgb(230 180 80 / 1)' }
+    // 背景圖的遮罩與漸層也在檢查表裡（遮罩問題的 path 不是色鍵，也必須被讀到它的檢查涵蓋）。
+    if (round % 4 < 2) definition.modes.light.image = { fit: 'cover', overlayColor: 'rgb(128 128 128 / 1)', dim: 0.5 }
+    if (round % 3 === 0) definition.modes.dark.background = { type: 'gradient', kind: 'linear', angle: 180, stops: [{ color: 'rgb(10 10 30 / 1)', at: 0 }, { color: 'rgb(90 90 120 / 1)', at: 100 }] }
     for (const [mode, input] of inputsFor(definition)) {
       const reads = [...USER_PANEL_THEME_COLOR_KEYS.map(key => `colors.${key}`), ...(mode === 'dark' ? ['petStatus.text', 'petStatus.background', 'petStatus.quotaTrack'] : [])]
       const read = reads[Math.floor(random() * reads.length)]!
@@ -95,6 +99,71 @@ test('every suggestion fixes its key without adding a new problem', () => {
       assert.ok(all.get(issue.mode)!.has(idOf(after)), `${issue.mode} ${issue.path} adds no new problem (${after.path})`)
     }
   }
+})
+
+/** 改寫前的逐格搜尋（每個候選都跑完整驗證、由近而遠、先亮後暗），當作二分搜尋的參考答案。 */
+function exhaustiveSuggestion(input: PanelThemeModeCheckInput, issue: PanelThemeIssue, current: readonly PanelThemeIssue[]): string | undefined {
+  const idOf = (other: PanelThemeIssue) => `${other.path}\u0000${other.kind}\u0000${other.foreground ?? ''}\u0000${other.background ?? ''}`
+  const key = issue.path.slice('colors.'.length) as keyof PanelThemeModeCheckInput['colors']
+  const color = input.colors[key]
+  const baseline = new Set(current.filter(other => other.path !== issue.path).map(idOf))
+  const accepted = (candidate: typeof color) => {
+    for (const next of panelThemeModeIssues({ ...input, colors: { ...input.colors, [key]: candidate } })) {
+      if (next.path === issue.path || !baseline.has(idOf(next))) return false
+    }
+    return true
+  }
+  if (issue.kind === 'alpha') {
+    const candidate = { ...color, a: issue.required ?? 1 }
+    return accepted(candidate) ? formatPanelThemeColor(candidate) : undefined
+  }
+  const start = rgbToOklch(color)
+  let hue = start.h
+  let chroma = start.c
+  if (current.some(other => other.path === issue.path && (other.kind === 'hue' || other.kind === 'chroma'))) {
+    hue = PANEL_THEME_STATE_PREFERRED_HUES[key as keyof typeof PANEL_THEME_STATE_PREFERRED_HUES] ?? hue
+    chroma = Math.max(chroma, 0.09)
+  }
+  for (let step = 0; step <= 100; step += 1) {
+    for (const direction of step === 0 ? [0] : [1, -1]) {
+      const lightness = start.l + direction * step * 0.01
+      if (lightness < 0 || lightness > 1) continue
+      const candidate = oklchToRgb(lightness, chroma, hue, color.a)
+      if (candidate.r === color.r && candidate.g === color.g && candidate.b === color.b) continue
+      if (accepted(candidate)) return formatPanelThemeColor(candidate)
+    }
+  }
+  return undefined
+}
+
+test('the bisected suggestion equals the exhaustive nearest-first search', () => {
+  const random = lcg(7)
+  let compared = 0
+  for (let round = 0; round < 16; round += 1) {
+    const definition = builtinDefinition()
+    for (const mode of ['light', 'dark'] as const) {
+      const colors = definition.modes[mode].colors
+      for (const key of USER_PANEL_THEME_COLOR_KEYS) {
+        if (random() >= 0.35) continue
+        const alpha = /\/ ([0-9.]+)\)$/.exec(colors[key])?.[1] ?? '1'
+        colors[key] = `rgb(${Math.floor(random() * 256)} ${Math.floor(random() * 256)} ${Math.floor(random() * 256)} / ${alpha})`
+      }
+    }
+    const validation = validateUserPanelTheme(definition)
+    if (validation.schemaError) continue
+    for (const [mode, input] of inputsFor(definition)) {
+      const all = [...panelThemeModeIssues(input)]
+      const seen = new Set<string>()
+      for (const issue of validation.issues) {
+        if (issue.mode !== mode || !issue.path.startsWith('colors.') || seen.has(issue.path)) continue
+        seen.add(issue.path)
+        const first = all.find(other => other.path === issue.path)!
+        assert.equal(issue.suggested, exhaustiveSuggestion(input, first, all), `round ${round} ${mode} ${issue.path}`)
+        compared += 1
+      }
+    }
+  }
+  assert.ok(compared > 100, `compared ${compared} suggestions`)
 })
 
 test('the worst-case draft (every key mid-grey) validates within a timing ceiling', () => {
