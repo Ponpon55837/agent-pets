@@ -12,6 +12,8 @@ export function shouldShowCatalogPermissionCheck(
 export interface PluginCatalogVersion {
   version: string
   apiVersion: string
+  /** Lowest Agent Pets version able to install this package (for example `1.12.0`). */
+  minAppVersion?: string
   url: string
   sha256: string
   size: number
@@ -41,4 +43,6 @@ export interface PluginCatalogPanelItem {
   catalogOlder: boolean
   permissionsIncreased: boolean | null
   signingKeyChange: 'changed' | 'unchanged' | 'unknown'
+  /** Set when every version for this API needs a newer app; the item is shown but cannot be installed. */
+  requiresAppVersion?: string
 }

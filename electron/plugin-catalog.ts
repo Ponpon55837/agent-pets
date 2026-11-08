@@ -19,7 +19,8 @@ export const PLUGIN_CATALOG_ALLOWED_HOSTS = [
 
 const CATALOG_ROOT_KEYS = new Set(['schemaVersion', 'plugins'])
 const CATALOG_PLUGIN_KEYS = new Set(['id', 'name', 'description', 'author', 'homepage', 'publicKeyFingerprint', 'versions'])
-const CATALOG_VERSION_KEYS = new Set(['version', 'apiVersion', 'url', 'sha256', 'size', 'publishedAt'])
+const CATALOG_VERSION_KEYS = new Set(['version', 'apiVersion', 'minAppVersion', 'url', 'sha256', 'size', 'publishedAt'])
+const APP_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/
 
@@ -119,10 +120,13 @@ function parseCatalogVersion(value: unknown): PluginCatalogVersion | null {
     || typeof value.size !== 'number' || !Number.isSafeInteger(value.size)
     || value.size < 1 || value.size > PLUGIN_CATALOG_MAX_PACKAGE_BYTES
     || typeof value.publishedAt !== 'string' || !ISO_8601.test(value.publishedAt)
-    || !Number.isFinite(Date.parse(value.publishedAt))) return null
+    || !Number.isFinite(Date.parse(value.publishedAt))
+    || (value.minAppVersion !== undefined && (typeof value.minAppVersion !== 'string'
+      || value.minAppVersion.length > 32 || !APP_VERSION.test(value.minAppVersion)))) return null
   return {
     version: value.version as string,
     apiVersion: value.apiVersion,
+    ...(typeof value.minAppVersion === 'string' ? { minAppVersion: value.minAppVersion } : {}),
     url: value.url as string,
     sha256: value.sha256,
     size: value.size,
@@ -224,13 +228,25 @@ export function comparePluginSemver(left: unknown, right: unknown): number | nul
   return Math.sign(a.prerelease.length - b.prerelease.length)
 }
 
+/** True when `minAppVersion` is absent or not newer than the running app. */
+export function isCatalogVersionAppCompatible(version: Pick<PluginCatalogVersion, 'minAppVersion'>, appVersion: string | undefined): boolean {
+  if (version.minAppVersion === undefined || appVersion === undefined) return true
+  const comparison = comparePluginSemver(version.minAppVersion, appVersion)
+  return comparison !== null && comparison <= 0
+}
+
+/**
+ * Latest version for this host API. With `appVersion`, versions whose
+ * `minAppVersion` is newer than the running app are skipped (1.12.0+).
+ */
 export function selectLatestCompatiblePluginVersion(
   plugin: PluginCatalogPlugin,
   apiVersion: string,
+  appVersion?: string,
 ): PluginCatalogVersion | null {
   let latest: PluginCatalogVersion | null = null
   for (const version of plugin.versions) {
-    if (version.apiVersion !== apiVersion) continue
+    if (version.apiVersion !== apiVersion || !isCatalogVersionAppCompatible(version, appVersion)) continue
     if (!latest) {
       latest = version
       continue
