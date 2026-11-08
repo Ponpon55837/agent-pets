@@ -129,6 +129,8 @@
   "themeEditor.issueSummary": "{count} problems in {mode}",
   "themeEditor.allPass": "Every colour passes.",
   "themeEditor.checking": "Checking…",
+  "themeEditor.checkFailed": "The draft couldn’t be checked, so it can’t be saved yet.",
+  "themeEditor.checkRetry": "Try again",
   "themeEditor.schemaError": "This draft can’t be checked ({path}).",
   "themeEditor.background": "Background",
   "themeEditor.backgroundType": "Background type",
@@ -164,6 +166,8 @@
   "themeEditor.radiusLg": "Large radius (px)",
   "themeEditor.preview": "Preview",
   "themeEditor.previewLabel": "Preview of the draft in {mode}",
+  "themeEditor.previewHide": "Hide preview",
+  "themeEditor.previewShow": "Show preview",
   "themeEditor.applyMenu": "Use this theme",
   "themeEditor.undo": "Undo",
   "themeEditor.reset": "Reset",
@@ -209,6 +213,8 @@
   "themeEditor.surface.imagePixel": "a {pixel} image pixel",
   "themeEditor.surface.badgeFill": "the {state} badge",
   "themeEditor.surface.pressed": "the hovered primary button",
+  "themeEditor.surface.other": "another surface",
+  "themeEditor.surface.otherText": "other text",
   "themeEditor.desktop.black": "black",
   "themeEditor.desktop.white": "white"
 }

@@ -1,5 +1,4 @@
-import { formatPanelThemeColor, oklchToRgb, rgbToOklab, rgbToOklch, withAlpha, type PanelThemeRgba } from '../../electron/panel-theme-color.ts'
-import { validateUserPanelTheme } from '../../electron/panel-theme-diagnostics.ts'
+import { formatPanelThemeColor, oklchToRgb, rgbToOklab, rgbToOklch, validateUserPanelTheme, withAlpha, type PanelThemeRgba } from './panel-theme-host.ts'
 import type { PanelThemeMode } from '../types/panel-theme.ts'
 import type { UserPanelThemeDefinition } from '../types/panel-theme-user.ts'
 import type { PluginPanelThemeColorKey } from '../types/plugin.ts'

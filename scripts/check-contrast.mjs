@@ -48,6 +48,13 @@ export const PAIRS = [
   ['--accent-on', '--accent-hover', 4.5, 'primary button label'],
   ['--text-primary', '--surface-overlay', 4.5, 'dialog, menu, tooltip and toast text'],
   ['--text-muted', '--surface-overlay', 4.5, 'dialog helper text'],
+  // 危險按鈕（Button variant="danger"）：對話框、卡片與面板底上的標籤，以及懸停時 12% 危險色的底。
+  ['--text-danger', '--surface-overlay', 4.5, 'danger button label in a dialog'],
+  ['--text-danger', 'color-mix(in srgb, var(--text-danger) 12%, var(--surface-overlay))', 4.5, 'hovered danger button in a dialog'],
+  ['--text-danger', '--surface-raised', 4.5, 'danger button label on a card'],
+  ['--text-danger', 'color-mix(in srgb, var(--text-danger) 12%, var(--surface-raised))', 4.5, 'hovered danger button on a card'],
+  ['--text-danger', '--color-bg', 4.5, 'danger button label on the panel'],
+  ['--text-danger', 'color-mix(in srgb, var(--text-danger) 12%, var(--color-bg))', 4.5, 'hovered danger button on the panel'],
   ['--state-idle', '--surface-raised', 4.5, 'idle state (may carry text)'],
   ['--state-offline', '--surface-raised', 3, 'offline state graphic'],
 ]
@@ -64,7 +71,7 @@ export const PET_PAIRS = [
   ['--text-bright', '--surface-overlay', 4.5, 'permission bubble text'],
   ['--text-secondary', '--surface-overlay', 4.5, 'permission bubble secondary text'],
   ['--state-warn-bright', '--surface-overlay', 4.5, 'permission bubble warning text'],
-  ['--state-error-soft', '--surface-overlay', 4.5, 'permission bubble danger text'],
+  ['--text-danger', '--surface-overlay', 4.5, 'permission bubble danger text'],
   ['--state-success', '--surface-overlay', 4.5, 'permission bubble allow label'],
   ['--focus-ring-color', '--pet-bubble-surface', 3, 'focus ring on a bubble'],
   ['--focus-ring-color', '--organic-status-surface', 3, 'focus ring on the pill'],

@@ -487,13 +487,13 @@ onBeforeUnmount(() => {
 }
 
 .permission-queue-risk {
-  color: var(--state-error-soft);
+  color: var(--text-danger);
   font-weight: var(--weight-bold);
 }
 
 .permission-queue-deny.confirming {
   border-color: var(--state-error);
-  color: var(--state-error-soft);
+  color: var(--text-danger);
 }
 
 .permission-request-hint {
@@ -526,7 +526,7 @@ onBeforeUnmount(() => {
 }
 
 .permission-request-error {
-  color: var(--state-error-soft);
+  color: var(--text-danger);
 }
 
 .permission-outcome-text {

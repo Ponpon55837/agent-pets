@@ -119,6 +119,7 @@
   "design.themeEditor.error.importInvalid": "This file isn’t an Agent Pets theme.",
   "design.themeEditor.error.invalid": "This theme doesn’t pass the checks.",
   "design.themeEditor.error.failed": "That didn’t work. Try again.",
+  "design.themeEditor.error.invalidRequest": "That request wasn’t accepted. Check the theme and try again.",
   "design.themeEditor.imported": "Theme imported.",
   "design.themeEditor.exported": "Theme exported.",
   "design.themeEditor.deleted": "Theme deleted.",

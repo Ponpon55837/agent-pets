@@ -129,6 +129,8 @@
   "themeEditor.issueSummary": "{mode}有 {count} 個問題",
   "themeEditor.allPass": "所有顏色都通過檢查。",
   "themeEditor.checking": "檢查中…",
+  "themeEditor.checkFailed": "無法檢查這份草稿，所以還不能儲存。",
+  "themeEditor.checkRetry": "重試",
   "themeEditor.schemaError": "這份草稿無法檢查（{path}）。",
   "themeEditor.background": "背景",
   "themeEditor.backgroundType": "背景類型",
@@ -164,6 +166,8 @@
   "themeEditor.radiusLg": "大圓角（px）",
   "themeEditor.preview": "預覽",
   "themeEditor.previewLabel": "草稿在{mode}的預覽",
+  "themeEditor.previewHide": "隱藏預覽",
+  "themeEditor.previewShow": "顯示預覽",
   "themeEditor.applyMenu": "使用這個主題",
   "themeEditor.undo": "復原",
   "themeEditor.reset": "重設",
@@ -209,6 +213,8 @@
   "themeEditor.surface.imagePixel": "圖片的{pixel}像素",
   "themeEditor.surface.badgeFill": "{state}徽章",
   "themeEditor.surface.pressed": "滑鼠移過的主要按鈕",
+  "themeEditor.surface.other": "另一個表面",
+  "themeEditor.surface.otherText": "另一段文字",
   "themeEditor.desktop.black": "黑色",
   "themeEditor.desktop.white": "白色"
 }

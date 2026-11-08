@@ -1,5 +1,13 @@
-import { formatPanelThemeColor, oklchToRgb, parsePanelThemeColor, rgbToOklch, type PanelThemeRgba } from '../../electron/panel-theme-color.ts'
-import { panelThemeSharedProperties, petStatusProperties, type ResolvedPanelTheme } from '../../electron/plugin-panel-themes.ts'
+import {
+  formatPanelThemeColor,
+  oklchToRgb,
+  panelThemeSharedProperties,
+  parsePanelThemeColor,
+  petStatusProperties,
+  rgbToOklch,
+  type PanelThemeRgba,
+  type ResolvedPanelTheme,
+} from './panel-theme-host.ts'
 import {
   PANEL_THEME_COLOR_KEY_PROPERTIES,
   PANEL_THEME_MODES,
@@ -141,8 +149,13 @@ export function resetDraft(draft: EditorDraft): EditorDraft {
   return commitChange(draft, structuredClone(draft.baseline.definition))
 }
 
+/** 名稱以去掉前後空白後比較（存檔時也是存去空白的名稱），只多打了空白不算變更。 */
+function nameChanged(draft: EditorDraft): boolean {
+  return draft.name.trim() !== draft.baseline.name
+}
+
 export function isDirty(draft: EditorDraft): boolean {
-  return draft.id === null || draft.name !== draft.baseline.name || definitionKey(draft.definition) !== definitionKey(draft.baseline.definition)
+  return draft.id === null || nameChanged(draft) || definitionKey(draft.definition) !== definitionKey(draft.baseline.definition)
 }
 
 /**
@@ -151,12 +164,16 @@ export function isDirty(draft: EditorDraft): boolean {
  */
 export function hasUnsavedChanges(draft: EditorDraft): boolean {
   if (draft.id !== null) return isDirty(draft)
-  return draft.name !== draft.baseline.name || definitionKey(draft.definition) !== definitionKey(draft.baseline.definition)
+  return nameChanged(draft) || definitionKey(draft.definition) !== definitionKey(draft.baseline.definition)
 }
 
-/** 存檔後：新的基準就是目前內容；保留復原堆疊，讓使用者仍可退回。 */
-export function markSaved(draft: EditorDraft, id: string, name: string): EditorDraft {
-  return { ...draft, id, name, baseline: { name, definition: structuredClone(draft.definition) } }
+/**
+ * 存檔完成後：基準換成「送出去的那一份」（`saved`），目前的內容與名稱維持原樣。存檔要等 IPC
+ * 往返，期間使用者可能又改了顏色或名稱；那些變更沒有存到，所以必須保留並繼續算未儲存。
+ * 保留復原堆疊，讓使用者仍可退回。
+ */
+export function markSaved(draft: EditorDraft, id: string, saved: { name: string; definition: UserPanelThemeDefinition }): EditorDraft {
+  return { ...draft, id, baseline: { name: saved.name, definition: structuredClone(saved.definition) } }
 }
 
 export interface SaveGate {

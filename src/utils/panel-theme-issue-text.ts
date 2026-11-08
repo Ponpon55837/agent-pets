@@ -29,13 +29,17 @@ const SURFACE_RULES: readonly SurfaceRule[] = [
   { pattern: /^accentHover mixed 12% toward text \(hovered primary button\)$/, render: (_m, _label, tr) => tr('themeEditor.surface.pressed') },
 ]
 
+/**
+ * 驗證器的表面名稱轉成介面文字。規則表涵蓋驗證器會產生的每一種名稱（測試逐一列舉）；
+ * 萬一出現新的名稱，顯示中性的「另一個表面」而不是把英文的內部名稱顯示給使用者。
+ */
 export function surfaceLabel(name: string, keyLabel: (key: string) => string | null, translate: IssueTranslate): string {
   const label = (inner: string): string => surfaceLabel(inner, keyLabel, translate)
   for (const rule of SURFACE_RULES) {
     const match = rule.pattern.exec(name)
     if (match) return rule.render(match, label, translate)
   }
-  return keyLabel(name) ?? name
+  return keyLabel(name) ?? translate('themeEditor.surface.other')
 }
 
 function ratio(value: number | undefined): string {
@@ -51,7 +55,7 @@ export function describeIssue(issue: PanelThemeDiagnostic, keyLabel: (key: strin
       const params = { measured: ratio(issue.measured), background: surface(issue.background), required: issue.required ?? '' }
       // 被歸咎的是半透明的底（懸停底）時，說出是哪個文字在它上面不夠清楚。
       return issue.foreground && issue.foreground !== ownKey
-        ? translate('themeEditor.issue.contrastPair', { ...params, foreground: keyLabel(issue.foreground) ?? issue.foreground })
+        ? translate('themeEditor.issue.contrastPair', { ...params, foreground: keyLabel(issue.foreground) ?? translate('themeEditor.surface.otherText') })
         : translate('themeEditor.issue.contrast', params)
     }
     case 'hue':

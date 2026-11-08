@@ -49,7 +49,9 @@ const ERROR_KEY: Record<string, TranslationKey> = {
   theme_not_found: 'design.themeEditor.error.notFound',
   theme_import_invalid: 'design.themeEditor.error.importInvalid',
   invalid_panel_theme: 'design.themeEditor.error.invalid',
-  invalid_request: 'design.themeEditor.invalidName',
+  // invalid_request 涵蓋所有被主程序拒絕的參數（名稱、過大的定義、多餘的參數、錯誤的 id），
+  // 不能只說「名稱無效」；名稱本身在送出前已由輸入框檢查。
+  invalid_request: 'design.themeEditor.error.invalidRequest',
 }
 
 export function userThemeErrorText(result: Extract<UserPanelThemeIpcResult, { ok: false }>): string {

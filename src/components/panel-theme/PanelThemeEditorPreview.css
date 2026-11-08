@@ -1,10 +1,18 @@
 /* 主題編輯器的預覽：只讀語意層 token（在 .panel-theme-preview 上依草稿重新解析），
    不寫任何顏色字面值；懸停狀態與 Button.vue 相同，往文字色混 12%。 */
+/* 預覽欄：父層用 max-height 給高度上限（none = 只依欄寬縮放），縮圖置中。 */
+.ep-slot {
+  display: flex;
+  min-width: 0;
+  max-height: var(--ep-max-height, none);
+  justify-content: center;
+}
+
 .editor-preview {
   --panel-theme-background: initial;
 
   position: relative;
-  min-width: 0;
+  flex: none;
   overflow: hidden;
   isolation: isolate;
   border: 1px solid var(--color-border-strong);
@@ -15,11 +23,21 @@
   font-size: var(--organic-font-body-sm);
 }
 
+/* 寬度由元件以 inline style 固定（STAGE_WIDTH），再以 zoom 縮放；兩欄讓縮圖接近面板的比例。 */
 .ep-content {
-  display: flex;
-  flex-direction: column;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: var(--space-2);
   padding: var(--space-2);
+}
+
+.ep-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .ep-card,
@@ -120,7 +138,9 @@
   padding: 3px var(--space-2);
   border: 1px solid transparent;
   border-radius: var(--organic-radius-sm);
-  font-family: var(--organic-font-heading);
+  /* 與 Button.vue 相同：按鈕標籤用內文字體。 */
+  font-family: var(--organic-font-body);
+  font-weight: var(--weight-medium);
   white-space: nowrap;
 }
 
@@ -151,13 +171,6 @@
 
 .ep-deny {
   color: var(--color-danger);
-}
-
-.ep-floating {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--space-2);
-  align-items: start;
 }
 
 .ep-menu,

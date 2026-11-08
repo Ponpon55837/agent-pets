@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildPanelThemeState, emptyPanelThemeState, resolvePanelThemes } from '../electron/plugin-panel-themes.ts'
+import { PET_STATUS_TOKENS, buildPanelThemeState, emptyPanelThemeState, panelThemeModeIssues, resolvePanelThemes, type PanelThemeIssue } from '../electron/plugin-panel-themes.ts'
 import { validateUserPanelTheme } from '../electron/panel-theme-diagnostics.ts'
 import { userPanelThemeContribution } from '../electron/panel-theme-user.ts'
 import {
@@ -27,7 +27,11 @@ import {
 } from '../src/utils/panel-theme-editor.ts'
 import { panelThemeTargetProperties } from '../src/utils/panel-theme-css.ts'
 import { describeIssue, surfaceLabel } from '../src/utils/panel-theme-issue-text.ts'
-import { PANEL_THEME_COLOR_PROPERTIES } from '../src/types/panel-theme.ts'
+import { PANEL_THEME_COLOR_PROPERTIES, PANEL_THEME_MODES } from '../src/types/panel-theme.ts'
+import { USER_PANEL_THEME_COLOR_KEYS } from '../src/types/panel-theme-user.ts'
+import { fillTemplate } from '../src/i18n.ts'
+import themeEditorZhTW from '../src/locales/themeEditor/zh-TW.json' with { type: 'json' }
+import themeEditorEnUS from '../src/locales/themeEditor/en-US.json' with { type: 'json' }
 import { DARK_COLORS, LIGHT_COLORS, builtinDefinition, theme } from './support/panel-theme-fixtures.mts'
 
 const resolver = {
@@ -101,9 +105,36 @@ test('drafts track changes, undo the last steps, reset to the starting point and
   assert.equal(hasUnsavedChanges({ ...fresh, name: 'Other' }), true)
   assert.equal(hasUnsavedChanges(commitChange(fresh, changed)), true)
   assert.equal(hasUnsavedChanges(draft), isDirty(draft))
-  const saved = markSaved(fresh, 'u-ffffffffffff', 'New')
+  const saved = markSaved(fresh, 'u-ffffffffffff', { name: 'New', definition: fresh.definition })
   assert.equal(isDirty(saved), false)
   assert.equal(isDirty({ ...saved, name: 'Renamed' }), true)
+  assert.equal(isDirty({ ...saved, name: '  New ' }), false, 'surrounding spaces are not a rename (the saved name is trimmed)')
+})
+
+test('saving keeps edits made while the save was in flight: only the id and baseline move', () => {
+  const opened = createDraft('u-0123456789ab', 'Mine', builtinDefinition())
+  // 存檔先取快照，送出 IPC；回應回來之前使用者又改了一個顏色與名稱。
+  const firstEdit = structuredClone(opened.definition)
+  firstEdit.modes.light.colors.accent = 'rgb(10 120 200 / 1)'
+  const beforeSave = commitChange(opened, firstEdit)
+  const snapshot = { name: beforeSave.name.trim(), definition: structuredClone(beforeSave.definition) }
+  const secondEdit = structuredClone(beforeSave.definition)
+  secondEdit.modes.dark.colors.accent = 'rgb(200 120 10 / 1)'
+  const during = { ...commitChange(beforeSave, secondEdit), name: 'Mine, renamed' }
+
+  const saved = markSaved(during, 'u-0123456789ab', snapshot)
+  assert.equal(saved.definition.modes.dark.colors.accent, 'rgb(200 120 10 / 1)', 'the edit made during the round trip is kept')
+  assert.equal(saved.name, 'Mine, renamed', 'a name typed during the round trip is kept')
+  assert.equal(definitionKey(saved.baseline.definition), definitionKey(snapshot.definition), 'the baseline is what was actually saved')
+  assert.equal(saved.baseline.name, 'Mine')
+  assert.equal(isDirty(saved), true, 'the unsaved edit still counts as unsaved')
+  assert.equal(hasUnsavedChanges(saved), true)
+  assert.equal(saved.undo.length, during.undo.length, 'undo history survives a save')
+  // 基準是複本：之後改動快照不會改到草稿。
+  snapshot.definition.modes.light.colors.accent = 'rgb(0 0 0 / 1)'
+  assert.equal(saved.baseline.definition.modes.light.colors.accent, 'rgb(10 120 200 / 1)')
+  // 沒有在途變更時，存檔後就是乾淨的。
+  assert.equal(isDirty(markSaved(beforeSave, 'u-0123456789ab', { name: 'Mine', definition: beforeSave.definition })), false)
 })
 
 test('save and apply are gated on a current, fully valid validation', () => {
@@ -178,7 +209,7 @@ test('validator surface names become readable phrases, recursively and for every
   assert.equal(surfaceLabel('dangerText at 0.12 over bg (state chip)', label, tr), 'themeEditor.surface.chip(state=<dangerText>,base=<bg>)')
   assert.equal(surfaceLabel('the quota track on the pet status pill over a white desktop', label, tr), 'themeEditor.surface.quotaTrack(base=themeEditor.surface.petPill(desktop=themeEditor.desktop.white()))')
   assert.equal(surfaceLabel('gradient between stops 0 and 1', label, tr), 'themeEditor.surface.gradientBetween(from=1,to=2)')
-  assert.equal(surfaceLabel('something new', label, tr), 'something new')
+  assert.equal(surfaceLabel('something new', label, tr), 'themeEditor.surface.other()', 'an unknown name never reaches the user in English')
   const definition = builtinDefinition()
   definition.modes.light.colors.textMuted = 'rgb(200 190 180 / 1)'
   definition.modes.dark.colors.dangerText = 'rgb(60 200 60 / 1)'
@@ -188,5 +219,59 @@ test('validator surface names become readable phrases, recursively and for every
     const text = describeIssue(issue, label, tr)
     assert.match(text, /^themeEditor\.issue\./, `${issue.kind} ${issue.path}`)
     assert.doesNotMatch(text, /undefined/)
+  }
+})
+
+/**
+ * 驗證器能產生的每一種表面名稱：所有顏色都相同時，每一組對比都失敗，所以不變量、懸停底、
+ * 狀態晶片、泡泡與膠囊（含焦點框、額度條與軌道）、徽章、按下的按鈕、最多 5 個色標的漸層、
+ * 寵物膠囊的每個配對、色差的比較對象都會出現一次。兩個模式都跑。
+ */
+function everyValidatorIssue(): Array<PanelThemeIssue & { mode: 'light' | 'dark' }> {
+  const gray = { r: 128, g: 128, b: 128, a: 1 }
+  const colors = Object.fromEntries(USER_PANEL_THEME_COLOR_KEYS.map(key => [key, gray])) as Parameters<typeof panelThemeModeIssues>[0]['colors']
+  const petStatus = Object.fromEntries(PET_STATUS_TOKENS.map(token => [token.key, gray])) as NonNullable<Parameters<typeof panelThemeModeIssues>[0]['petStatus']>
+  const stops = [0, 0.25, 0.5, 0.75, 1].map(at => ({ color: gray, at }))
+  return PANEL_THEME_MODES.flatMap(mode => [...panelThemeModeIssues({
+    mode,
+    colors,
+    background: { type: 'gradient', kind: 'linear', angle: 180, stops },
+    userImageOverlay: { color: gray, opacity: 0.5 },
+    petStatus,
+  })].map(issue => ({ ...issue, mode })))
+}
+
+const CATALOGS = { 'zh-TW': themeEditorZhTW, 'en-US': themeEditorEnUS } as const
+/** 驗證器內部的英文識別字：駝峰式的鍵名、surface2、bg、alpha 與混色比例等內部寫法。 */
+const RAW_NAME = /[a-z][A-Z]|\bsurface2\b|\bbg\b|\(state chip\)|\(badge fill\)|\bat 0\.|\bmixed 12%/
+
+test('every surface name the validator can emit has a translated label in en-US and zh-TW', () => {
+  const issues = everyValidatorIssue()
+  const names = new Set(issues.flatMap(issue => (issue.background ? [issue.background] : [])))
+  assert.ok(names.size >= 50, `expected the full surface matrix, got ${names.size}`)
+  for (const name of ['the quota track on the pet status pill over a black desktop', 'gradient between stops 3 and 4', 'quotaTrack on the pill over a white desktop', 'accentHover mixed 12% toward text (hovered primary button)']) {
+    assert.ok(names.has(name), `the enumeration covers ${name}`)
+  }
+  for (const [locale, catalog] of Object.entries(CATALOGS)) {
+    const strings = catalog as Record<string, string>
+    const translate = (key: string, params?: Record<string, string | number>) => {
+      assert.ok(key in strings, `${locale} has ${key}`)
+      return fillTemplate(strings[key]!, params)
+    }
+    const keyLabel = (key: string) => ((USER_PANEL_THEME_COLOR_KEYS as readonly string[]).includes(key) ? translate(`themeEditor.key.${key}`) : null)
+    const fallback = translate('themeEditor.surface.other')
+    for (const name of names) {
+      const text = surfaceLabel(name, keyLabel, translate)
+      assert.notEqual(text, fallback, `${locale}: "${name}" has its own label`)
+      assert.doesNotMatch(text, /[{}]|undefined/, `${locale}: "${name}" fills every placeholder`)
+      assert.doesNotMatch(text, RAW_NAME, `${locale}: "${name}" → "${text}" shows no validator identifier`)
+      if (locale === 'zh-TW') assert.doesNotMatch(text, /[A-Za-z]{2,}/, `zh-TW: "${name}" → "${text}" has no English`)
+    }
+    // 整句也一樣：每個問題（含「懸停底上的某段文字」這種前景與背景不同的句子）都沒有內部名稱。
+    for (const issue of issues) {
+      const text = describeIssue(issue, keyLabel, translate)
+      assert.doesNotMatch(text, RAW_NAME, `${locale}: ${issue.path} ${issue.kind} → "${text}"`)
+      if (locale === 'zh-TW') assert.doesNotMatch(text.replace(/OKLCH|OKLab/g, ''), /[A-Za-z]{2,}/, `zh-TW: ${issue.path} ${issue.kind} → "${text}"`)
+    }
   }
 })

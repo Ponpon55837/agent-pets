@@ -232,8 +232,10 @@ function commitOklch(): void {
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
   color: var(--text-primary);
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
   font-size: var(--font-xs);
+  font-weight: var(--weight-normal);
 }
 
 .invalid .color-text {
@@ -276,9 +278,32 @@ function commitOklch(): void {
   gap: var(--space-2);
 }
 
+/* 數值和輸入框一樣用內文字體的一般字重，與按鈕標籤的「使用建議值」區分。 */
 .color-fix-value {
   color: var(--text-secondary);
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-normal);
+}
+
+/* 區塊寬度放不下「名稱 + 完整的 rgb(255 255 255 / 0.18)」時（預設 460 px 與 360 px 寬的面板都是）：
+   顏色文字欄位換到自己的一行並佔滿寬度，值才讀得完整；OKLCH 微調改為一欄。 */
+@container (width < 26rem) {
+  .color-row {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+
+  .color-text {
+    order: 1;
+    width: auto;
+    flex: 1 1 calc(100% - var(--hit-min) - var(--space-2));
+    margin-left: calc(var(--hit-min) + var(--space-2));
+  }
+
+  .color-fine {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (forced-colors: active) {

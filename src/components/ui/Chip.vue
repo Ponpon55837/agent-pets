@@ -48,7 +48,7 @@ withDefaults(defineProps<{
 
 .tone-danger {
   background: color-mix(in srgb, var(--state-error) 12%, transparent);
-  color: var(--state-error-soft);
+  color: var(--text-danger);
 }
 
 .tone-info {

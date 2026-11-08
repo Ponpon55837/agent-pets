@@ -121,7 +121,13 @@ const describedBy = computed(() => (props.description ? descriptionId : undefine
 .size-sm { max-width: 300px; }
 .size-md { max-width: 420px; }
 .size-lg { max-width: 560px; }
-.size-full { max-width: none; height: 100%; }
+/* 全面板的工具（主題編輯器）：對話框本身不捲動，標題與底部按鈕一直看得到，也不會出現兩層
+   捲軸。內容自己是捲動區（min-height: 0; flex: 1 1 auto; overflow-y: auto）。 */
+.size-full {
+  max-width: none;
+  height: 100%;
+  overflow: hidden;
+}
 
 .head {
   display: flex;

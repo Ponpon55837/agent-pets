@@ -69,7 +69,7 @@ export type PetStatusProperty = typeof PET_STATUS_PROPERTIES[number]
  * 不送字型、圓角、背景或面板專用的顏色。
  */
 export const PET_THEME_COLOR_PROPERTIES = [
-  '--organic-bg', '--organic-surface', '--organic-surface-warm', '--organic-text', '--organic-text-secondary',
+  '--organic-bg', '--organic-surface', '--organic-text', '--organic-text-secondary',
   '--organic-text-muted', '--organic-text-faint', '--organic-accent', '--organic-accent-hover', '--organic-accent-text',
   '--organic-accent-contrast', '--organic-sage', '--organic-sage-deep', '--organic-sage-dark', '--organic-border',
   '--organic-border-soft', '--organic-danger-text', '--organic-success-text', '--organic-warn-text',
