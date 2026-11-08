@@ -25,7 +25,10 @@ defineProps<{
 </template>
 
 <style scoped>
+/* `hidden` must win over any layout a consumer gives the panel (a scoped
+   `display: flex` rule with equal specificity loaded later would otherwise
+   show every panel at once). */
 .tab-panel[hidden] {
-  display: none;
+  display: none !important;
 }
 </style>

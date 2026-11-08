@@ -107,6 +107,7 @@ function preview(cue: SoundCue): void {
       :disabled="!store.desktopVisibilityCapabilities.fullscreenAutoHide.supported"
       @update:model-value="store.setFullscreenAutoHideEnabled($event)"
     />
+    <ToggleRow :model-value="store.completionMarkersEnabled" :label="t('completionMarkers')" :help="t('completionMarkersHelp')" @update:model-value="store.setCompletionMarkersEnabled($event)" />
     <ToggleRow :model-value="store.rightClickHideEnabled" :label="t('rightClickHide')" :help="t('rightClickHideHelp')" @update:model-value="store.setRightClickHideEnabled($event)" />
     <ToggleRow :model-value="store.permissionBubbleEnabled" :label="t('permissionBubble')" :help="t('permissionBubbleHelp', { seconds: PERMISSION_DEFAULT_TTL_SECONDS })" @update:model-value="store.setPermissionBubbleEnabled($event)" />
   </Card>

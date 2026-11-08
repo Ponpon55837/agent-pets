@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { AgentSession } from '../src/types/agent.ts'
-import { compareAttention, mostUrgentSession, summarizeFamilies, truncateProject } from '../src/utils/session-attention.ts'
+import { compareAttention, mostUrgentSession, statusLineText, summarizeFamilies, truncateProject } from '../src/utils/session-attention.ts'
 
 function session(key: string, overrides: Partial<AgentSession> = {}): AgentSession {
   const [source, sessionId] = key.split(':') as [AgentSession['source'], string]
@@ -73,4 +73,43 @@ test('project names are truncated by character, not UTF-16 unit', () => {
   assert.equal(truncateProject('a'.repeat(30)), `${'a'.repeat(23)}…`)
   assert.equal(truncateProject('專案'.repeat(20), 5), '專案專案…')
   assert.equal(Array.from(truncateProject('😀'.repeat(30))).length, 24)
+})
+
+test('status line text never carries an other-sessions count and keeps the state whole', () => {
+  const busy = statusLineText({ label: 'Claude', variants: ['CLI', 'Desktop'], project: 'a-very-long-project-name-for-layout-testing', count: 3 }, '思考中')
+  assert.equal(busy.name, 'Claude')
+  assert.equal(busy.project, 'a-very-long-project-nam…')
+  assert.equal(busy.full, 'Claude (CLI+Desktop) · a-very-long-project-name-for-layout-testing · 思考中')
+  for (const value of Object.values(busy)) assert.doesNotMatch(value, /\(\+\d+\)/)
+
+  const single = statusLineText({ label: 'Codex', variants: ['CLI'], project: 'web', count: 1 }, 'Working')
+  assert.deepEqual(single, { name: 'Codex', project: '', full: 'Codex (CLI) · Working' })
+
+  const overall = statusLineText({ label: '', variants: [], count: 0 }, 'Offline')
+  assert.deepEqual(overall, { name: '', project: '', full: 'Offline' })
+})
+
+test('the pet template no longer renders a (+N) session count', async () => {
+  const fs = await import('node:fs')
+  const source = fs.readFileSync(new URL('../src/components/DesktopPet.vue', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /line\.count - 1/)
+  assert.doesNotMatch(source, /line-more/)
+  assert.match(source, /:aria-label="lineAriaLabel\(line\)"/)
+  // A generic div only gets its aria-label announced with a role.
+  assert.equal(source.match(/class="status-line[^"]*"\s+role="group"/g)?.length, 2)
+  assert.equal(source.match(/<span class="line-state">\{\{ stateLineLabel\(line\.state\) \}\}<\/span>/g)?.length, 2)
+})
+
+test('on-pet state words are short; the long form stays for screen readers', async () => {
+  const fs = await import('node:fs')
+  const en = JSON.parse(fs.readFileSync(new URL('../src/locales/pet/en-US.json', import.meta.url), 'utf8')) as Record<string, string>
+  const zh = JSON.parse(fs.readFileSync(new URL('../src/locales/pet/zh-TW.json', import.meta.url), 'utf8')) as Record<string, string>
+  const lineKeys = Object.keys(en).filter(key => key.startsWith('pet.lineState'))
+  assert.equal(lineKeys.length, 8)
+  for (const key of lineKeys) {
+    assert.ok(zh[key], key)
+    assert.ok(en[key].length <= 12, `${key} is short: ${en[key]}`)
+  }
+  assert.equal(en['pet.lineStatePermission'], 'Permission')
+  assert.equal(en['pet.statePermission'], 'waiting for permission')
 })

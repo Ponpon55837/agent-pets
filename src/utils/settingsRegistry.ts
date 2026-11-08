@@ -65,6 +65,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   { id: 'shimeji', section: 'desktop', labelKey: 'shimejiBehavior', helpKey: 'shimejiBehaviorHelp', keywords: ['wander', '走動', '自主'] },
   { id: 'captureExclusion', section: 'desktop', labelKey: 'captureExclusion', helpKey: 'captureExclusionHelp', keywords: ['screenshot', 'recording', '截圖', '錄影', '分享螢幕'] },
   { id: 'fullscreenAutoHide', section: 'desktop', labelKey: 'fullscreenAutoHide', helpKey: 'fullscreenAutoHideHelp', keywords: ['fullscreen', '全螢幕', '簡報'] },
+  { id: 'completionMarkers', section: 'desktop', labelKey: 'completionMarkers', helpKey: 'completionMarkersHelp', keywords: ['completion', 'badge', 'unread', 'check', 'done', '完成標記', '完成', '標記', '徽章', '未讀', '勾'] },
   { id: 'rightClickHide', section: 'desktop', labelKey: 'rightClickHide', helpKey: 'rightClickHideHelp', keywords: ['right click', 'context', '右鍵', '隱藏'] },
   { id: 'permissionBubble', section: 'desktop', labelKey: 'permissionBubble', helpKey: 'permissionBubbleHelp', keywords: ['permission', '權限', '批准', '氣泡'] },
   { id: 'claudePermissionRespond', section: 'desktop', labelKey: 'permission.claudeRespond', helpKey: 'permission.claudeRespondHelp', keywords: ['claude', 'permission', 'approve', 'terminal', '權限', '核准', '終端機', '回覆'] },

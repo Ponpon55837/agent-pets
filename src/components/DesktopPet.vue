@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
-import { STATE_COLORS } from '@/types/agent'
+import { STATE_COLORS, type AgentState } from '@/types/agent'
 import { locale, t, type TranslationKey } from '@/i18n'
 import type { AchievementUnlock } from '@/types/achievement'
 import type { PluginBadgeView } from '@/types/plugin'
@@ -15,14 +15,14 @@ import {
 } from '@/types/pet'
 import { quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
 import { selectBubble } from '@/utils/feed-arbiter'
-import { stateAriaLabel } from '@/utils/state-aria'
+import { stateAriaLabel, stateLineLabel } from '@/utils/state-aria'
 import { summarizePluginBadgesForPet } from '@/utils/plugin-badges'
 import PetAnimation from '@/components/PetAnimation.vue'
 import { useKeyedRefs, usePetBubbleAnchor } from '@/composables/usePetBubbleAnchor'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 import { describeTool } from '@/utils/pet-toast'
-import { truncateProject } from '@/utils/session-attention'
+import { statusLineText, type StatusLineSource, type StatusLineText } from '@/utils/session-attention'
 import PermissionBubble from '@/components/permission/PermissionBubble.vue'
 import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
 import { formatDateParts } from '@/utils/intl-format'
@@ -525,6 +525,16 @@ function quotaTitle(familyKey: string): string | undefined {
   )).join('\n')
 }
 
+function lineText(line: StatusLineSource & { state: AgentState }): StatusLineText {
+  return statusLineText(line, stateAriaLabel(line.state))
+}
+
+// 狀態列只顯示精簡文字，完整的名稱、專案與狀態放在可存取名稱裡（有 Quota 時接在後面）。
+function lineAriaLabel(line: StatusLineSource & { state: AgentState; key: string }): string | undefined {
+  const parts = [line.label ? lineText(line).full : '', quotaTitle(line.key) ?? ''].filter(Boolean)
+  return parts.length > 0 ? parts.join('\n') : undefined
+}
+
 // --- Permission 泡泡 --------------------------------------------------------
 
 // --- 視窗高度回報（ResizeObserver）------------------------------------------
@@ -806,7 +816,7 @@ watch(() => store.levelUpEvent, (event) => {
         </span>
         <span class="edge-peek-grip" aria-hidden="true" />
         <span
-          v-if="store.unreadResults.count > 0"
+          v-if="store.completionMarkersEnabled && store.unreadResults.count > 0"
           class="edge-peek-result-badge"
           :class="{ error: store.unreadResults.hasError }"
           :aria-label="t('pet.unreadResultsAria', { count: store.unreadResults.count })"
@@ -971,11 +981,11 @@ watch(() => store.levelUpEvent, (event) => {
           <Icon v-if="miniStatus.icon" :name="miniStatus.icon" :size="11" />
           <span v-else class="mini-status-dot" />
         </span>
-        <span v-if="store.unreadResults.count > 0" class="mini-status-count">{{ store.unreadResults.count }}</span>
+        <span v-if="store.completionMarkersEnabled && store.unreadResults.count > 0" class="mini-status-count">{{ store.unreadResults.count }}</span>
       </span>
 
       <span
-        v-if="store.unreadResults.count > 0"
+        v-if="store.completionMarkersEnabled && store.unreadResults.count > 0"
         class="unread-badge"
         :class="{ error: store.unreadResults.hasError }"
         role="status"
@@ -1004,6 +1014,7 @@ watch(() => store.levelUpEvent, (event) => {
             />
             <div
               class="status-line multi-pet-status-line"
+              role="group"
               :class="{
                 'has-quota': store.quotaByFamily[line.key],
                 'quota-motion': store.reactionsActive,
@@ -1011,14 +1022,18 @@ watch(() => store.levelUpEvent, (event) => {
                 'quota-drain': store.reactionsActive && draining[line.key],
               }"
               :style="quotaLineStyle(line.key)"
-              :aria-label="quotaTitle(line.key)"
+              :aria-label="lineAriaLabel(line)"
               :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
               data-pet-hit-target="solid"
             >
               <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
-              <span class="line-text">
-                <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
-                <span class="line-sep">·</span><template v-if="line.count > 1 && line.project"><span class="line-project">{{ truncateProject(line.project) }}</span></template><span class="line-state">{{ stateAriaLabel(line.state) }}<span v-if="line.count > 1" class="line-more">(+{{ line.count - 1 }})</span></span>
+              <span class="line-text" :title="store.quotaByFamily[line.key] ? undefined : lineText(line).full">
+                <span class="line-main">
+                  <span class="line-label">{{ lineText(line).name }}</span>
+                  <span class="line-sep">·</span>
+                  <span class="line-state">{{ stateLineLabel(line.state) }}</span>
+                </span>
+                <span v-if="lineText(line).project" class="line-project">{{ lineText(line).project }}</span>
               </span>
               <span v-if="pluginBadgesVisible" class="plugin-status-badges">
                 <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
@@ -1037,6 +1052,7 @@ watch(() => store.levelUpEvent, (event) => {
                 {{ quotaPercent(line.key) }}%
               </span>
               <span v-if="store.quotaByFamily[line.key]" class="quota-tooltip" role="tooltip">
+                <span v-if="line.label" class="quota-tooltip-line">{{ lineText(line).full }}</span>
                 <span
                   v-for="quota in quotaDetails(line.key)"
                   :key="quota.id"
@@ -1082,6 +1098,7 @@ watch(() => store.levelUpEvent, (event) => {
             v-for="line in displayLines"
             :key="line.key"
             class="status-line"
+            role="group"
             :class="{
               'has-quota': store.quotaByFamily[line.key],
               'quota-motion': store.reactionsActive,
@@ -1089,16 +1106,20 @@ watch(() => store.levelUpEvent, (event) => {
               'quota-drain': store.reactionsActive && draining[line.key],
             }"
             :style="quotaLineStyle(line.key)"
-            :aria-label="quotaTitle(line.key)"
+            :aria-label="lineAriaLabel(line)"
             :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
             data-pet-hit-target="solid"
           >
             <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
-            <span class="line-text">
-              <template v-if="line.label">
-                <span class="line-label">{{ line.label }}<span v-if="line.variants.length" class="line-variants">&nbsp;({{ line.variants.join('+') }})</span></span>
-                <span class="line-sep">·</span>
-              </template><template v-if="line.count > 1 && line.project"><span class="line-project">{{ truncateProject(line.project) }}</span></template><span class="line-state">{{ stateAriaLabel(line.state) }}<span v-if="line.count > 1" class="line-more">(+{{ line.count - 1 }})</span></span>
+            <span class="line-text" :title="store.quotaByFamily[line.key] || !line.label ? undefined : lineText(line).full">
+              <span class="line-main">
+                <template v-if="line.label">
+                  <span class="line-label">{{ lineText(line).name }}</span>
+                  <span class="line-sep">·</span>
+                </template>
+                <span class="line-state">{{ stateLineLabel(line.state) }}</span>
+              </span>
+              <span v-if="lineText(line).project" class="line-project">{{ lineText(line).project }}</span>
             </span>
             <span v-if="pluginBadgesVisible" class="plugin-status-badges">
               <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
@@ -1117,6 +1138,7 @@ watch(() => store.levelUpEvent, (event) => {
               {{ quotaPercent(line.key) }}%
             </span>
             <span v-if="store.quotaByFamily[line.key]" class="quota-tooltip" role="tooltip">
+              <span v-if="line.label" class="quota-tooltip-line">{{ lineText(line).full }}</span>
               <span
                 v-for="quota in quotaDetails(line.key)"
                 :key="quota.id"

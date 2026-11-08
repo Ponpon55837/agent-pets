@@ -4,7 +4,7 @@ import { locale, t } from '@/i18n'
 import { useHistoryFormat } from '@/composables/useHistoryFormat'
 import type { HistoryDailyStat } from '@/types/history'
 import { niceCeiling } from '@/utils/token-format'
-import { formatDateParts } from '@/utils/intl-format'
+import { axisLabelParts, axisLabelVisible, dayLabel } from '@/utils/history-axis'
 
 const props = defineProps<{ days: HistoryDailyStat[]; todayKey: string; weekdayLabels: boolean }>()
 const { tokens, duration } = useHistoryFormat()
@@ -19,11 +19,7 @@ const gridLines = computed(() => [1, 0.5].map(fraction => ({
 const labelStep = computed(() => Math.max(1, Math.ceil(props.days.length / 7)))
 
 function dateLabel(day: HistoryDailyStat, withWeekday: boolean): string {
-  const date = new Date(`${day.localDate}T12:00:00`)
-  if (!Number.isFinite(date.getTime())) return day.localDate
-  return formatDateParts(date, withWeekday
-    ? { weekday: 'short', month: 'numeric', day: 'numeric' }
-    : { month: 'numeric', day: 'numeric' }, locale.value)
+  return dayLabel(day.localDate, withWeekday, locale.value)
 }
 
 function total(day: HistoryDailyStat): number {
@@ -38,14 +34,19 @@ function segmentHeight(value: number): string {
   return `${Math.min(100, (value / maxTokens.value) * 100)}%`
 }
 
-function ariaLabel(day: HistoryDailyStat): string {
-  return t('growth.barAria', {
-    date: dateLabel(day, true),
-    tokens: tokens(total(day), 'full'),
-    completed: day.sessionsCompleted,
-    failed: day.sessionsFailed,
-  })
-}
+// 依 days 與語系預先算好；hover 只改 activeDay，不該重新格式化每一根長條的標籤。
+const barAriaLabels = computed(() => props.days.map(day => t('growth.barAria', {
+  date: dateLabel(day, true),
+  tokens: tokens(total(day), 'full'),
+  completed: day.sessionsCompleted,
+  failed: day.sessionsFailed,
+})))
+
+const axisLabels = computed(() => props.days.map((day, index) => (
+  axisLabelVisible(index, props.days.length, labelStep.value)
+    ? axisLabelParts(day.localDate, props.weekdayLabels, locale.value)
+    : null
+)))
 
 const detail = computed(() => {
   const day = props.days.find(entry => entry.localDate === activeDay.value)
@@ -76,13 +77,13 @@ const detail = computed(() => {
       </div>
       <div class="bars" role="group" :aria-label="t('growth.chartSummary')">
         <div
-          v-for="day in days"
+          v-for="(day, index) in days"
           :key="day.localDate"
           class="bar"
           :class="{ today: day.localDate === todayKey, idle: !hasActivity(day) }"
           tabindex="0"
           role="img"
-          :aria-label="ariaLabel(day)"
+          :aria-label="barAriaLabels[index]"
           @mouseenter="activeDay = day.localDate"
           @mouseleave="activeDay = null"
           @focus="activeDay = day.localDate"
@@ -101,7 +102,10 @@ const detail = computed(() => {
         :key="day.localDate"
         class="axis-label"
         :class="{ today: day.localDate === todayKey }"
-      >{{ (days.length - 1 - index) % labelStep === 0 ? dateLabel(day, weekdayLabels) : '' }}</span>
+      ><template v-if="axisLabels[index]"
+        ><span class="axis-date">{{ axisLabels[index]!.date }}</span
+        ><span v-if="axisLabels[index]!.weekday" class="axis-weekday">{{ axisLabels[index]!.weekday }}</span
+      ></template></span>
     </div>
     <p class="history-detail" aria-live="polite">{{ detail }}</p>
     <table class="sr-only">
@@ -169,6 +173,8 @@ const detail = computed(() => {
 .plot {
   position: relative;
   height: 96px;
+  /* Room for the top grid label, which sits above the plot's first line. */
+  margin-top: var(--space-3);
 }
 
 .grid {
@@ -253,13 +259,35 @@ const detail = computed(() => {
 }
 
 .axis-label {
+  display: flex;
   flex: 1 1 0;
   min-width: 0;
+  flex-direction: column;
+  align-items: center;
   overflow: visible;
   color: var(--text-muted);
   font-size: var(--font-xs);
+  line-height: var(--leading-tight);
   text-align: center;
   white-space: nowrap;
+}
+
+/* The 7-day view labels every column, so a label may not spill into its
+   neighbour; the 30/90-day views label every few columns and may. */
+.axis-label:has(.axis-weekday) {
+  overflow: hidden;
+}
+
+.axis-date,
+.axis-weekday {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.axis-label:not(:has(.axis-weekday)) .axis-date {
+  max-width: none;
+  overflow: visible;
 }
 
 .axis-label.today {

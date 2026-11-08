@@ -573,6 +573,15 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+.quota-tooltip-line {
+  display: block;
+  margin-bottom: 4px;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .quota-tooltip-summary {
   display: flex;
   align-items: baseline;
@@ -845,23 +854,24 @@
   display: flex;
   flex: 1;
   min-width: 0;
-  align-items: baseline;
+  flex-direction: column;
   overflow: hidden;
   white-space: nowrap;
 }
 
-/* Label and project shrink (project first) with their own ellipsis; the state and (+N) never do. */
-.line-label {
-  flex: 0 1 auto;
+/* 狀態永遠完整；名稱先縮。專案在第二行，CLI/Desktop 變體只在 tooltip 與 aria-label。 */
+.line-main {
+  display: flex;
   min-width: 0;
+  align-items: baseline;
+}
+
+.line-label {
+  flex: 0 100 auto;
+  min-width: 2ch;
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 600;
-}
-
-.line-variants {
-  font-weight: 400;
-  opacity: 0.75;
 }
 
 .line-sep {
@@ -870,23 +880,23 @@
   margin: 0 3px;
 }
 
-/* With several sessions in a family: which one needs you, and how many others there are. */
-.line-project {
-  flex: 0 100 auto;
-  min-width: 2ch;
-  margin-right: 0.3em;
+/* 狀態最後才縮：名稱的 flex-shrink 遠大於狀態；真的放不下時才以省略號收尾。 */
+.line-state {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* With several sessions in a family: which one needs you. */
+.line-project {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font-xs);
   font-weight: 500;
-}
-
-.line-state {
-  flex: none;
-}
-
-.line-more {
-  margin-left: 0.3em;
-  opacity: 0.75;
+  line-height: 1.2;
+  opacity: 0.8;
+  text-overflow: ellipsis;
 }
 
 .status-line-enter-active,

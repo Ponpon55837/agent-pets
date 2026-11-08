@@ -99,7 +99,7 @@ function formatTime(timestamp: number): string {
 </script>
 
 <template>
-  <div id="panel-sessions" role="tabpanel" aria-labelledby="tab-sessions" class="tab-panel">
+  <div id="panel-sessions" role="tabpanel" aria-labelledby="tab-sessions" class="dashboard-tab-panel">
     <div v-if="activeSessionList.length > 0" class="session-filter-bar">
       <SegmentedControl
         v-model="filter"

@@ -62,6 +62,8 @@ import {
   type RecentAward,
 } from '@/utils/progression-events'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
+import { petWindowHeight } from '@/utils/pet-window-height'
+import { noteUnread } from '@/utils/unread-results'
 import {
   INITIAL_PANEL_ROUTE,
   panelResizeRequest,
@@ -99,17 +101,6 @@ const QUOTA_SETTLE_DELAY_MS = 8_000
 // one after another can't turn the settle hook into a tight polling loop.
 const QUOTA_SETTLE_MIN_INTERVAL_MS = 45_000
 const PET_BASE_W = 250 // wide enough for a status line like "OpenCode (CLI+Desktop)"
-const PET_BASE_H = 232 // canvas + 1 status line
-const STATUS_LINE_EXTRA_H = 22 // per additional status line beyond the first
-// The quota tooltip pops open above the status line and is rendered at a
-// fixed (unscaled) size regardless of pet size (see DesktopPet.vue), so this
-// headroom must stay fixed too rather than scaling with petScale. Without
-// it the pet window's transparent canvas is sized exactly to the visible
-// sprite + status line with no slack above — fine on macOS, where the
-// compositor tolerates content painted slightly outside a layer-backed
-// window's bounds, but Windows' layered-window transparency hard-clips to
-// the window rectangle, so the tooltip got cut off / visibly broken there.
-const QUOTA_TOOLTIP_HEADROOM_H = 190
 const MOOD_BASELINE = 10
 const MOOD_SYSTEM_VERSION = '2'
 const MOOD_SUCCESS_REWARD = 4
@@ -453,6 +444,7 @@ export const useAgentStore = defineStore('agent', () => {
   const captureExclusionEnabled = ref(false)
   const fullscreenAutoHideEnabled = ref(false)
   const rightClickHideEnabled = ref(false)
+  const completionMarkersEnabled = ref(true)
   const sessionJumpEnabled = ref(true)
   const sessionJumpSwitchAppEnabled = ref(true)
   const desktopVisibilityCapabilities = ref<DesktopVisibilityCapabilities>({
@@ -579,11 +571,9 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   function noteUnreadResult(tone: 'success' | 'error') {
-    if (Date.now() - lastPetInteractionAt < UNREAD_AWAY_MS) return
-    unreadResults.value = {
-      count: Math.min(99, unreadResults.value.count + 1),
-      hasError: unreadResults.value.hasError || tone === 'error',
-    }
+    const away = Date.now() - lastPetInteractionAt >= UNREAD_AWAY_MS
+    const next = noteUnread(unreadResults.value, tone, completionMarkersEnabled.value, away)
+    if (next !== unreadResults.value) unreadResults.value = next
   }
 
   // App.vue decides whether this window may actually make sound.
@@ -912,6 +902,8 @@ export const useAgentStore = defineStore('agent', () => {
     captureExclusionEnabled.value = preferences.captureExclusionEnabled
     fullscreenAutoHideEnabled.value = preferences.fullscreenAutoHideEnabled
     rightClickHideEnabled.value = preferences.rightClickHideEnabled
+    completionMarkersEnabled.value = preferences.completionMarkersEnabled !== false
+    if (!completionMarkersEnabled.value) clearUnreadResults()
     sessionJumpEnabled.value = preferences.sessionJumpEnabled !== false
     sessionJumpSwitchAppEnabled.value = preferences.sessionJumpSwitchAppEnabled !== false
     desktopVisibilityCapabilities.value = preferences.visibilityCapabilities
@@ -1014,6 +1006,12 @@ export const useAgentStore = defineStore('agent', () => {
   function setRightClickHideEnabled(enabled: boolean) {
     rightClickHideEnabled.value = enabled
     updateDesktopPreferences({ rightClickHideEnabled: enabled })
+  }
+
+  function setCompletionMarkersEnabled(enabled: boolean) {
+    completionMarkersEnabled.value = enabled
+    if (!enabled) clearUnreadResults()
+    updateDesktopPreferences({ completionMarkersEnabled: enabled })
   }
 
   function setSessionJumpEnabled(enabled: boolean) {
@@ -1635,11 +1633,6 @@ export const useAgentStore = defineStore('agent', () => {
     return Math.max(Math.round(PET_BASE_W * petScale.value), QUOTA_TOOLTIP_MIN_W)
   })
   const scaledH = computed(() => {
-    const lineCount = Math.max(1, familyLines.value.length)
-    // Multi-pet mode lays families out side by side with one short label
-    // each, instead of stacking a status line per family, so it doesn't
-    // need the per-line height growth the single-pet mode does.
-    const extra = isMultiPet.value ? 0 : (lineCount - 1) * STATUS_LINE_EXTRA_H
     // The toast/activity bubble deliberately does NOT grow the window here
     // (see DesktopPet.vue) — it overlays the existing canvas instead, so
     // showing/hiding it never triggers a resize+reposition of the window.
@@ -1647,7 +1640,7 @@ export const useAgentStore = defineStore('agent', () => {
     // than added only while a tooltip is open) for the same reason: growing
     // the window on hover would reposition/animate it, which is distracting
     // for a "just glance at it" hover interaction.
-    return Math.round((PET_BASE_H + extra) * petScale.value) + QUOTA_TOOLTIP_HEADROOM_H
+    return petWindowHeight(familyLines.value, isMultiPet.value, petScale.value)
   })
 
   const highestPrioritySession = computed<AgentSession | null>(() => mostUrgentSession(sessionsByKey.values()))
@@ -2176,6 +2169,7 @@ export const useAgentStore = defineStore('agent', () => {
     captureExclusionEnabled,
     fullscreenAutoHideEnabled,
     rightClickHideEnabled,
+    completionMarkersEnabled,
     sessionJumpEnabled,
     sessionJumpSwitchAppEnabled,
     desktopVisibilityCapabilities,
@@ -2271,6 +2265,7 @@ export const useAgentStore = defineStore('agent', () => {
     setEdgeModeEnabled,
     setCaptureExclusionEnabled,
     setFullscreenAutoHideEnabled,
+    setCompletionMarkersEnabled,
     setRightClickHideEnabled,
     setSessionJumpEnabled,
     setSessionJumpSwitchAppEnabled,

@@ -26,6 +26,8 @@ export interface DesktopPreferences {
   captureExclusionEnabled: boolean
   fullscreenAutoHideEnabled: boolean
   rightClickHideEnabled: boolean
+  /** The "N ✓" badge next to the pet counting results that finished while you were away. */
+  completionMarkersEnabled: boolean
   /** Per-session "open project folder" / "copy project path" actions. */
   sessionJumpEnabled: boolean
   /** Per-session "switch to app" (macOS only; brings the app forward, not a specific window). */
@@ -59,6 +61,7 @@ export type DesktopPreferencesPatch = Partial<Pick<
   | 'captureExclusionEnabled'
   | 'fullscreenAutoHideEnabled'
   | 'rightClickHideEnabled'
+  | 'completionMarkersEnabled'
   | 'sessionJumpEnabled'
   | 'sessionJumpSwitchAppEnabled'
   | 'soundEnabled'
