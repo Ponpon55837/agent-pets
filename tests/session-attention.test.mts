@@ -95,4 +95,21 @@ test('the pet template no longer renders a (+N) session count', async () => {
   assert.doesNotMatch(source, /line\.count - 1/)
   assert.doesNotMatch(source, /line-more/)
   assert.match(source, /:aria-label="lineAriaLabel\(line\)"/)
+  // A generic div only gets its aria-label announced with a role.
+  assert.equal(source.match(/class="status-line[^"]*"\s+role="group"/g)?.length, 2)
+  assert.equal(source.match(/<span class="line-state">\{\{ stateLineLabel\(line\.state\) \}\}<\/span>/g)?.length, 2)
+})
+
+test('on-pet state words are short; the long form stays for screen readers', async () => {
+  const fs = await import('node:fs')
+  const en = JSON.parse(fs.readFileSync(new URL('../src/locales/pet/en-US.json', import.meta.url), 'utf8')) as Record<string, string>
+  const zh = JSON.parse(fs.readFileSync(new URL('../src/locales/pet/zh-TW.json', import.meta.url), 'utf8')) as Record<string, string>
+  const lineKeys = Object.keys(en).filter(key => key.startsWith('pet.lineState'))
+  assert.equal(lineKeys.length, 8)
+  for (const key of lineKeys) {
+    assert.ok(zh[key], key)
+    assert.ok(en[key].length <= 12, `${key} is short: ${en[key]}`)
+  }
+  assert.equal(en['pet.lineStatePermission'], 'Permission')
+  assert.equal(en['pet.statePermission'], 'waiting for permission')
 })

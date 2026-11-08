@@ -15,7 +15,7 @@ import {
 } from '@/types/pet'
 import { quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
 import { selectBubble } from '@/utils/feed-arbiter'
-import { stateAriaLabel } from '@/utils/state-aria'
+import { stateAriaLabel, stateLineLabel } from '@/utils/state-aria'
 import { summarizePluginBadgesForPet } from '@/utils/plugin-badges'
 import PetAnimation from '@/components/PetAnimation.vue'
 import { useKeyedRefs, usePetBubbleAnchor } from '@/composables/usePetBubbleAnchor'
@@ -1014,6 +1014,7 @@ watch(() => store.levelUpEvent, (event) => {
             />
             <div
               class="status-line multi-pet-status-line"
+              role="group"
               :class="{
                 'has-quota': store.quotaByFamily[line.key],
                 'quota-motion': store.reactionsActive,
@@ -1030,7 +1031,7 @@ watch(() => store.levelUpEvent, (event) => {
                 <span class="line-main">
                   <span class="line-label">{{ lineText(line).name }}</span>
                   <span class="line-sep">·</span>
-                  <span class="line-state">{{ stateAriaLabel(line.state) }}</span>
+                  <span class="line-state">{{ stateLineLabel(line.state) }}</span>
                 </span>
                 <span v-if="lineText(line).project" class="line-project">{{ lineText(line).project }}</span>
               </span>
@@ -1097,6 +1098,7 @@ watch(() => store.levelUpEvent, (event) => {
             v-for="line in displayLines"
             :key="line.key"
             class="status-line"
+            role="group"
             :class="{
               'has-quota': store.quotaByFamily[line.key],
               'quota-motion': store.reactionsActive,
@@ -1115,7 +1117,7 @@ watch(() => store.levelUpEvent, (event) => {
                   <span class="line-label">{{ lineText(line).name }}</span>
                   <span class="line-sep">·</span>
                 </template>
-                <span class="line-state">{{ stateAriaLabel(line.state) }}</span>
+                <span class="line-state">{{ stateLineLabel(line.state) }}</span>
               </span>
               <span v-if="lineText(line).project" class="line-project">{{ lineText(line).project }}</span>
             </span>
