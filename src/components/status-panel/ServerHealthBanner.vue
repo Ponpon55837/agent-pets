@@ -33,7 +33,7 @@ onUnmounted(() => dispose?.())
 </script>
 
 <template>
-  <div v-if="offline.length > 0" class="server-health-banner" role="alert">
+  <div v-if="offline.length > 0" class="server-health-banner host-protected" role="alert">
     <Icon name="warning" :size="18" />
     <div class="server-health-text">
       <strong class="server-health-summary">{{ summary }}</strong>

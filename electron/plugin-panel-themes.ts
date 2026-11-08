@@ -956,6 +956,15 @@ function slotState(ref: PanelThemeRef | null, mode: PanelThemeMode, sources: Rea
   return { ref: { ...ref }, status: 'active' }
 }
 
+/** The full built-in palette for a mode as canonical properties. */
+export function builtinPanelThemeProperties(mode: PanelThemeMode): Record<PanelThemeColorProperty, string> {
+  const properties = {} as Record<PanelThemeColorProperty, string>
+  for (const token of PANEL_THEME_COLOR_TOKENS) properties[token.property] = formatPanelThemeColor(builtinColor(token, mode))
+  return properties
+}
+
+const BUILTIN_PROPERTIES = { light: builtinPanelThemeProperties('light'), dark: builtinPanelThemeProperties('dark') }
+
 /** Builds the renderer state: slot statuses plus the themes of every available plugin. */
 export function buildPanelThemeState(
   sources: readonly PanelThemeSourcePlugin[],
@@ -974,6 +983,15 @@ export function buildPanelThemeState(
       dark: slotState(store.slots.dark, 'dark', byId),
     },
     themes,
+    builtin: { light: { ...BUILTIN_PROPERTIES.light }, dark: { ...BUILTIN_PROPERTIES.dark } },
+  }
+}
+
+export function emptyPanelThemeState(): PanelThemeState {
+  return {
+    slots: { light: { ref: null, status: 'builtin' }, dark: { ref: null, status: 'builtin' } },
+    themes: [],
+    builtin: { light: { ...BUILTIN_PROPERTIES.light }, dark: { ...BUILTIN_PROPERTIES.dark } },
   }
 }
 

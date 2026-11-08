@@ -59,7 +59,7 @@ function decide(decision: PermissionDecisionValue): void {
 
 <template>
   <section
-    class="inline-permission-card"
+    class="inline-permission-card host-protected"
     aria-labelledby="inline-permission-title"
     aria-describedby="inline-permission-context inline-permission-description"
   >

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { settingsSectionRequest } from '@/utils/settings-navigation'
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
@@ -75,6 +76,10 @@ async function openResult(section: SettingsSectionId): Promise<void> {
   await nextTick()
   scrollToSection(section)
 }
+
+watch(settingsSectionRequest, request => {
+  if (request) void openResult(request.section)
+})
 
 // Section heights change as async sections load; keep the scroll hints honest.
 let resizeObserver: ResizeObserver | null = null

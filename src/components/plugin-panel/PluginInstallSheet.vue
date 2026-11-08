@@ -104,7 +104,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
 
 <template>
   <Transition name="sheet">
-    <div v-if="open && plan" class="sheet-scrim" @click.self="cancel">
+    <div v-if="open && plan" class="sheet-scrim host-protected" @click.self="cancel">
       <div
         ref="sheetRef"
         class="sheet"

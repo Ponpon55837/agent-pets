@@ -143,6 +143,8 @@ export interface PanelThemeCatalogEntry {
 export interface PanelThemeState {
   slots: Record<PanelThemeMode, PanelThemeSlotState>
   themes: PanelThemeCatalogEntry[]
+  /** The complete built-in palette per mode (for the Settings previews). */
+  builtin: Record<PanelThemeMode, Record<PanelThemeColorProperty, string>>
 }
 
 export interface PanelThemeUserImageOptions {

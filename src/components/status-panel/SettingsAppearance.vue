@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import Select from '@/components/ui/Select.vue'
 import ToggleRow from '@/components/ui/ToggleRow.vue'
+import SettingsPanelTheme from '@/components/status-panel/SettingsPanelTheme.vue'
 import { type PetThemePreference, PET_THEME_PREFERENCES, THEME_PREFERENCES, petThemePreference, setPetThemePreference, setThemePreference, themePreference } from '@/composables/useTheme'
 
 const store = useAgentStore()
@@ -45,6 +46,8 @@ const scaleModel = computed({
       </Select>
     </div>
   </Card>
+
+  <SettingsPanelTheme />
 
   <Card :title="t('petSize')">
     <SegmentedControl v-model="scaleModel" :options="scaleOptions" :ariaLabel="t('petSize')" semantics="radio" id-prefix="pet-size-" size="sm" fill />

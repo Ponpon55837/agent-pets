@@ -20,7 +20,7 @@ const KEYS: Record<PermissionOutcomeKind, TranslationKey> = {
 </script>
 
 <template>
-  <div v-if="outcome" class="permission-outcome-notice" role="status" aria-live="polite">
+  <div v-if="outcome" class="permission-outcome-notice host-protected" role="status" aria-live="polite">
     <Icon name="warning" :size="18" />
     <span class="permission-outcome-notice-text">
       {{ t(KEYS[outcome.kind], { source: permissionSourceName(outcome.agentId) }) }}

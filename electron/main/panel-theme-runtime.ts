@@ -3,6 +3,7 @@ import {
   buildPanelThemeState,
   checkPanelThemePackagedImage,
   checkPanelThemeUserImage,
+  emptyPanelThemeState,
   isWoff2,
   PANEL_THEME_FONT_MAX_BYTES,
   PANEL_THEME_IMAGE_MAX_BYTES,
@@ -72,7 +73,7 @@ export class PanelThemeRuntime {
   private readonly resolvedCache = new Map<string, ResolvedPanelTheme[] | null>()
   private sources: PanelThemeSourcePlugin[] = []
   private tokens = new Map<string, TokenAsset>()
-  private state: PanelThemeState = { slots: { light: { ref: null, status: 'builtin' }, dark: { ref: null, status: 'builtin' } }, themes: [] }
+  private state: PanelThemeState = emptyPanelThemeState()
   private stateHash = ''
   private installed = new Set<string>()
   private knownManifests = new Set<string>()

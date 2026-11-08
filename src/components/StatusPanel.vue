@@ -12,6 +12,8 @@ import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import InlinePermissionCard from '@/components/ui/InlinePermissionCard.vue'
 import PermissionOutcomeNotice from '@/components/permission/PermissionOutcomeNotice.vue'
 import PetAnimation from '@/components/PetAnimation.vue'
+import PanelThemeBackdrop from '@/components/PanelThemeBackdrop.vue'
+import { usePanelTheme } from '@/composables/usePanelTheme'
 import ServerHealthBanner from '@/components/status-panel/ServerHealthBanner.vue'
 import StatusPanelHistory from '@/components/status-panel/StatusPanelHistory.vue'
 import StatusPanelSessions from '@/components/status-panel/StatusPanelSessions.vue'
@@ -25,6 +27,8 @@ import { DEFAULT_SETTINGS_GROUP, SETTINGS_GROUPS, isSettingsGroupId, type Settin
 
 const store = useAgentStore()
 const panelRoot = ref<HTMLElement | null>(null)
+// Plugin panel theme: inline --organic-* on this element only (spec §7.3).
+const { backdrop: panelThemeBackdrop } = usePanelTheme(panelRoot)
 const settingsShortcut = /Mac/i.test(navigator.platform) ? '\u2318,' : 'Ctrl+,'
 
 const themeLabel = (preference: ThemePreference) =>
@@ -260,6 +264,7 @@ onUnmounted(() => {
 
 <template>
   <div ref="panelRoot" class="status-panel" :inert="store.showWizard || store.showProjectMcpPanel" @click.stop>
+    <PanelThemeBackdrop :backdrop="panelThemeBackdrop" />
     <div class="panel-header">
       <Button v-if="store.panelView === 'settings'" variant="ghost" icon-only :title="t('back')" :aria-label="t('back')" @click="store.backToSessions()">
         <Icon name="back" />

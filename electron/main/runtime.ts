@@ -115,6 +115,7 @@ import { registerPluginCatalogIpc } from '../ipc/plugin-catalog'
 import { registerPluginInstallIpc } from '../ipc/plugin-install'
 import { registerPanelThemeIpc } from '../ipc/panel-theme'
 import { PanelThemeRuntime } from './panel-theme-runtime'
+import { emptyPanelThemeState } from '../plugin-panel-themes'
 import { deleteUserImage, prepareUserImage, readUserImageSource, storeUserImage } from '../panel-theme-images'
 import { mainState, type PluginSkinFallbackInfo } from './state'
 import { EMPTY_ATTENTION } from '../attention-tracker'
@@ -1463,7 +1464,7 @@ export async function createPluginServices(): Promise<void> {
     assertPluginPanelSender,
     getStore: () => mainState.panelThemeRuntime?.store ?? null,
     getSources: () => mainState.panelThemeRuntime?.getSources() ?? [],
-    getState: () => mainState.panelThemeRuntime?.getState() ?? { slots: { light: { ref: null, status: 'builtin' }, dark: { ref: null, status: 'builtin' } }, themes: [] },
+    getState: () => mainState.panelThemeRuntime?.getState() ?? emptyPanelThemeState(),
     publish: () => mainState.panelThemeRuntime?.publish(),
     getPanelWindow: () => mainState.panelWindow,
     isDialogOpen: () => mainState.dialogOpen,
