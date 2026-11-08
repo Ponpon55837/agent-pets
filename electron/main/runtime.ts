@@ -169,7 +169,8 @@ export function sendIntegrationTestEvent(
   return new Promise((resolvePromise, reject) => {
     const request = httpRequest({
       hostname: '127.0.0.1',
-      port: 17373,
+      // 與事件伺服器實際監聽的埠相同（開發或 e2e 執行可能不是 17373）。
+      port: localPorts().event,
       path: '/v1/events',
       method: 'POST',
       headers: {

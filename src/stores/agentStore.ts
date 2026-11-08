@@ -1604,9 +1604,8 @@ export const useAgentStore = defineStore('agent', () => {
       label: family.label,
       variants,
       state: top.state,
-      // With several sessions the line names the one that needs you (priority, then most recent).
+      // 最需要你處理的工作階段（優先度，其次最近）；專案名稱只出現在狀態列的提示與 aria-label。
       project: top.project,
-      count: family.count,
       since: top.lastSeenAt,
       petId: top.routedPetId ?? getPetForFamily(family.key),
       sessionKey: top.key,
@@ -1640,7 +1639,7 @@ export const useAgentStore = defineStore('agent', () => {
     // than added only while a tooltip is open) for the same reason: growing
     // the window on hover would reposition/animate it, which is distracting
     // for a "just glance at it" hover interaction.
-    return petWindowHeight(familyLines.value, isMultiPet.value, petScale.value)
+    return petWindowHeight(familyLines.value.length, isMultiPet.value, petScale.value)
   })
 
   const highestPrioritySession = computed<AgentSession | null>(() => mostUrgentSession(sessionsByKey.values()))

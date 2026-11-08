@@ -7,14 +7,18 @@
 // "Desktop" section it labelled.
 //
 // Inline SVG renders identically on both platforms and inherits currentColor.
-import { ICON_PATHS as paths } from '@/components/ui/icons'
+import { computed } from 'vue'
+import { FILLED_ICONS, ICON_PATHS as paths } from '@/components/ui/icons'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   name: string
   size?: number
 }>(), {
   size: 16,
 })
+
+// 填色圖示以實心繪製；否則 svg 層級的 1.4 線條會把它描粗。
+const filled = computed(() => FILLED_ICONS.has(props.name))
 </script>
 
 <template>
@@ -31,7 +35,11 @@ withDefaults(defineProps<{
     aria-hidden="true"
     focusable="false"
   >
-    <path :d="paths[name] ?? ''" />
+    <path
+      :d="paths[name] ?? ''"
+      :fill="filled ? 'currentColor' : undefined"
+      :stroke="filled ? 'none' : undefined"
+    />
   </svg>
 </template>
 

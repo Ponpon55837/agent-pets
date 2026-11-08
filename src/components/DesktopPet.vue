@@ -15,14 +15,17 @@ import {
 } from '@/types/pet'
 import { quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
 import { selectBubble } from '@/utils/feed-arbiter'
-import { stateAriaLabel, stateLineLabel } from '@/utils/state-aria'
+import { stateAriaLabel } from '@/utils/state-aria'
+import { stateLineLabel } from '@/utils/state-line-words'
 import { summarizePluginBadgesForPet } from '@/utils/plugin-badges'
 import PetAnimation from '@/components/PetAnimation.vue'
 import { useKeyedRefs, usePetBubbleAnchor } from '@/composables/usePetBubbleAnchor'
 import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 import { describeTool } from '@/utils/pet-toast'
-import { statusLineText, type StatusLineSource, type StatusLineText } from '@/utils/session-attention'
+import { statusLineText, type StatusLineSource } from '@/utils/session-attention'
+import { fitStatusLine, statusLineContentWidth, STATUS_TEXT_FONTS, type MeasureText, type StatusLineFit, type StatusLinePart } from '@/utils/status-line-fit'
+import { resolvedPetTheme } from '@/composables/useTheme'
 import PermissionBubble from '@/components/permission/PermissionBubble.vue'
 import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
 import { formatDateParts } from '@/utils/intl-format'
@@ -237,7 +240,7 @@ function disposeShimejiEnvironment(): void {
 // to a single line showing the pet's overall (idle/offline) state.
 const displayLines = computed(() => {
   if (store.familyLines.length > 0) return store.familyLines
-  return [{ key: 'overall', label: '', variants: [], state: store.currentState, project: undefined, count: 0, since: undefined, petId: store.activePetId, sessionKey: '' }]
+  return [{ key: 'overall', label: '', variants: [], state: store.currentState, project: undefined, since: undefined, petId: store.activePetId, sessionKey: '' }]
 })
 
 // With only one active family, one pet reflects it (and the status lines
@@ -423,16 +426,15 @@ const sayTargetStyle = usePetBubbleAnchor(
   () => store.presentationSay?.petId,
 )
 
-function quotaColor(familyKey: string): string {
-  const quota = store.quotaByFamily[familyKey]
-  if (!quota) return 'transparent'
-  if (quota.remainingPercent < 20) return 'var(--organic-quota-error)'
-  if (quota.remainingPercent < 50) return 'var(--organic-quota-warning)'
-  return familyKey === 'claude' ? 'var(--organic-accent)' : 'var(--organic-quota-sage)'
-}
+// Quota 顏色由 CSS 依 data-quota-tier 選 token（DesktopPet.css），可隨主題調整，也讓 token 檢查看得到用處。
+type QuotaTier = 'low' | 'warning' | 'claude' | 'normal'
 
-function quotaLineStyle(familyKey: string): Record<string, string> {
-  return { '--quota-color': quotaColor(familyKey) }
+function quotaTier(familyKey: string): QuotaTier | undefined {
+  const quota = store.quotaByFamily[familyKey]
+  if (!quota) return undefined
+  if (quota.remainingPercent < 20) return 'low'
+  if (quota.remainingPercent < 50) return 'warning'
+  return familyKey === 'claude' ? 'claude' : 'normal'
 }
 
 function quotaFillStyle(familyKey: string): Record<string, string> {
@@ -525,15 +527,129 @@ function quotaTitle(familyKey: string): string | undefined {
   )).join('\n')
 }
 
-function lineText(line: StatusLineSource & { state: AgentState }): StatusLineText {
-  return statusLineText(line, stateAriaLabel(line.state))
+// --- 狀態列文字、寬度預算與插件徽章 -----------------------------------------
+// 各家族的狀態列：畫面上是英文短字，提示框與可存取名稱是介面語言的完整文字。
+// 沒有家族時的整體狀態列（Idle／Offline）只有英文狀態詞，提示與可存取名稱也用同一個字。
+function lineText(line: StatusLineSource & { state: AgentState }): string {
+  return statusLineText(line, line.label ? stateAriaLabel(line.state) : stateLineLabel(line.state))
 }
 
-// 狀態列只顯示精簡文字，完整的名稱、專案與狀態放在可存取名稱裡（有 Quota 時接在後面）。
-function lineAriaLabel(line: StatusLineSource & { state: AgentState; key: string }): string | undefined {
-  const parts = [line.label ? lineText(line).full : '', quotaTitle(line.key) ?? ''].filter(Boolean)
-  return parts.length > 0 ? parts.join('\n') : undefined
+// 以 canvas 量字寬（不觸發版面計算），結果依字串快取；字型載入完成或主題切換時清快取重算。
+// 沒有 canvas 時的保守估計（每字 8px），寧可多拿掉東西也不讓狀態被截斷。
+const STATUS_TEXT_FALLBACK_CHAR_W = 8
+// 快取的鍵含插件徽章文字，數量沒有上限；超過時整批清掉重量（量一次只要微秒級）。
+const STATUS_TEXT_CACHE_MAX = 256
+const statusFontEpoch = ref(0)
+const statusTextWidths = new Map<string, number>()
+let statusTextContext: CanvasRenderingContext2D | null | undefined
+let statusFontSpecs: Record<StatusLinePart, string> | null = null
+
+function statusFonts(): Record<StatusLinePart, string> {
+  if (statusFontSpecs) return statusFontSpecs
+  const root = getComputedStyle(document.documentElement)
+  const token = (name: string, fallback: string) => root.getPropertyValue(name).trim() || fallback
+  statusFontSpecs = Object.fromEntries(Object.entries(STATUS_TEXT_FONTS).map(([part, font]) => (
+    [part, `${font.weight} ${token(font.sizeVar, font.sizeFallback)} ${token(font.familyVar, 'sans-serif')}`]
+  ))) as Record<StatusLinePart, string>
+  return statusFontSpecs
 }
+
+const measureStatusText: MeasureText = (text, part) => {
+  const cacheKey = `${part}\u0000${text}`
+  const cached = statusTextWidths.get(cacheKey)
+  if (cached !== undefined) return cached
+  if (statusTextContext === undefined) statusTextContext = document.createElement('canvas').getContext('2d')
+  let width = Array.from(text).length * STATUS_TEXT_FALLBACK_CHAR_W
+  if (statusTextContext) {
+    statusTextContext.font = statusFonts()[part]
+    width = statusTextContext.measureText(text).width
+  }
+  if (statusTextWidths.size >= STATUS_TEXT_CACHE_MAX) statusTextWidths.clear()
+  statusTextWidths.set(cacheKey, width)
+  return width
+}
+
+function resetStatusTextMetrics() {
+  statusTextWidths.clear()
+  statusFontSpecs = null
+  statusFontEpoch.value += 1
+}
+
+interface StatusLineView {
+  text: string
+  aria: string
+  /** 沒有 Quota 提示框時的 title；含被寬度預算拿掉的徽章。 */
+  title: string
+  fit: StatusLineFit
+  /** 寬度預算內放得下的徽章。 */
+  badges: PluginBadgeView[]
+  /** 「+N」的 N；放不下或沒有時為 0。 */
+  overflowCount: number
+}
+
+const EMPTY_STATUS_LINE_VIEW: StatusLineView = {
+  text: '',
+  aria: '',
+  title: '',
+  fit: { showLabel: true, showReadout: true, badgeCount: 0, showOverflow: false },
+  badges: [],
+  overflowCount: 0,
+}
+
+// 每條狀態列的文字、可存取名稱、寬度取捨與徽章一次算好；模板只查表，
+// 不再於每次 render 對每條線重複過濾徽章或重組文字。
+const statusLineViews = computed<Record<string, StatusLineView>>(() => {
+  void statusFontEpoch.value
+  const multi = isMultiPet.value
+  const lines = multi ? store.familyLines : displayLines.value
+  const contentWidth = statusLineContentWidth(multi, store.petScale, store.scaledW)
+  const badgesByPet = new Map<string, ReturnType<typeof pluginBadgeSummary>>()
+  const views: Record<string, StatusLineView> = {}
+  for (const line of lines) {
+    let summary = badgesByPet.get(line.petId)
+    if (!summary) {
+      summary = pluginBadgeSummary(line.petId)
+      badgesByPet.set(line.petId, summary)
+    }
+    const quota = store.quotaByFamily[line.key]
+    const fit = fitStatusLine({
+      contentWidth,
+      label: line.label,
+      state: stateLineLabel(line.state),
+      readout: quota ? `${quotaPercent(line.key)}%` : null,
+      badges: summary.badges.map(badge => badge.text),
+      hiddenCount: summary.hiddenCount,
+    }, measureStatusText)
+    const text = lineText(line)
+    // 被拿掉的徽章與「+N」不能從可存取名稱裡消失。
+    const dropped = summary.badges.slice(fit.badgeCount).map(pluginBadgeTooltip)
+    if (!fit.showOverflow && summary.hiddenCount > 0) dropped.push(t('pluginBadgeOverflow', { count: summary.hiddenCount }))
+    views[line.key] = {
+      text,
+      aria: [text, quotaTitle(line.key) ?? '', ...dropped].filter(Boolean).join('\n'),
+      title: [text, ...dropped].join('\n'),
+      fit,
+      badges: summary.badges.slice(0, fit.badgeCount),
+      overflowCount: fit.showOverflow ? summary.hiddenCount : 0,
+    }
+  }
+  return views
+})
+
+function lineView(key: string): StatusLineView {
+  return statusLineViews.value[key] ?? EMPTY_STATUS_LINE_VIEW
+}
+
+onMounted(() => {
+  document.fonts?.addEventListener('loadingdone', resetStatusTextMetrics)
+  void document.fonts?.ready.then(resetStatusTextMetrics)
+})
+
+onBeforeUnmount(() => {
+  document.fonts?.removeEventListener('loadingdone', resetStatusTextMetrics)
+})
+
+watch(resolvedPetTheme, resetStatusTextMetrics)
 
 // --- Permission 泡泡 --------------------------------------------------------
 
@@ -810,8 +926,8 @@ watch(() => store.levelUpEvent, (event) => {
             :since="store.highestPrioritySession?.lastSeenAt"
             autonomous-behavior="idle"
             :freeze="petAnimationFrozen"
-          :low-fps="petLowFps"
-          :facing="shimejiFacing"
+            :low-fps="petLowFps"
+            :facing="shimejiFacing"
           />
         </span>
         <span class="edge-peek-grip" aria-hidden="true" />
@@ -1009,8 +1125,8 @@ watch(() => store.levelUpEvent, (event) => {
               :mood="store.moodVisualsEnabled ? store.mood : undefined"
               :autonomous-behavior="shimejiBehavior"
               :freeze="petAnimationFrozen"
-          :low-fps="petLowFps"
-          :facing="shimejiFacing"
+              :low-fps="petLowFps"
+              :facing="shimejiFacing"
             />
             <div
               class="status-line multi-pet-status-line"
@@ -1021,38 +1137,36 @@ watch(() => store.levelUpEvent, (event) => {
                 'quota-critical': store.reactionsActive && (store.quotaByFamily[line.key]?.remainingPercent ?? 100) < 10,
                 'quota-drain': store.reactionsActive && draining[line.key],
               }"
-              :style="quotaLineStyle(line.key)"
-              :aria-label="lineAriaLabel(line)"
+              :data-quota-tier="quotaTier(line.key)"
+              :aria-label="lineView(line.key).aria"
+              :title="store.quotaByFamily[line.key] ? undefined : lineView(line.key).title"
               :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
               data-pet-hit-target="solid"
             >
               <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
-              <span class="line-text" :title="store.quotaByFamily[line.key] ? undefined : lineText(line).full">
-                <span class="line-main">
-                  <span class="line-label">{{ lineText(line).name }}</span>
-                  <span class="line-sep">·</span>
-                  <span class="line-state">{{ stateLineLabel(line.state) }}</span>
-                </span>
-                <span v-if="lineText(line).project" class="line-project">{{ lineText(line).project }}</span>
+              <span v-if="lineView(line.key).fit.showLabel" class="line-text">
+                <span class="line-label">{{ line.label }}</span>
+                <span class="line-sep">·</span>
               </span>
+              <span class="line-state">{{ stateLineLabel(line.state) }}</span>
               <span v-if="pluginBadgesVisible" class="plugin-status-badges">
-                <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
+                <template v-for="badge in lineView(line.key).badges" :key="badge.pluginId">
                   <span class="plugin-badge-anchor" tabindex="0" :aria-label="pluginBadgeTooltip(badge)">
                     <span class="plugin-badge-pill" :class="`tone-${badge.tone}`">{{ badge.text }}</span>
                     <span class="plugin-badge-tooltip" role="tooltip">{{ pluginBadgeTooltip(badge) }}</span>
                   </span>
                 </template>
                 <span
-                  v-if="pluginBadgeSummary(line.petId).hiddenCount > 0"
+                  v-if="lineView(line.key).overflowCount > 0"
                   class="plugin-badge-pill plugin-badge-overflow"
-                  :aria-label="t('pluginBadgeOverflow', { count: pluginBadgeSummary(line.petId).hiddenCount })"
-                >+{{ pluginBadgeSummary(line.petId).hiddenCount }}</span>
+                  :aria-label="t('pluginBadgeOverflow', { count: lineView(line.key).overflowCount })"
+                >+{{ lineView(line.key).overflowCount }}</span>
               </span>
-              <span v-if="store.quotaByFamily[line.key]" class="quota-readout">
+              <span v-if="store.quotaByFamily[line.key] && lineView(line.key).fit.showReadout" class="quota-readout">
                 {{ quotaPercent(line.key) }}%
               </span>
               <span v-if="store.quotaByFamily[line.key]" class="quota-tooltip" role="tooltip">
-                <span v-if="line.label" class="quota-tooltip-line">{{ lineText(line).full }}</span>
+                <span v-if="line.label" class="quota-tooltip-line">{{ lineView(line.key).text }}</span>
                 <span
                   v-for="quota in quotaDetails(line.key)"
                   :key="quota.id"
@@ -1105,40 +1219,36 @@ watch(() => store.levelUpEvent, (event) => {
               'quota-critical': store.reactionsActive && (store.quotaByFamily[line.key]?.remainingPercent ?? 100) < 10,
               'quota-drain': store.reactionsActive && draining[line.key],
             }"
-            :style="quotaLineStyle(line.key)"
-            :aria-label="lineAriaLabel(line)"
+            :data-quota-tier="quotaTier(line.key)"
+            :aria-label="lineView(line.key).aria"
+            :title="store.quotaByFamily[line.key] ? undefined : lineView(line.key).title"
             :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
             data-pet-hit-target="solid"
           >
             <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
-            <span class="line-text" :title="store.quotaByFamily[line.key] || !line.label ? undefined : lineText(line).full">
-              <span class="line-main">
-                <template v-if="line.label">
-                  <span class="line-label">{{ lineText(line).name }}</span>
-                  <span class="line-sep">·</span>
-                </template>
-                <span class="line-state">{{ stateLineLabel(line.state) }}</span>
-              </span>
-              <span v-if="lineText(line).project" class="line-project">{{ lineText(line).project }}</span>
+            <span v-if="line.label && lineView(line.key).fit.showLabel" class="line-text">
+              <span class="line-label">{{ line.label }}</span>
+              <span class="line-sep">·</span>
             </span>
+            <span class="line-state">{{ stateLineLabel(line.state) }}</span>
             <span v-if="pluginBadgesVisible" class="plugin-status-badges">
-              <template v-for="badge in pluginBadgeSummary(line.petId).badges" :key="badge.pluginId">
+              <template v-for="badge in lineView(line.key).badges" :key="badge.pluginId">
                 <span class="plugin-badge-anchor" tabindex="0" :aria-label="pluginBadgeTooltip(badge)">
                   <span class="plugin-badge-pill" :class="`tone-${badge.tone}`">{{ badge.text }}</span>
                   <span class="plugin-badge-tooltip" role="tooltip">{{ pluginBadgeTooltip(badge) }}</span>
                 </span>
               </template>
               <span
-                v-if="pluginBadgeSummary(line.petId).hiddenCount > 0"
+                v-if="lineView(line.key).overflowCount > 0"
                 class="plugin-badge-pill plugin-badge-overflow"
-                :aria-label="t('pluginBadgeOverflow', { count: pluginBadgeSummary(line.petId).hiddenCount })"
-              >+{{ pluginBadgeSummary(line.petId).hiddenCount }}</span>
+                :aria-label="t('pluginBadgeOverflow', { count: lineView(line.key).overflowCount })"
+              >+{{ lineView(line.key).overflowCount }}</span>
             </span>
-            <span v-if="store.quotaByFamily[line.key]" class="quota-readout">
+            <span v-if="store.quotaByFamily[line.key] && lineView(line.key).fit.showReadout" class="quota-readout">
               {{ quotaPercent(line.key) }}%
             </span>
             <span v-if="store.quotaByFamily[line.key]" class="quota-tooltip" role="tooltip">
-              <span v-if="line.label" class="quota-tooltip-line">{{ lineText(line).full }}</span>
+              <span v-if="line.label" class="quota-tooltip-line">{{ lineView(line.key).text }}</span>
               <span
                 v-for="quota in quotaDetails(line.key)"
                 :key="quota.id"

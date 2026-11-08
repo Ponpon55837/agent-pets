@@ -51,7 +51,8 @@
 | 拖曳 | 移動寵物，位置重啟後會記住 |
 | 右鍵 | 選單：開啟面板、開啟設定、勿擾模式、Mini 模式、隱藏、離開（若開啟**右鍵隱藏**則直接隱藏） |
 
-- **狀態列** — 寵物下方最多 3 行，每個工具家族（Codex / Claude / OpenCode）一行，CLI 與 Desktop 合併成同一行。狀態一律完整顯示；同一家族有多個工作階段時，第二行會標出最需要你處理的那一個（狀態優先度最高，其次是最近的），例如 `Claude · 等待權限` 下方顯示 `my-app`。完整名稱、CLI/Desktop、專案與狀態放在滑過時的提示（有額度條時併入額度提示）與螢幕閱讀器的標籤中。
+- **狀態列** — 寵物下方最多 3 行，每個工具家族（Codex / Claude / OpenCode）一行，CLI 與 Desktop 合併成同一行。每行都是一條細的單行：工具名稱與簡短狀態（狀態詞不論介面語言都以英文顯示），有額度資料時再加上百分比與額度條，另有插件徽章時也在同一行，例如 `Claude · Working 71%`。狀態詞一律完整：寬度不夠時（多寵物小尺寸、徽章較多）依序拿掉徽章的 `+N`、徽章（由後往前），接著名稱以省略號縮短、再拿掉名稱，最後才是百分比（額度條保留）。被拿掉的徽章仍會出現在提示與螢幕閱讀器標籤中。同一家族有多個工作階段時，這一行會跟著最需要你處理的那一個（狀態優先度最高，其次是最近的）。完整名稱、CLI/Desktop、專案與介面語言的完整狀態放在滑過時的提示（有額度條時併入額度提示）與螢幕閱讀器的標籤中。沒有進行中的工作階段時只顯示一行 `Idle` 或 `Offline`，提示與螢幕閱讀器標籤也是同一個字。
+- **完成標記** — 超過 45 秒沒碰寵物時完成的結果，會在寵物旁累計成 `✓ N`（有失敗時為 `⚠ N`）；Mini 模式與邊緣收合也會顯示數量。點寵物或標記即清除。可在**設定 → 桌面 → 完成標記**關閉，關閉期間不會累計。
 - **氣泡** — 成功、失敗與等待提示會出現在寵物上方（**狀態泡泡**，預設開啟，數秒後自動關閉，點擊可開啟面板）。可另外開啟**工作中提示**，顯示目前使用的工具（預設關閉）。權限提示不會自動消失。氣泡有優先順序：權限最優先，其次是 Agent 提示、Presentation MCP 發言、工作中提示與插件通知。
 - **反應** — 狀態變化時的彈跳與等待權限時的晃動（**彈跳與晃動**，預設開啟），另有裝飾性的**待機小動作**（預設關閉）。使用 Presentation MCP 的 Agent 與插件也能觸發 `happy`、`curious`、`thinking`、`surprised`、`encouraging` 五種反應。
 - **心情與成長** — 見[成長](#成長)。
@@ -210,7 +211,7 @@ pnpm dev
 | `pnpm build` / `pnpm build:fast` | 型別檢查、Vite 建置，再由 electron-builder 輸出到 `release/`（`build:fast` 不壓縮） |
 | `pnpm bench`、`pnpm bench:lag` | 效能基準測試 |
 
-兩個建置指令都會先關閉本專案的 Agent Pets 程序。若想在真實 Electron App 中驗證修改又不動到你的資料，先執行 `pnpm exec vite build`，再執行 `node scripts/e2e-isolated-electron.mjs`（暫時的 home 與 userData、假的 `safeStorage`，所以不會碰到 macOS 鑰匙圈；見 [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)）。
+兩個建置指令都會先關閉本專案的 Agent Pets 程序。若想在真實 Electron App 中驗證修改又不動到你的資料，先執行 `pnpm exec vite build`，再執行 `node scripts/e2e-isolated-electron.mjs`（暫時的 home 與 userData、假的 `safeStorage`，所以不會碰到 macOS 鑰匙圈；本機埠預設為 27373–27375，已安裝的版本可保有 17373–17375，`--hook-port-base` 可改用另一組，`--real-hook-ports` 才用預設埠；見 [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)）。
 
 **開發埠覆寫** — 未打包的執行可設定 `AGENT_PETS_EVENT_PORT`、`AGENT_PETS_PERMISSION_PORT`、`AGENT_PETS_PRESENTATION_PORT`（1024–65535；預設 17373、17374、17375），避免和已安裝的版本搶埠。打包版會忽略這些變數。
 

@@ -347,8 +347,9 @@
 .multi-pet-status-line {
   /* Keep the same status-pill treatment as single-pet mode, but constrain
      each pill to its own sprite column instead of the full pet window. */
-  width: calc(192px * var(--pet-scale, 1) - 12px);
-  max-width: calc(192px * var(--pet-scale, 1) - 12px);
+  /* 小尺寸時保留 112px 的下限（仍在 0.6 倍、約 115px 的寵物欄內），讓「點 + 最長的狀態詞」放得下。 */
+  width: max(calc(192px * var(--pet-scale, 1) - 12px), 112px);
+  max-width: max(calc(192px * var(--pet-scale, 1) - 12px), 112px);
   margin-top: -8px;
 }
 
@@ -394,6 +395,27 @@
   border-radius: var(--organic-status-radius);
 }
 
+/* Quota 顏色依剩餘比例分級（DesktopPet.vue 的 quotaTier）；沒有 Quota 時維持透明。 */
+.status-line {
+  --quota-color: transparent;
+}
+
+.status-line[data-quota-tier='low'] {
+  --quota-color: var(--organic-quota-error);
+}
+
+.status-line[data-quota-tier='warning'] {
+  --quota-color: var(--organic-quota-warning);
+}
+
+.status-line[data-quota-tier='claude'] {
+  --quota-color: var(--organic-accent);
+}
+
+.status-line[data-quota-tier='normal'] {
+  --quota-color: var(--organic-quota-sage);
+}
+
 .status-line:hover {
   z-index: calc(var(--z-sticky) + 20);
 }
@@ -416,17 +438,24 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  flex: 0 1 auto;
+  /* 若量測有誤差，徽章比名稱先縮。 */
+  flex: 0 1000 auto;
   min-width: 0;
   max-width: 132px;
 }
 
+/* 沒有插件徽章時不佔位，省下一個 gap 給名稱與狀態。 */
+.plugin-status-badges:not(:has(*)) {
+  display: none;
+}
+
+/* 寬度隨文字、最寬 42px（status-line-fit.ts 的 badgeMax 以同樣方式計算）。 */
 .plugin-badge-anchor {
   position: relative;
   display: inline-flex;
-  flex: 0 1 42px;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: 100%;
+  max-width: 42px;
   overflow: visible;
   border-radius: 999px;
 }
@@ -442,7 +471,8 @@
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  padding: 1px 5px;
+  /* 不加上下 padding：徽章（11px × 1.2 + 邊框 = 15.2px）不高於狀態文字的行高，狀態列維持同一高度。 */
+  padding: 0 5px;
   border: 1px solid var(--organic-status-border);
   border-radius: 999px;
   background: var(--organic-status-surface-fallback);
@@ -454,13 +484,15 @@
   white-space: nowrap;
 }
 
+/* 用寵物外觀（深／淺）各自調過對比的強調色：原本的 --state-info／--organic-quota-warning
+   在淺色寵物底上只有約 1.4–1.8:1。 */
 .plugin-badge-pill.tone-info {
-  color: var(--state-info);
+  color: var(--pet-bubble-info-accent);
 }
 
 .plugin-badge-pill.tone-warning {
-  border-color: color-mix(in srgb, var(--organic-quota-warning) 45%, var(--organic-status-border));
-  color: var(--organic-quota-warning);
+  border-color: var(--pet-bubble-warn-border);
+  color: var(--pet-bubble-warn-accent);
 }
 
 .plugin-badge-overflow {
@@ -573,13 +605,18 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+/* 完整的名稱、專案與狀態（狀態列本身只剩一行）：允許換行，最多三行，
+   讓長專案名與狀態都看得到，又不會長出 tooltip 預留的高度。 */
 .quota-tooltip-line {
-  display: block;
+  display: -webkit-box;
   margin-bottom: 4px;
   overflow: hidden;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
 }
 
 .quota-tooltip-summary {
@@ -850,22 +887,18 @@
   border-radius: var(--radius-lg);
 }
 
+/* 名稱與分隔點。寬度預算（src/utils/status-line-fit.ts）先拿掉插件徽章，
+   再讓名稱縮短或整個拿掉，所以這裡只有名稱會縮。 */
 .line-text {
   display: flex;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
-  flex-direction: column;
+  align-items: baseline;
   overflow: hidden;
   white-space: nowrap;
 }
 
-/* 狀態永遠完整；名稱先縮。專案在第二行，CLI/Desktop 變體只在 tooltip 與 aria-label。 */
-.line-main {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-}
-
+/* 單行細條：CLI/Desktop 變體與專案名稱只在 tooltip 與 aria-label。 */
 .line-label {
   flex: 0 100 auto;
   min-width: 2ch;
@@ -877,26 +910,19 @@
 .line-sep {
   flex: none;
   opacity: 0.45;
-  margin: 0 3px;
+  margin-left: 3px;
 }
 
-/* 狀態最後才縮：名稱的 flex-shrink 遠大於狀態；真的放不下時才以省略號收尾。 */
+/* 分隔點兩側都是 3px：狀態與名稱之間隔著 .status-line 的 5px gap，拉回 2px。 */
+.line-text + .line-state {
+  margin-left: -2px;
+}
+
+/* 狀態永遠完整、不縮（即使只縮 0.01px，text-overflow 也會換成省略號）。
+   它吃掉剩餘空間，把徽章與百分比推到右側。 */
 .line-state {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* With several sessions in a family: which one needs you. */
-.line-project {
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--font-xs);
-  font-weight: 500;
-  line-height: 1.2;
-  opacity: 0.8;
-  text-overflow: ellipsis;
+  flex: 1 0 auto;
+  white-space: nowrap;
 }
 
 .status-line-enter-active,
