@@ -180,10 +180,14 @@ test('the worst-case draft (every key mid-grey) validates within a timing ceilin
 })
 
 test('a deeply nested payload is rejected by the structural parse before anything is hashed', () => {
+  const depth = 8000
   let deep: unknown = 1
-  for (let level = 0; level < 8000; level += 1) deep = [deep]
+  for (let level = 0; level < depth; level += 1) deep = [deep]
   const payload = { typography: deep, shape: {}, modes: {} }
-  assert.ok(Buffer.byteLength(JSON.stringify(payload), 'utf8') <= USER_PANEL_THEME_MAX_BYTES)
+  // 不用 JSON.stringify 量大小：CI（coverage 模式）的堆疊較小，測試自己就會溢位。
+  // 序列化後是 '['×depth + '1' + ']'×depth 加上外層物件的固定字元。
+  const encodedBytes = 2 * depth + 1 + '{"typography":,"shape":{},"modes":{}}'.length
+  assert.ok(encodedBytes <= USER_PANEL_THEME_MAX_BYTES)
   assert.throws(() => canonicalJson(deep), RangeError)
   assert.doesNotThrow(() => canonicalJson(JSON.parse(JSON.stringify(builtinDefinition()))))
   let nested: unknown = 0
