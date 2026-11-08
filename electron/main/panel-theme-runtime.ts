@@ -19,8 +19,8 @@ import type { PluginThemeSnapshot } from '../../src/types/plugin-theme.ts'
 import { buildPluginThemeSnapshot } from '../plugin-theme-tokens.ts'
 import { ContentHashCache, PanelThemeResolveCache } from './panel-theme-cache.ts'
 import { UserPanelThemeStore } from '../panel-theme-user-store.ts'
-import { userPanelThemeContribution } from '../panel-theme-user.ts'
-import { validateUserPanelTheme } from '../panel-theme-diagnostics.ts'
+import { parseUserPanelThemeDefinition, userPanelThemeContribution } from '../panel-theme-user.ts'
+import { userPanelThemeSchemaFailure, validateUserPanelTheme } from '../panel-theme-diagnostics.ts'
 import { USER_PANEL_THEME_MAX_COUNT, USER_PANEL_THEME_OWNER, USER_PANEL_THEME_SOURCE_NAME, type PanelThemeValidation } from '../../src/types/panel-theme-user.ts'
 
 // 主程序中插件面板主題的擁有者：store、每個工作階段的
@@ -160,9 +160,15 @@ export class PanelThemeRuntime {
     return this.sources
   }
 
-  /** 驗證一份「我的主題」草稿（不安裝、不儲存），結果以內容雜湊快取。 */
+  /**
+   * 驗證一份「我的主題」草稿（不安裝、不儲存）。先做有界的結構解析（封閉的鍵集合，深度固定）：
+   * 失敗時直接回傳文法錯誤、不碰快取；只有解析後的標準定義才拿去雜湊與快取，所以任意深的巢狀
+   * payload 不會進到遞迴的序列化。
+   */
   validate(definition: unknown): PanelThemeValidation {
-    return this.validationCache.lookup(definition).result
+    const parsed = parseUserPanelThemeDefinition(definition)
+    if (!parsed.ok) return userPanelThemeSchemaFailure(parsed)
+    return this.validationCache.lookup(parsed.value).result
   }
 
   /** 「我的主題」新增、修改或刪除之後：重建使用者來源、修剪 store（刪掉的主題的插槽與圖片），再發布。 */

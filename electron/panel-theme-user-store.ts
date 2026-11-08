@@ -3,7 +3,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { renameSyncWithRetry } from './fs-rename.ts'
 import { isFutureUserPanelThemeRecord, parseUserPanelThemeDefinition, parseUserPanelThemeName, parseUserPanelThemeRecord } from './panel-theme-user.ts'
-import { validateUserPanelTheme } from './panel-theme-diagnostics.ts'
+import { userPanelThemeSchemaFailure, validateUserPanelTheme } from './panel-theme-diagnostics.ts'
 import {
   USER_PANEL_THEME_MAX_BYTES,
   USER_PANEL_THEME_MAX_COUNT,
@@ -206,11 +206,12 @@ export class UserPanelThemeStore {
     return clean
   }
 
-  /** 結構解析之後再以完整驗證器檢查；任何問題都拒絕寫入。 */
+  /** 結構解析之後再以完整驗證器檢查（只傳入解析後的定義）；任何問題都拒絕寫入。 */
   private requireDefinition(definition: unknown): UserPanelThemeDefinition {
     const parsed = parseUserPanelThemeDefinition(definition)
-    const validation = this.validate(parsed.ok ? parsed.value : definition)
-    if (!parsed.ok || !validation.valid) throw new UserPanelThemeStoreError('invalid_definition', validation)
+    if (!parsed.ok) throw new UserPanelThemeStoreError('invalid_definition', userPanelThemeSchemaFailure(parsed))
+    const validation = this.validate(parsed.value)
+    if (!validation.valid) throw new UserPanelThemeStoreError('invalid_definition', validation)
     return parsed.value
   }
 

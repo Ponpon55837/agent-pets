@@ -529,41 +529,19 @@ export const PANEL_THEME_STATE_MIN_DISTANCE = 0.08
  */
 export const PANEL_THEME_STATE_ACCENT_MIN_DISTANCE = 0.06
 
-interface StateMeaningIssue {
-  key: PluginPanelThemeColorKey
-  kind: 'chroma' | 'hue' | 'distance'
-  problem: string
-  measured: number
-  required: number
-  other?: PluginPanelThemeColorKey
-}
-
-function* stateMeaningIssues(colors: ColorSet): Generator<StateMeaningIssue> {
-  for (const [key, ranges] of Object.entries(PANEL_THEME_STATE_HUES) as Array<[keyof typeof PANEL_THEME_STATE_HUES, readonly HueRange[]]>) {
-    const { c, h } = rgbToOklch(colors[key])
-    if (c < PANEL_THEME_STATE_MIN_CHROMA) {
-      yield { key, kind: 'chroma', measured: c, required: PANEL_THEME_STATE_MIN_CHROMA, problem: `chroma ${c.toFixed(3)} < ${PANEL_THEME_STATE_MIN_CHROMA} (too grey to read as a state colour)` }
-    } else if (!ranges.some(([from, to]) => h >= from && h <= to)) {
-      yield { key, kind: 'hue', measured: h, required: ranges[0]![0], problem: `OKLCH hue ${Math.round(h)}° is outside ${ranges.map(([from, to]) => `${from}–${to}°`).join(' or ')}` }
-    }
-  }
-  const pairs: Array<[PluginPanelThemeColorKey, PluginPanelThemeColorKey, number]> = [
-    ['dangerText', 'successText', PANEL_THEME_STATE_MIN_DISTANCE],
-    ['dangerText', 'warnText', PANEL_THEME_STATE_MIN_DISTANCE],
-    ['successText', 'warnText', PANEL_THEME_STATE_MIN_DISTANCE],
-    ['infoText', 'dangerText', PANEL_THEME_STATE_MIN_DISTANCE],
-    ['infoText', 'successText', PANEL_THEME_STATE_MIN_DISTANCE],
-    ['infoText', 'warnText', PANEL_THEME_STATE_MIN_DISTANCE],
-    ['dangerText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
-    ['successText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
-    ['warnText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
-    ['infoText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
-  ]
-  for (const [first, second, minimum] of pairs) {
-    const distance = oklabDistance(colors[first], colors[second])
-    if (distance < minimum) yield { key: first, kind: 'distance', other: second, measured: distance, required: minimum, problem: `OKLab ΔE ${distance.toFixed(3)} to ${second} < ${minimum}` }
-  }
-}
+/** 狀態色彼此之間、以及與強調色之間的最小色差（依此順序檢查）。 */
+const STATE_DISTANCE_PAIRS: ReadonlyArray<readonly [PluginPanelThemeColorKey, PluginPanelThemeColorKey, number]> = [
+  ['dangerText', 'successText', PANEL_THEME_STATE_MIN_DISTANCE],
+  ['dangerText', 'warnText', PANEL_THEME_STATE_MIN_DISTANCE],
+  ['successText', 'warnText', PANEL_THEME_STATE_MIN_DISTANCE],
+  ['infoText', 'dangerText', PANEL_THEME_STATE_MIN_DISTANCE],
+  ['infoText', 'successText', PANEL_THEME_STATE_MIN_DISTANCE],
+  ['infoText', 'warnText', PANEL_THEME_STATE_MIN_DISTANCE],
+  ['dangerText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
+  ['successText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
+  ['warnText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
+  ['infoText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
+]
 
 // ── 主機強制的不變量（spec R14）──────────────────────────────────────
 // 主題會套到每個介面（包含權限與風險 UI），所以不再有「保護區域」；改由主機在
@@ -593,9 +571,17 @@ type ColorKey = PluginPanelThemeColorKey
  * 每個表面會出現哪些文字（依元件實際用法）。一般表面與寵物泡泡、膠囊承載所有文字、
  * 狀態與資訊色；強調淺底（surfaceWarm：分頁、晶片、徽章、精靈與 Project MCP 的待處理列）
  * 只放主要文字與強調文字；鼠尾草底（成就、成長卡、精靈與 Project MCP 的就緒列）放主要文字與
- * sageDeep／sageDark。bg 排在最後：同時失敗時先指出卡片表面。
+ * sageDeep／sageDark。bg 排在最後：同時失敗時先指出卡片表面。`reads` 是表面色用到的色鍵。
  */
-interface Surface { name: string; color: PanelThemeRgba; blame?: ColorKey; pill: boolean; focus: boolean; text: readonly ColorKey[] }
+interface SurfaceSpec {
+  name: string
+  reads: readonly ColorKey[]
+  color(colors: ColorSet): PanelThemeRgba
+  blame?: ColorKey
+  pill: boolean
+  focus: boolean
+  text: readonly ColorKey[]
+}
 
 /** 鼠尾草文字（通過的測試結果、統計數字、額度重設時間、就緒列）。只出現在面板，不在寵物介面。 */
 const PANEL_TEXT_KEYS: readonly ColorKey[] = [...TEXT_KEYS, 'sageDeep', 'sageDark']
@@ -620,17 +606,25 @@ const HOVER_WASH_SURFACES: ReadonlyArray<readonly [ColorKey, readonly ColorKey[]
 ]
 const STATE_TINT_KEYS = ['dangerText', 'successText', 'warnText'] as const
 const STATE_TINT_BASES: readonly ColorKey[] = ['surface', 'surface2', 'bg']
+const DESKTOPS = [['black', PANEL_THEME_BLACK], ['white', PANEL_THEME_WHITE]] as const
 
 /** 文字可能出現的每個表面：不透明的面板表面、懸停底，以及疊在黑/白桌面上的寵物泡泡與狀態膠囊。 */
-function themeSurfaces(colors: ColorSet): Surface[] {
-  const surfaces: Surface[] = OPAQUE_SURFACES.map(([key, text]) => ({ name: key, color: colors[key], pill: false, focus: true, text }))
+function surfaceSpecs(): SurfaceSpec[] {
+  const surfaces: SurfaceSpec[] = OPAQUE_SURFACES.map(([key, text]) => ({ name: key, reads: [key], color: colors => colors[key], pill: false, focus: true, text }))
   for (const [base, text] of HOVER_WASH_SURFACES) {
-    surfaces.push({ name: `accentOnHover over ${base}`, color: compositeColor(colors.accentOnHover, colors[base]), blame: 'accentOnHover', pill: false, focus: true, text })
+    surfaces.push({ name: `accentOnHover over ${base}`, reads: ['accentOnHover', base], color: colors => compositeColor(colors.accentOnHover, colors[base]), blame: 'accentOnHover', pill: false, focus: true, text })
   }
   // 狀態色晶片：同色文字放在 12% 的同色底上；底愈濃對比愈低，所以以上限檢查。
   for (const key of STATE_TINT_KEYS) {
     for (const base of STATE_TINT_BASES) {
-      surfaces.push({ name: `${key} at ${PANEL_THEME_STATE_TINT_ALPHA} over ${base} (state chip)`, color: compositeColor(withAlphaUnrounded(colors[key], PANEL_THEME_STATE_TINT_ALPHA), colors[base]), pill: false, focus: false, text: [key] })
+      surfaces.push({
+        name: `${key} at ${PANEL_THEME_STATE_TINT_ALPHA} over ${base} (state chip)`,
+        reads: [key, base],
+        color: colors => compositeColor(withAlphaUnrounded(colors[key], PANEL_THEME_STATE_TINT_ALPHA), colors[base]),
+        pill: false,
+        focus: false,
+        text: [key],
+      })
     }
   }
   const translucent: ReadonlyArray<readonly [string, number, boolean]> = [
@@ -638,12 +632,70 @@ function themeSurfaces(colors: ColorSet): Surface[] {
     ['pet status pill', PET_PILL_SURFACE_ALPHA, true],
   ]
   for (const [label, alpha, pill] of translucent) {
-    for (const [desktop, base] of [['black', PANEL_THEME_BLACK], ['white', PANEL_THEME_WHITE]] as const) {
-      surfaces.push({ name: `${label} over a ${desktop} desktop`, color: compositeColor(withAlphaUnrounded(colors.surface, alpha), base), pill, focus: true, text: TEXT_KEYS })
+    for (const [desktop, base] of DESKTOPS) {
+      surfaces.push({ name: `${label} over a ${desktop} desktop`, reads: ['surface'], color: colors => compositeColor(withAlphaUnrounded(colors.surface, alpha), base), pill, focus: true, text: TEXT_KEYS })
     }
   }
   return surfaces
 }
+
+/**
+ * 一個不變量配對：最多一個失敗。`reads` 是它用到的所有色鍵（前景與表面）；主題編輯器的
+ * 建議值搜尋只換一個鍵，所以只重跑讀到該鍵的配對。
+ */
+interface InvariantCheck { reads: readonly ColorKey[]; failure(colors: ColorSet): ContrastFailure | null }
+
+function invariantChecks(): InvariantCheck[] {
+  const checks: InvariantCheck[] = []
+  const pair = (
+    foreground: ColorKey,
+    reads: readonly ColorKey[],
+    background: (colors: ColorSet) => PanelThemeRgba,
+    minimum: number,
+    names: { foreground: string; background: string; blame?: string },
+  ) => {
+    checks.push({
+      reads: [...new Set([foreground, ...reads])],
+      failure: colors => {
+        const ratio = contrastRatio(colors[foreground], background(colors))
+        return ratio >= minimum ? null : { ...names, ratio, minimum }
+      },
+    })
+  }
+  for (const surface of surfaceSpecs()) {
+    // 懸停底是半透明的：失敗時指向 accentOnHover（文字色本身在底下的不透明表面上已通過）。
+    const blame = surface.blame ? { blame: surface.blame } : {}
+    for (const key of surface.text) pair(key, surface.reads, surface.color, 4.5, { foreground: key, background: surface.name, ...blame })
+    // 焦點環不會畫在狀態晶片上（晶片不可聚焦）。
+    if (surface.focus) pair('accentText', surface.reads, surface.color, 3, { foreground: 'accentText', background: `${surface.name} (focus ring)`, ...blame })
+    if (!surface.pill) continue
+    // 膠囊的額度條：一般（sageDeep）、Claude（accentText）、低額度（warnText）、危急（dangerText），
+    // 在膠囊上與疊在額度軌道上都要 >= 3:1。
+    const track = (colors: ColorSet) => compositeColor(withAlphaUnrounded(colors.text, PET_PILL_TRACK_ALPHA), surface.color(colors))
+    for (const key of ['sageDeep', 'accentText', 'warnText', 'dangerText'] as const) {
+      pair(key, surface.reads, surface.color, 3, { foreground: key, background: `${surface.name} (quota fill)` })
+      pair(key, ['text', ...surface.reads], track, 3, { foreground: key, background: `the quota track on the ${surface.name}` })
+    }
+  }
+  const pairs: ReadonlyArray<readonly [ColorKey, readonly ColorKey[], (colors: ColorSet) => PanelThemeRgba, number, string]> = [
+    // textFaint 只用於裝飾（狀態點、分隔）：>= 3:1。
+    ['textFaint', ['surface'], colors => colors.surface, 3, 'surface'],
+    ['textFaint', ['bg'], colors => colors.bg, 3, 'bg'],
+    // 強調填色當圖形使用（外框、核取方塊、進度條）：>= 3:1。
+    ['accent', ['surface'], colors => colors.surface, 3, 'surface'],
+    ['onAccent', ['accent'], colors => colors.accent, 3, 'accent'],
+    ['onAccent', ['accentHover'], colors => colors.accentHover, 4.5, 'accentHover'],
+    ['onAccent', ['accentHover', 'text'], colors => mixColor(colors.accentHover, colors.text, PANEL_THEME_PRESSED_MIX), 4.5, 'accentHover mixed 12% toward text (hovered primary button)'],
+    // 狀態徽章的標籤（未讀/錯誤/成功徽章）：bg 色字在實心狀態色上。
+    ['bg', ['dangerText'], colors => colors.dangerText, 4.5, 'dangerText (badge fill)'],
+    ['bg', ['successText'], colors => colors.successText, 4.5, 'successText (badge fill)'],
+    ['bg', ['warnText'], colors => colors.warnText, 4.5, 'warnText (badge fill)'],
+  ]
+  for (const [key, reads, background, minimum, name] of pairs) pair(key, reads, background, minimum, { foreground: key, background: name })
+  return checks
+}
+
+const INVARIANT_CHECKS: readonly InvariantCheck[] = invariantChecks()
 
 /** 依固定順序找出第一個不符合的配對；同一組輸入一定得到同一個診斷。 */
 export function panelThemeInvariantFailure(colors: ColorSet): ContrastFailure | null {
@@ -652,51 +704,8 @@ export function panelThemeInvariantFailure(colors: ColorSet): ContrastFailure | 
 
 /** 依固定順序列出所有不符合的配對（第一個就是 panelThemeInvariantFailure 的結果）。 */
 export function* panelThemeInvariantFailures(colors: ColorSet): Generator<ContrastFailure> {
-  const check = (foreground: PanelThemeRgba, background: PanelThemeRgba, minimum: number, names: { foreground: string; background: string; blame?: string }): ContrastFailure | null => {
-    const ratio = contrastRatio(foreground, background)
-    return ratio >= minimum ? null : { ...names, ratio, minimum }
-  }
-  for (const surface of themeSurfaces(colors)) {
-    // 懸停底是半透明的：失敗時指向 accentOnHover（文字色本身在底下的不透明表面上已通過）。
-    const blame = surface.blame
-    for (const key of surface.text) {
-      const failure = check(colors[key], surface.color, 4.5, { foreground: key, background: surface.name, ...(blame ? { blame } : {}) })
-      if (failure) yield failure
-    }
-    // 焦點環不會畫在狀態晶片上（晶片不可聚焦）。
-    const focus = surface.focus
-      ? check(colors.accentText, surface.color, 3, { foreground: 'accentText', background: `${surface.name} (focus ring)`, ...(blame ? { blame } : {}) })
-      : null
-    if (focus) yield focus
-    if (surface.pill) {
-      // 膠囊的額度條：一般（sageDeep）、Claude（accentText）、低額度（warnText）、危急（dangerText），
-      // 在膠囊上與疊在額度軌道上都要 >= 3:1。
-      const track = compositeColor(withAlphaUnrounded(colors.text, PET_PILL_TRACK_ALPHA), surface.color)
-      for (const key of ['sageDeep', 'accentText', 'warnText', 'dangerText'] as const) {
-        const onPill = check(colors[key], surface.color, 3, { foreground: key, background: `${surface.name} (quota fill)` })
-        if (onPill) yield onPill
-        const onTrack = check(colors[key], track, 3, { foreground: key, background: `the quota track on the ${surface.name}` })
-        if (onTrack) yield onTrack
-      }
-    }
-  }
-  const pressed = mixColor(colors.accentHover, colors.text, PANEL_THEME_PRESSED_MIX)
-  const pairs: ReadonlyArray<readonly [PluginPanelThemeColorKey, PanelThemeRgba, number, string]> = [
-    // textFaint 只用於裝飾（狀態點、分隔）：>= 3:1。
-    ['textFaint', colors.surface, 3, 'surface'],
-    ['textFaint', colors.bg, 3, 'bg'],
-    // 強調填色當圖形使用（外框、核取方塊、進度條）：>= 3:1。
-    ['accent', colors.surface, 3, 'surface'],
-    ['onAccent', colors.accent, 3, 'accent'],
-    ['onAccent', colors.accentHover, 4.5, 'accentHover'],
-    ['onAccent', pressed, 4.5, 'accentHover mixed 12% toward text (hovered primary button)'],
-    // 狀態徽章的標籤（未讀/錯誤/成功徽章）：bg 色字在實心狀態色上。
-    ['bg', colors.dangerText, 4.5, 'dangerText (badge fill)'],
-    ['bg', colors.successText, 4.5, 'successText (badge fill)'],
-    ['bg', colors.warnText, 4.5, 'warnText (badge fill)'],
-  ]
-  for (const [key, background, minimum, name] of pairs) {
-    const failure = check(colors[key], background, minimum, { foreground: key, background: name })
+  for (const check of INVARIANT_CHECKS) {
+    const failure = check.failure(colors)
     if (failure) yield failure
   }
 }
@@ -840,52 +849,248 @@ export interface PanelThemeModeCheckInput {
 }
 
 /**
+ * 一個語意檢查：最多產生一個問題。`reads` 列出它用到的所有可調整色鍵（與問題的 `path` 同名：
+ * `colors.<key>`、`petStatus.<key>`），而它產生的問題的 `path` 一定在 `reads` 裡。主題編輯器替一個
+ * 鍵找建議值時只換那個鍵，所以只重跑讀到它的檢查（spec R21）；其他檢查的結果不可能改變。
+ */
+interface ModeCheck {
+  reads: readonly string[]
+  run(input: PanelThemeModeCheckInput): PanelThemeIssue | null
+}
+
+/** 一個模式的檢查表，以及依色鍵建立的索引（同一個順序）。 */
+interface ModeCheckPlan {
+  checks: readonly ModeCheck[]
+  byRead: ReadonlyMap<string, readonly ModeCheck[]>
+}
+
+const colorRead = (key: ColorKey): string => `colors.${key}`
+const petStatusRead = (key: PetStatusColorKey): string => `petStatus.${key}`
+
+function contrastCheck(check: InvariantCheck): ModeCheck {
+  return {
+    reads: check.reads.map(colorRead),
+    run: ({ colors }) => {
+      const failure = check.failure(colors)
+      return failure ? contrastIssue(failure) : null
+    },
+  }
+}
+
+/** 單一背景色上的 BACKDROP_PAIRS（背景色以 `color` 取得、名稱固定）。 */
+function backdropChecks(name: string, reads: readonly ColorKey[], color: (input: PanelThemeModeCheckInput) => PanelThemeRgba): ModeCheck[] {
+  return BACKDROP_PAIRS.map(([key, minimum]) => ({
+    reads: [...new Set([key, ...reads])].map(colorRead),
+    run: input => {
+      const ratio = contrastRatio(input.colors[key], color(input))
+      return ratio >= minimum ? null : contrastIssue({ foreground: key, background: name, ratio, minimum })
+    },
+  }))
+}
+
+/** 與輸入形狀無關的檢查（alpha、明暗方向、陰影／高光、狀態色語意、不變量、bg 上的文字）。 */
+function staticModeChecks(): ModeCheck[] {
+  const checks: ModeCheck[] = PANEL_THEME_COLOR_TOKENS.map(token => {
+    const [min, max] = ALPHA_RANGES[token.alpha]
+    const problem = token.alpha === 'opaque' ? 'must be opaque' : `alpha must be ${min}-${max}`
+    return {
+      reads: [colorRead(token.key)],
+      run: ({ colors }) => {
+        const alpha = colors[token.key].a
+        return alpha < min || alpha > max ? { path: `colors.${token.key}`, kind: 'alpha', problem, measured: alpha, required: min } : null
+      },
+    }
+  })
+  checks.push({
+    reads: [colorRead('bg'), colorRead('text')],
+    run: ({ mode, colors }) => {
+      const bgLuminance = relativeLuminance(colors.bg)
+      const textLuminance = relativeLuminance(colors.text)
+      if (mode === 'light' && !(textLuminance < bgLuminance && bgLuminance >= 0.45)) {
+        return { path: 'colors.bg', kind: 'direction', problem: 'light mode needs a light bg (luminance >= 0.45) and darker text', measured: bgLuminance, required: 0.45 }
+      }
+      if (mode === 'dark' && !(textLuminance > bgLuminance && bgLuminance <= 0.12)) {
+        return { path: 'colors.bg', kind: 'direction', problem: 'dark mode needs a dark bg (luminance <= 0.12) and lighter text', measured: bgLuminance, required: 0.12 }
+      }
+      return null
+    },
+  })
+  checks.push({
+    reads: [colorRead('shadow')],
+    run: ({ colors }) => {
+      const luminance = relativeLuminance(colors.shadow)
+      return luminance > PANEL_THEME_SHADOW_MAX_LUMINANCE
+        ? { path: 'colors.shadow', kind: 'luminance', problem: `luminance ${luminance.toFixed(3)} > ${PANEL_THEME_SHADOW_MAX_LUMINANCE} (a shadow must be dark)`, measured: luminance, required: PANEL_THEME_SHADOW_MAX_LUMINANCE }
+        : null
+    },
+  })
+  checks.push({
+    reads: [colorRead('highlight')],
+    run: ({ colors }) => {
+      const luminance = relativeLuminance(colors.highlight)
+      return luminance < PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE
+        ? { path: 'colors.highlight', kind: 'luminance', problem: `luminance ${luminance.toFixed(3)} < ${PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE} (a highlight must be light)`, measured: luminance, required: PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE }
+        : null
+    },
+  })
+  for (const [key, ranges] of Object.entries(PANEL_THEME_STATE_HUES) as Array<[keyof typeof PANEL_THEME_STATE_HUES, readonly HueRange[]]>) {
+    const allowed = ranges.map(([from, to]) => `${from}–${to}°`).join(' or ')
+    checks.push({
+      reads: [colorRead(key)],
+      run: ({ colors }) => {
+        const { c, h } = rgbToOklch(colors[key])
+        if (c < PANEL_THEME_STATE_MIN_CHROMA) {
+          return { path: `colors.${key}`, kind: 'chroma', problem: `chroma ${c.toFixed(3)} < ${PANEL_THEME_STATE_MIN_CHROMA} (too grey to read as a state colour)`, measured: c, required: PANEL_THEME_STATE_MIN_CHROMA }
+        }
+        if (!ranges.some(([from, to]) => h >= from && h <= to)) {
+          return { path: `colors.${key}`, kind: 'hue', problem: `OKLCH hue ${Math.round(h)}° is outside ${allowed}`, measured: h, required: ranges[0]![0] }
+        }
+        return null
+      },
+    })
+  }
+  for (const [first, second, minimum] of STATE_DISTANCE_PAIRS) {
+    checks.push({
+      reads: [colorRead(first), colorRead(second)],
+      run: ({ colors }) => {
+        const distance = oklabDistance(colors[first], colors[second])
+        return distance < minimum
+          ? { path: `colors.${first}`, kind: 'distance', problem: `OKLab ΔE ${distance.toFixed(3)} to ${second} < ${minimum}`, measured: distance, required: minimum, background: second }
+          : null
+      },
+    })
+  }
+  checks.push(...INVARIANT_CHECKS.map(contrastCheck))
+  checks.push(...backdropChecks('bg', ['bg'], input => input.colors.bg))
+  return checks
+}
+
+const STATIC_MODE_CHECKS: readonly ModeCheck[] = staticModeChecks()
+/** 覆蓋層的最小值與文字可讀性讀到的色鍵（imageBackdrops 以 bg 為底）。 */
+const OVERLAY_READS: readonly string[] = [...BACKDROP_PAIRS.map(([key]) => key), 'bg'].map(key => colorRead(key as ColorKey))
+
+function gradientStopColor(input: PanelThemeModeCheckInput, index: number): PanelThemeRgba {
+  return input.background.type === 'gradient' ? input.background.stops[index]!.color : PANEL_THEME_BLACK
+}
+
+/** 寵物膠囊的 alpha 與對比（疊在黑色與白色桌面上）。 */
+function petStatusChecks(): ModeCheck[] {
+  const checks: ModeCheck[] = PET_STATUS_TOKENS.map(token => {
+    const [min, max] = token.alpha
+    const problem = min === 1 ? 'must be opaque' : `alpha must be ${min}-${max}`
+    return {
+      reads: [petStatusRead(token.key)],
+      run: ({ petStatus }) => {
+        const alpha = petStatus![token.key].a
+        return alpha < min || alpha > max ? { path: `petStatus.${token.key}`, kind: 'alpha', problem, measured: alpha, required: min } : null
+      },
+    }
+  })
+  for (const [index, desktop] of [PANEL_THEME_BLACK, PANEL_THEME_WHITE].entries()) {
+    const name = `pill over a ${index === 0 ? 'black' : 'white'} desktop`
+    const pill = (resolved: Record<PetStatusColorKey, PanelThemeRgba>) => compositeColor(resolved.background, desktop)
+    const track = (resolved: Record<PetStatusColorKey, PanelThemeRgba>) => compositeColor(resolved.quotaTrack, pill(resolved))
+    const pairs: ReadonlyArray<readonly [PetStatusColorKey, readonly PetStatusColorKey[], typeof pill, string, number]> = [
+      ['text', ['background'], pill, name, 4.5],
+      ['textMuted', ['background'], pill, name, 4.5],
+      ['quotaFill', ['background'], pill, name, 3],
+      ['quotaFill', ['background', 'quotaTrack'], track, `quotaTrack on the ${name}`, 3],
+      ['quotaWarn', ['background'], pill, name, 3],
+      ['quotaWarn', ['background', 'quotaTrack'], track, `quotaTrack on the ${name}`, 3],
+    ]
+    for (const [key, reads, background, label, minimum] of pairs) {
+      checks.push({
+        reads: [key, ...reads].map(petStatusRead),
+        run: ({ petStatus }) => {
+          const ratio = contrastRatio(petStatus![key], background(petStatus!))
+          return ratio >= minimum ? null : { path: `petStatus.${key}`, kind: 'contrast', problem: `${ratioText(ratio)}:1 < ${minimum}:1 on ${label}`, foreground: key, background: label, measured: ratio, required: minimum }
+        },
+      })
+    }
+  }
+  return checks
+}
+
+const PET_STATUS_CHECKS: readonly ModeCheck[] = petStatusChecks()
+
+/** 依輸入的形狀（背景種類與色標數、覆蓋層、膠囊）組出完整的檢查表；檢查本身只讀輸入的值。 */
+function buildModeCheckPlan(input: PanelThemeModeCheckInput): ModeCheckPlan {
+  const checks: ModeCheck[] = [...STATIC_MODE_CHECKS]
+  const { background } = input
+  if (background.type === 'gradient') {
+    const count = background.stops.length
+    for (let index = 0; index < count; index += 1) {
+      checks.push(...backdropChecks(`gradient stop ${index}`, [], current => gradientStopColor(current, index)))
+    }
+    for (let index = 0; index + 1 < count; index += 1) {
+      for (const t of [0.25, 0.5, 0.75]) {
+        checks.push(...backdropChecks(`gradient between stops ${index} and ${index + 1}`, [], current => mixColor(gradientStopColor(current, index), gradientStopColor(current, index + 1), t)))
+      }
+    }
+  }
+  // 圖片背景：以最小覆蓋層檢查，讓診斷訊息可據以修正。
+  if (background.type === 'image') {
+    checks.push({
+      reads: OVERLAY_READS,
+      run: current => current.background.type === 'image'
+        ? overlayIssue(current.colors, current.background.overlay, current.background.opacity, 'background.overlay', 'a black/white image pixel')
+        : null,
+    })
+  }
+  if (input.userImageOverlay) {
+    checks.push({
+      reads: OVERLAY_READS,
+      run: current => current.userImageOverlay ? overlayIssue(current.colors, current.userImageOverlay, 1, 'userImage.overlay', 'a black/white image pixel') : null,
+    })
+  }
+  if (input.petStatus) checks.push(...PET_STATUS_CHECKS)
+  const byRead = new Map<string, ModeCheck[]>()
+  for (const check of checks) {
+    for (const read of check.reads) {
+      const list = byRead.get(read)
+      if (list) list.push(check)
+      else byRead.set(read, [check])
+    }
+  }
+  return { checks, byRead }
+}
+
+/** 形狀的組合有限（背景 3 種 × 色標數 × 覆蓋層 × 膠囊），所以快取每個形狀的檢查表。 */
+const MODE_CHECK_PLANS = new Map<string, ModeCheckPlan>()
+
+function modeCheckPlan(input: PanelThemeModeCheckInput): ModeCheckPlan {
+  const { background } = input
+  const shape = `${background.type}:${background.type === 'gradient' ? background.stops.length : 0}:${input.userImageOverlay ? 1 : 0}:${input.petStatus ? 1 : 0}`
+  let plan = MODE_CHECK_PLANS.get(shape)
+  if (!plan) {
+    plan = buildModeCheckPlan(input)
+    MODE_CHECK_PLANS.set(shape, plan)
+  }
+  return plan
+}
+
+function* runChecks(checks: readonly ModeCheck[], input: PanelThemeModeCheckInput): Generator<PanelThemeIssue> {
+  for (const check of checks) {
+    const issue = check.run(input)
+    if (issue) yield issue
+  }
+}
+
+/**
  * 依驗證器的固定順序列出一個模式的所有語意問題（alpha、明暗方向、陰影／高光、狀態色語意、
  * 不變量、背景、覆蓋層、寵物膠囊）。驗證器取第一個；主題編輯器的診斷走完全部，
  * 所以兩者對「哪裡錯」的判斷永遠一致。
  */
-export function* panelThemeModeIssues(input: PanelThemeModeCheckInput): Generator<PanelThemeIssue> {
-  const { mode, colors, background } = input
-  for (const token of PANEL_THEME_COLOR_TOKENS) {
-    const [min, max] = ALPHA_RANGES[token.alpha]
-    const alpha = colors[token.key].a
-    if (alpha < min || alpha > max) {
-      yield { path: `colors.${token.key}`, kind: 'alpha', problem: token.alpha === 'opaque' ? 'must be opaque' : `alpha must be ${min}-${max}`, measured: alpha, required: min }
-    }
-  }
-  const bgLuminance = relativeLuminance(colors.bg)
-  const textLuminance = relativeLuminance(colors.text)
-  if (mode === 'light' && !(textLuminance < bgLuminance && bgLuminance >= 0.45)) {
-    yield { path: 'colors.bg', kind: 'direction', problem: 'light mode needs a light bg (luminance >= 0.45) and darker text', measured: bgLuminance, required: 0.45 }
-  }
-  if (mode === 'dark' && !(textLuminance > bgLuminance && bgLuminance <= 0.12)) {
-    yield { path: 'colors.bg', kind: 'direction', problem: 'dark mode needs a dark bg (luminance <= 0.12) and lighter text', measured: bgLuminance, required: 0.12 }
-  }
-  const shadowLuminance = relativeLuminance(colors.shadow)
-  if (shadowLuminance > PANEL_THEME_SHADOW_MAX_LUMINANCE) {
-    yield { path: 'colors.shadow', kind: 'luminance', problem: `luminance ${shadowLuminance.toFixed(3)} > ${PANEL_THEME_SHADOW_MAX_LUMINANCE} (a shadow must be dark)`, measured: shadowLuminance, required: PANEL_THEME_SHADOW_MAX_LUMINANCE }
-  }
-  const highlightLuminance = relativeLuminance(colors.highlight)
-  if (highlightLuminance < PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE) {
-    yield { path: 'colors.highlight', kind: 'luminance', problem: `luminance ${highlightLuminance.toFixed(3)} < ${PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE} (a highlight must be light)`, measured: highlightLuminance, required: PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE }
-  }
-  for (const issue of stateMeaningIssues(colors)) {
-    yield { path: `colors.${issue.key}`, kind: issue.kind, problem: issue.problem, measured: issue.measured, required: issue.required, ...(issue.other ? { background: issue.other } : {}) }
-  }
-  for (const failure of panelThemeInvariantFailures(colors)) yield contrastIssue(failure)
-  const backdrops: Backdrop[] = [{ name: 'bg', color: colors.bg }]
-  if (background.type === 'gradient') backdrops.push(...gradientBackdrops(background.stops))
-  for (const failure of backdropFailures(colors, backdrops)) yield contrastIssue(failure)
-  // 圖片背景：以最小覆蓋層檢查，讓診斷訊息可據以修正。
-  if (background.type === 'image') {
-    const issue = overlayIssue(colors, background.overlay, background.opacity, 'background.overlay', 'a black/white image pixel')
-    if (issue) yield issue
-  }
-  if (input.userImageOverlay) {
-    const issue = overlayIssue(colors, input.userImageOverlay, 1, 'userImage.overlay', 'a black/white image pixel')
-    if (issue) yield issue
-  }
-  if (input.petStatus) yield* petStatusIssues(input.petStatus)
+export function panelThemeModeIssues(input: PanelThemeModeCheckInput): Generator<PanelThemeIssue> {
+  return runChecks(modeCheckPlan(input).checks, input)
+}
+
+/**
+ * 只跑讀到 `read`（例如 `colors.text`）的檢查，順序與 panelThemeModeIssues 相同。只換了這個鍵的
+ * 輸入，其餘檢查的結果與原輸入相同，所以建議值搜尋用這個代替完整的檢查。
+ */
+export function panelThemeModeIssuesReading(input: PanelThemeModeCheckInput, read: string): Generator<PanelThemeIssue> {
+  return runChecks(modeCheckPlan(input).byRead.get(read) ?? [], input)
 }
 
 interface ParsedModeGrammar {
@@ -1022,34 +1227,6 @@ function petStatusBackdrops(background: PanelThemeRgba): Backdrop[] {
     name: `pill over a ${index === 0 ? 'black' : 'white'} desktop`,
     color: compositeColor(background, desktop),
   }))
-}
-
-/** 膠囊的 alpha 與對比問題（疊在黑色與白色桌面上）。 */
-function* petStatusIssues(resolved: Record<PetStatusColorKey, PanelThemeRgba>): Generator<PanelThemeIssue> {
-  for (const token of PET_STATUS_TOKENS) {
-    const [min, max] = token.alpha
-    const alpha = resolved[token.key].a
-    if (alpha < min || alpha > max) {
-      yield { path: `petStatus.${token.key}`, kind: 'alpha', problem: min === 1 ? 'must be opaque' : `alpha must be ${min}-${max}`, measured: alpha, required: min }
-    }
-  }
-  for (const backdrop of petStatusBackdrops(resolved.background)) {
-    const track = compositeColor(resolved.quotaTrack, backdrop.color)
-    const pairs: Array<[PetStatusColorKey, PanelThemeRgba, string, number]> = [
-      ['text', backdrop.color, backdrop.name, 4.5],
-      ['textMuted', backdrop.color, backdrop.name, 4.5],
-      ['quotaFill', backdrop.color, backdrop.name, 3],
-      ['quotaFill', track, `quotaTrack on the ${backdrop.name}`, 3],
-      ['quotaWarn', backdrop.color, backdrop.name, 3],
-      ['quotaWarn', track, `quotaTrack on the ${backdrop.name}`, 3],
-    ]
-    for (const [key, background, name, minimum] of pairs) {
-      const ratio = contrastRatio(resolved[key], background)
-      if (!(ratio >= minimum)) {
-        yield { path: `petStatus.${key}`, kind: 'contrast', problem: `${ratioText(ratio)}:1 < ${minimum}:1 on ${name}`, foreground: key, background: name, measured: ratio, required: minimum }
-      }
-    }
-  }
 }
 
 function parsePetStatus(value: unknown, modeColors: ColorSet, path: string) {

@@ -10,12 +10,19 @@ export const PANEL_THEME_CACHE_MAX_ENTRIES = 32
 
 type Resolve = (declared: unknown) => ResolvedPanelTheme[] | null
 
+/**
+ * 巢狀深度上限。呼叫端只傳入解析後的主題（深度約 8），這只是縱深防禦：不受信任的深層巢狀
+ * 會得到一個可預期的 RangeError，而不是耗盡呼叫堆疊。
+ */
+export const CANONICAL_JSON_MAX_DEPTH = 32
+
 /** 鍵排序後的 JSON：同樣的內容不論屬性順序都得到同一個字串。 */
-export function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+export function canonicalJson(value: unknown, depth = 0): string {
+  if (depth > CANONICAL_JSON_MAX_DEPTH) throw new RangeError('content is nested too deeply to hash')
+  if (Array.isArray(value)) return `[${value.map(item => canonicalJson(item, depth + 1)).join(',')}]`
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>
-    return `{${Object.keys(record).sort().filter(key => record[key] !== undefined).map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`
+    return `{${Object.keys(record).sort().filter(key => record[key] !== undefined).map(key => `${JSON.stringify(key)}:${canonicalJson(record[key], depth + 1)}`).join(',')}}`
   }
   return JSON.stringify(value) ?? 'null'
 }
