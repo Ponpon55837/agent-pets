@@ -816,7 +816,7 @@ watch(() => store.levelUpEvent, (event) => {
         </span>
         <span class="edge-peek-grip" aria-hidden="true" />
         <span
-          v-if="store.unreadResults.count > 0"
+          v-if="store.completionMarkersEnabled && store.unreadResults.count > 0"
           class="edge-peek-result-badge"
           :class="{ error: store.unreadResults.hasError }"
           :aria-label="t('pet.unreadResultsAria', { count: store.unreadResults.count })"
@@ -981,11 +981,11 @@ watch(() => store.levelUpEvent, (event) => {
           <Icon v-if="miniStatus.icon" :name="miniStatus.icon" :size="11" />
           <span v-else class="mini-status-dot" />
         </span>
-        <span v-if="store.unreadResults.count > 0" class="mini-status-count">{{ store.unreadResults.count }}</span>
+        <span v-if="store.completionMarkersEnabled && store.unreadResults.count > 0" class="mini-status-count">{{ store.unreadResults.count }}</span>
       </span>
 
       <span
-        v-if="store.unreadResults.count > 0"
+        v-if="store.completionMarkersEnabled && store.unreadResults.count > 0"
         class="unread-badge"
         :class="{ error: store.unreadResults.hasError }"
         role="status"

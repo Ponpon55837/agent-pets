@@ -79,3 +79,13 @@ test('roving tab navigation wraps and supports Home and End', () => {
   assert.equal(nextRovingId(ids, 'b', 'ArrowDown', 'vertical'), 'c')
   assert.equal(nextRovingId([], 'a', 'Home'), null)
 })
+
+test('completion markers are searchable in both languages', () => {
+  for (const locale of ['zh-TW', 'en-US'] as const) {
+    const messages = catalog(locale)
+    const translate = ((key: string) => messages[key] ?? key) as never
+    for (const query of ['完成標記', 'completion', 'badge']) {
+      assert.ok(searchSettings(query, translate).some(hit => hit.entry.id === 'completionMarkers'), `${locale}: ${query}`)
+    }
+  }
+})

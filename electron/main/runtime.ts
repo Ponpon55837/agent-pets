@@ -2309,6 +2309,7 @@ export function currentDesktopPreferences(): DesktopPreferences {
       captureExclusionEnabled: false,
       fullscreenAutoHideEnabled: false,
       rightClickHideEnabled: false,
+      completionMarkersEnabled: true,
       sessionJumpEnabled: true,
       sessionJumpSwitchAppEnabled: true,
       soundEnabled: false,

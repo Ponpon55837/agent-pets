@@ -98,7 +98,7 @@ Open from the panel header or the pet menu. Settings are in five groups, with **
 |-------|----------|
 | General | Language (Traditional Chinese / English), **Theme** (Panel: match system / light / dark; Pet: dark by default, light, or follow the panel — set separately, e.g. a dark system with a light pet), pet size, reset panel size, bounce & shake, status bubble, ambient motion, working hint |
 | Pets | Pet library and imports, multiple pets, project pets, Growth (mood, XP, achievements) |
-| Desktop | Notifications, Do Not Disturb, sound; Mini mode, Edge peek, Shimeji, capture exclusion, fullscreen auto-hide, right-click hide, jump back to a session, permission bubble, answering Claude Code permissions, Presentation MCP, launch at startup (packaged builds), permission log |
+| Desktop | Notifications, Do Not Disturb, sound; Mini mode, Edge peek, Shimeji, capture exclusion, fullscreen auto-hide, completion markers, right-click hide, jump back to a session, permission bubble, answering Claude Code permissions, Presentation MCP, launch at startup (packaged builds), permission log |
 | Advanced | Setup Wizard, project MCP, diagnostics, restart, quit |
 | Plugins | Install, enable, permissions, updates and plugin notifications (day-to-day use is in the dashboard plugin tabs) |
 

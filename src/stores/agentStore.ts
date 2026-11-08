@@ -453,6 +453,7 @@ export const useAgentStore = defineStore('agent', () => {
   const captureExclusionEnabled = ref(false)
   const fullscreenAutoHideEnabled = ref(false)
   const rightClickHideEnabled = ref(false)
+  const completionMarkersEnabled = ref(true)
   const sessionJumpEnabled = ref(true)
   const sessionJumpSwitchAppEnabled = ref(true)
   const desktopVisibilityCapabilities = ref<DesktopVisibilityCapabilities>({
@@ -912,6 +913,7 @@ export const useAgentStore = defineStore('agent', () => {
     captureExclusionEnabled.value = preferences.captureExclusionEnabled
     fullscreenAutoHideEnabled.value = preferences.fullscreenAutoHideEnabled
     rightClickHideEnabled.value = preferences.rightClickHideEnabled
+    completionMarkersEnabled.value = preferences.completionMarkersEnabled !== false
     sessionJumpEnabled.value = preferences.sessionJumpEnabled !== false
     sessionJumpSwitchAppEnabled.value = preferences.sessionJumpSwitchAppEnabled !== false
     desktopVisibilityCapabilities.value = preferences.visibilityCapabilities
@@ -1014,6 +1016,11 @@ export const useAgentStore = defineStore('agent', () => {
   function setRightClickHideEnabled(enabled: boolean) {
     rightClickHideEnabled.value = enabled
     updateDesktopPreferences({ rightClickHideEnabled: enabled })
+  }
+
+  function setCompletionMarkersEnabled(enabled: boolean) {
+    completionMarkersEnabled.value = enabled
+    updateDesktopPreferences({ completionMarkersEnabled: enabled })
   }
 
   function setSessionJumpEnabled(enabled: boolean) {
@@ -2176,6 +2183,7 @@ export const useAgentStore = defineStore('agent', () => {
     captureExclusionEnabled,
     fullscreenAutoHideEnabled,
     rightClickHideEnabled,
+    completionMarkersEnabled,
     sessionJumpEnabled,
     sessionJumpSwitchAppEnabled,
     desktopVisibilityCapabilities,
@@ -2271,6 +2279,7 @@ export const useAgentStore = defineStore('agent', () => {
     setEdgeModeEnabled,
     setCaptureExclusionEnabled,
     setFullscreenAutoHideEnabled,
+    setCompletionMarkersEnabled,
     setRightClickHideEnabled,
     setSessionJumpEnabled,
     setSessionJumpSwitchAppEnabled,
