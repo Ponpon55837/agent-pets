@@ -72,48 +72,20 @@ export function mostUrgentSession<T extends AgentSession>(sessions: Iterable<T>)
   return best
 }
 
-const MAX_PROJECT_CHARS = 24
-
-/** Shortens a project display name for the pet's status line (the full name stays in the panel). */
-export function truncateProject(name: string, max = MAX_PROJECT_CHARS): string {
-  const characters = Array.from(name)
-  return characters.length <= max ? name : `${characters.slice(0, max - 1).join('')}…`
-}
-
 export interface StatusLineSource {
   label: string
   variants: readonly string[]
   project?: string
-  count: number
-}
-
-export interface StatusLineText {
-  /** Tool family name only; the CLI/Desktop variant is in `full`. */
-  name: string
-  /** The session that needs you when a family has several; '' otherwise. */
-  project: string
-  /** Everything, untruncated, for the tooltip and the accessible name. */
-  full: string
 }
 
 /**
- * 寵物下方狀態列的文字。寵物寬度只有約 250px，同一行塞「名稱 (變體) · 專案 · 狀態 (+N)」
- * 會把每一段都截成幾個字。狀態永遠完整顯示；變體只放在 `full`（tooltip / aria-label）；
- * 專案名稱改到第二行；其他工作階段的數量不再顯示。
+ * 寵物下方狀態列的完整文字（tooltip / aria-label）。寵物寬度只有約 250px，狀態列本身維持
+ * 單行細條，只畫「名稱 · 狀態」：狀態永遠完整、名稱先縮。CLI/Desktop 變體與專案名稱只放在
+ * 這段完整文字裡；其他工作階段的數量不再顯示。
  */
-/** Whether the line gets its second, project row (the pet window budgets height for it). */
-export function showsProjectRow(line: Pick<StatusLineSource, 'count' | 'project'>): boolean {
-  return line.count > 1 && Boolean(line.project)
-}
-
-export function statusLineText(line: StatusLineSource, stateLabel: string): StatusLineText {
-  const project = showsProjectRow(line) ? line.project ?? '' : ''
+export function statusLineText(line: StatusLineSource, stateLabel: string): string {
   const nameWithVariants = line.label && line.variants.length > 0
     ? `${line.label} (${line.variants.join('+')})`
     : line.label
-  return {
-    name: line.label,
-    project: project ? truncateProject(project) : '',
-    full: [nameWithVariants, project, stateLabel].filter(Boolean).join(' · '),
-  }
+  return [nameWithVariants, line.project, stateLabel].filter(Boolean).join(' · ')
 }

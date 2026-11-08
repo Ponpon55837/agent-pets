@@ -421,6 +421,11 @@
   max-width: 132px;
 }
 
+/* 沒有插件徽章時不佔位，省下一個 gap 給名稱與狀態。 */
+.plugin-status-badges:not(:has(*)) {
+  display: none;
+}
+
 .plugin-badge-anchor {
   position: relative;
   display: inline-flex;
@@ -573,13 +578,18 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+/* 完整的名稱、專案與狀態（狀態列本身只剩一行）：允許換行，最多三行，
+   讓長專案名與狀態都看得到，又不會長出 tooltip 預留的高度。 */
 .quota-tooltip-line {
-  display: block;
+  display: -webkit-box;
   margin-bottom: 4px;
   overflow: hidden;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
 }
 
 .quota-tooltip-summary {
@@ -854,18 +864,12 @@
   display: flex;
   flex: 1;
   min-width: 0;
-  flex-direction: column;
+  align-items: baseline;
   overflow: hidden;
   white-space: nowrap;
 }
 
-/* 狀態永遠完整；名稱先縮。專案在第二行，CLI/Desktop 變體只在 tooltip 與 aria-label。 */
-.line-main {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-}
-
+/* 單行細條：狀態永遠完整，名稱先縮；CLI/Desktop 變體與專案名稱只在 tooltip 與 aria-label。 */
 .line-label {
   flex: 0 100 auto;
   min-width: 2ch;
@@ -880,23 +884,10 @@
   margin: 0 3px;
 }
 
-/* 狀態最後才縮：名稱的 flex-shrink 遠大於狀態；真的放不下時才以省略號收尾。 */
+/* 狀態不參與縮放：即使只縮 0.01px，text-overflow 也會把字尾換成省略號
+   （多寵物 180px 欄位的 "Permissi…"）。空間不夠時只縮名稱。 */
 .line-state {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* With several sessions in a family: which one needs you. */
-.line-project {
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--font-xs);
-  font-weight: 500;
-  line-height: 1.2;
-  opacity: 0.8;
-  text-overflow: ellipsis;
+  flex: none;
 }
 
 .status-line-enter-active,

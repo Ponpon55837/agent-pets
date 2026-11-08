@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { AgentSession } from '../src/types/agent.ts'
-import { compareAttention, mostUrgentSession, statusLineText, summarizeFamilies, truncateProject } from '../src/utils/session-attention.ts'
+import { compareAttention, mostUrgentSession, statusLineText, summarizeFamilies } from '../src/utils/session-attention.ts'
 
 function session(key: string, overrides: Partial<AgentSession> = {}): AgentSession {
   const [source, sessionId] = key.split(':') as [AgentSession['source'], string]
@@ -68,25 +68,14 @@ test('family summary stays linear for a large session set', () => {
   assert.ok(performance.now() - startedAt < 500)
 })
 
-test('project names are truncated by character, not UTF-16 unit', () => {
-  assert.equal(truncateProject('short'), 'short')
-  assert.equal(truncateProject('a'.repeat(30)), `${'a'.repeat(23)}…`)
-  assert.equal(truncateProject('專案'.repeat(20), 5), '專案專案…')
-  assert.equal(Array.from(truncateProject('😀'.repeat(30))).length, 24)
-})
+test('status line text keeps the project and variants for the tooltip, never an other-sessions count', () => {
+  const busy = statusLineText({ label: 'Claude', variants: ['CLI', 'Desktop'], project: 'a-very-long-project-name-for-layout-testing' }, '思考中')
+  assert.equal(busy, 'Claude (CLI+Desktop) · a-very-long-project-name-for-layout-testing · 思考中')
+  assert.doesNotMatch(busy, /\(\+\d+\)/)
 
-test('status line text never carries an other-sessions count and keeps the state whole', () => {
-  const busy = statusLineText({ label: 'Claude', variants: ['CLI', 'Desktop'], project: 'a-very-long-project-name-for-layout-testing', count: 3 }, '思考中')
-  assert.equal(busy.name, 'Claude')
-  assert.equal(busy.project, 'a-very-long-project-nam…')
-  assert.equal(busy.full, 'Claude (CLI+Desktop) · a-very-long-project-name-for-layout-testing · 思考中')
-  for (const value of Object.values(busy)) assert.doesNotMatch(value, /\(\+\d+\)/)
-
-  const single = statusLineText({ label: 'Codex', variants: ['CLI'], project: 'web', count: 1 }, 'Working')
-  assert.deepEqual(single, { name: 'Codex', project: '', full: 'Codex (CLI) · Working' })
-
-  const overall = statusLineText({ label: '', variants: [], count: 0 }, 'Offline')
-  assert.deepEqual(overall, { name: '', project: '', full: 'Offline' })
+  assert.equal(statusLineText({ label: 'Codex', variants: ['CLI'], project: 'web' }, 'Working'), 'Codex (CLI) · web · Working')
+  assert.equal(statusLineText({ label: 'Codex', variants: [] }, 'Working'), 'Codex · Working')
+  assert.equal(statusLineText({ label: '', variants: [] }, 'Offline'), 'Offline')
 })
 
 test('the pet template no longer renders a (+N) session count', async () => {
@@ -94,6 +83,8 @@ test('the pet template no longer renders a (+N) session count', async () => {
   const source = fs.readFileSync(new URL('../src/components/DesktopPet.vue', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /line\.count - 1/)
   assert.doesNotMatch(source, /line-more/)
+  // One thin line: no second project row on the pill (the project is in the tooltip / aria-label).
+  assert.doesNotMatch(source, /line-project|line-main/)
   assert.match(source, /:aria-label="lineAriaLabel\(line\)"/)
   // A generic div only gets its aria-label announced with a role.
   assert.equal(source.match(/class="status-line[^"]*"\s+role="group"/g)?.length, 2)
