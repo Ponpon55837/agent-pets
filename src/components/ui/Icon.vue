@@ -7,14 +7,19 @@
 // "Desktop" section it labelled.
 //
 // Inline SVG renders identically on both platforms and inherits currentColor.
-import { ICON_PATHS as paths } from '@/components/ui/icons'
+import { computed } from 'vue'
+import { FILLED_ICONS, ICON_PATHS as paths } from '@/components/ui/icons'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   name: string
   size?: number
 }>(), {
   size: 16,
 })
+
+// A filled icon paints its path as a solid shape; the svg-level stroke would
+// otherwise fatten it by the 1.4 outline.
+const filled = computed(() => FILLED_ICONS.has(props.name))
 </script>
 
 <template>
@@ -31,7 +36,11 @@ withDefaults(defineProps<{
     aria-hidden="true"
     focusable="false"
   >
-    <path :d="paths[name] ?? ''" />
+    <path
+      :d="paths[name] ?? ''"
+      :fill="filled ? 'currentColor' : undefined"
+      :stroke="filled ? 'none' : undefined"
+    />
   </svg>
 </template>
 

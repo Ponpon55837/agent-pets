@@ -54,7 +54,10 @@ export const ICON_PATHS: Record<string, string> = {
   'external-link': 'M9.4 2.6h4v4M13.4 2.6 7.4 8.6M11.6 9.4v3.2a1 1 0 0 1-1 1H3.4a1 1 0 0 1-1-1V5.4a1 1 0 0 1 1-1h3.2',
   // Plugin area: overflow menu, refresh, trust shield, trash, update arrow.
   // Vertical kebab (⋮) for every overflow menu.
-  more: 'M8 3.2v.01M8 8v.01M8 12.8v.01',
+  // Overflow (kebab): three filled dots, vertically centred like Material's
+  // more_vert (24-grid: r 2 at y 6/12/18 → 16-grid: r 1.333 at y 4/8/12).
+  // Drawn filled (see FILLED_ICONS), each dot two half-circle arcs.
+  more: 'M8 2.667a1.333 1.333 0 1 1 0 2.666 1.333 1.333 0 0 1 0-2.666ZM8 6.667a1.333 1.333 0 1 1 0 2.666 1.333 1.333 0 0 1 0-2.666ZM8 10.667a1.333 1.333 0 1 1 0 2.666 1.333 1.333 0 0 1 0-2.666Z',
   refresh: 'M13.2 8a5.2 5.2 0 1 1-1.6-3.7M13.2 2.6v2.8H10.4',
   shield: 'M8 1.8 13 3.6v4c0 3-2.2 5.2-5 6.6-2.8-1.4-5-3.6-5-6.6v-4zM5.8 8l1.6 1.6 3-3.2',
   trash: 'M3 4.4h10M6.2 4.4V2.8h3.6v1.6M4.4 4.4l.5 8.8h6.2l.5-8.8M6.8 7v3.8M9.2 7v3.8',
@@ -62,3 +65,7 @@ export const ICON_PATHS: Record<string, string> = {
 }
 
 export type IconName = keyof typeof ICON_PATHS
+
+// Icons drawn as solid shapes (fill currentColor, no stroke) instead of the
+// default 1.4 outline. Everything else in ICON_PATHS stays stroke-only.
+export const FILLED_ICONS: ReadonlySet<string> = new Set(['more'])
