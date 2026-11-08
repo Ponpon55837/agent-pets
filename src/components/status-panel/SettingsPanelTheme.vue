@@ -51,7 +51,7 @@ onMounted(() => { void refreshPanelThemeState() })
       <Button v-if="openTarget" size="sm" variant="secondary" data-testid="panel-theme-open-plugin" @click="openPanelThemeSettings(openTarget)">{{ t('design.panelTheme.openPluginSettings') }}</Button>
       <Button size="sm" variant="secondary" :disabled="busy || !anySlotSet" data-testid="panel-theme-restore" @click="restoreBuiltIn">{{ t('design.panelTheme.restoreBuiltIn') }}</Button>
     </div>
-    <p class="status-live" role="status" aria-live="polite">{{ status }}</p>
+    <p class="status-live" role="status">{{ status }}</p>
     <p v-if="error" class="status-error" role="alert">{{ error }}</p>
   </Card>
 </template>

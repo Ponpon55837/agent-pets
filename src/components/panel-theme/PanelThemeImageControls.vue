@@ -99,7 +99,7 @@ function update(patch: Partial<PanelThemeUserImageOptions>): void {
         />
       </div>
     </template>
-    <p class="image-live" role="status" aria-live="polite">{{ status }}</p>
+    <p class="image-live" role="status">{{ status }}</p>
     <p v-if="error" class="image-error" role="alert">{{ error }}</p>
   </div>
 </template>

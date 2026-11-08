@@ -116,7 +116,7 @@ onBeforeUnmount(() => observer?.disconnect())
     <div class="themes-footer">
       <Button size="sm" variant="secondary" :disabled="busy || !anySlotSet" data-testid="panel-theme-restore" @click="restoreBuiltIn">{{ t('design.panelTheme.restoreBuiltIn') }}</Button>
     </div>
-    <p class="themes-live" role="status" aria-live="polite">{{ status }}</p>
+    <p class="themes-live" role="status">{{ status }}</p>
     <p v-if="error" class="themes-error" role="alert">{{ error }}</p>
   </section>
 </template>
