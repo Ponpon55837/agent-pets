@@ -59,7 +59,7 @@ Additional primitives (all backward compatible; existing props above are unchang
 
 | Component | Use for |
 | --- | --- |
-| `Dialog.vue` + `composables/useDialogA11y.ts` | Every modal. Props `open`, `title`, `description`, `role`, `initial-focus`, `show-close`, `size`; `#footer` slot; emits `close`. Provides Esc, Tab trap, initial focus, focus restore, `inert` siblings, `aria-labelledby/describedby`. `ConfirmDialog` is built on it. |
+| `Dialog.vue` + `composables/useDialogA11y.ts` | Every modal. Props `open`, `title`, `description`, `role`, `initial-focus`, `show-close`, `size` (`sm`/`md`/`lg`, or `full` for a full-panel tool such as the theme editor); `#footer` slot; `#overlay` slot for a dialog opened from inside this one (it stays in scope, so the outer dialog's keys step aside); emits `close`. Provides Esc, Tab trap, initial focus, focus restore, `inert` siblings, `aria-labelledby/describedby`. `ConfirmDialog` is built on it. |
 | `Tabs.vue` + `TabPanel.vue` (+ `utils/tab-navigation.ts`) | Every tablist (dashboard tabs, settings nav). `v-model` id, `items`, `aria-label`, `orientation` (vertical uses up/down), `variant` underline/pill, `id-prefix` shared with `TabPanel` for `aria-controls/labelledby`. Roving tabindex, Home/End. Hidden panels use the `hidden` attribute. Wrap in `<nav>` for a landmark; never put `role="tablist"` on `<nav>`. |
 | `TextField.vue` | Pill-shaped text/search field with leading search icon, clear button and character counter (`v-model`, `search`, `clear-label`, `maxlength`, `error`). Use `Input.vue` for labelled form fields, `TextField` for search boxes and inline rename. |
 | `Input.vue` | Every text field. `v-model`, `label`, `help`, `error` (renders `role="alert"`, sets `aria-invalid` and `aria-describedby`), `ariaLabel` when there is no visible label. Extra attrs fall through to the `<input>`. |
@@ -68,7 +68,7 @@ Additional primitives (all backward compatible; existing props above are unchang
 | `Toast.vue` + `ToastHost.vue` + `composables/useToast.ts` | Transient messages. Push with `useToast().push({ tone, title, message, actionLabel, onAction, duration })`; mount `<ToastHost />` once near the app root. Danger toasts are `role="alert"`, the rest `role="status"`; max 3 visible. |
 | `EmptyState.vue` | "Nothing here yet": `icon`, `title`, `description`, default slot for actions, `compact` inside Cards. |
 | `Skeleton.vue` | Loading placeholder (`line` / `block` / `circle`, `lines`). Static under reduced motion; put `aria-busy="true"` on the loading region. |
-| `Tooltip.vue` | Replacement for native `title=` hints: hover (300ms) + focus, `aria-describedby`, Esc closes, clamped to the viewport. Wrap one focusable element. |
+| `Tooltip.vue` | Replacement for native `title=` hints: hover (300ms) + focus, `aria-describedby`, Esc closes (only the tooltip, not a surrounding dialog), clamped to the viewport. Wrap one focusable element, e.g. an icon button that explains a setting (the theme editor's "where is this colour used" hints). |
 
 New tokens for primitives: `--hit-min` (32px minimum hit area), `--z-*` scale (the only z-index values components may use), `--leading-tight/normal/relaxed`, `--ease-standard`.
 

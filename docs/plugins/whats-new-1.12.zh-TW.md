@@ -24,6 +24,11 @@ Agent Pets 1.12.0 新增一份主題契約，插件可以提供主題，也可�
 - 放在強調色填色上的文字請用 `--ap-accent-hover` 當底，不要用 `--ap-accent`：`--ap-on-accent` 在 `--ap-accent-hover` 上保證 4.5:1，在 `--ap-accent` 上只保證 3:1。
 - Windows 高對比（`forced-colors`）或沒有套用主題時，token 是內建色盤。
 
+## 使用者可以自己做主題（請確認）
+
+- 使用者有主機繪製的主題編輯器與**我的主題**（最多 50 個），也會顯示在你的插件分頁的主題清單之後。他們可以從任何已安裝的插件主題開始；複本會帶上顏色、漸層、圓角、寵物狀態列顏色與 `userImage` 設定，不會帶上你的字型或套件內的圖片。見[我的主題與主題編輯器](panel-themes.zh-TW.md#我的主題與主題編輯器)。
+- 我的主題使用與插件主題相同的驗證器與淺色／深色插槽；套用它會取代你的主題。`--ap-*` 與 `api.theme` 回報方式與其他主題相同，也不會透露目前是誰的主題。
+
 ## 預設值的改變（請確認）
 
 - **`_shared/tokens.css` 的舊顏色名稱跟著 `--ap-*`。** `--surface-panel`、`--surface-raised`、`--text-primary`、`--text-muted`、`--accent`、`--border-subtle`、`--state-*` 以及 [UX 指南](ux-guidelines.zh-TW.md)列出的其他顏色名稱，現在都是使用者看到的主題（淺色或深色、插件主題或內建）的別名。以前它們是固定的深色玻璃色盤（`--surface-panel` 是深色半透明、`--text-primary` 接近白色）。依賴那組深色色盤或寫死 `color-scheme: dark` 的頁面，要一致使用這些名稱，淺色表面上的深色文字才會正確；請依 `api.theme` 設定 `color-scheme`（見[範例](examples.zh-TW.md)）。正式的顏色契約仍是 `--ap-*`。

@@ -95,3 +95,36 @@
 ## 版本建議
 
 Minor（1.12.0）：新的公開 manifest 契約、新的 IPC 與協定安全邊界、新的持久化檔案。依 `AGENTS.md`，待使用者確認後再變更版本。
+
+## 第 4 步（主機繪製的主題編輯器與「我的主題」）
+
+使用者需求：主題插件的分頁裡要能自己調參數，不只能選預設主題；要有調色盤可以逐一定義顏色，也要能匯入背景圖。規格新增 R20–R24。
+
+| 項目 | 結果 |
+| --- | --- |
+| 驗證 IPC | `panel-theme-validate`（只限面板 main frame、payload ≤ 16 KiB、不接受多餘參數）：結構錯誤回報第一個；語意問題全部列出 `{ mode, path, kind, problem, foreground, background, measured, required, suggested }`（≤ 64 項）與各模式最小遮罩。驗證器的檢查改為一個依序的產生器 `panelThemeModeIssues`，`parsePanelThemes` 取第一個且診斷文字不變，所以編輯器與安裝時的判斷永遠一致。建議值：在 OKLCH 明度上由近而遠搜尋、讓該鍵的問題全部消失且不產生新問題的值（狀態色先移到典型色相）；遮罩建議最小值；每次請求最多評估 1,600 個候選色。結果以內容雜湊快取（R17 的 LRU 泛化為 `ContentHashCache`）。 |
+| 儲存與 CRUD | `userData/panel-themes-user/<id>.json`（0o700／0o600、暫存檔 + rename、schemaVersion 1、≤ 16 KiB、≤ 50 個）；損毀檔改名備份後略過；頻道 `panel-theme-user-list/create/update/rename/duplicate/delete/export/import`，套用沿用 `panel-theme-slot-set`（擁有者 `_user`）。每次寫入都先經過驗證器；目錄中顯示為「我的主題：<名稱>」，插件全部關閉也可用。刪除正在使用的主題：該模式回到內建，背景圖一併刪除（修剪流程與插件更新相同）；孤兒清掃保留 `_user` 目錄。背景圖沿用既有的主機匯入（原生對話框、記憶體驗證、`panel-theme-images/_user/`）。 |
+| 色盤產生器 | `src/utils/panel-theme-palette.ts`：種子色 → 兩個模式（OKLCH 固定明度階層，狀態色固定色相）＋最多 4 輪驗證器建議值修正；背景圖 → canvas ≤ 128 px → OKLab k-means（確定性最遠點初始、8 次迭代、k = 6，O(n·k)）→ 種子。1,000 多個種子（灰、黑白、每 10° 色相、色度到色域邊界）全部通過所有不變量。 |
+| 編輯器 | `PanelThemeEditor.vue`（獨立延後載入的 chunk 與 `themeEditor` 文案領域）：起點（空白、內建、插件主題、我的主題）、淺色／深色分開、31 個顏色鍵分組加寵物狀態列，每個鍵有原生取色器、文字欄位（任何 manifest 顏色文法）、OKLCH 微調與「用在哪裡」的提示（`Tooltip.vue`）；由顏色或背景圖產生色盤；背景純色／線性／放射漸層（2–5 色標）／自己的圖片；系統字型組合、文字大小、圓角；兩個模式的即時預覽（卡片、按鈕各狀態、選單、通知、對話框、內嵌權限卡與高風險徽章、寵物狀態列）；150 ms debounce 驗證、逐鍵逐組合的問題與「使用建議值」、未通過時不能儲存或使用、復原（50 步）、重設、未儲存提醒、JSON 匯出／匯入。入口：通用 → 外觀「自訂…」與「我的主題」卡片、主題插件分頁的 `#after-list`。 |
+| 匯入／匯出 | 只有 `format`／`schemaVersion`／`name`／`definition`，沒有圖片位元組、檔名或路徑；匯入嚴格解析並驗證，永遠建立新主題。 |
+
+第 4 步一併修正的問題：
+
+- 使用者圖片的協定回應沒有 CORS，渲染端無法在 canvas 上取色：改為只對受信任的面板來源回 `Access-Control-Allow-Origin`（字型原本就有，套件內的圖片仍然沒有）。
+- 孤兒清掃與 store 解析只接受插件 id，會把 `_user` 目錄與項目當成無效刪掉：改為接受保留擁有者 id。
+- `Tooltip.vue` 有文件但沒有任何使用者：現在用於編輯器的說明提示；它與 `ActionMenu.vue` 的 id 改用 `useId()`（原本是 `Math.random`）。
+- 外觀設定的寵物外觀標籤是巢狀三元，改為查表。
+- 設定頁主題預覽的次要文字重複顯示淡化文字的字串。
+- `panelThemeSettingsTarget` 與外觀卡的「開啟插件設定」不再把「我的主題」當成插件。
+- 插件主題清單與我的主題共用 `PanelThemeCard`；預覽樣式與背景計算抽成共用函式（`panelThemePreviewStyle`、`panelThemePreviewBackdrop`），寵物狀態列預覽抽成 `PanelThemePreviewPill`。
+- 隔離執行器新增僅供測試的儲存對話框佇列（匯出用）。
+
+驗證（隔離 Electron，hook 埠 37373–37375、假 safeStorage：`encryptString`／`decryptString` 0 次，`security`／`claude` 被攔下；`vite build`，未完整打包）：由外觀「自訂…」開啟編輯器 → 種子色 #2f7f8a 產生色盤 → 改強調色與淡化文字 → 淺色模式出現 9 個問題（儲存與使用停用）→「使用建議值」後全部通過 → 背景改為自己的圖片，預設遮罩低於最小值 → 使用建議值 → 選圖（存檔後匯入）→ 由背景圖產生色盤 → 儲存 → 兩種模式都使用 → 匯出 → 未儲存提醒 → 套用結果在面板（內嵌權限卡與高風險徽章、圖片背景）、對話框、寵物權限泡泡與狀態列的淺色與深色截圖 → 匯入匯出檔 → 刪除正在使用的主題後兩個模式回到內建、圖片檔被刪除。共 21 張截圖。
+
+驗證時發現另一個來源在同一個測試視窗上點擊 `<select>`（`isTrusted` 的 pointer 事件），曾讓草稿被改動或編輯器被關閉；改為每個步驟在單一指令內完成並在截圖前確認狀態。
+
+剩餘風險：
+
+- 主題插件分頁中的「我的主題」區塊只由程式碼與元件結構確認（這次沒有在執行器中安裝主題插件截圖）。
+- 編輯器在窄面板（360 px）與 125%／150% 縮放下的版面未截圖檢查；Windows 未測。
+- 原生 `<input type="color">` 的取色面板外觀由作業系統決定。

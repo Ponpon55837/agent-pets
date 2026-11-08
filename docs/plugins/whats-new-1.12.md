@@ -24,6 +24,11 @@ Agent Pets 1.12.0 adds a theme contract that plugins can contribute and read. No
 - Put text on an accent fill on `--ap-accent-hover`, not `--ap-accent`: `--ap-on-accent` is guaranteed 4.5:1 on `--ap-accent-hover` and only 3:1 on `--ap-accent`.
 - Under Windows high contrast (`forced-colors`) and when no theme is active, the tokens carry the built-in palette.
 
+## Users can make their own themes (check)
+
+- Users get a host-rendered theme editor and **My themes** (up to 50), also shown after your theme list in your plugin's tab. They can start from any installed plugin theme; the copy takes colours, gradients, radii, pet pill colours and `userImage` settings, not your fonts or packaged images. See [My themes and the theme editor](panel-themes.md#my-themes-and-the-theme-editor).
+- A My theme uses the same validator and the same light/dark slots as plugin themes; applying one replaces your theme. `--ap-*` and `api.theme` report it like any theme and never reveal whose theme is active.
+
 ## Changed defaults (check)
 
 - **`_shared/tokens.css` legacy colour names follow `--ap-*`.** `--surface-panel`, `--surface-raised`, `--text-primary`, `--text-muted`, `--accent`, `--border-subtle`, `--state-*` and the other colour names in [UX guidelines](ux-guidelines.md) are now aliases of the theme the user sees, light or dark, plugin theme or built-in. They used to be a fixed dark glass palette (`--surface-panel` was a dark translucent fill, `--text-primary` near-white). A page that relied on that dark palette, or hard-coded `color-scheme: dark`, can now render dark text on a light surface correctly only if it uses these names consistently; set `color-scheme` from `api.theme` (see the [examples](examples.md)). `--ap-*` remains the documented colour contract.
