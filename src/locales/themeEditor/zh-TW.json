@@ -207,6 +207,8 @@
   "themeEditor.surface.chip": "{base}上的{state}晶片",
   "themeEditor.surface.petBubble": "{desktop}桌面上的寵物泡泡",
   "themeEditor.surface.petPill": "{desktop}桌面上的寵物狀態列",
+  "themeEditor.surface.petOverlay": "{desktop}桌面上的寵物選單與對話框",
+  "themeEditor.surface.petOverlayDangerHover": "{desktop}桌面上寵物選單與對話框的危險按鈕懸停底",
   "themeEditor.surface.gradientStop": "漸層色標 {index}",
   "themeEditor.surface.gradientBetween": "漸層色標 {from} 與 {to} 之間",
   "themeEditor.surface.overlayPixel": "{pixel}像素加上遮罩後",

@@ -207,6 +207,8 @@
   "themeEditor.surface.chip": "the {state} chip on {base}",
   "themeEditor.surface.petBubble": "the pet bubble over a {desktop} desktop",
   "themeEditor.surface.petPill": "the pet status pill over a {desktop} desktop",
+  "themeEditor.surface.petOverlay": "the pet menus and dialogs over a {desktop} desktop",
+  "themeEditor.surface.petOverlayDangerHover": "the danger button hover on pet menus and dialogs over a {desktop} desktop",
   "themeEditor.surface.gradientStop": "gradient stop {index}",
   "themeEditor.surface.gradientBetween": "the gradient between stops {from} and {to}",
   "themeEditor.surface.overlayPixel": "the dimmed image over a {pixel} pixel",
