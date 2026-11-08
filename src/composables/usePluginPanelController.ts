@@ -42,6 +42,7 @@ import {
 import { usePluginNotify } from '@/composables/plugin/usePluginNotify'
 import { pluginDetailRequestNonce, takePluginDetailRequest } from '@/utils/plugin-detail-request'
 import { formatDateParts, formatDateTime, formatNumber } from '@/utils/intl-format'
+import { isKeyFingerprint } from '@/types/id-patterns'
 export interface PermissionEntryView {
   unit: string
   label: string
@@ -220,7 +221,7 @@ async function restoreCatalogUrl(): Promise<void> {
 }
 
 function displayFingerprint(value: string | undefined): string {
-  return typeof value === 'string' && /^[a-f0-9]{16}$/.test(value)
+  return isKeyFingerprint(value)
     ? value.match(/.{4}/g)?.join(' ') ?? ''
     : ''
 }

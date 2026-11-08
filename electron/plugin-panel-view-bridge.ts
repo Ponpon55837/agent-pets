@@ -1,5 +1,6 @@
 import { isPluginErrorCode, type PluginErrorCode } from '../src/types/plugin.ts'
 import { clonePluginThemeSnapshot, isPluginThemeSnapshot, type PluginThemeSnapshot } from '../src/types/plugin-theme.ts'
+import { isRecord } from './value-guards.ts'
 
 // 面板頁可呼叫的方法白名單；preload 與主程序的 PluginPanelViewController 共用同一份。
 export const PLUGIN_PANEL_API_METHODS = Object.freeze([
@@ -49,10 +50,6 @@ const PANEL_METHODS: ReadonlySet<string> = new Set(PLUGIN_PANEL_API_METHODS)
 
 function codedError(code: PluginPanelApiErrorCode): Error & { code: PluginPanelApiErrorCode } {
   return Object.assign(new Error(code), { code })
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 function unwrapResponse(response: unknown): unknown {

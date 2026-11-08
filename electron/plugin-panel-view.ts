@@ -6,12 +6,12 @@ import { dispatchPluginUiMessage, PLUGIN_UI_MESSAGE_MAX_BYTES, PluginUiMessageGu
 import { IPC_CHANNELS } from './ipc/channels.ts'
 import type { PluginThemeSnapshot } from '../src/types/plugin-theme.ts'
 import { layoutPluginPanelView, type PluginPanelInsets, type PluginPanelSize } from './plugin-panel-window.ts'
+import { isPluginId, isUuidV4 } from '../src/types/id-patterns.ts'
+import { isRecord } from './value-guards.ts'
 
 export const PLUGIN_PANEL_PARTITION_PREFIX = 'plugin-ui-'
 export const PLUGIN_PANEL_MESSAGE_MAX_BYTES = PLUGIN_UI_MESSAGE_MAX_BYTES
 
-const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
-const UUID_TOKEN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
 const PANEL_ENTRY_METHODS: ReadonlySet<string> = new Set(PLUGIN_PANEL_API_METHODS)
 const PANEL_ERROR_CODES: ReadonlySet<string> = new Set(PLUGIN_PANEL_IPC_ERROR_CODES)
 
@@ -103,10 +103,6 @@ interface ActivePanelView {
   insets: PluginPanelInsets | null
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
 function isPanelEntry(value: unknown): value is string {
   if (typeof value !== 'string' || value.length === 0 || value.length > 512 || value.startsWith('/')
     || value.includes('\\') || value.includes(':')) return false
@@ -116,7 +112,7 @@ function isPanelEntry(value: unknown): value is string {
 }
 
 function safePanelUrl(urlValue: string, token: string | null): boolean {
-  if (!token || !UUID_TOKEN.test(token)) return false
+  if (!token || !isUuidV4(token)) return false
   try {
     const url = new URL(urlValue)
     if (url.protocol !== 'agent-pets:' || url.hostname !== 'plugin' || url.username || url.password || url.port
@@ -169,7 +165,7 @@ export class PluginPanelViewController {
   }
 
   async open(descriptor: PluginPanelViewDescriptor): Promise<{ ok: true; value: { opened: true; openToken: number } } | { ok: false; error: string }> {
-    if (!isRecord(descriptor) || typeof descriptor.pluginId !== 'string' || !PLUGIN_ID.test(descriptor.pluginId)
+    if (!isRecord(descriptor) || !isPluginId(descriptor.pluginId)
       || !isPanelEntry(descriptor.entry) || !Number.isSafeInteger(descriptor.openToken)
       || (descriptor.openToken as number) <= this.lastOpenToken || !isValidBounds(descriptor.bounds)) return errorResult('invalid_request')
     const parent = this.options.getParentWindow()
@@ -182,7 +178,7 @@ export class PluginPanelViewController {
     const pluginId = descriptor.pluginId
     let token: string
     try { token = this.options.createToken(pluginId) } catch { return errorResult('disabled') }
-    if (!UUID_TOKEN.test(token)) {
+    if (!isUuidV4(token)) {
       try { this.options.revokeToken(pluginId, token) } catch {}
       return errorResult('disabled')
     }

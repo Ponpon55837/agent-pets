@@ -9,6 +9,8 @@ import { checkPanelThemePackagedImage, isWoff2, panelThemeAssetPaths, PANEL_THEM
 import { verifyPluginSignature } from './plugin-signature.ts'
 import type { PluginManifest, PluginRuntimeState } from '../src/types/plugin.ts'
 import type { PluginRegistryError } from '../src/types/ipc.ts'
+import { isPluginId, isKeyFingerprint, isSemverCore } from '../src/types/id-patterns.ts'
+import { isRecord } from './value-guards.ts'
 
 export const PLUGIN_ARCHIVE_MAX_BYTES = 5 * 1024 * 1024
 export const PLUGIN_ARCHIVE_SKIN_MAX_BYTES = 25 * 1024 * 1024
@@ -61,19 +63,9 @@ interface PreparedPlan {
   createdAt: number
 }
 
-const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
-const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 const ALLOWED_EXTENSIONS = ['.js', '.json', '.png', '.webp', '.html', '.css', '.woff2'] as const
 const PLAN_TTL_MS = 10 * 60 * 1_000
 const REGISTRY_MAX_BYTES = 1024 * 1024
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function isVersion(value: unknown): value is string {
-  return typeof value === 'string' && VERSION.test(value)
-}
 
 function compareVersions(left: string, right: string): number {
   const a = left.split('.').map(Number)
@@ -187,7 +179,7 @@ function readRegistry(filePath: string): Record<string, PluginRegistryEntry> {
   if (!isRecord(value) || !isRecord(value.plugins)) throw new TypeError('invalid plugin registry')
   const entries: Record<string, PluginRegistryEntry> = {}
   for (const [id, raw] of Object.entries(value.plugins)) {
-    if (!PLUGIN_ID.test(id) || !isRecord(raw) || raw.id !== id || !isVersion(raw.currentVersion)
+    if (!isPluginId(id) || !isRecord(raw) || raw.id !== id || !isSemverCore(raw.currentVersion)
       || !Number.isSafeInteger(raw.installedAt)
       || (raw.status !== 'installed' && raw.status !== 'enabled' && raw.status !== 'disabled_crashed' && raw.status !== 'incompatible')) {
       continue
@@ -195,10 +187,10 @@ function readRegistry(filePath: string): Record<string, PluginRegistryEntry> {
     const signatureStatus = raw.signatureStatus === 'valid' || raw.signatureStatus === 'unverified'
       ? raw.signatureStatus
       : 'unsigned'
-    const signatureFingerprint = typeof raw.signatureFingerprint === 'string' && /^[a-f0-9]{16}$/.test(raw.signatureFingerprint)
+    const signatureFingerprint = isKeyFingerprint(raw.signatureFingerprint)
       ? raw.signatureFingerprint
       : undefined
-    const trustedKeyFingerprint = typeof raw.trustedKeyFingerprint === 'string' && /^[a-f0-9]{16}$/.test(raw.trustedKeyFingerprint)
+    const trustedKeyFingerprint = isKeyFingerprint(raw.trustedKeyFingerprint)
       ? raw.trustedKeyFingerprint
       : undefined
     entries[id] = {
@@ -217,8 +209,8 @@ function readRegistry(filePath: string): Record<string, PluginRegistryEntry> {
 
 function manifestFromUnsupportedApi(value: unknown): { id?: string; name?: PluginManifest['name']; version?: string; author?: string } {
   if (!isRecord(value)) return {}
-  const id = typeof value.id === 'string' && PLUGIN_ID.test(value.id) ? value.id : undefined
-  const version = isVersion(value.version) ? value.version : undefined
+  const id = isPluginId(value.id) ? value.id : undefined
+  const version = isSemverCore(value.version) ? value.version : undefined
   const author = typeof value.author === 'string' && value.author.length <= 64 ? value.author : undefined
   const name = isRecord(value.name)
     && typeof value.name['zh-TW'] === 'string' && value.name['zh-TW'].length <= 48
@@ -260,7 +252,7 @@ export class PluginRegistry {
   }
 
   setStatus(pluginId: string, status: PluginRuntimeState): boolean {
-    if (!PLUGIN_ID.test(pluginId)
+    if (!isPluginId(pluginId)
       || (status !== 'installed' && status !== 'enabled' && status !== 'disabled_crashed' && status !== 'incompatible')) return false
     try {
       const entries = readRegistry(this.registryPath)
@@ -573,7 +565,7 @@ export class PluginRegistry {
         const oldVersion = path.join(pluginDirectory, name)
         try {
           const stat = fs.lstatSync(oldVersion)
-          if (stat.isDirectory() && !stat.isSymbolicLink() && isVersion(name)) fs.rmSync(oldVersion, { recursive: true, force: true })
+          if (stat.isDirectory() && !stat.isSymbolicLink() && isSemverCore(name)) fs.rmSync(oldVersion, { recursive: true, force: true })
         } catch {}
       }
       return { ok: true, value: { ...entry } }
@@ -597,7 +589,7 @@ export class PluginRegistry {
   }
 
   remove(pluginId: string, keepData: boolean): PluginRegistryResult<{ removed: true; keptData: boolean }> {
-    if (!PLUGIN_ID.test(pluginId) || typeof keepData !== 'boolean') return { ok: false, error: 'plugin_not_found' }
+    if (!isPluginId(pluginId) || typeof keepData !== 'boolean') return { ok: false, error: 'plugin_not_found' }
     let entries: Record<string, PluginRegistryEntry>
     try {
       entries = readRegistry(this.registryPath)

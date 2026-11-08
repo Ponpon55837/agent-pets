@@ -7,8 +7,6 @@ import type { PluginHostGrantController } from '../plugin-host-grants.ts'
 import type { PluginPreferencesStore } from '../plugin-preferences.ts'
 import type { PluginRegistry } from '../plugin-registry.ts'
 import type { PluginSecretsStore } from '../plugin-secrets.ts'
-import { PLUGIN_ARCHIVE_SKIN_MAX_BYTES } from '../plugin-registry.ts'
-import { isPluginPanelInstallConfirmation, isPluginPanelPluginId } from '../plugin-panel-validation.ts'
 import { rememberPluginPlan } from './plugin-catalog.ts'
 import { handleWithSenderGuard } from './trusted.ts'
 import { IPC_CHANNELS } from './channels.ts'
@@ -211,7 +209,3 @@ export function registerPluginInstallIpc(deps: PluginInstallIpcDependencies): vo
     }
   })
 }
-
-export const pluginInstallMaxArchiveBytes = PLUGIN_ARCHIVE_SKIN_MAX_BYTES
-export const isPluginInstallConfirmation = isPluginPanelInstallConfirmation
-export const isPluginIdForInstall = isPluginPanelPluginId

@@ -3,6 +3,7 @@ import { parsePetBehaviorManifest } from './pet-behavior-manifest.ts'
 import { normalizePluginEventSourceFamily } from './plugin-event-source.ts'
 import { PanelThemeValidationError, parsePanelThemes } from './plugin-panel-themes.ts'
 import { PLUGIN_CONTRIBUTION_REGISTRY } from '../src/types/plugin.ts'
+import { isPluginId, isPluginCommandId, isSemverCore } from '../src/types/id-patterns.ts'
 import type {
   PluginLocalizedText,
   PluginManifest,
@@ -10,11 +11,10 @@ import type {
   PluginSettingScalar,
   PluginSettingsSchema,
 } from '../src/types/plugin.ts'
+import { isRecord } from './value-guards.ts'
 
-const PLUGIN_ID_PATTERN = /^[a-z0-9-]{3,48}$/
 const SECRET_KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_]{0,31}$/
 const PROPERTY_KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/
-const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 const MAX_RELATIVE_PATH_LENGTH = 512
 const MAX_SETTING_ENUM_ITEMS = 50
@@ -53,10 +53,6 @@ class ManifestValidationError extends Error {
 
 function reject(code: PluginManifestError, diagnostic?: string): never {
   throw new ManifestValidationError(code, diagnostic)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
@@ -138,7 +134,7 @@ export function isValidPluginNetworkHost(value: unknown, allowWildcard = true): 
 }
 
 function parseVersion(value: unknown): string | null {
-  if (typeof value !== 'string' || !VERSION_PATTERN.test(value)) return null
+  if (!isSemverCore(value)) return null
   const parts = value.split('.').map(Number)
   return parts.every(Number.isSafeInteger) ? value : null
 }
@@ -224,7 +220,7 @@ function parseManifest(value: unknown): PluginManifest {
     'id', 'name', 'version', 'apiVersion', 'author', 'entry', 'icon', 'permissions', 'contributes',
   ])) reject('invalid_manifest')
 
-  if (typeof value.id !== 'string' || !PLUGIN_ID_PATTERN.test(value.id) || value.id === '_host' || value.id === '_shared') {
+  if (!isPluginId(value.id)) {
     reject('invalid_id')
   }
   const name = parseLocalizedText(value.name, 48)
@@ -340,7 +336,7 @@ function parseManifest(value: unknown): PluginManifest {
     const ids = new Set<string>()
     for (const command of commands) {
       if (!isRecord(command) || !hasOnlyKeys(command, ['id', 'title'])
-        || typeof command.id !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(command.id) || ids.has(command.id)) {
+        || !isPluginCommandId(command.id) || ids.has(command.id)) {
         reject('invalid_contributions')
       }
       const title = parseLocalizedText(command.title, 32)

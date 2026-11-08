@@ -13,6 +13,8 @@ import {
   type PanelThemeStoredUserImage,
   type PanelThemeUserImageOptions,
 } from '../src/types/panel-theme.ts'
+import { isPluginId } from '../src/types/id-patterns.ts'
+import { isRecord } from './value-guards.ts'
 
 // `userData/panel-theme.json`（spec §7.1）：記錄每個模式使用哪個插件主題，
 // 以及使用者匯入的背景圖片項目。仿照 PluginPreferencesStore：
@@ -23,7 +25,6 @@ export const PANEL_THEME_STORE_FILENAME = 'panel-theme.json'
 export const PANEL_THEME_STORE_MAX_BYTES = 64 * 1024
 export const PANEL_THEME_MAX_USER_IMAGES = 64
 
-const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 const THEME_ID = /^[a-z0-9-]{1,32}$/
 export const PANEL_THEME_USER_IMAGE_FILE = /^[0-9a-f]{64}\.(?:png|jpg|webp)$/
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
@@ -43,17 +44,13 @@ export function emptyPanelThemeStoreData(): PanelThemeStoreData {
   return { version: 1, slots: { light: null, dark: null }, userImages: {} }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
 function isErrorCode(error: unknown, code: string): boolean {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === code)
 }
 
 export function isPanelThemeRef(value: unknown): value is PanelThemeRef {
   return isRecord(value) && Object.keys(value).length === 2
-    && typeof value.pluginId === 'string' && PLUGIN_ID.test(value.pluginId)
+    && isPluginId(value.pluginId)
     && typeof value.themeId === 'string' && THEME_ID.test(value.themeId)
 }
 
@@ -105,7 +102,7 @@ export function parsePanelThemeStoreData(value: unknown): PanelThemeStoreData | 
   }
   let count = 0
   for (const [pluginId, themes] of Object.entries(value.userImages)) {
-    if (!PLUGIN_ID.test(pluginId) || !isRecord(themes)) continue
+    if (!isPluginId(pluginId) || !isRecord(themes)) continue
     for (const [themeId, modes] of Object.entries(themes)) {
       if (!THEME_ID.test(themeId) || !isRecord(modes)) continue
       for (const mode of PANEL_THEME_MODES) {
@@ -246,7 +243,7 @@ export class PanelThemeStore {
 
   /** 丟棄已移除插件的所有項目與插槽。 */
   removePlugin(pluginId: string): boolean {
-    if (!PLUGIN_ID.test(pluginId)) throw new TypeError('Plugin id is invalid')
+    if (!isPluginId(pluginId)) throw new TypeError('Plugin id is invalid')
     const current = this.load()
     const next = cloneData(current)
     let changed = false

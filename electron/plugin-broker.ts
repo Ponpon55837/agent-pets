@@ -7,6 +7,8 @@ import { writeJsonAtomic } from './desktop-preferences.ts'
 import type { PluginFeedController } from './plugin-feed.ts'
 import type { PluginNetLimits, PluginNetworkClient } from './plugin-net.ts'
 import { clonePluginThemeSnapshot, type PluginThemeSnapshot } from '../src/types/plugin-theme.ts'
+import { isPluginId } from '../src/types/id-patterns.ts'
+import { isRecord } from './value-guards.ts'
 
 export const PLUGIN_RPC_MAX_BYTES = 256 * 1024
 export const PLUGIN_RPC_ID_MAX_LENGTH = 64
@@ -70,13 +72,8 @@ interface PluginStorageState {
   maxBytes: number
 }
 
-const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 const STORAGE_KEY_FORBIDDEN = new Set(['__proto__', 'prototype', 'constructor'])
 type BrokerMethodHandler = (pluginId: string, context: PluginBrokerContext, args: unknown[], method: string) => unknown
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
 
 function isJsonValue(value: unknown, depth = 0, seen = new Set<object>()): boolean {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
@@ -176,7 +173,7 @@ export class PluginBroker {
     const id = isRecord(rawRequest) && typeof rawRequest.id === 'string' && rawRequest.id.length <= PLUGIN_RPC_ID_MAX_LENGTH
       ? rawRequest.id
       : null
-    if (!PLUGIN_ID.test(pluginId) || !isRecord(rawRequest)) {
+    if (!isPluginId(pluginId) || !isRecord(rawRequest)) {
       this.recordDiagnostic(pluginId, 'invalid_request')
       return { ok: false, error: 'invalid_request' }
     }
@@ -226,12 +223,12 @@ export class PluginBroker {
   }
 
   listLogs(pluginId: string): PluginBrokerLogEntry[] {
-    if (!PLUGIN_ID.test(pluginId)) return []
+    if (!isPluginId(pluginId)) return []
     return (this.logs.get(pluginId) ?? []).map(entry => ({ ...entry }))
   }
 
   listDiagnostics(pluginId: string): PluginBrokerDiagnostic[] {
-    if (!PLUGIN_ID.test(pluginId)) return []
+    if (!isPluginId(pluginId)) return []
     return (this.diagnostics.get(pluginId) ?? []).map(entry => ({ ...entry }))
   }
 
@@ -244,7 +241,7 @@ export class PluginBroker {
   }
 
   flushStorage(pluginId: string): boolean {
-    if (!PLUGIN_ID.test(pluginId)) return false
+    if (!isPluginId(pluginId)) return false
     const state = this.storage.get(pluginId)
     if (!state?.loaded || !state.available) return false
     let maxBytes = state.maxBytes
@@ -483,7 +480,7 @@ export class PluginBroker {
   }
 
   private recordDiagnostic(pluginId: string, code: PluginErrorCode, method?: string): void {
-    if (!PLUGIN_ID.test(pluginId)) return
+    if (!isPluginId(pluginId)) return
     const records = this.diagnostics.get(pluginId) ?? []
     records.push({ at: this.safeNow(), code, ...(method ? { method: method.slice(0, 64) } : {}) })
     while (records.length > PLUGIN_LOG_MAX_ENTRIES) records.shift()

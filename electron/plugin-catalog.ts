@@ -4,6 +4,8 @@ import { validatePluginNetUrl } from './plugin-net.ts'
 import type { PluginCatalogDocument, PluginCatalogPlugin, PluginCatalogVersion } from '../src/types/plugin-catalog.ts'
 import type { PluginLocalizedText } from '../src/types/plugin.ts'
 import type { PluginCatalogError } from '../src/types/ipc.ts'
+import { isPluginId, isKeyFingerprint, isSemverCore } from '../src/types/id-patterns.ts'
+import { isRecord } from './value-guards.ts'
 export type { PluginCatalogError } from '../src/types/ipc.ts'
 
 export const PLUGIN_CATALOG_MAX_BYTES = 1024 * 1024
@@ -20,7 +22,6 @@ export const PLUGIN_CATALOG_ALLOWED_HOSTS = [
 const CATALOG_ROOT_KEYS = new Set(['schemaVersion', 'plugins'])
 const CATALOG_PLUGIN_KEYS = new Set(['id', 'name', 'description', 'author', 'homepage', 'publicKeyFingerprint', 'versions'])
 const CATALOG_VERSION_KEYS = new Set(['version', 'apiVersion', 'minAppVersion', 'url', 'sha256', 'size', 'publishedAt'])
-const APP_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/
 
@@ -41,10 +42,6 @@ interface SemverParts {
 function transportErrorCode(error: unknown): string | null {
   return error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
     ? error.code : null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, allowed: Set<string>): boolean {
@@ -122,7 +119,7 @@ function parseCatalogVersion(value: unknown): PluginCatalogVersion | null {
     || typeof value.publishedAt !== 'string' || !ISO_8601.test(value.publishedAt)
     || !Number.isFinite(Date.parse(value.publishedAt))
     || (value.minAppVersion !== undefined && (typeof value.minAppVersion !== 'string'
-      || value.minAppVersion.length > 32 || !APP_VERSION.test(value.minAppVersion)))) return null
+      || value.minAppVersion.length > 32 || !isSemverCore(value.minAppVersion)))) return null
   return {
     version: value.version as string,
     apiVersion: value.apiVersion,
@@ -136,13 +133,13 @@ function parseCatalogVersion(value: unknown): PluginCatalogVersion | null {
 
 function parseCatalogPlugin(value: unknown): PluginCatalogPlugin | null {
   if (!isRecord(value) || !hasOnlyKeys(value, CATALOG_PLUGIN_KEYS)
-    || typeof value.id !== 'string' || !/^(?!_host$|_shared$)[a-z0-9-]{3,48}$/.test(value.id)) return null
+    || !isPluginId(value.id)) return null
   const name = parseLocalizedText(value.name, 48)
   const description = parseLocalizedText(value.description, 200)
   if (!name || !description || !cleanText(value.author, 64)
     || (value.homepage !== undefined && !isSafeHomepage(value.homepage))
     || (value.publicKeyFingerprint !== undefined
-      && (typeof value.publicKeyFingerprint !== 'string' || !/^[a-f0-9]{16}$/.test(value.publicKeyFingerprint)))
+      && (!isKeyFingerprint(value.publicKeyFingerprint)))
     || !Array.isArray(value.versions) || value.versions.length < 1 || value.versions.length > PLUGIN_CATALOG_MAX_VERSIONS) return null
 
   const parsedVersions = value.versions.map(parseCatalogVersion).filter((entry): entry is PluginCatalogVersion => entry !== null)
@@ -262,8 +259,8 @@ export function isCatalogVersionNewer(installedVersion: unknown, catalogVersion:
 
 export function catalogFingerprintMatches(expected: unknown, actual: unknown): boolean {
   if (expected === undefined) return true
-  return typeof expected === 'string' && /^[a-f0-9]{16}$/.test(expected)
-    && typeof actual === 'string' && /^[a-f0-9]{16}$/.test(actual) && expected === actual
+  return isKeyFingerprint(expected)
+    && isKeyFingerprint(actual) && expected === actual
 }
 
 export function createPluginCatalogGateway(dependencies: PluginCatalogDependencies) {

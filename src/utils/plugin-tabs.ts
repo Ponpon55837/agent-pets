@@ -1,12 +1,12 @@
 // Pure selection logic for the dashboard plugin tabs: which plugins get a tab,
 // how a tab is identified, and how the remembered tab is restored.
 import type { PluginNotificationRecord, PluginPanelPlugin, PluginPanelSnapshot } from '../types/plugin'
+import { isPluginId } from '../types/id-patterns.ts'
 
 export const BUILT_IN_DASHBOARD_TABS = ['sessions', 'usage', 'history'] as const
 export type BuiltInDashboardTab = typeof BUILT_IN_DASHBOARD_TABS[number]
 
 export const PLUGIN_TAB_PREFIX = 'plugin:'
-const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 
 export function isBuiltInDashboardTab(value: unknown): value is BuiltInDashboardTab {
   return typeof value === 'string' && (BUILT_IN_DASHBOARD_TABS as readonly string[]).includes(value)
@@ -20,7 +20,7 @@ export function pluginTabValue(pluginId: string): string {
 export function pluginIdOfTab(value: unknown): string | null {
   if (typeof value !== 'string' || !value.startsWith(PLUGIN_TAB_PREFIX)) return null
   const id = value.slice(PLUGIN_TAB_PREFIX.length)
-  return PLUGIN_ID.test(id) ? id : null
+  return isPluginId(id) ? id : null
 }
 
 /**
@@ -36,7 +36,7 @@ export function visiblePluginTabPlugins(
     && plugin.status !== 'incompatible'
     && plugin.preference.enabled
     && plugin.manifest !== null
-    && PLUGIN_ID.test(plugin.id))
+    && isPluginId(plugin.id))
 }
 
 /** A requested tab if it still exists, otherwise Sessions. */

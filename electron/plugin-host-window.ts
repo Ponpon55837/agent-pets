@@ -8,6 +8,8 @@ import { dispatchPluginUiMessage, PluginUiMessageGuard, type PluginUiMessageResu
 import { join } from 'node:path'
 import { isCurrentPluginRuntimeToken, runPluginRpcForCurrentToken } from './plugin-host-token.ts'
 import type { PluginThemeSnapshot } from '../src/types/plugin-theme.ts'
+import { isPluginId, isPluginCommandId, isUuidV4 } from '../src/types/id-patterns.ts'
+import { isRecord } from './value-guards.ts'
 
 export interface PluginHostDescriptor {
   id: string
@@ -44,13 +46,8 @@ const PLUGIN_SCHEME_PREFIX = 'agent-pets://plugin/'
 const PING_INTERVAL_MS = 10_000
 const PONG_TIMEOUT_MS = 30_000
 const MEMORY_POLL_INTERVAL_MS = 30_000
-const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 const PLUGIN_ENTRY = /^(?!\/)(?!.*(?:^|\/)\.\.?\/)[^\\:]+\.js$/
 const configuredPluginSessions = new WeakSet<object>()
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
 
 export class PluginHostWindowController {
   private readonly onRpc: PluginHostControllerOptions['onRpc']
@@ -263,7 +260,7 @@ export class PluginHostWindowController {
       if (this.runtime.has(pluginId)) continue
       let token: string
       try { token = this.createPluginToken(pluginId) } catch { continue }
-      if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(token)) continue
+      if (!isUuidV4(token)) continue
       this.runtime.set(pluginId, { descriptor, lastPongAt: now, startedAt: now, token, receivedPong: false, ready: false })
       this.post({ type: 'start', pluginId, token, ...descriptor })
     }
@@ -397,7 +394,7 @@ export class PluginHostWindowController {
         if (now === null) return
         let token: string
         try { token = this.createPluginToken(pluginId) } catch { return }
-        if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(token)) return
+        if (!isUuidV4(token)) return
         this.runtime.set(pluginId, { descriptor, lastPongAt: now, startedAt: now, token, receivedPong: false, ready: false })
         this.post({ type: 'start', pluginId, token, ...descriptor })
       }, pluginHostRetryDelay(count)))
@@ -481,10 +478,10 @@ export class PluginHostWindowController {
 }
 
 function isValidDescriptor(value: unknown): value is PluginHostDescriptor {
-  if (!isRecord(value) || typeof value.id !== 'string' || !PLUGIN_ID.test(value.id)
+  if (!isRecord(value) || !isPluginId(value.id)
     || typeof value.entry !== 'string' || value.entry.length > 512 || !PLUGIN_ENTRY.test(value.entry)) return false
   if (value.commandIds !== undefined && (!Array.isArray(value.commandIds) || value.commandIds.length > 10
-    || value.commandIds.some(id => typeof id !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(id))
+    || value.commandIds.some(id => !isPluginCommandId(id))
     || new Set(value.commandIds).size !== value.commandIds.length)) return false
   if (value.revision !== undefined && (typeof value.revision !== 'string' || value.revision.length > 128)) return false
   return !value.entry.split('/').some(segment => !segment || segment === '.' || segment === '..')

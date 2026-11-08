@@ -7,7 +7,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const pluginId = process.argv[2]
 const outputPath = process.argv[3]
 
-if (!pluginId || !/^(?!_host$|_shared$)[a-z0-9-]{3,48}$/.test(pluginId) || !outputPath) {
+if (!pluginId || !/^[a-z0-9-]{3,48}$/.test(pluginId) || !outputPath) {
   throw new Error('Usage: node scripts/pack-test-plugin.mjs <plugin-id> <output.agentpet-plugin>')
 }
 

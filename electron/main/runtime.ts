@@ -18,10 +18,6 @@ import { Readable } from 'node:stream'
 import * as fs from 'fs'
 import * as path from 'path'
 
-
-
-
-
 import { DesktopPreferencesStore } from '../desktop-preferences'
 import { createLoginItemAdapter } from '../login-item'
 import { DesktopNotificationService } from '../desktop-notifications'
@@ -39,7 +35,6 @@ import { LocalUsageReader } from '../local-usage'
 import { createPresentationMcpServer } from '../presentation-mcp'
 import { listenOnLocalPort } from '../local-server-listen'
 import { normalizePresentationStatus, PresentationController } from '../presentation-controller'
-
 
 import { ProjectRoutingStore } from '../project-routing'
 import { PluginRegistry, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES, PLUGIN_ARCHIVE_SKIN_MAX_BYTES } from '../plugin-registry'
@@ -90,22 +85,13 @@ import { availablePluginSkinPetIds } from '../plugin-skins.ts'
 import { EDGE_DWELL_MS, EDGE_REDOCK_AFTER_MS, EDGE_TRIGGER_DISTANCE_PX, clampWindowBounds, edgeWindowBounds, miniWindowBounds, nearestEdge, type WindowBounds } from '../pet-window-mode'
 import { IS_MAC, hookScriptDeployPath, readWindowState, syncClaudePermissionRespondOptIn, writeWindowState } from '../setup'
 
-
 import { createWindowsFullscreenDetector, nativeWindowHandleToPointer, type WindowsFullscreenState } from '../windows-fullscreen-detector'
-
-
-
-
-
-
 
 import { registerPluginFeedIpc } from '../ipc/plugin-feed'
 import { createLatestValueCoalescer } from '../ipc/broadcast-coalescer.ts'
 import { createProgressionChangeGate, createVisibleSender } from '../ipc/progression-broadcast-gate.ts'
 
 import { type IntegrationTestSource } from '../ipc/integrations'
-
-
 
 import { registerPluginPanelUiIpc } from '../ipc/plugin-panel-ui'
 
@@ -121,6 +107,7 @@ import { mainState, type PluginSkinFallbackInfo } from './state'
 import { EMPTY_ATTENTION } from '../attention-tracker'
 import { attachHotkeyInfo, PermissionHotkeys } from '../permission-hotkeys'
 import { PANEL_GAP, PANEL_WIDTH, PANEL_BLUR_HIDE_DELAY_MS, clampPanelSize, clampRectToWorkArea, computePanelPlacement, effectivePanelSize, panelMaxSize, panelMinSize, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
+import { isRecord } from '../value-guards.ts'
 
 let permissionHotkeys: PermissionHotkeys | null = null
 
@@ -373,7 +360,6 @@ export async function pluginPanelSnapshot(): Promise<PluginPanelResult<PluginPan
     return { ok: false, error: pluginPanelError(error) }
   }
 }
-
 
 export { sanitizePetId }
 
@@ -877,10 +863,6 @@ export function requestPluginNetwork(
     if (typeof init.body === 'string') request.write(init.body)
     request.end()
   })
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 export function decodeCatalogBase64(value: unknown): Uint8Array {
@@ -2234,7 +2216,6 @@ export async function openPluginPanelViewForPlugin(
 // Status-line count can flap as agents come and go, so coalesce the writes
 // instead of hitting disk on every resize.
 
-
 export function persistPetBounds(x: number, y: number, width: number, height: number) {
   if (mainState.persistBoundsHandle) clearTimeout(mainState.persistBoundsHandle)
   mainState.persistBoundsHandle = setTimeout(() => {
@@ -3313,7 +3294,6 @@ export async function availablePetIds(): Promise<Set<string>> {
   ids.add('aang-airbender')
   return ids
 }
-
 
 export const AVAILABLE_PET_IDS_CACHE_MS = 5_000
 let availablePetIdsLoad: Promise<Set<string>> | null = null

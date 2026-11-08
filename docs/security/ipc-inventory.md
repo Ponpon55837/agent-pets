@@ -19,7 +19,7 @@
 | `history-sessions` | `handle` | 設定面板 main frame | normalizeSessionQuery；無效輸入回安全預設或錯誤 | listHistorySessions (invoke) | `tests/history-sessions.test.mts` |
 | `history-session-detail` | `handle` | 設定面板 main frame | isHistorySessionId；無效輸入回安全預設或錯誤 | getHistorySessionDetail (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-clear` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | clearHistory (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `history-export` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | exportHistory (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `history-export` | `handle` | 設定面板 main frame | 型別；isProjectId；無效輸入回安全預設或錯誤 | exportHistory (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-reveal-export` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | revealHistoryExport (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `test-integration` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | testIntegration (invoke) | `tests/ipc-integrations.test.mts` |
 | `install-integrations` | `handle` | 設定面板 main frame | isIntegrationTarget；無效輸入回安全預設或錯誤 | installIntegrations (invoke) | `tests/ipc-integrations.test.mts` |
@@ -57,13 +57,13 @@
 | `plugin-feed-unread-count` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | onPluginFeedUnreadCount (on)<br>getPluginFeedUnreadCount (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-badges-get` | `handle` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | getPluginBadges (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-event-source-list` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getPluginEventSourceStatuses (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `plugin-feed-complete` | `handle` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | 型別；無效輸入回安全預設或錯誤 | completePluginFeed (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `plugin-feed-complete` | `handle` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | isSafeItemId；無效輸入回安全預設或錯誤 | completePluginFeed (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-notifications-list` | `handle` | 設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | listPluginNotifications (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-notifications-read` | `handle` | 設定面板 main frame | isPluginPanelNotificationId；無效輸入回安全預設或錯誤 | markPluginNotificationRead (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-notifications-read-all` | `handle` | 設定面板 main frame | isPluginPanelPluginId；無效輸入回安全預設或錯誤 | markAllPluginNotificationsRead (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-notifications-clear` | `handle` | 設定面板 main frame | isPluginPanelPluginId；無效輸入回安全預設或錯誤 | clearPluginNotifications (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-skin-fallback-notify` | `handle` | 受信任寵物或設定面板 main frame | 長度／數量上限；isPluginSkinPetId；無效輸入回安全預設或錯誤 | notifyPluginSkinFallback (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `plugin-feed-open-link` | `handle` | 受信任寵物或設定面板 main frame | 型別；isPluginLinkHostAllowed；無效輸入回安全預設或錯誤 | openPluginFeedLink (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `plugin-feed-open-link` | `handle` | 受信任寵物或設定面板 main frame | isSafeItemId, isPluginLinkHostAllowed；無效輸入回安全預設或錯誤 | openPluginFeedLink (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-install-select` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | selectPluginArchive (invoke) | `tests/ipc-plugin-install.test.mts` |
 | `plugin-install-select-folder` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | selectPluginFolder (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-install-confirm` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；isInstallConfirmation；無效輸入回安全預設或錯誤 | installPluginPlan (invoke) | `tests/ipc-plugin-install.test.mts` |
@@ -96,8 +96,8 @@
 | `project-pets-get-enabled` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | getProjectPetsEnabled (invoke) | `tests/project-pets-ipc-scope.test.mts` |
 | `project-pets-set-enabled` | `handle` | 設定面板 main frame（共用 sender guard） | handler／controller 驗證 payload；拒絕無效輸入 | setProjectPetsEnabled (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `project-pets-pick` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | pickProjectPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `project-pets-bind` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；isValidPetId；無效輸入回安全預設或錯誤 | setProjectPetBinding (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `project-pets-archive` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；無效輸入回安全預設或錯誤 | archiveProjectPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `project-pets-bind` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；isProjectId, isValidPetId；無效輸入回安全預設或錯誤 | setProjectPetBinding (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `project-pets-archive` | `handle` | 設定面板 main frame（共用 sender guard） | isProjectId；無效輸入回安全預設或錯誤 | archiveProjectPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `quota-usage` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getQuotaUsage (invoke) | `tests/ipc-quota.test.mts`<br>`tests/quota.test.mts` |
 | `renderer-error-report` | `on` | 受信任寵物或設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | reportRendererError (send) | `tests/ipc-reliability.test.mts` |
 | `renderer-reload` | `on` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | reloadRenderer (send) | `tests/ipc-reliability.test.mts` |
