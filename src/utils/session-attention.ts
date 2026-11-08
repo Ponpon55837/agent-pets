@@ -101,8 +101,13 @@ export interface StatusLineText {
  * 會把每一段都截成幾個字。狀態永遠完整顯示；變體只放在 `full`（tooltip / aria-label）；
  * 專案名稱改到第二行；其他工作階段的數量不再顯示。
  */
+/** Whether the line gets its second, project row (the pet window budgets height for it). */
+export function showsProjectRow(line: Pick<StatusLineSource, 'count' | 'project'>): boolean {
+  return line.count > 1 && Boolean(line.project)
+}
+
 export function statusLineText(line: StatusLineSource, stateLabel: string): StatusLineText {
-  const project = line.count > 1 && line.project ? line.project : ''
+  const project = showsProjectRow(line) ? line.project ?? '' : ''
   const nameWithVariants = line.label && line.variants.length > 0
     ? `${line.label} (${line.variants.join('+')})`
     : line.label
