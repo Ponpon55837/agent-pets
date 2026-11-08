@@ -91,16 +91,24 @@ test('the pet template no longer renders a (+N) session count', async () => {
   assert.equal(source.match(/<span class="line-state">\{\{ stateLineLabel\(line\.state\) \}\}<\/span>/g)?.length, 2)
 })
 
-test('on-pet state words are short; the long form stays for screen readers', async () => {
+test('on-pet state words are short English in every locale; the localized long form stays for screen readers', async () => {
   const fs = await import('node:fs')
+  const source = fs.readFileSync(new URL('../src/utils/state-aria.ts', import.meta.url), 'utf8')
+  const words = Object.fromEntries([...source.matchAll(/^\s+'?([a-z-]+)'?: '([^']+)',$/gm)].filter(([, , w]) => !w.startsWith('pet.')).map(([, k, w]) => [k, w]))
+  assert.deepEqual(words, {
+    offline: 'Offline', idle: 'Idle', thinking: 'Thinking', 'tool-running': 'Working',
+    'waiting-permission': 'Permission', 'waiting-input': 'Needs input', success: 'Done', error: 'Failed',
+  })
+  for (const word of Object.values(words)) {
+    assert.ok(word.length <= 12, `short: ${word}`)
+    assert.match(word, /^[A-Za-z ]+$/)
+  }
+  // The pill word no longer goes through t(), so zh-TW cannot turn it back into Chinese.
+  assert.match(source, /export function stateLineLabel\(state: string\): string \{\n\s+return STATE_LINE_WORDS\[/)
   const en = JSON.parse(fs.readFileSync(new URL('../src/locales/pet/en-US.json', import.meta.url), 'utf8')) as Record<string, string>
   const zh = JSON.parse(fs.readFileSync(new URL('../src/locales/pet/zh-TW.json', import.meta.url), 'utf8')) as Record<string, string>
-  const lineKeys = Object.keys(en).filter(key => key.startsWith('pet.lineState'))
-  assert.equal(lineKeys.length, 8)
-  for (const key of lineKeys) {
-    assert.ok(zh[key], key)
-    assert.ok(en[key].length <= 12, `${key} is short: ${en[key]}`)
-  }
-  assert.equal(en['pet.lineStatePermission'], 'Permission')
+  for (const catalog of [en, zh]) assert.equal(Object.keys(catalog).filter(key => key.startsWith('pet.lineState')).length, 0)
+  // Tooltip / aria-label keep the localized long form.
   assert.equal(en['pet.statePermission'], 'waiting for permission')
+  assert.ok(zh['pet.statePermission'])
 })
