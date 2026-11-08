@@ -156,32 +156,32 @@
      The desktop pet keeps the original dark presentation layer. The panel
      and its modal surfaces opt into this warm, opaque theme locally so a
      bright wallpaper can never reduce text contrast behind the controls. */
-  --organic-bg: #f5ead8;
-  --organic-surface: #f9f4ed;
-  --organic-surface-2: #eee7db;
-  --organic-surface-warm: #ffe1d0;
-  --organic-surface-sage: #e1eecc;
-  --organic-surface-sage-soft: #f0fae1;
-  --organic-surface-off: #dcd3c4;
-  --organic-accent: #c67139;
-  --organic-accent-hover: #a85a28; /* text-on-accent >= 4.5:1 with --organic-accent-contrast */
-  --organic-accent-text: #8c491a;
-  --organic-accent-contrast: #fff2eb;
-  --organic-sage: #7a8a5e;
-  --organic-sage-deep: #56633f;
-  --organic-sage-dark: #3d472b;
-  --organic-text: #201e1d;
-  --organic-text-secondary: #645c50;
-  --organic-text-muted: #6b6354;
-  --organic-text-faint: #8a8070; /* decorative only (>= 3:1); never for text */
-  --organic-border: rgba(32, 30, 29, 0.16);
-  --organic-border-soft: rgba(32, 30, 29, 0.1);
-  --organic-border-on-accent: rgba(255, 242, 235, 0.55);
-  --organic-sage-track: rgba(61, 71, 43, 0.16);
-  --organic-accent-track: rgba(32, 30, 29, 0.08);
-  --organic-accent-glow: rgba(198, 113, 57, 0.2);
-  --organic-accent-on-hover: rgba(32, 30, 29, 0.05);
-  --organic-scrim: rgba(46, 43, 37, 0.42);
+  --builtin-organic-bg: #f5ead8;
+  --builtin-organic-surface: #f9f4ed;
+  --builtin-organic-surface-2: #eee7db;
+  --builtin-organic-surface-warm: #ffe1d0;
+  --builtin-organic-surface-sage: #e1eecc;
+  --builtin-organic-surface-sage-soft: #f0fae1;
+  --builtin-organic-surface-off: #dcd3c4;
+  --builtin-organic-accent: #c67139;
+  --builtin-organic-accent-hover: #a85a28; /* text-on-accent >= 4.5:1 with --organic-accent-contrast */
+  --builtin-organic-accent-text: #8c491a;
+  --builtin-organic-accent-contrast: #fff2eb;
+  --builtin-organic-sage: #7a8a5e;
+  --builtin-organic-sage-deep: #56633f;
+  --builtin-organic-sage-dark: #3d472b;
+  --builtin-organic-text: #201e1d;
+  --builtin-organic-text-secondary: #645c50;
+  --builtin-organic-text-muted: #6b6354;
+  --builtin-organic-text-faint: #8a8070; /* decorative only (>= 3:1); never for text */
+  --builtin-organic-border: rgba(32, 30, 29, 0.16);
+  --builtin-organic-border-soft: rgba(32, 30, 29, 0.1);
+  --builtin-organic-border-on-accent: rgba(255, 242, 235, 0.55);
+  --builtin-organic-sage-track: rgba(61, 71, 43, 0.16);
+  --builtin-organic-accent-track: rgba(32, 30, 29, 0.08);
+  --builtin-organic-accent-glow: rgba(198, 113, 57, 0.2);
+  --builtin-organic-accent-on-hover: rgba(32, 30, 29, 0.05);
+  --builtin-organic-scrim: rgba(46, 43, 37, 0.42);
   --organic-panel-shadow: 0 12px 32px rgba(46, 43, 37, 0.32);
   --organic-card-shadow: 0 1px 2px rgba(46, 43, 37, 0.14);
   --organic-hero-shadow: 0 3px 10px rgba(46, 43, 37, 0.16);
@@ -209,14 +209,14 @@
   --organic-quota-error: #d64a3a;
   --organic-quota-sage: #8fa073;
   /* Status text on cream surfaces (checked >= 4.5:1 by check-contrast). */
-  --organic-danger-text: #a62f1e;
-  --organic-success-text: #3f5a1c;
-  --organic-warn-text: #7a5200;
+  --builtin-organic-danger-text: #a62f1e;
+  --builtin-organic-success-text: #3f5a1c;
+  --builtin-organic-warn-text: #7a5200;
   /* Georgia only ships old-style figures ("0" reads as "o"), and it has no
      lnum feature, so digits are routed to the UI font via the 'Lining Digits'
      face defined in base.css. */
-  --organic-font-heading: 'Lining Digits', Georgia, 'Times New Roman', serif; /* Caprasimo was never bundled */
-  --organic-font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --builtin-organic-font-heading: 'Lining Digits', Georgia, 'Times New Roman', serif; /* Caprasimo was never bundled */
+  --builtin-organic-font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
   --organic-space-1: 4px;
   --organic-space-2: 8px;
@@ -224,18 +224,67 @@
   --organic-space-4: 16px;
   --organic-space-5: 24px;
   --organic-space-6: 32px;
-  --organic-radius-sm: 8px;
-  --organic-radius-md: 16px;
-  --organic-radius-lg: 28px;
-  --organic-font-label: 12px;
-  --organic-font-body-sm: 12px;
-  --organic-font-body-md: 13px;
-  --organic-font-body-lg: 15px;
-  --organic-font-heading-sm: 15px;
-  --organic-font-heading-md: 18px;
-  --organic-font-panel-title: 18px;
-  --organic-font-display-sm: 22px;
-  --organic-font-display-md: 22px;
+  --builtin-organic-radius-sm: 8px;
+  --builtin-organic-radius-md: 16px;
+  --builtin-organic-radius-lg: 28px;
+  --builtin-organic-font-label: 12px;
+  --builtin-organic-font-body-sm: 12px;
+  --builtin-organic-font-body-md: 13px;
+  --builtin-organic-font-body-lg: 15px;
+  --builtin-organic-font-heading-sm: 15px;
+  --builtin-organic-font-heading-md: 18px;
+  --builtin-organic-font-panel-title: 18px;
+  --builtin-organic-font-display-sm: 22px;
+  --builtin-organic-font-display-md: 22px;
+
+  /* Themable palette. The literal values above are the frozen built-in
+     copy (--builtin-organic-*); --organic-* points at it here, and a plugin
+     panel theme re-points --organic-* inline on .status-panel only (spec
+     docs/design/Plugin-Panel-Theme-Spec.md §3.6). .host-protected below
+     resets them so permission/risk UI always renders built-in. */
+  --organic-bg: var(--builtin-organic-bg);
+  --organic-surface: var(--builtin-organic-surface);
+  --organic-surface-2: var(--builtin-organic-surface-2);
+  --organic-surface-warm: var(--builtin-organic-surface-warm);
+  --organic-surface-sage: var(--builtin-organic-surface-sage);
+  --organic-surface-sage-soft: var(--builtin-organic-surface-sage-soft);
+  --organic-surface-off: var(--builtin-organic-surface-off);
+  --organic-text: var(--builtin-organic-text);
+  --organic-text-secondary: var(--builtin-organic-text-secondary);
+  --organic-text-muted: var(--builtin-organic-text-muted);
+  --organic-text-faint: var(--builtin-organic-text-faint);
+  --organic-accent: var(--builtin-organic-accent);
+  --organic-accent-hover: var(--builtin-organic-accent-hover);
+  --organic-accent-text: var(--builtin-organic-accent-text);
+  --organic-accent-contrast: var(--builtin-organic-accent-contrast);
+  --organic-accent-glow: var(--builtin-organic-accent-glow);
+  --organic-accent-track: var(--builtin-organic-accent-track);
+  --organic-accent-on-hover: var(--builtin-organic-accent-on-hover);
+  --organic-sage: var(--builtin-organic-sage);
+  --organic-sage-deep: var(--builtin-organic-sage-deep);
+  --organic-sage-dark: var(--builtin-organic-sage-dark);
+  --organic-sage-track: var(--builtin-organic-sage-track);
+  --organic-border: var(--builtin-organic-border);
+  --organic-border-soft: var(--builtin-organic-border-soft);
+  --organic-border-on-accent: var(--builtin-organic-border-on-accent);
+  --organic-danger-text: var(--builtin-organic-danger-text);
+  --organic-success-text: var(--builtin-organic-success-text);
+  --organic-warn-text: var(--builtin-organic-warn-text);
+  --organic-scrim: var(--builtin-organic-scrim);
+  --organic-font-body: var(--builtin-organic-font-body);
+  --organic-font-heading: var(--builtin-organic-font-heading);
+  --organic-font-label: var(--builtin-organic-font-label);
+  --organic-font-body-sm: var(--builtin-organic-font-body-sm);
+  --organic-font-body-md: var(--builtin-organic-font-body-md);
+  --organic-font-body-lg: var(--builtin-organic-font-body-lg);
+  --organic-font-heading-sm: var(--builtin-organic-font-heading-sm);
+  --organic-font-heading-md: var(--builtin-organic-font-heading-md);
+  --organic-font-panel-title: var(--builtin-organic-font-panel-title);
+  --organic-font-display-sm: var(--builtin-organic-font-display-sm);
+  --organic-font-display-md: var(--builtin-organic-font-display-md);
+  --organic-radius-sm: var(--builtin-organic-radius-sm);
+  --organic-radius-md: var(--builtin-organic-radius-md);
+  --organic-radius-lg: var(--builtin-organic-radius-lg);
 
   /* ── Semantic layer (panel) ───────────────────────────────────────────
      The names new panel-layer CSS should use. Each is an alias of the
@@ -351,9 +400,62 @@
   --shadow-edge-handle: 0 3px 12px rgba(46, 43, 37, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
+/* ── Protected regions ──────────────────────────────────────────────────
+   Permission, risk and consent UI, plugin-content markers and the panel
+   theme card itself always render with the built-in palette, whatever
+   panel theme is active. */
+.host-protected {
+  --organic-bg: var(--builtin-organic-bg);
+  --organic-surface: var(--builtin-organic-surface);
+  --organic-surface-2: var(--builtin-organic-surface-2);
+  --organic-surface-warm: var(--builtin-organic-surface-warm);
+  --organic-surface-sage: var(--builtin-organic-surface-sage);
+  --organic-surface-sage-soft: var(--builtin-organic-surface-sage-soft);
+  --organic-surface-off: var(--builtin-organic-surface-off);
+  --organic-text: var(--builtin-organic-text);
+  --organic-text-secondary: var(--builtin-organic-text-secondary);
+  --organic-text-muted: var(--builtin-organic-text-muted);
+  --organic-text-faint: var(--builtin-organic-text-faint);
+  --organic-accent: var(--builtin-organic-accent);
+  --organic-accent-hover: var(--builtin-organic-accent-hover);
+  --organic-accent-text: var(--builtin-organic-accent-text);
+  --organic-accent-contrast: var(--builtin-organic-accent-contrast);
+  --organic-accent-glow: var(--builtin-organic-accent-glow);
+  --organic-accent-track: var(--builtin-organic-accent-track);
+  --organic-accent-on-hover: var(--builtin-organic-accent-on-hover);
+  --organic-sage: var(--builtin-organic-sage);
+  --organic-sage-deep: var(--builtin-organic-sage-deep);
+  --organic-sage-dark: var(--builtin-organic-sage-dark);
+  --organic-sage-track: var(--builtin-organic-sage-track);
+  --organic-border: var(--builtin-organic-border);
+  --organic-border-soft: var(--builtin-organic-border-soft);
+  --organic-border-on-accent: var(--builtin-organic-border-on-accent);
+  --organic-danger-text: var(--builtin-organic-danger-text);
+  --organic-success-text: var(--builtin-organic-success-text);
+  --organic-warn-text: var(--builtin-organic-warn-text);
+  --organic-scrim: var(--builtin-organic-scrim);
+  --organic-font-body: var(--builtin-organic-font-body);
+  --organic-font-heading: var(--builtin-organic-font-heading);
+  --organic-font-label: var(--builtin-organic-font-label);
+  --organic-font-body-sm: var(--builtin-organic-font-body-sm);
+  --organic-font-body-md: var(--builtin-organic-font-body-md);
+  --organic-font-body-lg: var(--builtin-organic-font-body-lg);
+  --organic-font-heading-sm: var(--builtin-organic-font-heading-sm);
+  --organic-font-heading-md: var(--builtin-organic-font-heading-md);
+  --organic-font-panel-title: var(--builtin-organic-font-panel-title);
+  --organic-font-display-sm: var(--builtin-organic-font-display-sm);
+  --organic-font-display-md: var(--builtin-organic-font-display-md);
+  --organic-radius-sm: var(--builtin-organic-radius-sm);
+  --organic-radius-md: var(--builtin-organic-radius-md);
+  --organic-radius-lg: var(--builtin-organic-radius-lg);
+  font-family: var(--font-ui);
+}
+
 /* Panel layer: the status panel and plugin pages render on cream surfaces,
    so status text must use the darker values. */
-.status-panel {
+.status-panel,
+.status-panel .host-protected,
+.panel-theme-preview {
   --text-danger: var(--organic-danger-text);
   --text-success: var(--organic-success-text);
   --text-warning: var(--organic-warn-text);
@@ -361,6 +463,8 @@
 
 /* Every organic-themed surface: solid accent fills carry light text. */
 .status-panel,
+.status-panel .host-protected,
+.panel-theme-preview,
 .setup-overlay,
 .mcp-overlay {
   --accent-on: var(--organic-accent-contrast);
@@ -378,54 +482,54 @@
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --organic-bg: #1f1b16;
-  --organic-surface: #292420;
-  --organic-surface-2: #342e28;
-  --organic-surface-warm: #4a3022;
-  --organic-surface-sage: #2e3622;
-  --organic-surface-sage-soft: #263019;
-  --organic-surface-off: #3f372e;
-  --organic-accent: #d98652;
-  --organic-accent-hover: #e39a6b;
-  --organic-accent-text: #f0b48a;
-  --organic-accent-contrast: #201e1d;
-  --organic-sage: #9db07b;
-  --organic-sage-deep: #aebf8c;
-  --organic-sage-dark: #c9d6ad;
-  --organic-text: #f3ede4;
-  --organic-text-secondary: #cfc5b6;
-  --organic-text-muted: #b0a592;
-  --organic-text-faint: #8d8374;
-  --organic-border: rgba(243, 237, 228, 0.18);
-  --organic-border-soft: rgba(243, 237, 228, 0.1);
-  --organic-border-on-accent: rgba(32, 30, 29, 0.4);
-  --organic-sage-track: rgba(201, 214, 173, 0.18);
-  --organic-accent-track: rgba(243, 237, 228, 0.1);
-  --organic-accent-glow: rgba(217, 134, 82, 0.28);
-  --organic-accent-on-hover: rgba(243, 237, 228, 0.06);
-  --organic-scrim: rgba(0, 0, 0, 0.55);
+  --builtin-organic-bg: #1f1b16;
+  --builtin-organic-surface: #292420;
+  --builtin-organic-surface-2: #342e28;
+  --builtin-organic-surface-warm: #4a3022;
+  --builtin-organic-surface-sage: #2e3622;
+  --builtin-organic-surface-sage-soft: #263019;
+  --builtin-organic-surface-off: #3f372e;
+  --builtin-organic-accent: #d98652;
+  --builtin-organic-accent-hover: #e39a6b;
+  --builtin-organic-accent-text: #f0b48a;
+  --builtin-organic-accent-contrast: #201e1d;
+  --builtin-organic-sage: #9db07b;
+  --builtin-organic-sage-deep: #aebf8c;
+  --builtin-organic-sage-dark: #c9d6ad;
+  --builtin-organic-text: #f3ede4;
+  --builtin-organic-text-secondary: #cfc5b6;
+  --builtin-organic-text-muted: #b0a592;
+  --builtin-organic-text-faint: #8d8374;
+  --builtin-organic-border: rgba(243, 237, 228, 0.18);
+  --builtin-organic-border-soft: rgba(243, 237, 228, 0.1);
+  --builtin-organic-border-on-accent: rgba(32, 30, 29, 0.4);
+  --builtin-organic-sage-track: rgba(201, 214, 173, 0.18);
+  --builtin-organic-accent-track: rgba(243, 237, 228, 0.1);
+  --builtin-organic-accent-glow: rgba(217, 134, 82, 0.28);
+  --builtin-organic-accent-on-hover: rgba(243, 237, 228, 0.06);
+  --builtin-organic-scrim: rgba(0, 0, 0, 0.55);
   --organic-panel-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   --organic-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   --organic-hero-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
   --organic-thumb-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --organic-danger-text: #ff9a8a;
-  --organic-success-text: #b6d48a;
-  --organic-warn-text: #f0c866;
+  --builtin-organic-danger-text: #ff9a8a;
+  --builtin-organic-success-text: #b6d48a;
+  --builtin-organic-warn-text: #f0c866;
   --focus-ring-color-on-light: #9dd8ff;
 }
 
 /* More contrast: stronger borders in both themes. */
 @media (prefers-contrast: more) {
   :root {
-    --organic-border: rgba(32, 30, 29, 0.6);
-    --organic-border-soft: rgba(32, 30, 29, 0.4);
+    --builtin-organic-border: rgba(32, 30, 29, 0.6);
+    --builtin-organic-border-soft: rgba(32, 30, 29, 0.4);
     --border-strong: rgba(255, 255, 255, 0.5);
     --border-subtle: rgba(255, 255, 255, 0.3);
   }
 
   :root[data-theme='dark'] {
-    --organic-border: rgba(243, 237, 228, 0.65);
-    --organic-border-soft: rgba(243, 237, 228, 0.45);
+    --builtin-organic-border: rgba(243, 237, 228, 0.65);
+    --builtin-organic-border-soft: rgba(243, 237, 228, 0.45);
   }
 }
 

@@ -1,7 +1,11 @@
 /* Organic panel surface. The component primitives inherit these semantic
    values, while the desktop pet keeps the original dark presentation layer. */
 
-.status-panel {
+/* Aliases re-resolve inside protected regions and theme previews, because an
+   inherited alias arrives already substituted (spec §3.6). */
+.status-panel,
+.status-panel :deep(.host-protected),
+:deep(.panel-theme-preview) {
   --surface-panel: var(--organic-bg);
   --surface-raised: var(--organic-surface);
   --surface-raised-hover: var(--organic-surface-2);
@@ -73,16 +77,20 @@
   --toggle-thumb-shadow: var(--organic-thumb-shadow);
   --border-on-accent: var(--organic-border-on-accent);
   --accent-on-hover: var(--organic-accent-on-hover);
+}
 
+.status-panel {
   position: relative;
   z-index: var(--z-system);
+  isolation: isolate;
   display: flex;
   width: 100%;
   height: 100%;
   flex-direction: column;
   overflow: hidden;
   border-radius: var(--organic-radius-lg);
-  background: var(--surface-panel);
+  /* A plugin gradient (host-built, renderer-validated) or the solid bg. */
+  background: var(--panel-theme-background, var(--surface-panel));
   color: var(--text-primary);
   font-family: var(--font-ui);
   font-size: var(--font-md);
@@ -1463,7 +1471,7 @@
 
 @media (prefers-reduced-transparency: reduce) {
   .status-panel {
-    background: var(--organic-bg);
+    background: var(--panel-theme-background, var(--organic-bg));
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
