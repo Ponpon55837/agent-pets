@@ -14,7 +14,9 @@ import {
   contrastRatio,
   formatPanelThemeColor,
   mixColor,
+  oklabDistance,
   parsePanelThemeColor,
+  rgbToOklch,
   relativeLuminance,
   withAlpha,
   type PanelThemeRgba,
@@ -482,6 +484,45 @@ function firstBackdropFailure(colors: ColorSet, backdrops: readonly Backdrop[]):
   return null
 }
 
+// 狀態色必須維持語意：危險是紅、成功是綠、警告是琥珀（OKLCH 色相區間與最低色度），
+// 彼此之間以及與強調色之間要有最小 OKLab 色差，避免主題把「危險」畫得像「成功」或像一般按鈕。
+type HueRange = readonly [number, number]
+export const PANEL_THEME_STATE_HUES: Readonly<Record<'dangerText' | 'successText' | 'warnText', readonly HueRange[]>> = Object.freeze({
+  dangerText: [[0, 50], [340, 360]],
+  successText: [[105, 170]],
+  warnText: [[55, 105]],
+})
+export const PANEL_THEME_STATE_MIN_CHROMA = 0.05
+export const PANEL_THEME_STATE_MIN_DISTANCE = 0.08
+/**
+ * 與強調色（按鈕填色 `accent`）的距離。以填色而非 `accentText` 比較：內建淺色的警告字
+ * 與強調文字只差 0.046，但它們從不並列成「按鈕對徽章」；會被誤認的是強調按鈕與風險徽章。
+ */
+export const PANEL_THEME_STATE_ACCENT_MIN_DISTANCE = 0.06
+
+function stateMeaningFailure(colors: ColorSet): { key: string; problem: string } | null {
+  for (const [key, ranges] of Object.entries(PANEL_THEME_STATE_HUES) as Array<[keyof typeof PANEL_THEME_STATE_HUES, readonly HueRange[]]>) {
+    const { c, h } = rgbToOklch(colors[key])
+    if (c < PANEL_THEME_STATE_MIN_CHROMA) return { key, problem: `chroma ${c.toFixed(3)} < ${PANEL_THEME_STATE_MIN_CHROMA} (too grey to read as a state colour)` }
+    if (!ranges.some(([from, to]) => h >= from && h <= to)) {
+      return { key, problem: `OKLCH hue ${Math.round(h)}° is outside ${ranges.map(([from, to]) => `${from}–${to}°`).join(' or ')}` }
+    }
+  }
+  const pairs: Array<[PluginPanelThemeColorKey, PluginPanelThemeColorKey, number]> = [
+    ['dangerText', 'successText', PANEL_THEME_STATE_MIN_DISTANCE],
+    ['dangerText', 'warnText', PANEL_THEME_STATE_MIN_DISTANCE],
+    ['successText', 'warnText', PANEL_THEME_STATE_MIN_DISTANCE],
+    ['dangerText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
+    ['successText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
+    ['warnText', 'accent', PANEL_THEME_STATE_ACCENT_MIN_DISTANCE],
+  ]
+  for (const [first, second, minimum] of pairs) {
+    const distance = oklabDistance(colors[first], colors[second])
+    if (distance < minimum) return { key: first, problem: `OKLab ΔE ${distance.toFixed(3)} to ${second} < ${minimum}` }
+  }
+  return null
+}
+
 function firstSurfaceFailure(colors: ColorSet): ContrastFailure | null {
   for (const [foreground, background, minimum] of SURFACE_PAIRS) {
     const ratio = contrastRatio(colors[foreground], colors[background])
@@ -646,6 +687,8 @@ function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contri
   if (background.type === 'gradient') backdrops.push(...gradientBackdrops(background.stops))
   const surfaceFailure = firstSurfaceFailure(colors)
   if (surfaceFailure) failContrast(path, surfaceFailure)
+  const meaningFailure = stateMeaningFailure(colors)
+  if (meaningFailure) fail(`${path}.colors.${meaningFailure.key}`, meaningFailure.problem)
   const backdropFailure = firstBackdropFailure(colors, backdrops)
   if (backdropFailure) failContrast(path, backdropFailure)
   // Image backdrops: checked through the minimum overlay so the diagnostic is actionable.

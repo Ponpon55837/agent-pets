@@ -222,3 +222,37 @@ export function contrastRatio(foreground: PanelThemeRgba, background: PanelTheme
 
 export const PANEL_THEME_BLACK: PanelThemeRgba = Object.freeze({ r: 0, g: 0, b: 0, a: 1 })
 export const PANEL_THEME_WHITE: PanelThemeRgba = Object.freeze({ r: 255, g: 255, b: 255, a: 1 })
+
+function decodeSrgb(channel: number): number {
+  const c = channel / 255
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+}
+
+/** sRGB -> OKLab（Ottosson）。狀態色的色相界線與色差都以這個空間計算，與人眼感知較一致。 */
+export function rgbToOklab(color: PanelThemeRgba): { l: number; a: number; b: number } {
+  const r = decodeSrgb(color.r)
+  const g = decodeSrgb(color.g)
+  const bl = decodeSrgb(color.b)
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * bl)
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * bl)
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * bl)
+  return {
+    l: 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+    a: 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+    b: 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+  }
+}
+
+/** OKLCH 的色度與色相（度，0–360）。 */
+export function rgbToOklch(color: PanelThemeRgba): { l: number; c: number; h: number } {
+  const { l, a, b } = rgbToOklab(color)
+  const hue = (Math.atan2(b, a) * 180) / Math.PI
+  return { l, c: Math.hypot(a, b), h: hue < 0 ? hue + 360 : hue }
+}
+
+/** OKLab 歐氏色差（ΔE_ok）。 */
+export function oklabDistance(first: PanelThemeRgba, second: PanelThemeRgba): number {
+  const x = rgbToOklab(first)
+  const y = rgbToOklab(second)
+  return Math.hypot(x.l - y.l, x.a - y.a, x.b - y.b)
+}

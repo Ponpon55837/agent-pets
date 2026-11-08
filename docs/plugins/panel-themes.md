@@ -53,6 +53,7 @@ Every mode is checked separately and any failure rejects the whole package, with
 - Text, secondary, muted and accent text ≥ 4.5:1 and `accent` ≥ 3:1 on `bg`, on every gradient stop and midpoint, and on an image backdrop over a worst-case black and white pixel.
 - Text levels and danger/success/warn text ≥ 4.5:1 on `surface` and `surface2`; `onAccent` ≥ 4.5:1 on `accentHover` and ≥ 3:1 on `accent`.
 - Image overlays must be at least the computed minimum (and never below 0.50). The hint names the failing pair and the minimum. Reusing the built-in light text colours on an image cannot pass (`textMuted` is 4.96:1 on the built-in `bg`); pick darker text.
+- State colours keep their meaning: `dangerText` stays red (OKLCH hue 0–50° or 340–360°), `successText` green (105–170°), `warnText` amber (55–105°), each with chroma ≥ 0.05, at least ΔE 0.08 (OKLab) apart and ≥ 0.06 from the `accent` fill.
 - The pet pill is checked over a black and a white desktop: `text` and `textMuted` ≥ 4.5:1, `quotaFill` and `quotaWarn` ≥ 3:1 on the pill and on the quota track.
 
 Omitted optional colours are derived deterministically (spec §3.5, §3.7). `accentHover` is `accent` mixed toward `text` by the first of 0.20, 0.25 … 0.60 that keeps `onAccent` at 4.5:1.

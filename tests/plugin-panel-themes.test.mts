@@ -307,3 +307,15 @@ test('the module stays free of Electron and Node imports so the catalog validato
     for (const match of source.matchAll(/^import (?!type).* from '([^']+)'/gm)) assert.match(match[1]!, /^\.\//, `${file} imports only sibling pure modules`)
   }
 })
+
+test('state colours keep their meaning: OKLCH hue bands, minimum chroma and OKLab distance', () => {
+  const withState = (overrides: Record<string, string>) => [lightTheme({ colors: { ...LIGHT_COLORS, ...overrides } })]
+  // 綠色的「危險」、紅色的「成功」、灰色的「警告」都必須被拒絕。
+  rejects(withState({ dangerText: '#2f6b2f' }), /colors\.dangerText: OKLCH hue \d+° is outside 0–50° or 340–360°/)
+  rejects(withState({ successText: '#a62f1e' }), /colors\.successText: OKLCH hue/)
+  rejects(withState({ warnText: '#5a5a5a' }), /colors\.warnText: chroma 0\.000 < 0\.05/)
+  rejects(withState({ dangerText: '#8a2a2a', warnText: '#8a3a1a' }), /colors\.warnText: OKLCH hue|ΔE/)
+  // 危險色若與強調按鈕色幾乎相同（例如紅色強調）也會被拒絕。
+  rejects(withState({ accent: '#a62f1e', accentText: '#8a2618', dangerText: '#a62f1e', onAccent: '#ffffff' }), /dangerText: OKLab ΔE 0\.000 to accent\b/)
+  assert.doesNotThrow(() => parsePanelThemes(withState({ dangerText: '#a62f1e', successText: '#3f5a1c', warnText: '#7a5200' })))
+})
