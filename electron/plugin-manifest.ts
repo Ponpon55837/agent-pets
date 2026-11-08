@@ -1,6 +1,7 @@
 import { isIP } from 'node:net'
 import { parsePetBehaviorManifest } from './pet-behavior-manifest.ts'
 import { normalizePluginEventSourceFamily } from './plugin-event-source.ts'
+import { PanelThemeValidationError, parsePanelThemes } from './plugin-panel-themes.ts'
 import { PLUGIN_CONTRIBUTION_REGISTRY } from '../src/types/plugin.ts'
 import type {
   PluginLocalizedText,
@@ -32,22 +33,26 @@ export type PluginManifestError =
   | 'invalid_host'
   | 'invalid_settings'
   | 'invalid_contributions'
+  | 'invalid_panel_theme'
 
 export type PluginManifestParseResult =
   | { ok: true; manifest: PluginManifest }
-  | { ok: false; error: string }
+  /** `diagnostic` is a sanitised, at most 200-character author hint (panel themes only). */
+  | { ok: false; error: string; diagnostic?: string }
 
 class ManifestValidationError extends Error {
   readonly code: PluginManifestError
+  readonly diagnostic?: string
 
-  constructor(code: PluginManifestError) {
+  constructor(code: PluginManifestError, diagnostic?: string) {
     super(code)
     this.code = code
+    if (diagnostic) this.diagnostic = diagnostic
   }
 }
 
-function reject(code: PluginManifestError): never {
-  throw new ManifestValidationError(code)
+function reject(code: PluginManifestError, diagnostic?: string): never {
+  throw new ManifestValidationError(code, diagnostic)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -393,14 +398,24 @@ function parseManifest(value: unknown): PluginManifest {
     if (!family || !displayName) reject('invalid_contributions')
     contributes.eventSource = { family, displayName }
   }
+  if (value.contributes.panelThemes !== undefined) {
+    try {
+      contributes.panelThemes = parsePanelThemes(value.contributes.panelThemes).contributions
+    } catch (error) {
+      reject('invalid_panel_theme', error instanceof PanelThemeValidationError ? error.diagnostic : undefined)
+    }
+  }
   if (!entry) {
-    const workerlessContributionIds = Object.entries(PLUGIN_CONTRIBUTION_REGISTRY)
+    // Workerless: no permissions, and every declared contribution is a
+    // workerless one (skins, panelThemes) with at least one item.
+    const workerlessContributionIds = new Set(Object.entries(PLUGIN_CONTRIBUTION_REGISTRY)
       .filter(([, definition]) => 'allowsWorkerlessPlugin' in definition && definition.allowsWorkerlessPlugin === true)
-      .map(([id]) => id)
-    const onlySkinContribution = Object.keys(value.contributes).length === 1
-      && Object.keys(value.contributes).every(key => workerlessContributionIds.includes(key))
-      && (contributes.skins?.length ?? 0) > 0
-    if (!onlySkinContribution || Object.keys(value.permissions).length > 0) reject('invalid_contributions')
+      .map(([id]) => id))
+    const declaredKeys = Object.keys(value.contributes)
+    const workerlessOnly = declaredKeys.length > 0
+      && declaredKeys.every(key => workerlessContributionIds.has(key)
+        && Array.isArray(contributes[key as 'skins' | 'panelThemes']) && (contributes[key as 'skins' | 'panelThemes']?.length ?? 0) > 0)
+    if (!workerlessOnly || Object.keys(value.permissions).length > 0) reject('invalid_contributions')
   }
 
   return {
@@ -420,9 +435,9 @@ export function parsePluginManifest(value: unknown): PluginManifestParseResult {
   try {
     return { ok: true, manifest: parseManifest(value) }
   } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof ManifestValidationError ? error.code : 'invalid_manifest',
+    if (error instanceof ManifestValidationError) {
+      return { ok: false, error: error.code, ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}) }
     }
+    return { ok: false, error: 'invalid_manifest' }
   }
 }

@@ -5,6 +5,7 @@ import { renameSyncWithRetry } from './fs-rename.ts'
 import { zipSync } from 'fflate'
 import { guardArchive } from './archive-guard.ts'
 import { parsePluginManifest } from './plugin-manifest.ts'
+import { checkPanelThemePackagedImage, isWoff2, panelThemeAssetPaths, PANEL_THEME_FONT_MAX_BYTES, PANEL_THEME_IMAGE_MAX_BYTES } from './plugin-panel-themes.ts'
 import { verifyPluginSignature } from './plugin-signature.ts'
 import type { PluginManifest, PluginRuntimeState } from '../src/types/plugin.ts'
 import type { PluginRegistryError } from '../src/types/ipc.ts'
@@ -50,7 +51,8 @@ export interface PluginInstallPlan {
 
 export type { PluginRegistryError } from '../src/types/ipc.ts'
 
-export type PluginRegistryResult<T> = { ok: true; value: T } | { ok: false; error: PluginRegistryError }
+/** `diagnostic` is only set for developer-mode installs (sanitised, <= 200 chars). */
+export type PluginRegistryResult<T> = { ok: true; value: T } | { ok: false; error: PluginRegistryError; diagnostic?: string }
 
 interface PreparedPlan {
   publicPlan: PluginInstallPlan
@@ -61,7 +63,7 @@ interface PreparedPlan {
 
 const PLUGIN_ID = /^(?!_host$|_shared$)[a-z0-9-]{3,48}$/
 const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
-const ALLOWED_EXTENSIONS = ['.js', '.json', '.png', '.webp', '.html', '.css'] as const
+const ALLOWED_EXTENSIONS = ['.js', '.json', '.png', '.webp', '.html', '.css', '.woff2'] as const
 const PLAN_TTL_MS = 10 * 60 * 1_000
 const REGISTRY_MAX_BYTES = 1024 * 1024
 
@@ -108,6 +110,9 @@ function permissionUnits(manifest: PluginManifest): string[] {
   if (manifest.contributes.badge) result.add('contributes:badge')
   if (manifest.contributes.skins?.length) result.add(`contributes:skins:${manifest.contributes.skins.length}`)
   if (manifest.contributes.eventSource) result.add('contributes:eventSource')
+  const panelThemes = manifest.contributes.panelThemes ?? []
+  if (panelThemes.length) result.add(`contributes:panelThemes:${panelThemes.length}`)
+  if (panelThemes.some(theme => theme.fonts.length > 0)) result.add('contributes:panelThemeFonts')
   return [...result].sort()
 }
 
@@ -313,18 +318,50 @@ export class PluginRegistry {
           developerMode,
         }, guarded.files, null)
       }
+      if (parsed.error === 'invalid_panel_theme') {
+        return {
+          ok: false,
+          error: 'invalid_panel_theme',
+          ...(developerMode && parsed.diagnostic ? { diagnostic: parsed.diagnostic } : {}),
+        }
+      }
       return { ok: false, error: 'invalid_manifest' }
     }
     const manifest = parsed.manifest
     const skinPaths = new Set((manifest.contributes.skins ?? []).map(skin => skin.spritesheet))
+    const themeAssets = panelThemeAssetPaths(manifest.contributes.panelThemes)
+    // An "asset package" (skins and/or panel themes) gets the larger total limit.
+    const assetPackage = skinPaths.size > 0 || themeAssets.images.size > 0 || themeAssets.fonts.size > 0
     const totalBytes = [...guarded.files.values()].reduce((total, bytes) => total + bytes.byteLength, 0)
-    const archiveLimit = skinPaths.size > 0 ? PLUGIN_ARCHIVE_SKIN_MAX_BYTES : PLUGIN_ARCHIVE_MAX_BYTES
-    if (totalBytes > archiveLimit || (archive.byteLength > PLUGIN_ARCHIVE_MAX_BYTES && skinPaths.size === 0)) {
+    const archiveLimit = assetPackage ? PLUGIN_ARCHIVE_SKIN_MAX_BYTES : PLUGIN_ARCHIVE_MAX_BYTES
+    if (totalBytes > archiveLimit || (archive.byteLength > PLUGIN_ARCHIVE_MAX_BYTES && !assetPackage)) {
       return { ok: false, error: 'archive_too_large' }
     }
     for (const [name, bytes] of guarded.files) {
-      const fileLimit = skinPaths.has(name) ? PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES : PLUGIN_ARCHIVE_MAX_BYTES
+      const fileLimit = skinPaths.has(name) ? PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES
+        : themeAssets.images.has(name) ? PANEL_THEME_IMAGE_MAX_BYTES
+          : themeAssets.fonts.has(name) ? PANEL_THEME_FONT_MAX_BYTES
+            : PLUGIN_ARCHIVE_MAX_BYTES
       if (bytes.byteLength > fileLimit) return { ok: false, error: 'archive_too_large' }
+      // Every packaged font must be declared by a theme face.
+      if (path.posix.extname(name).toLowerCase() === '.woff2' && !themeAssets.fonts.has(name)) {
+        return { ok: false, error: 'invalid_panel_theme', ...(developerMode ? { diagnostic: 'panelThemes: a packaged .woff2 is not referenced by any fonts[].src' } : {}) }
+      }
+    }
+    for (const fontPath of themeAssets.fonts) {
+      const font = guarded.files.get(fontPath)
+      if (!font || !isWoff2(font)) {
+        return { ok: false, error: 'invalid_panel_theme', ...(developerMode ? { diagnostic: 'panelThemes: a fonts[].src file is missing or is not WOFF2' } : {}) }
+      }
+    }
+    for (const imagePath of themeAssets.images) {
+      const image = guarded.files.get(imagePath)
+      const check = image ? checkPanelThemePackagedImage(image) : null
+      if (!check?.ok) {
+        const reason = !check ? 'is missing' : check.error === 'image_animated' ? 'is animated'
+          : check.error === 'image_too_large' ? 'is too large (8 MiB, 4096 px per side, 8.39 MP)' : 'is not a static PNG/WebP of at least 64 px with orientation 1'
+        return { ok: false, error: 'invalid_panel_theme', ...(developerMode ? { diagnostic: `panelThemes: a background image ${reason}` } : {}) }
+      }
     }
     if (manifest.entry && !guarded.files.has(manifest.entry)) return { ok: false, error: 'missing_entry' }
     for (const skin of manifest.contributes.skins ?? []) {

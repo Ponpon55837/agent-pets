@@ -46,6 +46,8 @@ export interface PluginInstallIpcDependencies {
   pluginPanelError(error: unknown): string
   syncPluginHost(): void | Promise<void>
   pluginPanelSnapshot(): PluginPanelResult<PluginPanelSnapshot> | Promise<PluginPanelResult<PluginPanelSnapshot>>
+  /** Deletes host-owned per-plugin state that is not plugin data (panel theme slots and images). */
+  onPluginRemoved?(pluginId: string): void
 }
 
 export function registerPluginInstallIpc(deps: PluginInstallIpcDependencies): void {
@@ -119,7 +121,9 @@ export function registerPluginInstallIpc(deps: PluginInstallIpcDependencies): vo
       const sourceFolder = selection.filePaths[0]
       if (!sourceFolder) return { ok: false, error: 'invalid_archive' }
       const planned = await registry.planInstallDirectory(sourceFolder)
-      if (!planned.ok) return { ok: false, error: planned.error }
+      if (!planned.ok) {
+        return { ok: false, error: planned.error, ...(planned.diagnostic ? { diagnostic: planned.diagnostic } : {}) }
+      }
       if (planned.value.pluginId && planned.value.kind !== 'incompatible') {
         rememberPluginPlan(deps.pendingPlanIds, deps.pendingDeveloperFolders, planned.value.token, planned.value.pluginId)
         deps.pendingDeveloperFolders.set(planned.value.token, sourceFolder)
@@ -182,6 +186,7 @@ export function registerPluginInstallIpc(deps: PluginInstallIpcDependencies): vo
     deps.getDeveloperModeWatcher()?.unwatch(pluginId)
     deps.getPluginBroker()?.removePlugin(pluginId, keepData)
     deps.getPluginHostGrantController()?.clearPlugin(pluginId)
+    deps.onPluginRemoved?.(pluginId)
     if (!keepData) {
       try { preferences.removePlugin(pluginId) } catch (error) {
         return { ok: false, error: deps.pluginPanelError(error) }

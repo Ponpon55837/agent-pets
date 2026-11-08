@@ -453,6 +453,7 @@ function localizedError(code: string): string {
     signature_confirmation_required: 'pluginSignatureConfirmationRequired',
     invalid_archive: 'pluginInvalidArchive',
     invalid_manifest: 'pluginInvalidArchive',
+    invalid_panel_theme: 'plugins.errInvalidPanelTheme',
     incompatible: 'pluginIncompatible',
     permission_reconsent_required: 'pluginReconsentRequired',
     filesystem_unsafe: 'pluginFilesystemUnsafe',
@@ -480,11 +481,12 @@ function localizedError(code: string): string {
   return t(keys[code] ?? 'pluginActionFailed')
 }
 
-function setError(code: string, retry?: () => void): void {
+function setError(code: string, retry?: () => void, diagnostic?: string): void {
   notifier.notify({
     tone: 'error',
     text: localizedError(code),
-    detail: code,
+    // Developer-mode installs carry a sanitised author hint (<= 200 chars) from main.
+    detail: diagnostic ? `${code}: ${diagnostic}` : code,
     action: retry ? { label: t('plugins.retry'), run: retry } : undefined,
   })
 }
@@ -1001,7 +1003,7 @@ async function selectDeveloperFolder(): Promise<void> {
   try {
     const result = await window.electronAPI?.selectPluginFolder()
     if (!result?.ok) {
-      if (result && !result.ok && !result.cancelled) setError(result.error)
+      if (result && !result.ok && !result.cancelled) setError(result.error, undefined, result.diagnostic)
       return
     }
     pendingPlan.value = result.value
@@ -1040,6 +1042,8 @@ function permissionLabel(unit: string): string {
   if (detail === 'badge') return t('pluginPermissionBadge')
   if (detail === 'eventSource') return t('pluginPermissionEventSource')
   if (detail.startsWith('skins:')) return t('pluginPermissionSkins', { count: detail.slice(6) })
+  if (detail.startsWith('panelThemes:')) return t('pluginPermissionPanelThemes', { count: detail.slice(12) })
+  if (detail === 'panelThemeFonts') return t('pluginPermissionPanelThemeFonts')
   return t('plugins.permUnknown', { unit })
 }
 
@@ -1060,6 +1064,8 @@ function permissionHint(unit: string): string {
   if (detail === 'badge') return t('plugins.hintBadge')
   if (detail === 'eventSource') return t('plugins.hintEventSource')
   if (detail.startsWith('skins:')) return t('plugins.hintSkins')
+  if (detail.startsWith('panelThemes:')) return t('plugins.hintPanelThemes')
+  if (detail === 'panelThemeFonts') return t('plugins.hintPanelThemeFonts')
   return t('plugins.hintUnknown')
 }
 
