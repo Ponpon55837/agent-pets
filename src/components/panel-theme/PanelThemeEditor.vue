@@ -38,8 +38,7 @@ import {
 } from '@/utils/panel-theme-editor'
 import { describeIssue } from '@/utils/panel-theme-issue-text'
 import { extractDominantColors, paletteFromSeed, sampleSize, seedFromClusters } from '@/utils/panel-theme-palette'
-import { parsePanelThemeColor } from '../../../electron/panel-theme-color.ts'
-import { builtinPanelThemeProperties } from '../../../electron/plugin-panel-themes.ts'
+import { builtinPanelThemeProperties, parsePanelThemeColor } from '@/utils/panel-theme-host'
 import { PANEL_THEME_MODES, type PanelThemeMode } from '@/types/panel-theme'
 import { isPanelThemeAssetUrl } from '@/utils/panel-theme-css'
 import {

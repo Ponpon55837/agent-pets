@@ -1,5 +1,13 @@
-import { formatPanelThemeColor, oklchToRgb, parsePanelThemeColor, rgbToOklch, type PanelThemeRgba } from '../../electron/panel-theme-color.ts'
-import { panelThemeSharedProperties, petStatusProperties, type ResolvedPanelTheme } from '../../electron/plugin-panel-themes.ts'
+import {
+  formatPanelThemeColor,
+  oklchToRgb,
+  panelThemeSharedProperties,
+  parsePanelThemeColor,
+  petStatusProperties,
+  rgbToOklch,
+  type PanelThemeRgba,
+  type ResolvedPanelTheme,
+} from './panel-theme-host.ts'
 import {
   PANEL_THEME_COLOR_KEY_PROPERTIES,
   PANEL_THEME_MODES,
