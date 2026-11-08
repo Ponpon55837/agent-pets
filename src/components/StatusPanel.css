@@ -1478,3 +1478,13 @@
     padding-bottom: var(--organic-space-2);
   }
 }
+
+/* 高對比（forced colors）會把背景色換成 Canvas，狀態點就消失了；改用系統文字色畫成實心點，
+   狀態本身仍由旁邊的文字標籤表達。 */
+@media (forced-colors: active) {
+  .status-panel :deep(.session-status-dot) {
+    background: CanvasText;
+    box-shadow: none;
+    forced-color-adjust: none;
+  }
+}

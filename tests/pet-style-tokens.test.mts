@@ -55,3 +55,8 @@ test('the pet permission bubble never grows past the reserved headroom, so the s
   assert.match(bubble, /\.permission-request > \* \{\n {2}flex: none;\n\}/)
   assert.match(bubble, /\.permission-request > \.permission-details \{[^}]*min-height: 0;[^}]*overflow-y: auto;/)
 })
+
+test('state dots stay visible under forced colors (the shape still carries the state)', () => {
+  assert.match(readFileSync('src/components/DesktopPet.css', 'utf8'), /@media \(forced-colors: active\) \{\n {2}\.line-dot \{\n {4}background: CanvasText !important;/)
+  assert.match(readFileSync('src/components/StatusPanel.css', 'utf8'), /@media \(forced-colors: active\) \{\n {2}\.status-panel :deep\(\.session-status-dot\) \{\n {4}background: CanvasText;/)
+})

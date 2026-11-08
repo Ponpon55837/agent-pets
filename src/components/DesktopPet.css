@@ -884,6 +884,16 @@
   box-shadow: 0 0 4px currentColor;
 }
 
+/* 高對比（forced colors）會把背景換成 Canvas，點與它的形狀就看不見了；改用系統文字色，
+   狀態仍由形狀與文字表達（inline 的 STATE_COLORS 需要 !important 才蓋得過）。 */
+@media (forced-colors: active) {
+  .line-dot {
+    background: CanvasText !important;
+    box-shadow: none;
+    forced-color-adjust: none;
+  }
+}
+
 /* State is also carried by shape, not colour alone. */
 .line-dot.dot-error {
   border-radius: 1px;
