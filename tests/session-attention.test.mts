@@ -85,30 +85,27 @@ test('the pet template no longer renders a (+N) session count', async () => {
   assert.doesNotMatch(source, /line-more/)
   // One thin line: no second project row on the pill (the project is in the tooltip / aria-label).
   assert.doesNotMatch(source, /line-project|line-main/)
-  assert.match(source, /:aria-label="lineAriaLabel\(line\)"/)
+  assert.equal(source.match(/:aria-label="lineView\(line\.key\)\.aria"/g)?.length, 2)
   // A generic div only gets its aria-label announced with a role.
   assert.equal(source.match(/class="status-line[^"]*"\s+role="group"/g)?.length, 2)
   assert.equal(source.match(/<span class="line-state">\{\{ stateLineLabel\(line\.state\) \}\}<\/span>/g)?.length, 2)
 })
 
-test('on-pet state words are short English in every locale; the localized long form stays for screen readers', async () => {
-  const fs = await import('node:fs')
-  const source = fs.readFileSync(new URL('../src/utils/state-aria.ts', import.meta.url), 'utf8')
-  const words = Object.fromEntries([...source.matchAll(/^\s+'?([a-z-]+)'?: '([^']+)',$/gm)].filter(([, , w]) => !w.startsWith('pet.')).map(([, k, w]) => [k, w]))
-  assert.deepEqual(words, {
+test('on-pet state words are short English for every state; the catalogs no longer carry them', async () => {
+  const { stateLineLabel } = await import('../src/utils/state-line-words.ts')
+  const expected: Record<string, string> = {
     offline: 'Offline', idle: 'Idle', thinking: 'Thinking', 'tool-running': 'Working',
     'waiting-permission': 'Permission', 'waiting-input': 'Needs input', success: 'Done', error: 'Failed',
-  })
-  for (const word of Object.values(words)) {
-    assert.ok(word.length <= 12, `short: ${word}`)
-    assert.match(word, /^[A-Za-z ]+$/)
   }
-  // The pill word no longer goes through t(), so zh-TW cannot turn it back into Chinese.
-  assert.match(source, /export function stateLineLabel\(state: string\): string \{\n\s+return STATE_LINE_WORDS\[/)
+  for (const [state, word] of Object.entries(expected)) assert.equal(stateLineLabel(state), word)
+  assert.equal(stateLineLabel('not-a-state'), 'Idle')
+  // The overall line (no family) uses the same English word for its title and accessible name.
+  assert.equal(statusLineText({ label: '', variants: [] }, stateLineLabel('offline')), 'Offline')
+  const fs = await import('node:fs')
   const en = JSON.parse(fs.readFileSync(new URL('../src/locales/pet/en-US.json', import.meta.url), 'utf8')) as Record<string, string>
   const zh = JSON.parse(fs.readFileSync(new URL('../src/locales/pet/zh-TW.json', import.meta.url), 'utf8')) as Record<string, string>
   for (const catalog of [en, zh]) assert.equal(Object.keys(catalog).filter(key => key.startsWith('pet.lineState')).length, 0)
-  // Tooltip / aria-label keep the localized long form.
+  // Per-family tooltip / aria-label keep the localized long form.
   assert.equal(en['pet.statePermission'], 'waiting for permission')
   assert.ok(zh['pet.statePermission'])
 })

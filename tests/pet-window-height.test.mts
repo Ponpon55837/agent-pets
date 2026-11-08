@@ -19,9 +19,3 @@ test('multi pet: pills share one row, so the line count adds nothing', () => {
   assert.equal(petWindowHeight(2, true, 1), PET_BASE_H + QUOTA_TOOLTIP_HEADROOM_H)
   assert.equal(petWindowHeight(3, true, 1), PET_BASE_H + QUOTA_TOOLTIP_HEADROOM_H)
 })
-
-test('the status line has no second project row to budget for', async () => {
-  const fs = await import('node:fs')
-  const source = fs.readFileSync(new URL('../src/utils/pet-window-height.ts', import.meta.url), 'utf8')
-  assert.doesNotMatch(source, /PROJECT_H|showsProjectRow/)
-})

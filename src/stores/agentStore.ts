@@ -1604,9 +1604,8 @@ export const useAgentStore = defineStore('agent', () => {
       label: family.label,
       variants,
       state: top.state,
-      // The session that needs you (priority, then most recent); shown in the line's tooltip / aria-label.
+      // 最需要你處理的工作階段（優先度，其次最近）；專案名稱只出現在狀態列的提示與 aria-label。
       project: top.project,
-      count: family.count,
       since: top.lastSeenAt,
       petId: top.routedPetId ?? getPetForFamily(family.key),
       sessionKey: top.key,

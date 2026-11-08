@@ -17,8 +17,7 @@ const props = withDefaults(defineProps<{
   size: 16,
 })
 
-// A filled icon paints its path as a solid shape; the svg-level stroke would
-// otherwise fatten it by the 1.4 outline.
+// 填色圖示以實心繪製；否則 svg 層級的 1.4 線條會把它描粗。
 const filled = computed(() => FILLED_ICONS.has(props.name))
 </script>
 
