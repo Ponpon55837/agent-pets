@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
-import { axisLabelParts, axisLabelVisible } from '../src/utils/history-axis.ts'
+import { axisLabelParts, axisLabelVisible, dayLabel } from '../src/utils/history-axis.ts'
 
 const root = path.resolve(import.meta.dirname, '..')
 const read = (file: string) => fs.readFileSync(path.join(root, file), 'utf8')
@@ -64,4 +64,26 @@ test('axis labels always include the newest day', () => {
   assert.equal(shown(30, 5).at(-1), 29)
   assert.equal(shown(90, 13).at(-1), 89)
   assert.ok(shown(90, 13).length <= 7)
+})
+
+test('the chart formats its labels once per data change, not on every hover', () => {
+  assert.equal(dayLabel('2026-11-02', true, 'en-US'), 'Mon, 11/2')
+  assert.equal(dayLabel('2026-11-02', false, 'zh-TW'), '11/2')
+  assert.equal(dayLabel('bad', true, 'en-US'), 'bad')
+  const chart = read('src/components/growth/HistoryChart.vue')
+  assert.match(chart, /const barAriaLabels = computed\(/)
+  assert.match(chart, /const axisLabels = computed\(/)
+  assert.match(chart, /:aria-label="barAriaLabels\[index\]"/)
+  assert.doesNotMatch(chart, /\{\{[^}]*axisLabelParts\(/)
+})
+
+// The panel is its own window, so a viewport media query never saw the
+// panel's real width; the stat tiles must follow the History view's width.
+test('History stat tiles reflow by container width and never ellipsize their notes', () => {
+  const css = read('src/components/StatusPanel.css')
+  assert.match(css, /:deep\(\.history-view\) \{\s*container: history-view \/ inline-size;/)
+  assert.match(css, /@container history-view \(max-width: 520px\) \{\s*\.status-panel :deep\(\.history-stat-grid\) \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/)
+  assert.doesNotMatch(css, /@media[^{]*\{[^@]*history-stat-grid/)
+  const meta = css.match(/:deep\(\.history-stat-meta\) \{([^}]*)\}/)?.[1] ?? ''
+  assert.doesNotMatch(meta, /ellipsis|nowrap/)
 })

@@ -728,6 +728,10 @@
 
 /* ── History ──────────────────────────────────────────────────────────── */
 
+.status-panel :deep(.history-view) {
+  container: history-view / inline-size;
+}
+
 .status-panel :deep(.history-hero), .status-panel :deep(.history-growth-line), .status-panel :deep(.history-footer), .status-panel :deep(.history-agent-heading) {
   display: flex;
   align-items: center;
@@ -772,11 +776,9 @@
 }
 
 .status-panel :deep(.history-stat-label), .status-panel :deep(.history-stat-meta) {
-  overflow: hidden;
   color: var(--text-muted);
   font-size: var(--organic-font-label);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .status-panel :deep(.history-stat-number) {
@@ -1478,16 +1480,37 @@
 }
 
 @media (max-width: 420px) {
-  .status-panel :deep(.history-stat-grid), .status-panel :deep(.achievement-grid) {
+  .status-panel :deep(.achievement-grid) {
     grid-template-columns: 1fr;
   }
+}
 
+/* The panel window is never narrower than the viewport it lives in, so a
+   viewport media query never fired here; size the History layout from the
+   view's own width instead. */
+@container history-view (max-width: 520px) {
+  .status-panel :deep(.history-stat-grid) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .status-panel :deep(.history-stat-time) {
+    grid-column: 1 / -1;
+  }
+}
+
+@container history-view (max-width: 420px) {
   .status-panel :deep(.history-footer) {
     flex-direction: column;
   }
 
   .status-panel :deep(.history-footer > span) {
     max-width: none;
+  }
+}
+
+@container history-view (max-width: 280px) {
+  .status-panel :deep(.history-stat-grid) {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
