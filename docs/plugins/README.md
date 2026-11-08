@@ -21,6 +21,7 @@ Users install a `.agentpet-plugin` package from **Settings → Integrations → 
 - [Host API reference](api-reference.md) and [TypeScript declarations](agent-pets-plugin.d.ts)
 - [Contribution points](contribution-points.md)
 - [Panel themes](panel-themes.md)
+- [What's new in 1.12](whats-new-1.12.md)
 - [Permissions and consent](permissions.md)
 - [Sandbox](sandbox.md)
 - [Resource and rate limits](limits.md)

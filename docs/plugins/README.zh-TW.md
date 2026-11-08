@@ -21,6 +21,7 @@
 - [Host API 參考](api-reference.zh-TW.md)與 [TypeScript 宣告](agent-pets-plugin.d.ts)
 - [畫面貢獻點](contribution-points.zh-TW.md)
 - [面板主題](panel-themes.zh-TW.md)
+- [1.12 新功能](whats-new-1.12.zh-TW.md)
 - [權限與同意畫面](permissions.zh-TW.md)
 - [沙箱](sandbox.zh-TW.md)
 - [資源與速率限制](limits.zh-TW.md)
