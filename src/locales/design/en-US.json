@@ -121,5 +121,6 @@
   "design.themeEditor.exported": "Theme exported.",
   "design.themeEditor.deleted": "Theme deleted.",
   "design.themeEditor.duplicated": "Theme duplicated.",
-  "design.themeEditor.renamed": "Theme renamed."
+  "design.themeEditor.renamed": "Theme renamed.",
+  "design.panelTheme.previewSecondary": "Project agent-pets"
 }

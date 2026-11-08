@@ -166,6 +166,12 @@ const realShowOpenDialog = dialog.showOpenDialog.bind(dialog)
 dialog.showOpenDialog = async (...args) => (dialogQueue.length > 0
   ? { canceled: false, filePaths: [String(dialogQueue.shift())] }
   : realShowOpenDialog(...args))
+// 儲存對話框（主題匯出）同理：saveDialogQueue 的第一個路徑當作使用者選的檔案。
+const saveDialogQueue = []
+const realShowSaveDialog = dialog.showSaveDialog.bind(dialog)
+dialog.showSaveDialog = async (...args) => (saveDialogQueue.length > 0
+  ? { canceled: false, filePath: String(saveDialogQueue.shift()) }
+  : realShowSaveDialog(...args))
 safeStorage.isEncryptionAvailable = () => { calls.isEncryptionAvailable += 1; return true }
 safeStorage.encryptString = (value) => { calls.encryptString += 1; return Buffer.from('agent-pets-e2e:' + value, 'utf8') }
 safeStorage.decryptString = (value) => {
@@ -220,6 +226,7 @@ globalThis.__agentPetsE2E = {
   pluginIssueReportBaseUrl: 'https://github.com/example/agent-pets-plugins/issues/new',
   shellOpenExternalCalls,
   dialogQueue,
+  saveDialogQueue,
   panelViewBlockedRequests: 0,
 }
 console.log('AGENT_PETS_E2E_READY ' + JSON.stringify({ root, userData: app.getPath('userData'), home: require('node:os').homedir(), fakeSafeStorage: fake }))

@@ -121,5 +121,6 @@
   "design.themeEditor.exported": "已匯出主題。",
   "design.themeEditor.deleted": "已刪除主題。",
   "design.themeEditor.duplicated": "已複製主題。",
-  "design.themeEditor.renamed": "已重新命名主題。"
+  "design.themeEditor.renamed": "已重新命名主題。",
+  "design.panelTheme.previewSecondary": "專案 agent-pets"
 }

@@ -48,7 +48,7 @@ const backdrop = computed(() => panelThemePreviewBackdrop(props.entry, props.mod
         <span class="ep-button ep-primary">{{ te('themeEditor.mock.primary') }}</span>
         <span class="ep-button ep-primary ep-hover">{{ te('themeEditor.mock.hover') }}</span>
         <span class="ep-button ep-secondary">{{ te('themeEditor.mock.secondary') }}</span>
-        <span class="ep-button ep-secondary ep-focus">{{ te('themeEditor.mock.pressed') }}</span>
+        <span class="ep-button ep-secondary ep-focus">{{ te('themeEditor.mock.focus') }}</span>
         <span class="ep-button ep-secondary ep-disabled">{{ te('themeEditor.mock.disabled') }}</span>
       </div>
 

@@ -40,6 +40,14 @@ watch(() => props.value, value => {
 })
 
 const hex = computed(() => colorToHex(props.value))
+/** 背景色同時是表面也是背景，同一句話會出現兩次：只列一次。 */
+const issueTexts = computed(() => [...new Set(props.issues.map(issue => issue.text))])
+/** 同一個鍵的多個問題通常共用同一個建議值：每個不同的修正只顯示一個按鈕。 */
+const fixes = computed(() => {
+  const seen = new Map<string, NonNullable<ColorFieldIssue['fix']>>()
+  for (const issue of props.issues) if (issue.fix) seen.set(`${issue.fix.path}\u0000${issue.fix.value}`, issue.fix)
+  return [...seen.values()]
+})
 const alphaText = computed(() => {
   const alpha = colorAlpha(props.value)
   return alpha < 1 ? `${Math.round(alpha * 100)}%` : ''
@@ -117,22 +125,26 @@ function commitOklch(): void {
       <NumberField v-model="oklch.c" :label="te('themeEditor.chroma')" :min="0" :max="0.4" :step="0.005" @commit="commitOklch" />
       <NumberField v-model="oklch.h" :label="te('themeEditor.hue')" :min="0" :max="360" :step="1" @commit="commitOklch" />
     </div>
-    <ul v-if="issues.length || textError" :id="issuesId" class="color-issues">
-      <li v-if="textError" class="color-issue" role="alert">{{ textError }}</li>
-      <li v-for="(issue, index) in issues" :key="index" class="color-issue">
-        <span class="color-issue-text">{{ issue.text }}</span>
+    <div v-if="issues.length || textError" :id="issuesId" class="color-issues">
+      <p v-if="textError" class="color-issue" role="alert">{{ textError }}</p>
+      <ul v-if="issueTexts.length" class="color-issue-list">
+        <li v-for="text in issueTexts" :key="text" class="color-issue">{{ text }}</li>
+      </ul>
+      <div v-if="fixes.length" class="color-fixes">
         <Button
-          v-if="issue.fix"
+          v-for="fix in fixes"
+          :key="`${fix.path}-${fix.value}`"
           size="sm"
           variant="secondary"
-          :aria-label="issue.fix.label"
+          :aria-label="fix.label"
           :data-testid="`use-suggested-${testId}`"
-          @click="emit('fix', issue.fix.path, issue.fix.value)"
+          @click="emit('fix', fix.path, fix.value)"
         >
           {{ te('themeEditor.useSuggested') }}
+          <span class="color-fix-value">{{ fix.value }}</span>
         </Button>
-      </li>
-    </ul>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -239,24 +251,34 @@ function commitOklch(): void {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  padding-left: calc(var(--hit-min) + var(--space-2));
+}
+
+.color-issue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   margin: 0;
-  padding: 0 0 0 calc(var(--hit-min) + var(--space-2));
+  padding: 0;
   list-style: none;
 }
 
 .color-issue {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
+  margin: 0;
   color: var(--text-danger);
   font-size: var(--font-xs);
   line-height: var(--leading-normal);
 }
 
-.color-issue-text {
-  min-width: 0;
-  flex: 1 1 12em;
+.color-fixes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.color-fix-value {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 @media (forced-colors: active) {

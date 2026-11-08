@@ -33,7 +33,7 @@ const backdrop = computed(() => panelThemePreviewBackdrop(props.entry, props.mod
       <div class="preview-header">{{ t('design.panelTheme.previewTitle') }}</div>
       <div class="preview-card">
         <span class="preview-text">{{ t('design.panelTheme.previewBody') }}</span>
-        <span class="preview-secondary">{{ t('design.panelTheme.previewMuted') }}</span>
+        <span class="preview-secondary">{{ t('design.panelTheme.previewSecondary') }}</span>
         <span class="preview-muted">{{ t('design.panelTheme.previewMuted') }}</span>
         <span class="preview-states">
           <span class="preview-danger">{{ t('design.panelTheme.previewDanger') }}</span>

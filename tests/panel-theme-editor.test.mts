@@ -26,6 +26,7 @@ import {
   undoChange,
 } from '../src/utils/panel-theme-editor.ts'
 import { panelThemeTargetProperties } from '../src/utils/panel-theme-css.ts'
+import { describeIssue, surfaceLabel } from '../src/utils/panel-theme-issue-text.ts'
 import { PANEL_THEME_COLOR_PROPERTIES } from '../src/types/panel-theme.ts'
 import { DARK_COLORS, LIGHT_COLORS, builtinDefinition, theme } from './support/panel-theme-fixtures.mts'
 
@@ -168,4 +169,24 @@ test('the preview entry uses the same property map as the panel and passes the r
   }
   assert.equal(entry.modes.dark!.petStatus!['--pet-status-text'], 'rgb(243 237 228 / 1)')
   assert.equal(entry.modes.dark!.petStatus!['--pet-status-background-opaque'], 'rgb(41 36 32 / 1)')
+})
+
+test('validator surface names become readable phrases, recursively and for every issue kind', () => {
+  const tr = (key: string, params: Record<string, string | number> = {}) => `${key}(${Object.entries(params).map(([name, value]) => `${name}=${value}`).join(',')})`
+  const label = (key: string) => (key.startsWith('surface') || key === 'bg' || key.endsWith('Text') ? `<${key}>` : null)
+  assert.equal(surfaceLabel('accentOnHover over surface2 (focus ring)', label, tr), 'themeEditor.surface.focus(base=themeEditor.surface.hover(base=<surface2>))')
+  assert.equal(surfaceLabel('dangerText at 0.12 over bg (state chip)', label, tr), 'themeEditor.surface.chip(state=<dangerText>,base=<bg>)')
+  assert.equal(surfaceLabel('the quota track on the pet status pill over a white desktop', label, tr), 'themeEditor.surface.quotaTrack(base=themeEditor.surface.petPill(desktop=themeEditor.desktop.white()))')
+  assert.equal(surfaceLabel('gradient between stops 0 and 1', label, tr), 'themeEditor.surface.gradientBetween(from=1,to=2)')
+  assert.equal(surfaceLabel('something new', label, tr), 'something new')
+  const definition = builtinDefinition()
+  definition.modes.light.colors.textMuted = 'rgb(200 190 180 / 1)'
+  definition.modes.dark.colors.dangerText = 'rgb(60 200 60 / 1)'
+  definition.modes.dark.colors.shadow = 'rgb(200 200 200 / 1)'
+  definition.modes.light.image = { fit: 'cover', overlayColor: 'rgb(245 234 216 / 1)', dim: 0.5 }
+  for (const issue of validateUserPanelTheme(definition).issues) {
+    const text = describeIssue(issue, label, tr)
+    assert.match(text, /^themeEditor\.issue\./, `${issue.kind} ${issue.path}`)
+    assert.doesNotMatch(text, /undefined/)
+  }
 })

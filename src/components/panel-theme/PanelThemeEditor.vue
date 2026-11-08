@@ -36,6 +36,7 @@ import {
   undoChange,
   type EditorDraft,
 } from '@/utils/panel-theme-editor'
+import { describeIssue } from '@/utils/panel-theme-issue-text'
 import { extractDominantColors, paletteFromSeed, sampleSize, seedFromClusters } from '@/utils/panel-theme-palette'
 import { parsePanelThemeColor } from '../../../electron/panel-theme-color.ts'
 import { builtinPanelThemeProperties } from '../../../electron/plugin-panel-themes.ts'
@@ -47,7 +48,6 @@ import {
   USER_PANEL_THEME_NAME_MAX,
   USER_PANEL_THEME_OWNER,
   USER_PANEL_THEME_PET_STATUS_KEYS,
-  type PanelThemeDiagnostic,
   type PanelThemeValidation,
   type UserPanelThemeDefinition,
   type UserPanelThemePetStatusKey,
@@ -152,40 +152,23 @@ const summary = computed(() => {
     .join(' · ')
 })
 
-/** 驗證器的表面名稱：是顏色鍵時顯示它的介面名稱，其餘（合成的表面）照原文顯示。 */
-function backgroundName(name: string): string {
-  return (USER_PANEL_THEME_COLOR_KEYS as readonly string[]).includes(name) ? keyLabel(name) : name
-}
-
-function ratio(value: number | undefined): string {
-  return value === undefined ? '' : (Math.floor(value * 100) / 100).toFixed(2)
-}
-
-const ISSUE_TEXT: Record<PanelThemeDiagnostic['kind'], (issue: PanelThemeDiagnostic) => string> = {
-  contrast: issue => te('themeEditor.issue.contrast', { measured: ratio(issue.measured), background: backgroundName(issue.background ?? ''), required: issue.required ?? '' }),
-  hue: issue => {
-    const key = issue.path.split('.')[1] as 'dangerText'
-    return te('themeEditor.issue.hue', { meaning: te(`themeEditor.meaning.${key}` as ThemeEditorKey), measured: Math.round(issue.measured ?? 0) })
-  },
-  chroma: () => te('themeEditor.issue.chroma'),
-  distance: issue => te('themeEditor.issue.distance', { background: keyLabel(issue.background ?? '') }),
-  direction: issue => te(issue.mode === 'light' ? 'themeEditor.issue.directionLight' : 'themeEditor.issue.directionDark'),
-  luminance: issue => te(issue.path === 'colors.shadow' ? 'themeEditor.issue.shadow' : 'themeEditor.issue.highlight'),
-  alpha: () => te('themeEditor.issue.alpha'),
-  overlay: issue => (issue.required === undefined
-    ? te('themeEditor.issue.overlayNone')
-    : te('themeEditor.issue.overlay', { measured: issue.measured ?? '', required: issue.required })),
-}
-
 function keyLabel(key: string): string {
   return te(`themeEditor.key.${key}` as ThemeEditorKey)
 }
+
+/** 驗證器的顏色鍵名換成介面名稱；不是顏色鍵（合成的表面）時回傳 null。 */
+function knownKeyLabel(key: string): string | null {
+  if ((USER_PANEL_THEME_COLOR_KEYS as readonly string[]).includes(key)) return keyLabel(key)
+  return null
+}
+
+const translateIssue = (key: string, params?: Record<string, string | number>) => te(key as ThemeEditorKey, params)
 
 function fieldIssues(path: string, label: string): ColorFieldIssue[] {
   return (modeIssues.value.get(path) ?? []).map(issue => {
     const fix = fixFor(issue, validation.value)
     return {
-      text: ISSUE_TEXT[issue.kind](issue),
+      text: describeIssue(issue, knownKeyLabel, translateIssue),
       fix: fix ? { ...fix, label: te('themeEditor.useSuggestedLabel', { value: String(fix.value), key: label }) } : null,
     }
   })
@@ -371,7 +354,8 @@ const APPLY_BUTTONS: ReadonlyArray<{ id: string; label: TranslationKey; modes: r
 async function chooseImage(): Promise<void> {
   status.value = te('themeEditor.imageSaveFirst')
   const id = await ensureSaved()
-  if (id) await themeActions.importImage({ pluginId: USER_PANEL_THEME_OWNER, themeId: id }, mode.value)
+  // 匯入結果（成功或錯誤）由 themeActions 的狀態與錯誤文字呈現。
+  if (id && await themeActions.importImage({ pluginId: USER_PANEL_THEME_OWNER, themeId: id }, mode.value)) status.value = ''
 }
 
 function exportTheme(): void {
@@ -406,7 +390,7 @@ const previews = computed(() => PANEL_THEME_MODES.map(value => ({
   label: te('themeEditor.previewLabel', { mode: t(MODE_NAME[value]) }),
 })))
 const errorText = computed(() => userActions.error.value || themeActions.error.value)
-const liveStatus = computed(() => userActions.status.value || themeActions.status.value || status.value)
+const liveStatus = computed(() => status.value || themeActions.status.value || userActions.status.value)
 
 onMounted(async () => {
   await Promise.all([refreshUserPanelThemes(), refreshPanelThemeState()])
