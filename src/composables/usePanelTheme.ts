@@ -34,11 +34,21 @@ export function setPanelThemeState(next: PanelThemeState | null): void {
   panelThemeState.value = next
 }
 
-export async function refreshPanelThemeState(): Promise<void> {
-  try {
-    const result = await window.electronAPI?.getPanelThemeState()
-    if (result?.ok) panelThemeState.value = result.value
-  } catch {}
+let refreshInFlight: Promise<void> | null = null
+
+/** Several components mount together; they share one in-flight request. */
+export function refreshPanelThemeState(): Promise<void> {
+  refreshInFlight ??= (async () => {
+    try {
+      const result = await window.electronAPI?.getPanelThemeState()
+      if (result?.ok) panelThemeState.value = result.value
+    } catch {
+      // The live broadcast (onPanelThemeChanged) still updates the state later.
+    } finally {
+      refreshInFlight = null
+    }
+  })()
+  return refreshInFlight
 }
 
 function mediaQuery(query: string): MediaQueryList | null {

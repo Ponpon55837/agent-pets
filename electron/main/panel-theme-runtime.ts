@@ -62,7 +62,6 @@ export interface PanelThemeRuntimeOptions {
 }
 
 const TOKEN_PATH = /^\/([0-9a-f]{32})$/
-const MAX_RESOLVED_CACHE = 64
 
 function hmacHex(salt: Uint8Array, value: string): string {
   return createHmac('sha256', salt).update(value, 'utf8').digest('hex')
@@ -132,8 +131,9 @@ export class PanelThemeRuntime {
         themes,
       })
     }
-    for (const key of [...this.resolvedCache.keys()]) {
-      if (!liveKeys.has(key) || this.resolvedCache.size > MAX_RESOLVED_CACHE) this.resolvedCache.delete(key)
+    // Bounded by the installed plugins: entries for removed or replaced versions are dropped.
+    for (const key of this.resolvedCache.keys()) {
+      if (!liveKeys.has(key)) this.resolvedCache.delete(key)
     }
     this.sources = sources
     this.prune()
