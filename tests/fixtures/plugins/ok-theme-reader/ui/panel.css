@@ -15,8 +15,9 @@ p { margin: 0; }
   padding: 0 14px;
   border: 0;
   border-radius: var(--ap-radius-md, 8px);
+  /* 強調填色上的文字放在 accent-hover：on-accent 在其上保證 4.5:1（在 accent 上只有 3:1）。 */
   color: var(--ap-on-accent, ButtonText);
-  background: var(--ap-accent, ButtonFace);
+  background: var(--ap-accent-hover, ButtonFace);
 }
 .primary:focus-visible { outline: 2px solid var(--ap-focus, Highlight); outline-offset: 2px; }
 ul {
