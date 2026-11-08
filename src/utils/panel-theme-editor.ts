@@ -145,6 +145,15 @@ export function isDirty(draft: EditorDraft): boolean {
   return draft.id === null || draft.name !== draft.baseline.name || definitionKey(draft.definition) !== definitionKey(draft.baseline.definition)
 }
 
+/**
+ * 關閉時要不要提醒：已存在的主題有任何未存變更；新主題只有在使用者動過之後才算
+ * （剛開啟就關掉不需要確認）。
+ */
+export function hasUnsavedChanges(draft: EditorDraft): boolean {
+  if (draft.id !== null) return isDirty(draft)
+  return draft.name !== draft.baseline.name || definitionKey(draft.definition) !== definitionKey(draft.baseline.definition)
+}
+
 /** 存檔後：新的基準就是目前內容；保留復原堆疊，讓使用者仍可退回。 */
 export function markSaved(draft: EditorDraft, id: string, name: string): EditorDraft {
   return { ...draft, id, name, baseline: { name, definition: structuredClone(draft.definition) } }

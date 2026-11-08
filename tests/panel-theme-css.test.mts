@@ -96,6 +96,11 @@ test('one active theme per mode and settings navigation targets the owning plugi
   assert.equal(panelThemeSettingsTarget(state({ light: { ref: null, status: 'builtin' }, dark: { ref: null, status: 'builtin' } })), 'theme-pack')
   assert.equal(panelThemeSettingsTarget({ ...current, themes: [] }), null)
   assert.equal(panelThemeSettingsTarget(null), null)
+  // 我的主題不是插件：使用中也不會被當成「開啟插件設定」的目的地。
+  const mine = { ...current.themes[0]!, ref: { pluginId: '_user', themeId: 'u-0123456789ab' } }
+  const userSlots = { light: { ref: mine.ref, status: 'active' as const }, dark: { ref: null, status: 'builtin' as const } }
+  assert.equal(panelThemeSettingsTarget({ ...current, slots: userSlots, themes: [mine, ...current.themes] }), 'theme-pack')
+  assert.equal(panelThemeSettingsTarget({ ...current, slots: userSlots, themes: [mine] }), null)
 })
 
 test('the renderer applies themes with setProperty in one frame, never cssText or <style>', () => {

@@ -3,8 +3,8 @@ import { t } from '@/i18n'
 import PluginPanelThemes from '@/components/plugin-panel/PluginPanelThemes.vue'
 
 // 主題插件的儀表板分頁主體：一個區塊容器，第一個區塊是主題清單（與設定 → 插件 → 詳情頁
-// 共用同一個 PluginPanelThemes 元件，不重複邏輯）。之後的主機端主題編輯器會作為下一個區塊
-// 掛在這裡（`#after-list` 插槽），不需要改分頁本身。
+// 共用同一個 PluginPanelThemes 元件，不重複邏輯），`#after-list` 插槽放「我的主題」與
+// 主題編輯器的入口（由 PluginTabContent 填入）。
 defineProps<{ pluginId: string }>()
 </script>
 

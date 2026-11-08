@@ -16,6 +16,7 @@ import {
   definitionFromCatalog,
   definitionKey,
   fixFor,
+  hasUnsavedChanges,
   isDirty,
   issuesByPath,
   markSaved,
@@ -94,6 +95,11 @@ test('drafts track changes, undo the last steps, reset to the starting point and
   // 新主題永遠算未儲存；存檔後以目前內容為新基準。
   const fresh = createDraft(null, 'New', builtinDefinition())
   assert.equal(isDirty(fresh), true)
+  // 關閉提醒：剛開啟的新主題不需要確認，動過之後才需要。
+  assert.equal(hasUnsavedChanges(fresh), false)
+  assert.equal(hasUnsavedChanges({ ...fresh, name: 'Other' }), true)
+  assert.equal(hasUnsavedChanges(commitChange(fresh, changed)), true)
+  assert.equal(hasUnsavedChanges(draft), isDirty(draft))
   const saved = markSaved(fresh, 'u-ffffffffffff', 'New')
   assert.equal(isDirty(saved), false)
   assert.equal(isDirty({ ...saved, name: 'Renamed' }), true)

@@ -9,6 +9,7 @@ import Icon from '@/components/ui/Icon.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
 import Spinner from '@/components/ui/Spinner.vue'
 import PluginThemeTab from '@/components/status-panel/PluginThemeTab.vue'
+import MyPanelThemes from '@/components/panel-theme/MyPanelThemes.vue'
 import { formatDateTime } from '@/utils/intl-format'
 import { isCurrentPluginPanelViewClose, pluginPanelViewCloseError } from '@/utils/plugin-panel-view'
 import type { PluginDashboardTab } from '@/composables/usePluginTabs'
@@ -253,7 +254,14 @@ onBeforeUnmount(() => {
         <Button variant="ghost" size="sm" @click="emit('openDetail', tab.pluginId)">{{ t('plugins.dashTabDetails') }}</Button>
       </header>
 
-      <PluginThemeTab v-if="tab.sections.panelThemes" :plugin-id="tab.pluginId" />
+      <PluginThemeTab v-if="tab.sections.panelThemes" :plugin-id="tab.pluginId">
+        <template #after-list>
+          <section class="plugin-tab-section" :aria-label="t('design.themeEditor.myThemes')" data-testid="plugin-tab-my-themes">
+            <h2>{{ t('design.themeEditor.myThemes') }}</h2>
+            <MyPanelThemes />
+          </section>
+        </template>
+      </PluginThemeTab>
 
       <section v-if="tab.sections.commands" class="plugin-tab-section" :aria-label="t('pluginCommandsHeading')">
         <h2>{{ t('pluginCommandsHeading') }}</h2>

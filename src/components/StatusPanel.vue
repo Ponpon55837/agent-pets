@@ -23,6 +23,7 @@ import { usePluginTabs } from '@/composables/usePluginTabs'
 import { isBuiltInDashboardTab, parseStoredDashboardTab, pluginIdOfTab, resolveDashboardTab } from '@/utils/plugin-tabs'
 import { requestPluginDetail, type PluginDetailRequestSection } from '@/utils/plugin-detail-request'
 import { panelThemeTargetRequest } from '@/utils/settings-navigation'
+import { closePanelThemeEditor, panelThemeEditorRequest } from '@/composables/useMyPanelThemes'
 import { countByBucket } from '@/utils/session-view'
 import { DEFAULT_SETTINGS_GROUP, SETTINGS_GROUPS, isSettingsGroupId, type SettingsGroupId } from '@/utils/settingsRegistry'
 
@@ -84,6 +85,8 @@ let removePanelSettingsListener: (() => void) | null = null
 let cleanupPluginEventSourceChanged: (() => void) | null = null
 
 const SettingsPage = defineAsyncComponent(() => import('@/components/status-panel/SettingsPage.vue'))
+// 編輯器連同驗證器與色盤產生器只在第一次開啟時載入（獨立 chunk，不增加面板啟動大小）。
+const PanelThemeEditor = defineAsyncComponent(() => import('@/components/panel-theme/PanelThemeEditor.vue'))
 
 const settingsGroupLabel = computed(() => {
   const group = SETTINGS_GROUPS.find(item => item.id === settingsGroup.value)
@@ -361,6 +364,8 @@ onUnmounted(() => {
     </template>
 
     <SettingsPage v-else v-model:group="settingsGroup" :requested-plugin-id="requestedPluginViewId" :requested-plugin-nonce="pluginViewRequestNonce" />
+    <!-- 主題編輯器（全面板對話框）：外觀設定與主題插件分頁共用這一個實例；nonce 讓每次開啟都是新的草稿。 -->
+    <PanelThemeEditor v-if="panelThemeEditorRequest" :key="panelThemeEditorRequest.nonce" :request="panelThemeEditorRequest" @close="closePanelThemeEditor()" />
   </div>
 </template>
 

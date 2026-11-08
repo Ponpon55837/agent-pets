@@ -1,0 +1,98 @@
+/* 主題編輯器的版面：預覽固定在捲動區頂端，修改任何值時都看得到結果。 */
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.editor-top {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12em, 1fr));
+  gap: var(--space-2);
+  align-items: start;
+}
+
+.editor-previews {
+  position: sticky;
+  top: calc(-1 * var(--space-4));
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  background: var(--surface-overlay);
+}
+
+.editor-mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.editor-summary {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-danger);
+  font-size: var(--font-xs);
+}
+
+.editor-summary.ok {
+  color: var(--text-success);
+}
+
+.editor-generate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.editor-seed {
+  width: var(--hit-min);
+  height: var(--hit-min);
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  cursor: pointer;
+}
+
+.editor-seed:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.editor-live {
+  min-height: 1em;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+}
+
+.editor-error {
+  margin: 0;
+  color: var(--text-danger);
+  font-size: var(--font-xs);
+}
+
+.editor-footer {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.editor-footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.editor-footer-spacer {
+  flex: 1 1 auto;
+}

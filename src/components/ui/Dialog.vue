@@ -20,7 +20,8 @@ const props = withDefaults(defineProps<{
   initialFocus?: string
   showClose?: boolean
   dismissOnScrim?: boolean
-  size?: 'sm' | 'md' | 'lg'
+  /** `full` fills the panel (theme editor); the others cap the width. */
+  size?: 'sm' | 'md' | 'lg' | 'full'
 }>(), {
   role: 'dialog',
   showClose: false,
@@ -78,6 +79,9 @@ const describedBy = computed(() => (props.description ? descriptionId : undefine
         <slot />
         <footer v-if="$slots.footer" class="footer"><slot name="footer" /></footer>
       </div>
+      <!-- A dialog opened from inside this one: inside the scope (so its siblings go inert and this
+           dialog's key handling steps aside) but outside the trapped surface. -->
+      <slot name="overlay" />
     </div>
   </Transition>
 </template>
@@ -117,6 +121,7 @@ const describedBy = computed(() => (props.description ? descriptionId : undefine
 .size-sm { max-width: 300px; }
 .size-md { max-width: 420px; }
 .size-lg { max-width: 560px; }
+.size-full { max-width: none; height: 100%; }
 
 .head {
   display: flex;

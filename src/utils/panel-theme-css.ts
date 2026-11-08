@@ -19,6 +19,7 @@ import {
   type PetThemeModeState,
   type PetThemeState,
 } from '../types/panel-theme.ts'
+import { USER_PANEL_THEME_OWNER } from '../types/panel-theme-user.ts'
 
 // 渲染端、純函式：每個主機建構的名稱與值在進入 style.setProperty 之前
 // 都會重新驗證（縱深防禦；主程序已經從封閉文法重新輸出它們），
@@ -161,11 +162,13 @@ export function activePanelThemeModes(state: PanelThemeState | null, ref: { plug
  */
 export function panelThemeSettingsTarget(state: PanelThemeState | null): string | null {
   if (!state) return null
+  // 我的主題（保留擁有者 `_user`）不是插件，沒有插件設定可開。
+  const pluginThemes = state.themes.filter(theme => theme.ref.pluginId !== USER_PANEL_THEME_OWNER)
   for (const mode of ['light', 'dark'] as const) {
     const ref = state.slots[mode].ref
-    if (ref && state.themes.some(theme => theme.ref.pluginId === ref.pluginId)) return ref.pluginId
+    if (ref && pluginThemes.some(theme => theme.ref.pluginId === ref.pluginId)) return ref.pluginId
   }
-  return state.themes[0]?.ref.pluginId ?? null
+  return pluginThemes[0]?.ref.pluginId ?? null
 }
 
 function canonicalSet(source: unknown, names: readonly string[]): Map<string, string> | null {
@@ -201,4 +204,27 @@ export function petThemeTargetProperties(state: PetThemeState | null, mode: Pane
 /** 主題預覽裡的膠囊：只取狀態膠囊顏色（全有或全無）。 */
 export function petStatusPreviewProperties(status: Record<string, string> | null | undefined): Map<string, string> {
   return canonicalSet(status, PET_STATUS_PROPERTIES) ?? new Map()
+}
+
+/**
+ * 主題預覽元素（`.panel-theme-preview`）的 inline 樣式：與面板相同的屬性對應加上膠囊顏色；
+ * 內建預覽使用該模式的內建色盤。forced colors 下為空（系統色）。設定頁與主題編輯器共用。
+ */
+export function panelThemePreviewStyle(
+  entry: PanelThemeCatalogEntry | null,
+  mode: PanelThemeMode,
+  builtin: Readonly<Record<string, string>> | null,
+  forcedColors: boolean,
+): Record<string, string> {
+  const result: Record<string, string> = {}
+  if (forcedColors) return result
+  if (entry) {
+    for (const [name, value] of panelThemeTargetProperties(entry, mode, { forcedColors: false, highContrast: false }).properties) result[name] = value
+    for (const [name, value] of petStatusPreviewProperties(entry.modes[mode]?.petStatus)) result[name] = value
+  } else if (builtin) {
+    for (const [name, value] of Object.entries(builtin)) {
+      if (isPanelThemePropertyValue(name, value)) result[name] = value
+    }
+  }
+  return result
 }

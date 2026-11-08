@@ -1,6 +1,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { resolvedTheme } from '@/composables/useTheme'
-import { isPanelThemeFit, isPanelThemePosition, type PanelThemeFit, type PanelThemeMode, type PanelThemePosition, type PanelThemeState } from '@/types/panel-theme'
+import { isPanelThemeFit, isPanelThemePosition, type PanelThemeCatalogEntry, type PanelThemeFit, type PanelThemeMode, type PanelThemePosition, type PanelThemeState } from '@/types/panel-theme'
 import {
   activePanelTheme,
   diffPanelThemeProperties,
@@ -78,6 +78,20 @@ export function validBackdrop(view: PanelThemeBackdropView | null): PanelThemeBa
   const inRange = (value: number, min: number, max: number) => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
   if (!inRange(view.opacity, 0.2, 1) || !inRange(view.overlayOpacity, 0.5, 0.95) || !Number.isInteger(view.blur) || !inRange(view.blur, 0, 24)) return null
   return view
+}
+
+/** 預覽用的背景圖：使用者圖片優先（遮罩取使用者選的值），否則為主題套件內的圖片。 */
+export function panelThemePreviewBackdrop(entry: PanelThemeCatalogEntry | null, mode: PanelThemeMode, forcedColors: boolean): PanelThemeBackdropView | null {
+  const modeState = entry?.modes[mode]
+  if (!modeState || forcedColors) return null
+  const user = modeState.userImage?.current
+  if (user) {
+    return validBackdrop({ url: user.url, fit: user.fit, position: user.position, opacity: 1, blur: user.blur, overlayColor: modeState.userImage!.overlayColor, overlayOpacity: user.dim })
+  }
+  const background = modeState.background
+  return background.type === 'image'
+    ? validBackdrop({ url: background.url, fit: background.fit, position: background.position, opacity: background.opacity, blur: background.blur, overlayColor: background.overlay.color, overlayOpacity: background.overlay.opacity })
+    : null
 }
 
 function logRejected(names: string[]): void {
