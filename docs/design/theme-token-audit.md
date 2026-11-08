@@ -50,3 +50,14 @@ Baseline on `feat/panel-themes` after the `--ap-*` read API: **141 raw colours**
 - `DesktopPet.css:258` uses the named colour `white` for the error badge text, and `Button.vue` mixes the primary hover with `black`; neither follows the light pet appearance or a theme.
 - `STATE_COLORS` duplicates `--state-*` values in TS, so a palette change must be made twice today.
 - `--focus-ring-color-on-light` is declared (light and dark) but never read; remove it or use it for the unified focus ring.
+
+## Unused tokens (`check:design --verbose`, 20)
+
+`tokens.css` is also served read-only to plugin pages as `agent-pets://plugin/_shared/tokens.css`, so its definitions stay until step 2 decides each case. The checker now counts `var(--x)` inside TS and Vue script/template strings as a use (the pet quota colours were misreported as unused before).
+
+| Tokens | Status | Step 2 decision |
+| --- | --- | --- |
+| `--accent-strong`, `--border-claude`, `--surface-claude`, `--font-xl` | Never read. The dead re-declarations in `StatusPanel.css`, `SetupWizard.css` and `ProjectMcpPanel.css` are removed; the `tokens.css` definitions remain for plugin pages. | Keep in `tokens.css` while plugin pages may use them; the re-tokenised surfaces must not reintroduce panel-scope copies. |
+| `--color-bg` … `--color-scrim` (12 semantic aliases of the palette) | Declared as "the names new panel-layer CSS should use", never adopted. They mirror the `--ap-*` colour subset 1:1. | Adopt as the internal semantic layer that every re-tokenised surface reads (and extend with the *new* keys above), or delete; do not keep two unused layers. |
+| `--accent-primary`, `--surface-secondary`, `--font-2xs` | Compatibility aliases for references that were removed in the UX overhaul; not in the documented plugin token table. | Delete once step 2 confirms no component or documented plugin token uses them. |
+| `--font-floor` | 11 px helper for `max(var(--font-floor), calc(11px * var(--pet-scale)))`; the pet bubbles use `max(var(--font-xs), …)` (also 11 px) instead. | Use it in the pet window's scaled text when that CSS is re-tokenised, otherwise delete. |

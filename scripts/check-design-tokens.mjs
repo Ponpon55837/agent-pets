@@ -177,6 +177,13 @@ export function analyze(root = defaultRoot) {
     }
   }
 
+  // TS 與 Vue script／template 裡的 var(--x) 字串（例如 :style 綁定）也算使用，否則會誤報為未使用。
+  for (const file of walk(srcDir, /\.(ts|vue)$/)) {
+    let text = allText.get(file) ?? readFileSync(file, 'utf8')
+    if (file.endsWith('.vue')) text = text.replace(/<style[\s\S]*?<\/style>/g, (m) => m.replace(/[^\n]/g, ' '))
+    for (const m of text.matchAll(/var\(\s*(--[a-z0-9-]+)/gi)) if (!used.has(m[1])) used.set(m[1], [])
+  }
+
   const tokenText = allText.get(tokensPath) ?? ''
   const unused = []
   for (const m of stripComments(tokenText).matchAll(/^\s*(--[a-z0-9-]+)\s*:/gim)) {
@@ -221,8 +228,7 @@ export function analyze(root = defaultRoot) {
       for (const _ of line.matchAll(/\}/g)) selectors.pop()
     })
   }
-  const scripts = walk(srcDir, /\.(ts|vue)$/)
-  for (const file of scripts) {
+  for (const file of walk(srcDir, /\.(ts|vue)$/)) {
     let text = allText.get(file) ?? readFileSync(file, 'utf8')
     if (file.endsWith('.vue')) text = text.replace(/<style[\s\S]*?<\/style>/g, (m) => m.replace(/[^\n]/g, ' '))
     for (const hit of scriptColorLines(text)) {
