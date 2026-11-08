@@ -52,9 +52,27 @@
 ## 未驗證項目與殘留風險
 
 - 狀態列畫面上的狀態詞是英文，可存取名稱是中文；語音控制使用者說出畫面上的「Working」可能對不上（WCAG 2.5.3 Label in Name）。這是使用者明確要求的取捨。
-- 隔離測試在開發機上取得了 hook 埠，真實工作階段可能同時寫入測試 store；截圖前重新注入狀態，截圖只裁切寵物與面板標題、插件卡片。
+- 第一輪隔離測試仍綁定 17373–17375，會收到真實 hook 事件；截圖前重新注入狀態，只裁切寵物、面板標題與插件卡片。審查修正後的測試改用獨立埠（見下節）。
 - `PluginDetail` 的選單按鈕沿用同一個 `Icon` 與 `ActionMenu`，未單獨截圖。
 - Windows 分層視窗、高對比、減少透明度與 125%／150% 縮放未在本階段實測。
+
+## 審查修正
+
+獨立審查後在同一分支修正：
+
+| 項目 | 檔案 | 內容 |
+|---|---|---|
+| 窄狀態列的狀態詞被截掉 | `src/utils/status-line-fit.ts`（新）、`DesktopPet.vue/.css` | 狀態改為 `.status-line` 的直接子項（`flex: 1 0 auto`，不縮）。新的純函式 `fitStatusLine()` 以 canvas 量到的字寬做寬度預算，放不下時依序拿掉 `+N`、徽章（由後往前）、讓名稱縮短、拿掉名稱，最後拿掉 Quota 百分比（分段條保留）。多寵物狀態列寬度下限 112 px（仍在 0.6 倍、約 115 px 的寵物欄內）。名稱與狀態之間的間距維持兩側各 3 px。 |
+| 插件徽章撐高狀態列 | `DesktopPet.css` | 既有問題：徽章上下 1 px padding 讓狀態列從 23.59 px 變成 25.2 px。改為 `padding: 0 5px`，有徽章時高度不變。 |
+| 整體狀態列沒有名稱 | `DesktopPet.vue` | 沒有家族時（Idle／Offline）的 `title` 與 aria-label 改為同一個英文字（使用者決定，不加中文）。 |
+| 每次 render 重算 | `DesktopPet.vue` | 既有問題：模板對每條狀態列多次呼叫 `pluginBadgeSummary()`（每次過濾並複製徽章）與組字函式。改為一個 computed 依線預先算好文字、aria-label、寬度取捨與徽章，同一隻寵物的徽章只彙整一次；字寬以字串快取，只在字型載入完成時清除。 |
+| 未使用的 `count` | `agentStore.ts`、`DesktopPet.vue` | 移除。 |
+| 測試 | `tests/status-line-fit.test.mts`（新）、`session-attention`、`pet-window-height` | 移除只比對原始碼文字的測試與用正則解析字表的測試；英文狀態詞移到 `src/utils/state-line-words.ts`，改為行為測試。寬度預算測試涵蓋 0.6／0.8／1.0 倍、單／多寵物、Quota＋兩個徽章＋`+N`，並檢查尺寸常數與 CSS 一致。 |
+| 隔離測試佔用 hook 埠 | `scripts/e2e-isolated-electron.mjs`、`electron/main/runtime.ts`、`electron/event-server.ts` | 隔離執行器預設以 `AGENT_PETS_*_PORT` 把三個埠移到 27373–27375（`--hook-port-base` 可改，`--real-hook-ports` 才用預設埠；打包版 `--app-root` 不讀環境變數）。既有問題：整合測試事件固定送往 17373、事件伺服器的日誌固定印 17373，改為使用實際設定的埠。 |
+
+**實測**（隔離執行器，埠 27373–27375，已確認未佔用 17373–17375）：單寵物與多寵物 × 0.6／0.8／1.0 倍 × 五種狀態（Needs input、Permission、Thinking、Working、Idle），Codex／Claude 有 Quota、四個插件徽章（兩個顯示加 `+2`）：30 組全部「狀態完整、沒有項目超出狀態列、高度 23.59 px」。例：多寵物 0.6 倍為 `▲ Permission`、`● Needs input`；0.8 倍為 `Permission 40%`；1.0 倍為 `Codex · Permission 40%`。單寵物 `Codex · Idle 40%` 加兩個徽章。整體狀態列在 zh-TW 下顯示 `Offline`，`title` 與 aria-label 都是 `Offline`。
+
+殘留風險：字寬是在 macOS 量測；Windows（Segoe UI）以同一套 canvas 量測運作，但未實機截圖。
 
 ## 建議版號
 
