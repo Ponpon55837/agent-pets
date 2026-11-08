@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { renameSyncWithRetry } from './fs-rename.ts'
-import { parseUserPanelThemeDefinition, parseUserPanelThemeName, parseUserPanelThemeRecord } from './panel-theme-user.ts'
+import { isFutureUserPanelThemeRecord, parseUserPanelThemeDefinition, parseUserPanelThemeName, parseUserPanelThemeRecord } from './panel-theme-user.ts'
 import { validateUserPanelTheme } from './panel-theme-diagnostics.ts'
 import {
   USER_PANEL_THEME_MAX_BYTES,
@@ -13,17 +13,26 @@ import {
   type UserPanelThemeDefinition,
   type UserPanelThemeRecord,
 } from '../src/types/panel-theme-user.ts'
+import type { PanelThemeMode } from '../src/types/panel-theme.ts'
 
 // 「我的主題」的儲存（spec R22）：`userData/panel-themes-user/<id>.json`，一個主題一個檔案。
 // 目錄 0o700、檔案 0o600，暫存檔 + rename 原子寫入；讀取時拒絕 symlink 與非一般檔案、
-// O_NOFOLLOW 開啟並以 fstat 比對 dev/ino，大小有上限。損毀的檔案改名備份後略過，
-// 不會讓其他主題消失。每次寫入前都以和插件主題相同的驗證器檢查定義。
+// O_NOFOLLOW 開啟並以 fstat 比對 dev/ino，大小有上限。損毀的檔案改名備份後略過（備份輪替，
+// 只留最新幾份），不會讓其他主題消失。每次寫入前都以和插件主題相同的驗證器檢查定義。
+//
+// 修剪（插槽與背景圖）只能依「磁碟上確定不存在」來刪：目錄不安全、掃描被截斷時整個 store
+// 視為未知，什麼都不刪；讀不到、版本較新（降級後）或超過數量上限的檔案仍算「存在」。
 
 export const USER_PANEL_THEMES_DIRECTORY = 'panel-themes-user'
 const FILE_NAME = /^(u-[0-9a-f]{12})\.json$/
 const TEMPORARY_FILE = /^\.u-[0-9a-f]{12}\.[0-9a-f-]{36}\.tmp$/
-/** 啟動時最多檢查的目錄項目數（主題上限的兩倍再加一點，給備份與暫存檔）。 */
+const CORRUPT_BACKUP = /^u-[0-9a-f]{12}\.json\.corrupt-(\d{1,16})$/
+/** 啟動時最多處理的主題檔與暫存檔數（主題上限的兩倍再加一點）。 */
 export const USER_PANEL_THEME_SCAN_LIMIT = USER_PANEL_THEME_MAX_COUNT * 2 + 16
+/** 目錄項目的原始迭代上限（含 `.DS_Store`、備份等不相干的檔案）；超過就視為掃描被截斷。 */
+export const USER_PANEL_THEME_SCAN_ENTRY_LIMIT = 4096
+/** 保留的損毀備份數（最新的幾份），更舊的在載入時刪除。 */
+export const USER_PANEL_THEME_CORRUPT_BACKUPS_KEPT = 5
 
 export type UserPanelThemeStoreErrorCode = 'unsafe_directory' | 'limit_reached' | 'not_found' | 'too_large' | 'invalid_definition' | 'invalid_name'
 
@@ -89,7 +98,14 @@ function compareRecords(first: UserPanelThemeRecord, second: UserPanelThemeRecor
 export class UserPanelThemeStore {
   readonly directory: string
   private records: Map<string, UserPanelThemeRecord> | null = null
+  /**
+   * 磁碟上存在、但沒有載入成可編輯記錄的 id：讀取失敗（非損毀）、symlink、較新的 schemaVersion、
+   * 超過數量上限。它們是唯讀的：不顯示、不覆寫、不修剪。
+   */
+  private readonly retained = new Set<string>()
   private unsafe = false
+  /** 掃描被上限截斷：還有沒看到的檔案，所以「不在清單裡」不代表「不存在」。 */
+  private truncated = false
   private readonly now: () => number
   private readonly randomHex: () => string
   private readonly validate: (definition: unknown) => PanelThemeValidation
@@ -112,6 +128,19 @@ export class UserPanelThemeStore {
     return record ? structuredClone(record) : null
   }
 
+  /**
+   * 修剪是否必須保留這個主題模式的插槽（`needsUserImage` = 背景圖）。只有在目錄完整掃描過、
+   * 而且磁碟上確定沒有這個 id 時才回傳 false；背景圖另外依記錄本身的設定（不是驗證器的結果，
+   * 驗證規則日後變嚴格也不會讓仍存在的主題失去圖片）。
+   */
+  retains(id: string, mode: PanelThemeMode, needsUserImage: boolean): boolean {
+    const records = this.load()
+    if (this.unsafe || this.truncated || this.retained.has(id)) return true
+    const record = records.get(id)
+    if (!record) return false
+    return !needsUserImage || record.definition.modes[mode].image !== null
+  }
+
   isUnsafe(): boolean {
     this.load()
     return this.unsafe
@@ -119,12 +148,13 @@ export class UserPanelThemeStore {
 
   create(name: unknown, definition: unknown): UserPanelThemeRecord {
     const records = this.load()
-    if (records.size >= USER_PANEL_THEME_MAX_COUNT) throw new UserPanelThemeStoreError('limit_reached')
+    // 唯讀的檔案也佔名額：目錄裡的主題檔總數維持有界。
+    if (records.size + this.retained.size >= USER_PANEL_THEME_MAX_COUNT) throw new UserPanelThemeStoreError('limit_reached')
     const cleanName = this.requireName(name)
     const cleanDefinition = this.requireDefinition(definition)
     let id = `u-${this.randomHex()}`
-    // 碰撞機率極低；仍保證不覆寫既有主題。
-    while (records.has(id) || !isUserPanelThemeId(id)) id = `u-${randomBytes(6).toString('hex')}`
+    // 碰撞機率極低；仍保證不覆寫既有主題（包括看不懂的較新版本檔案）。
+    while (records.has(id) || this.retained.has(id) || !isUserPanelThemeId(id)) id = `u-${randomBytes(6).toString('hex')}`
     const timestamp = new Date(this.now()).toISOString()
     const record: UserPanelThemeRecord = { schemaVersion: USER_PANEL_THEME_SCHEMA_VERSION, id, name: cleanName, createdAt: timestamp, updatedAt: timestamp, definition: cleanDefinition }
     this.write(record)
@@ -205,44 +235,111 @@ export class UserPanelThemeStore {
       this.unsafe = true
       return records
     }
-    let entries: fs.Dirent[]
-    try {
-      entries = fs.readdirSync(this.directory, { withFileTypes: true }).slice(0, USER_PANEL_THEME_SCAN_LIMIT)
-    } catch {
+    const scan = this.scan()
+    if (!scan) {
       this.unsafe = true
       return records
     }
     const loaded: UserPanelThemeRecord[] = []
-    for (const entry of entries) {
-      const filePath = path.join(this.directory, entry.name)
-      if (TEMPORARY_FILE.test(entry.name) && entry.isFile()) {
-        // 上次寫到一半就結束留下的暫存檔。
-        try { fs.rmSync(filePath, { force: true }) } catch {}
+    const backups = scan.backups
+    for (const [id, name] of scan.themes) {
+      const filePath = path.join(this.directory, name)
+      const read = readRegularJson(filePath)
+      if (read.ok && isFutureUserPanelThemeRecord(read.value)) {
+        this.retained.add(id)
         continue
       }
-      const match = FILE_NAME.exec(entry.name)
-      if (!match) continue
-      const read = readRegularJson(filePath)
-      const record = read.ok ? parseUserPanelThemeRecord(read.value, match[1]!) : null
+      const record = read.ok ? parseUserPanelThemeRecord(read.value, id) : null
       if (record) {
         loaded.push(record)
       } else if (read.ok || read.corrupt) {
-        this.backupCorrupt(filePath)
+        const backup = this.backupCorrupt(filePath)
+        if (backup) backups.push(backup)
+      } else {
+        // 暫時讀不到（權限、symlink、競態）：不是損毀，也不能當成已刪除。
+        this.retained.add(id)
       }
     }
-    for (const record of loaded.sort(compareRecords).slice(0, USER_PANEL_THEME_MAX_COUNT)) records.set(record.id, record)
+    loaded.sort(compareRecords)
+    for (const record of loaded.slice(0, USER_PANEL_THEME_MAX_COUNT)) records.set(record.id, record)
+    for (const record of loaded.slice(USER_PANEL_THEME_MAX_COUNT)) this.retained.add(record.id)
+    this.rotateBackups(backups)
     return records
   }
 
+  /**
+   * 以 opendir 逐項讀取目錄：上限算在主題檔與暫存檔上（不相干的檔案不會擠掉真正的主題），
+   * 原始項目另有一個較大的硬上限。任一上限觸發都標記為截斷。目錄讀不到時回傳 null。
+   */
+  private scan(): { themes: Array<[string, string]>; backups: Array<{ name: string; timestamp: number }> } | null {
+    const themes: Array<[string, string]> = []
+    const backups: Array<{ name: string; timestamp: number }> = []
+    let directory: fs.Dir
+    try {
+      directory = fs.opendirSync(this.directory)
+    } catch {
+      return null
+    }
+    try {
+      let matched = 0
+      for (let seen = 0; ; seen += 1) {
+        const entry = directory.readSync()
+        if (!entry) break
+        if (seen >= USER_PANEL_THEME_SCAN_ENTRY_LIMIT || matched >= USER_PANEL_THEME_SCAN_LIMIT) {
+          this.truncated = true
+          break
+        }
+        if (TEMPORARY_FILE.test(entry.name)) {
+          matched += 1
+          // 上次寫到一半就結束留下的暫存檔。
+          if (entry.isFile()) {
+            try { fs.rmSync(path.join(this.directory, entry.name), { force: true }) } catch {}
+          }
+          continue
+        }
+        const match = FILE_NAME.exec(entry.name)
+        if (match) {
+          matched += 1
+          themes.push([match[1]!, entry.name])
+          continue
+        }
+        const backup = CORRUPT_BACKUP.exec(entry.name)
+        if (backup && entry.isFile()) backups.push({ name: entry.name, timestamp: Number(backup[1]) })
+      }
+    } catch {
+      return null
+    } finally {
+      try { directory.closeSync() } catch {}
+    }
+    return { themes, backups }
+  }
+
   /** 損毀的檔案改名成 `<id>.json.corrupt-<時間>`（不再符合檔名規則，之後不會被讀取）。 */
-  private backupCorrupt(filePath: string): void {
+  private backupCorrupt(filePath: string): { name: string; timestamp: number } | null {
     let timestamp = this.now()
     let backup = `${filePath}.corrupt-${timestamp}`
     while (fs.existsSync(backup)) {
       timestamp += 1
       backup = `${filePath}.corrupt-${timestamp}`
     }
-    try { renameSyncWithRetry(filePath, backup) } catch {}
+    try {
+      renameSyncWithRetry(filePath, backup)
+    } catch {
+      // 改名失敗：檔案還在原位，不能讓修剪把它當成已刪除。
+      const match = FILE_NAME.exec(path.basename(filePath))
+      if (match) this.retained.add(match[1]!)
+      return null
+    }
+    return { name: path.basename(backup), timestamp }
+  }
+
+  /** 只留最新的幾份損毀備份；備份是給使用者手動救回用的，不需要無限累積。 */
+  private rotateBackups(backups: Array<{ name: string; timestamp: number }>): void {
+    if (backups.length <= USER_PANEL_THEME_CORRUPT_BACKUPS_KEPT) return
+    backups.sort((first, second) => second.timestamp - first.timestamp || (first.name < second.name ? -1 : 1))
+    for (const { name } of backups.slice(USER_PANEL_THEME_CORRUPT_BACKUPS_KEPT)) {
+      try { fs.rmSync(path.join(this.directory, name), { force: true }) } catch {}
+    }
   }
 
   private assertDirectory(): void {

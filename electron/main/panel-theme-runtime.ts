@@ -110,7 +110,8 @@ export class PanelThemeRuntime {
   private petStatus: PetThemeState = { light: null, dark: null }
   private petStatusHash = JSON.stringify({ light: null, dark: null })
   private installed = new Set<string>([USER_PANEL_THEME_OWNER])
-  private knownManifests = new Set<string>([USER_PANEL_THEME_OWNER])
+  /** 這次 sync 有 manifest 的插件；「我的主題」不在這裡，它另外依磁碟上的記錄判斷。 */
+  private knownManifests = new Set<string>()
   private appearance: PanelAppearance
   private pluginTheme: PluginThemeSnapshot
   private pluginThemeSentHash: string
@@ -225,7 +226,6 @@ export class PanelThemeRuntime {
     this.lastKeyByVersion = keyByVersion
     this.pluginSources = sources
     this.installed.add(USER_PANEL_THEME_OWNER)
-    this.knownManifests.add(USER_PANEL_THEME_OWNER)
     this.refreshUserThemes()
   }
 
@@ -334,8 +334,12 @@ export class PanelThemeRuntime {
     }
   }
 
-  /** 未知的 manifest（例如因當機而被停用的插件）會保留，絕不修剪。 */
+  /**
+   * 未知的 manifest（例如因當機而被停用的插件）會保留，絕不修剪。「我的主題」以磁碟上的記錄為準：
+   * 目錄不完整、記錄仍存在（即使驗證規則日後變嚴格而無法套用）都保留；只有明確刪除才會清掉。
+   */
   private modeKnown(pluginId: string, themeId: string, mode: PanelThemeMode, needsUserImage: boolean): boolean {
+    if (pluginId === USER_PANEL_THEME_OWNER) return this.userThemes.retains(themeId, mode, needsUserImage)
     if (!this.knownManifests.has(pluginId)) return true
     const theme = this.sources.find(source => source.pluginId === pluginId)?.themes.find(candidate => candidate.id === themeId)
     const resolved = theme?.modes[mode]

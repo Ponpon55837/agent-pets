@@ -231,6 +231,14 @@ export function userPanelThemeContribution(id: string, name: string, definition:
   }
 }
 
+/**
+ * 由較新版本寫入的記錄（降級後才會遇到）：看不懂它的內容，但它不是損毀，
+ * 絕不能改名備份或修剪——升級回去之後要原封不動地還在。
+ */
+export function isFutureUserPanelThemeRecord(value: unknown): boolean {
+  return isRecord(value) && typeof value.schemaVersion === 'number' && Number.isSafeInteger(value.schemaVersion) && value.schemaVersion > USER_PANEL_THEME_SCHEMA_VERSION
+}
+
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
 /** 解析磁碟上的一筆記錄；任何欄位不符（包括 id 與檔名不一致）都回傳 null。 */
