@@ -4,7 +4,8 @@ import { ref } from 'vue'
 // The desktop-pet layer (bubbles, status lines, handle) has its own
 // preference: 'dark' (default), 'light', or 'follow' the resolved panel theme.
 //   preference: 'system' follows the OS, 'light' / 'dark' force it.
-// Applied as <html data-theme="light|dark">; tokens.css supplies the values.
+// Applied as <html data-theme="light|dark"> — the panel window uses the panel
+// preference, the pet window its pet preference; tokens.css supplies the values.
 export type ThemePreference = 'system' | 'light' | 'dark'
 export type ResolvedTheme = 'light' | 'dark'
 
@@ -75,8 +76,8 @@ function apply(): void {
   resolvedPetTheme.value = resolvePetTheme(petThemePreference.value, resolvedTheme.value)
   if (typeof document === 'undefined') return
   document.documentElement.dataset.window = windowKind
-  document.documentElement.dataset.theme = resolvedTheme.value
-  document.documentElement.dataset.petTheme = resolvedPetTheme.value
+  // 寵物視窗的色盤模式就是寵物外觀；面板視窗用面板外觀。
+  document.documentElement.dataset.theme = windowKind === 'pet' ? resolvedPetTheme.value : resolvedTheme.value
 }
 
 export function setPetThemePreference(value: unknown): PetThemePreference {

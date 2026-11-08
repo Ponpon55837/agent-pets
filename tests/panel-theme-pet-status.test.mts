@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { derivePetStatusColors, parsePanelThemes, PanelThemeValidationError, PET_STATUS_TOKENS, petStatusProperties } from '../electron/plugin-panel-themes.ts'
+import { derivePetStatusColors, parsePanelThemes, PanelThemeValidationError, PET_BUBBLE_SURFACE_ALPHA, PET_PILL_SURFACE_ALPHA, PET_PILL_TRACK_ALPHA, PET_STATUS_TOKENS, petStatusProperties } from '../electron/plugin-panel-themes.ts'
 import { contrastRatio, compositeColor, parsePanelThemeColor, type PanelThemeRgba } from '../electron/panel-theme-color.ts'
-import { petStatusTargetProperties } from '../src/utils/panel-theme-css.ts'
-import { PET_STATUS_PROPERTIES } from '../src/types/panel-theme.ts'
+import { petThemeTargetProperties } from '../src/utils/panel-theme-css.ts'
+import { CONTEXTS, tokenMap } from '../scripts/check-contrast.mjs'
+import { PANEL_THEME_COLOR_PROPERTIES, PET_STATUS_PROPERTIES, PET_THEME_COLOR_PROPERTIES } from '../src/types/panel-theme.ts'
 import { DARK_COLORS, LIGHT_COLORS, theme } from './support/panel-theme-fixtures.mts'
 
 const color = (value: string): PanelThemeRgba => {
@@ -63,28 +64,66 @@ test('petStatus contrast is checked over worst-case black and white desktops', (
   assert.equal(PET_STATUS_TOKENS.filter(token => token.required).map(token => token.key).join(), 'background,text')
 })
 
-test('pet renderer accepts the full canonical set only, and suspends under forced colours', () => {
-  const full = Object.fromEntries(PET_STATUS_PROPERTIES.map(name => [name, 'rgb(1 2 3 / 1)'])) as never
-  assert.equal(petStatusTargetProperties({ light: full, dark: null }, 'light', false).size, PET_STATUS_PROPERTIES.length)
-  assert.equal(petStatusTargetProperties({ light: full, dark: null }, 'dark', false).size, 0)
-  assert.equal(petStatusTargetProperties({ light: full, dark: null }, 'light', true).size, 0)
-  assert.equal(petStatusTargetProperties({ light: { ...full, '--pet-status-text': 'red' }, dark: null }, 'light', false).size, 0)
-  assert.equal(petStatusTargetProperties({ light: { ...full, '--organic-bg': 'rgb(1 2 3 / 1)' }, dark: null }, 'light', false).has('--organic-bg'), false)
+test('pet renderer accepts each canonical set whole, and suspends under forced colours', () => {
+  const rgb = 'rgb(1 2 3 / 1)'
+  const colors = Object.fromEntries(PET_THEME_COLOR_PROPERTIES.map(name => [name, rgb])) as never
+  const status = Object.fromEntries(PET_STATUS_PROPERTIES.map(name => [name, rgb])) as never
+  const plain = { forcedColors: false, highContrast: false }
+  const both = PET_THEME_COLOR_PROPERTIES.length + PET_STATUS_PROPERTIES.length
+  assert.equal(petThemeTargetProperties({ light: { colors, status }, dark: null }, 'light', plain).size, both)
+  assert.equal(petThemeTargetProperties({ light: { colors, status: null }, dark: null }, 'light', plain).size, PET_THEME_COLOR_PROPERTIES.length)
+  assert.equal(petThemeTargetProperties({ light: { colors, status }, dark: null }, 'dark', plain).size, 0)
+  assert.equal(petThemeTargetProperties({ light: { colors, status }, dark: null }, 'light', { ...plain, forcedColors: true }).size, 0)
+  // 任一值不是主機標準 rgb()、缺一個或多一個名稱：整組拒絕。
+  assert.equal(petThemeTargetProperties({ light: { colors: { ...colors, '--organic-text': 'red' }, status }, dark: null }, 'light', plain).size, 0)
+  assert.equal(petThemeTargetProperties({ light: { colors: { ...colors, '--organic-font-body': rgb }, status }, dark: null }, 'light', plain).size, 0)
+  assert.equal(petThemeTargetProperties({ light: { colors, status: { ...status, '--pet-status-text': 'red' } }, dark: null }, 'light', plain).size, PET_THEME_COLOR_PROPERTIES.length)
+  const contrast = petThemeTargetProperties({ light: { colors, status: null }, dark: null }, 'light', { ...plain, highContrast: true })
+  assert.equal(contrast.get('--organic-border'), 'rgb(1 2 3 / 0.6)')
 })
 
-test('only the status pill reads --pet-status-*; bubbles, permission UI, dots and badges stay built-in', () => {
+test('the pet window receives exactly the palette properties its CSS reaches', () => {
+  // 從寵物視窗用到的 token 出發，沿著 tokens.css 的 var() 找出最終依賴的可套主題屬性。
+  const files = ['src/components/DesktopPet.vue', 'src/components/DesktopPet.css', 'src/components/DesktopPetBubbles.css', 'src/components/PetAnimation.vue',
+    'src/components/PetAnimation.css', 'src/components/permission/PermissionBubble.vue', 'src/components/permission/PermissionCountdown.vue',
+    'src/components/permission/PermissionDetails.vue', 'src/components/permission/PermissionNoticeBubble.vue', 'src/components/permission/PermissionRiskBadge.vue',
+    'src/components/ui/Button.vue', 'src/components/ui/Icon.vue', 'src/types/agent.ts', 'src/styles/base.css']
+  const used = new Set(files.flatMap(file => [...readFileSync(file, 'utf8').matchAll(/var\((--[a-z0-9-]+)/g)].map(m => m[1]!)))
+  const themable = new Set<string>(PANEL_THEME_COLOR_PROPERTIES)
+  const reached = new Set<string>()
+  for (const context of ['pet-dark', 'pet-light'] as const) {
+    const map = tokenMap(context)
+    const seen = new Set<string>()
+    const walk = (name: string) => {
+      if (seen.has(name)) return
+      seen.add(name)
+      if (themable.has(name)) reached.add(name)
+      for (const m of (map.get(name) ?? '').matchAll(/var\((--[a-z0-9-]+)/g)) walk(m[1]!)
+    }
+    for (const name of used) walk(name)
+    assert.ok(CONTEXTS[context].includes('.desktop-pet'))
+  }
+  assert.deepEqual([...reached].sort(), [...PET_THEME_COLOR_PROPERTIES].sort())
+  // 泡泡、膠囊與軌道的比例與驗證器相同。
+  const tokens = readFileSync('src/styles/tokens.css', 'utf8')
+  assert.match(tokens, new RegExp(`--pet-bubble-surface: color-mix\\(in srgb, var\\(--color-surface\\) ${Math.round(PET_BUBBLE_SURFACE_ALPHA * 100)}%, transparent\\);`))
+  assert.match(tokens, new RegExp(`--organic-status-surface: color-mix\\(in srgb, var\\(--color-surface\\) ${Math.round(PET_PILL_SURFACE_ALPHA * 100)}%, transparent\\);`))
+  assert.match(tokens, new RegExp(`--organic-status-track: color-mix\\(in srgb, var\\(--color-text\\) ${Math.round(PET_PILL_TRACK_ALPHA * 100)}%, transparent\\);`))
+})
+
+test('only the status pill reads --pet-status-*; bubbles, permission UI, dots and badges follow the palette', () => {
   const css = readFileSync('src/components/DesktopPet.css', 'utf8')
   const rules = [...css.matchAll(/([^{}]+)\{([^{}]*--pet-status-[^{}]*)\}/g)]
   assert.ok(rules.length > 0)
   for (const [, selector] of rules) {
-    assert.match(selector!.trim(), /status-line|quota-meter|^\.desktop-pet\[data-pet-status-theme\]/, selector)
+    assert.match(selector!.trim(), /status-line|quota-meter|^:root\[data-pet-status-theme\] \.desktop-pet/, selector)
     assert.doesNotMatch(selector!, /bubble|permission|badge|tooltip|line-dot|marker|edge|context/, selector)
   }
   for (const file of ['src/components/DesktopPetBubbles.css', 'src/components/permission/PermissionBubble.vue', 'src/components/permission/PermissionNoticeBubble.vue', 'src/components/PetAnimation.css']) {
     assert.doesNotMatch(readFileSync(file, 'utf8'), /--pet-status-|--organic-bg|panel-theme/, file)
   }
   const pet = readFileSync('src/components/DesktopPet.vue', 'utf8')
-  assert.match(pet, /usePetStatusTheme\(petRoot\)/)
+  assert.match(pet, /usePetTheme\(\)/)
   assert.doesNotMatch(pet, /usePanelTheme\b/)
   assert.match(readFileSync('src/components/DesktopPet.css', 'utf8'), /\.status-line\[data-quota-tier='low'\] \{\n  --quota-color: var\(--organic-quota-error\);/)
 })

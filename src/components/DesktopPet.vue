@@ -27,7 +27,7 @@ import { statusLineText, type StatusLineSource } from '@/utils/session-attention
 import { fitStatusLine, statusLineContentWidth, STATUS_TEXT_FONTS, type MeasureText, type StatusLineFit, type StatusLinePart } from '@/utils/status-line-fit'
 import { resolvedPetTheme } from '@/composables/useTheme'
 import PermissionBubble from '@/components/permission/PermissionBubble.vue'
-import { usePetStatusTheme } from '@/composables/usePetStatusTheme'
+import { usePetTheme } from '@/composables/usePetTheme'
 import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
 import { formatDateParts } from '@/utils/intl-format'
 
@@ -438,8 +438,7 @@ function quotaTier(familyKey: string): QuotaTier | undefined {
   return familyKey === 'claude' ? 'claude' : 'normal'
 }
 
-const petRoot = ref<HTMLElement | null>(null)
-usePetStatusTheme(petRoot)
+usePetTheme()
 
 function quotaFillStyle(familyKey: string): Record<string, string> {
   const quota = store.quotaByFamily[familyKey]
@@ -885,10 +884,9 @@ watch(() => store.levelUpEvent, (event) => {
 
 <template>
   <div
-    ref="petRoot"
     class="desktop-pet"
     :class="[`mode-${store.petWindowMode.mode}`, store.petWindowMode.edge ? `edge-${store.petWindowMode.edge}` : '']"
-:data-pet-mode="store.petWindowMode.mode"
+    :data-pet-mode="store.petWindowMode.mode"
     :style="{ '--mini-scale': miniScale }"
   >
     <div

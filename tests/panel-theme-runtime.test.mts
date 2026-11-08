@@ -6,7 +6,7 @@ import test from 'node:test'
 import { PanelThemeRuntime, type PanelThemeRuntimeContext } from '../electron/main/panel-theme-runtime.ts'
 import { parsePluginManifest } from '../electron/plugin-manifest.ts'
 import { prepareUserImage, storeUserImage } from '../electron/panel-theme-images.ts'
-import type { PanelThemeState } from '../src/types/panel-theme.ts'
+import { PET_THEME_COLOR_PROPERTIES, type PanelThemeState, type PetThemeState } from '../src/types/panel-theme.ts'
 import { DARK_COLORS, LIGHT_COLORS, manifest, png, theme, woff2 } from './support/panel-theme-fixtures.mts'
 
 // readRegularFileWithin 的替身，具有相同的路徑限制契約。
@@ -41,11 +41,13 @@ function setup() {
   const parsed = parsePluginManifest(raw)
   if (!parsed.ok) throw new Error(parsed.error)
   const sent: PanelThemeState[] = []
+  const petSent: PetThemeState[] = []
   const runtime = new PanelThemeRuntime({
     userDataDirectory: userData,
     pluginRoot: (pluginId, version) => path.join(userData, 'plugins', pluginId, version),
     readRegularFileWithin: readWithin,
     send: state => { sent.push(state) },
+    sendPetStatus: state => { petSent.push(state) },
     rendererOrigin: () => 'agent-pets://app',
     sendPluginTheme: () => {},
     schedulePluginTheme: callback => callback(),
@@ -57,7 +59,7 @@ function setup() {
     contexts: new Map(installed ? [['theme-pack', context(enabled, pluginsEnabled)]] : []),
     pluginsEnabled,
   })
-  return { userData, pluginRoot, runtime, sent, sync, cleanup: () => fs.rmSync(userData, { recursive: true, force: true }) }
+  return { userData, pluginRoot, runtime, sent, petSent, sync, cleanup: () => fs.rmSync(userData, { recursive: true, force: true }) }
 }
 
 test('the panel-theme route serves mapped tokens only, with nosniff, immutable caching and font CORS for the panel origin', async () => {
@@ -117,6 +119,11 @@ test('disabling, switching plugins off or removing makes every token 404 and kee
     context.sync()
     context.runtime.store.setSlot('light', { pluginId: 'theme-pack', themeId: 'aurora' })
     context.runtime.publish()
+    // 寵物視窗只收到它用得到的色盤子集，其值與面板相同。
+    const pet = context.petSent.at(-1)!
+    assert.equal(pet.dark, null)
+    assert.deepEqual(Object.keys(pet.light!.colors), [...PET_THEME_COLOR_PROPERTIES])
+    assert.equal(pet.light!.colors['--organic-text'], context.runtime.getState().themes[0]!.modes.light!.properties['--organic-text'])
     const background = context.runtime.getState().themes[0]!.modes.light!.background
     const url = background.type === 'image' ? background.url : ''
     assert.equal(context.runtime.getState().slots.light.status, 'active')

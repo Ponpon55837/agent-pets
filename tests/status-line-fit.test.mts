@@ -172,7 +172,7 @@ test('quota colours are chosen in CSS by data-quota-tier, not built as strings i
   const css = readFileSync(new URL('../src/components/DesktopPet.css', import.meta.url), 'utf8')
   const vue = readFileSync(new URL('../src/components/DesktopPet.vue', import.meta.url), 'utf8')
   const tiers: Record<string, string> = {
-    low: '--organic-quota-error', warning: '--organic-quota-warning', claude: '--organic-accent', normal: '--organic-quota-sage',
+    low: '--organic-quota-error', warning: '--organic-quota-warning', claude: '--organic-quota-accent', normal: '--organic-quota-sage',
   }
   for (const [tier, token] of Object.entries(tiers)) {
     // 一般與低額度可由插件主題的 --pet-status-* 覆寫；危急（low）一律用內建 token。

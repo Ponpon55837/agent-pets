@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { t } from '@/i18n'
 import type { PanelThemeCatalogEntry, PanelThemeColorProperty, PanelThemeMode } from '@/types/panel-theme'
-import { isPanelThemePropertyValue, panelThemeTargetProperties, petStatusTargetProperties } from '@/utils/panel-theme-css'
+import { isPanelThemePropertyValue, panelThemeTargetProperties, petStatusPreviewProperties } from '@/utils/panel-theme-css'
 import { validBackdrop, type PanelThemeBackdropView } from '@/composables/usePanelTheme'
 import PanelThemeBackdrop from '@/components/PanelThemeBackdrop.vue'
 
@@ -25,7 +25,7 @@ const style = computed(() => {
     for (const [name, value] of panelThemeTargetProperties(props.entry, props.mode, { forcedColors: false, highContrast: false }).properties) {
       result[name] = value
     }
-    for (const [name, value] of petStatusTargetProperties({ light: null, dark: null, [props.mode]: props.entry.modes[props.mode]?.petStatus ?? null }, props.mode, false)) {
+    for (const [name, value] of petStatusPreviewProperties(props.entry.modes[props.mode]?.petStatus)) {
       result[name] = value
     }
   } else if (props.builtin) {

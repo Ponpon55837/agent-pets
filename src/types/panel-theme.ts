@@ -46,10 +46,29 @@ export const PET_STATUS_PROPERTIES = [
 ] as const
 export type PetStatusProperty = typeof PET_STATUS_PROPERTIES[number]
 
-/** 主程序送給寵物視窗的內容：各模式啟用中主題的膠囊顏色，內建則為 null。 */
-export interface PetStatusThemeState {
-  light: Record<PetStatusProperty, string> | null
-  dark: Record<PetStatusProperty, string> | null
+/**
+ * 寵物視窗實際用到的色盤屬性（tokens.css 中寵物用到的衍生 token 只依賴這些；
+ * tests/panel-theme-pet-status.test.mts 從 CSS 反推並比對）。主程序只送這些，
+ * 不送字型、圓角、背景或面板專用的顏色。
+ */
+export const PET_THEME_COLOR_PROPERTIES = [
+  '--organic-bg', '--organic-surface', '--organic-surface-warm', '--organic-text', '--organic-text-secondary',
+  '--organic-text-muted', '--organic-text-faint', '--organic-accent', '--organic-accent-hover', '--organic-accent-text',
+  '--organic-accent-contrast', '--organic-sage', '--organic-sage-deep', '--organic-sage-dark', '--organic-border',
+  '--organic-border-soft', '--organic-danger-text', '--organic-success-text', '--organic-warn-text',
+] as const satisfies readonly PanelThemeColorProperty[]
+export type PetThemeColorProperty = typeof PET_THEME_COLOR_PROPERTIES[number]
+
+/** 一個模式的寵物視窗主題：色盤子集，加上（選填的）狀態膠囊顏色。 */
+export interface PetThemeModeState {
+  colors: Record<PetThemeColorProperty, string>
+  status: Record<PetStatusProperty, string> | null
+}
+
+/** 主程序送給寵物視窗的內容：各模式啟用中的主題，內建則為 null。 */
+export interface PetThemeState {
+  light: PetThemeModeState | null
+  dark: PetThemeModeState | null
 }
 
 export type PanelThemeSharedProperty =

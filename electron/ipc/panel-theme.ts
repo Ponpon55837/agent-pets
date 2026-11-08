@@ -1,5 +1,5 @@
 import type { BrowserWindow, IpcMain, IpcMainEvent, IpcMainInvokeEvent } from 'electron'
-import type { PanelThemeMode, PanelThemeRef, PanelThemeState, PanelThemeStoredUserImage, PetStatusThemeState } from '../../src/types/panel-theme.ts'
+import type { PanelThemeMode, PanelThemeRef, PanelThemeState, PanelThemeStoredUserImage, PetThemeState } from '../../src/types/panel-theme.ts'
 import { isPanelThemeMode } from '../../src/types/panel-theme.ts'
 import type { PanelThemeSourcePlugin } from '../plugin-panel-themes.ts'
 import type { PanelThemeStore } from '../panel-theme-store.ts'
@@ -23,7 +23,7 @@ export interface PanelThemeIpcDependencies {
   setPanelAppearance(appearance: { mode: PanelThemeMode; forcedColors: boolean }): void
   /** 只限寵物視窗的主框架（狀態膠囊是寵物唯一可套主題的介面）。 */
   assertPetSender(event: IpcMainInvokeEvent): void
-  getPetStatus(): PetStatusThemeState
+  getPetStatus(): PetThemeState
   getStore(): PanelThemeStore | null
   /** 目前提供主題的插件（已安裝；`available` = 已啟用且全域開關開啟）。 */
   getSources(): readonly PanelThemeSourcePlugin[]

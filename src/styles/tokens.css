@@ -120,28 +120,8 @@
   --builtin-organic-info-text: #2e5b8c;
   --builtin-organic-shadow: #2e2b25;
   --builtin-organic-highlight: #ffffff;
-  /* Compact desktop-pet status pills use the same Organic palette while
-     retaining an opaque dark presentation layer for arbitrary wallpapers. */
-  --organic-status-surface: rgba(46, 43, 37, 0.88);
-  --organic-status-surface-fallback: #241d16;
-  --organic-status-border: rgba(255, 225, 208, 0.14);
-  --organic-status-text: #f2eee8;
-  --organic-status-tooltip-surface: rgba(46, 43, 37, 0.94);
-  --organic-status-tooltip-border: rgba(198, 113, 57, 0.36);
-  --organic-status-tooltip-text: #f4ede6;
-  --organic-status-tooltip-muted: rgba(246, 237, 226, 0.8);
-  --organic-status-track: rgba(20, 16, 12, 0.38);
-  --organic-status-grid: rgba(7, 10, 12, 0.42);
-  --organic-status-flash: rgba(255, 255, 255, 0.92);
-  --organic-status-sheen: rgba(255, 255, 255, 0.72);
-  --organic-status-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  --organic-status-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  --organic-status-tooltip-shadow: 0 5px 16px rgba(0, 0, 0, 0.38);
   --organic-status-radius: 14px;
   --organic-status-tooltip-radius: 12px;
-  --organic-quota-warning: #e3b64f;
-  --organic-quota-error: #d64a3a;
-  --organic-quota-sage: #8fa073;
   /* Status text on cream surfaces (checked >= 4.5:1 by check-contrast). */
   --builtin-organic-danger-text: #a62f1e;
   --builtin-organic-success-text: #3f5a1c;
@@ -292,7 +272,8 @@
   --accent-claude: var(--organic-sage);
   --gradient-claude: var(--organic-sage);
   /* 代理狀態（狀態點、迷你環、工作階段列；STATE_COLORS 讀這些名稱）：
-     成功/錯誤/等待取自受色相限制的狀態色，思考/工具＝強調色，閒置/離線＝弱化文字。
+     成功/錯誤/等待取自受色相限制的狀態色，思考/工具＝強調文字色（強調填色在淺色膠囊上不到 3:1），
+     閒置/離線＝弱化文字。
      主題無法直接設定 --state-*，只能透過受驗證的色盤，所以語意不會被改掉；
      狀態也一律搭配文字標籤或形狀，不只靠顏色。 */
   --state-success: var(--color-success);
@@ -301,7 +282,7 @@
   --state-warn: var(--color-warn);
   --state-warn-bright: var(--color-warn);
   --state-info: var(--color-info);
-  --state-active: var(--color-accent);
+  --state-active: var(--color-accent-text);
   --state-idle: var(--color-text-3);
   --state-offline: var(--color-text-faint);
   --text-primary: var(--color-text);
@@ -357,9 +338,9 @@
 }
 
 /* ── 寵物狀態膠囊主題掛鉤 ─────────────────────────────────────────
-   預設不設定（guaranteed-invalid），讓每個 var() 都退回
-   內建的 --organic-status-* 外觀。插件面板主題可以在寵物根元素
-   （usePetStatusTheme）上設定它們；只有 .status-line 會讀取（spec §3.7）。 */
+   預設不設定（guaranteed-invalid），讓每個 var() 都退回由色盤衍生的
+   --organic-status-*。插件主題的 petStatus 可以在寵物視窗的 <html> 上設定它們；
+   只有 .status-line 會讀取（spec §3.7）。 */
 :root {
   --pet-status-background: initial;
   --pet-status-background-opaque: initial;
@@ -371,152 +352,72 @@
   --pet-status-quota-warn: initial;
 }
 
-/* ── Pet bubbles ───────────────────────────────────────────────────────
-   One material for every bubble the pet shows (result toast, say, plugin feed,
-   notices). The pet layer is dark by default; `data-pet-theme='light'` (below) swaps in a
-   light palette. The
-   opaque surface is the fallback for reduced-transparency / high contrast. */
-:root {
-  --pet-bubble-surface: rgba(30, 30, 40, 0.93);
-  --pet-bubble-surface-opaque: #1d1b24;
-  --pet-bubble-border: rgba(255, 255, 255, 0.12);
-  --pet-bubble-sheen: linear-gradient(155deg, rgba(255, 255, 255, 0.1), transparent 54%);
+/* ── 寵物視窗：泡泡、狀態膠囊與玻璃層 ────────────────────────────────────
+   全部由語意層衍生；寵物視窗的模式是寵物外觀（useTheme.ts 把它寫進 data-theme）。
+   泡泡與膠囊浮在任意桌面上：表面是 surface 以 0.93／0.92 疊上去，驗證器以同樣
+   比例在黑、白桌面上檢查每個文字 token（PET_BUBBLE_SURFACE_ALPHA、
+   PET_PILL_SURFACE_ALPHA）。不透明版本是減少透明度／高對比時的退路。
+   在 .panel-theme-preview 上重新解析，讓主題預覽裡的膠囊用預覽的色盤。 */
+:root,
+.panel-theme-preview {
+  --pet-bubble-surface: color-mix(in srgb, var(--color-surface) 93%, transparent);
+  --pet-bubble-surface-opaque: var(--color-surface);
+  --pet-bubble-border: var(--color-border-strong);
+  --pet-bubble-sheen: linear-gradient(155deg, color-mix(in srgb, var(--color-highlight) 40%, transparent), transparent 54%);
   --pet-bubble-shadow:
-    0 6px 18px rgba(0, 0, 0, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
-  --pet-bubble-text: #f2f2f2;
-  --pet-bubble-success-text: #a6f0c0;
-  --pet-bubble-error-text: #ffb3b3;
-  --pet-bubble-warn-border: rgba(232, 198, 91, 0.58);
-  --pet-bubble-warn-text: #fff4c4;
-  --pet-bubble-info-border: rgba(157, 176, 255, 0.56);
-  --pet-bubble-info-text: #e1e6ff;
-  --pet-bubble-info-accent: #aab8ff;
-  --pet-bubble-plugin-border: rgba(112, 189, 158, 0.56);
-  --pet-bubble-plugin-text: #e4fff3;
-  --pet-bubble-warn-accent: #ffe37c;
-  --pet-drag-shadow: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.35));
+    0 6px 18px color-mix(in srgb, var(--color-shadow) 28%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--color-highlight) 40%, transparent);
+  --pet-bubble-text: var(--color-text);
+  --pet-bubble-success-text: var(--color-success);
+  --pet-bubble-error-text: var(--color-danger);
+  --pet-bubble-warn-border: color-mix(in srgb, var(--color-warn) 58%, transparent);
+  --pet-bubble-warn-text: var(--color-text);
+  --pet-bubble-warn-accent: var(--color-warn);
+  --pet-bubble-info-border: color-mix(in srgb, var(--color-info) 56%, transparent);
+  --pet-bubble-info-text: var(--color-text);
+  --pet-bubble-info-accent: var(--color-info);
+  --pet-bubble-plugin-border: color-mix(in srgb, var(--organic-sage) 56%, transparent);
+  --pet-bubble-plugin-text: var(--color-text);
+  --pet-drag-shadow: drop-shadow(0 10px 14px color-mix(in srgb, var(--color-shadow) 32%, transparent));
+  --organic-status-surface: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  --organic-status-surface-fallback: var(--color-surface);
+  --organic-status-border: var(--color-border-strong);
+  --organic-status-text: var(--color-text);
+  --organic-status-tooltip-surface: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  --organic-status-tooltip-border: color-mix(in srgb, var(--color-accent) 38%, transparent);
+  --organic-status-tooltip-text: var(--color-text);
+  --organic-status-tooltip-muted: var(--color-text-2);
+  --organic-status-track: color-mix(in srgb, var(--color-text) 14%, transparent);
+  --organic-status-grid: color-mix(in srgb, var(--color-shadow) 42%, transparent);
+  --organic-status-flash: color-mix(in srgb, var(--color-highlight) 92%, transparent);
+  --organic-status-sheen: color-mix(in srgb, var(--color-highlight) 72%, transparent);
+  --organic-status-shadow: 0 2px 8px color-mix(in srgb, var(--color-shadow) 20%, transparent);
+  --organic-status-highlight: inset 0 1px 0 color-mix(in srgb, var(--color-highlight) 40%, transparent);
+  --organic-status-tooltip-shadow: 0 5px 16px color-mix(in srgb, var(--color-shadow) 30%, transparent);
+  /* 額度條：一般＝ sageDeep、Claude ＝ accentText、低額度＝警告色、危急＝危險色；
+     驗證器保證四者在膠囊與軌道上 >= 3:1。 */
+  --organic-quota-sage: var(--organic-sage-deep);
+  --organic-quota-accent: var(--color-accent-text);
+  --organic-quota-warning: var(--color-warn);
+  --organic-quota-error: var(--color-danger);
 }
 
-/* Light pet appearance (Settings -> Appearance -> Pet). Bubble tokens apply
-   globally; the surface tokens the pet's own status lines, handle and badges
-   read are re-pointed only inside .desktop-pet so the panel window is
-   untouched. The *-opaque / high-contrast fallbacks keep working because
-   they read the same tokens. */
-:root[data-pet-theme='light'] {
-  --pet-bubble-surface: rgba(252, 249, 243, 0.94);
-  --pet-bubble-surface-opaque: #fbf7f0;
-  --pet-bubble-border: rgba(32, 30, 29, 0.16);
-  --pet-bubble-sheen: linear-gradient(155deg, rgba(255, 255, 255, 0.7), transparent 54%);
-  --pet-bubble-shadow:
-    0 6px 18px rgba(46, 43, 37, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  --pet-bubble-text: #2a2622;
-  --pet-bubble-success-text: #17683a;
-  --pet-bubble-error-text: #a3261f;
-  --pet-bubble-warn-border: rgba(150, 100, 0, 0.55);
-  --pet-bubble-warn-text: #6e4600;
-  --pet-bubble-warn-accent: #7a4f00;
-  --pet-bubble-info-border: rgba(63, 81, 181, 0.5);
-  --pet-bubble-info-text: #2c3a96;
-  --pet-bubble-info-accent: #3a4bb5;
-  --pet-bubble-plugin-border: rgba(30, 120, 90, 0.5);
-  --pet-bubble-plugin-text: #145a45;
-  --pet-drag-shadow: drop-shadow(0 10px 14px rgba(46, 43, 37, 0.28));
-}
-
-:root[data-pet-theme='light'] .desktop-pet {
-  /* 權限泡泡會讀取這些深色層的文字/狀態 token；沒有淺色值時，
-     它的指令、細節與連結會在米白底上呈現近乎白色。 */
-  --text-bright: #2a2622;
-  --text-secondary: #5a5248;
-  --text-muted: #645c50;
-  --state-warn-bright: #7a4f00;
-  --state-error-soft: #a3261f;
-  --state-success: #17683a;
-  --surface-raised: rgba(32, 30, 29, 0.05);
-  --surface-panel: rgba(252, 249, 243, 0.92);
-  --surface-overlay: rgba(252, 249, 243, 0.98);
-  --surface-raised-hover: rgba(255, 255, 255, 0.6);
-  --border-strong: rgba(32, 30, 29, 0.2);
-  --text-primary: #2a2622;
-  --text-shadow-panel: none;
-  /* 淺藍焦點環在米白泡泡上只有約 1.4:1；改用色盤的焦點色。 */
-  --focus-ring-color: var(--color-focus);
-  --organic-status-surface: rgba(252, 249, 243, 0.92);
-  --organic-status-surface-fallback: #fbf7f0;
-  --organic-status-border: rgba(32, 30, 29, 0.16);
-  --organic-status-text: #2a2622;
-  --organic-status-tooltip-surface: rgba(252, 249, 243, 0.97);
-  --organic-status-tooltip-border: rgba(168, 92, 40, 0.4);
-  --organic-status-tooltip-text: #2a2622;
-  --organic-status-tooltip-muted: rgba(42, 38, 34, 0.78);
-  --organic-status-track: rgba(32, 30, 29, 0.14);
-  --organic-status-shadow: 0 2px 8px rgba(46, 43, 37, 0.16);
-  --organic-status-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  --organic-status-tooltip-shadow: 0 5px 16px rgba(46, 43, 37, 0.24);
-  --shadow-edge-handle: 0 3px 12px rgba(46, 43, 37, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.8);
-}
-
-/* ── 寵物視窗玻璃層 ──────────────────────────────────────────────────────
-   寵物視窗暫時保留原本的深色玻璃值（下一步改由色盤衍生）。 */
+/* 寵物視窗的玻璃層：浮在桌面上的元素（邊緣把手、權限泡泡、選單）用半透明的
+   色盤表面；卡片與列用文字色的淡色調，不疊第二層玻璃（liquid-glass.md）。 */
 .desktop-pet {
-  --surface-panel: rgba(18, 18, 26, 0.86);
-  --surface-raised: rgba(255, 255, 255, 0.05);
-  --surface-raised-hover: rgba(255, 255, 255, 0.08);
-  --surface-sunken: rgba(8, 10, 18, 0.18);
-  --surface-overlay: rgba(25, 25, 35, 0.98);
-  --surface-scrim: rgba(0, 0, 0, 0.5);
-  --surface-option: #1b1b29;
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
-  --border-accent: rgba(139, 156, 247, 0.22);
-  --border-accent-strong: rgba(139, 156, 247, 0.4);
-  --accent: #8b9cf7;
-  --accent-bright: #cdd4ff;
-  --accent-on: #12121a;
-  --accent-hover: initial;
-  --accent-text: initial;
-  --accent-wash: rgba(139, 156, 247, 0.08);
-  --accent-soft: rgba(139, 156, 247, 0.15);
-  --accent-strong: rgba(139, 156, 247, 0.25);
-  --accent-glow: rgba(139, 156, 247, 0.14);
-  --gradient-accent: linear-gradient(90deg, #667eea, #8b9cf7);
-  --gradient-claude: linear-gradient(90deg, #b56ee2, #d59bff);
-  --accent-claude: #d59bff;
-  --border-claude: rgba(213, 155, 255, 0.13);
-  --surface-claude: rgba(213, 155, 255, 0.04);
-  --state-success: #50c878;
-  --state-error: #ff6b6b;
-  --state-error-soft: #ff9a9a;
-  --state-warn: #c8b450;
-  --state-warn-bright: #ffe37c;
-  --state-info: #9dd8ff;
-  --state-active: #8b9cf7;
-  --state-idle: #8a8a8a;
-  --state-offline: #757575;
-  --text-primary: #e8ecfa;
-  --text-secondary: #a4a8b4;
-  --text-muted: #858b9b;
-  --text-bright: #f1f3ff;
-  --text-on-option: #ddd;
-  --text-danger: var(--state-error-soft);
-  --text-success: var(--state-success);
-  --text-warning: var(--state-warn-bright);
-  --status-error: var(--state-error);
-  --focus-ring-color: var(--state-info);
-  --focus-ring-offset: 1px;
+  --surface-panel: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  --surface-overlay: color-mix(in srgb, var(--color-surface) 98%, transparent);
+  --surface-raised: color-mix(in srgb, var(--color-text) 5%, transparent);
+  --surface-raised-hover: color-mix(in srgb, var(--color-text) 9%, transparent);
   --shadow-panel:
-    0 18px 40px rgba(0, 0, 0, 0.4),
-    0 2px 6px rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
-    inset 0 -18px 30px -20px rgba(0, 0, 0, 0.35);
-  --shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    0 18px 40px color-mix(in srgb, var(--color-shadow) 40%, transparent),
+    0 2px 6px color-mix(in srgb, var(--color-shadow) 22%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--color-highlight) 18%, transparent);
+  --shadow-raised: inset 0 1px 0 color-mix(in srgb, var(--color-highlight) 6%, transparent);
   --shadow-edge-handle:
-    0 4px 12px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  --text-shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.55);
+    0 4px 12px color-mix(in srgb, var(--color-shadow) 28%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--color-highlight) 40%, transparent);
+  --focus-ring-offset: 1px;
 }
 
 /* ── Dark theme (panel layer) ───────────────────────────────────────────
@@ -573,11 +474,6 @@
   :root {
     --builtin-organic-border: rgba(32, 30, 29, 0.6);
     --builtin-organic-border-soft: rgba(32, 30, 29, 0.4);
-  }
-
-  .desktop-pet {
-    --border-strong: rgba(255, 255, 255, 0.5);
-    --border-subtle: rgba(255, 255, 255, 0.3);
   }
 
   :root[data-theme='dark'] {

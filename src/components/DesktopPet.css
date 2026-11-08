@@ -76,7 +76,7 @@
   border: 2px solid var(--surface-panel);
   border-radius: 50%;
   background: var(--mini-ring, var(--state-idle));
-  color: var(--surface-panel);
+  color: var(--color-bg);
 }
 
 .mini-status-badge.pulse {
@@ -204,7 +204,7 @@
   border: 1px solid var(--surface-panel);
   border-radius: var(--radius-pill);
   background: var(--state-success);
-  color: var(--surface-panel);
+  color: var(--color-bg);
   cursor: pointer;
   font: 700 var(--font-xs)/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   animation: unread-pop 0.28s ease-out;
@@ -235,7 +235,7 @@
   border: 1px solid var(--surface-panel);
   border-radius: var(--radius-pill);
   background: var(--state-success);
-  color: var(--surface-panel);
+  color: var(--color-bg);
   font: 700 var(--font-xs)/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
@@ -255,7 +255,7 @@
   border: 1px solid var(--surface-panel);
   border-radius: var(--radius-pill);
   background: var(--status-error);
-  color: white;
+  color: var(--color-bg);
   font: 700 var(--font-xs)/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
@@ -396,7 +396,8 @@
   border-radius: var(--organic-status-radius);
 }
 
-/* Quota 顏色依剩餘比例分級（DesktopPet.vue 的 quotaTier）；沒有 Quota 時維持透明。 */
+/* Quota 顏色依剩餘比例分級（DesktopPet.vue 的 quotaTier）；沒有 Quota 時維持透明。
+   徽章文字用 --color-bg：狀態色在 bg 上 >= 4.5:1（對比對稱），所以反過來也成立。 */
 .status-line {
   --quota-color: transparent;
 }
@@ -410,7 +411,7 @@
 }
 
 .status-line[data-quota-tier='claude'] {
-  --quota-color: var(--pet-status-quota-fill, var(--organic-accent));
+  --quota-color: var(--pet-status-quota-fill, var(--organic-quota-accent));
 }
 
 .status-line[data-quota-tier='normal'] {
@@ -429,12 +430,12 @@
 
 /* 套用主題的膠囊在檢查對比時不含深色文字陰影，且次要文字
    為完全不透明。插件徽章維持內建外觀。 */
-.desktop-pet[data-pet-status-theme] .status-line {
+:root[data-pet-status-theme] .desktop-pet .status-line {
   text-shadow: none;
 }
 
-.desktop-pet[data-pet-status-theme] .status-line .line-sep,
-.desktop-pet[data-pet-status-theme] .status-line .line-project {
+:root[data-pet-status-theme] .desktop-pet .status-line .line-sep,
+:root[data-pet-status-theme] .desktop-pet .status-line .line-project {
   color: var(--pet-status-text-muted);
   opacity: 1;
 }

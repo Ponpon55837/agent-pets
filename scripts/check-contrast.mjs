@@ -18,7 +18,7 @@ export const CONTEXTS = {
   light: [':root', ":root[data-window='panel']", ":root[data-theme='light']"],
   dark: [':root', ":root[data-window='panel']", ":root[data-theme='dark']"],
   'pet-dark': [':root', ":root[data-window='pet']", ":root[data-theme='dark']", '.desktop-pet'],
-  'pet-light': [':root', ":root[data-window='pet']", ":root[data-theme='light']", ":root[data-pet-theme='light']", '.desktop-pet', ":root[data-pet-theme='light'] .desktop-pet"],
+  'pet-light': [':root', ":root[data-window='pet']", ":root[data-theme='light']", '.desktop-pet'],
 }
 
 // [前景 token, 背景 token, 最低比值, 說明]；4.5 = 內文，3 = 大字／圖形／焦點環。
@@ -52,29 +52,33 @@ export const PAIRS = [
   ['--state-offline', '--surface-raised', 3, 'offline state graphic'],
 ]
 
-// 寵物視窗：泡泡、玻璃層與狀態膠囊的文字。
+// 寵物視窗：泡泡、玻璃層與狀態膠囊浮在桌面上，半透明表面以黑、白桌面的較差者計算。
 export const PET_PAIRS = [
-  ['--pet-bubble-text', '--pet-bubble-surface-opaque', 4.5, 'bubble text'],
-  ['--pet-bubble-success-text', '--pet-bubble-surface-opaque', 4.5, 'bubble success text'],
-  ['--pet-bubble-error-text', '--pet-bubble-surface-opaque', 4.5, 'bubble error text'],
-  ['--pet-bubble-warn-text', '--pet-bubble-surface-opaque', 4.5, 'bubble warn text'],
-  ['--pet-bubble-warn-accent', '--pet-bubble-surface-opaque', 4.5, 'bubble waiting text'],
-  ['--pet-bubble-info-text', '--pet-bubble-surface-opaque', 4.5, 'bubble info text'],
-  ['--pet-bubble-info-accent', '--pet-bubble-surface-opaque', 3, 'bubble info icon'],
-  ['--pet-bubble-plugin-text', '--pet-bubble-surface-opaque', 4.5, 'bubble plugin text'],
-  ['--text-bright', '--pet-bubble-surface-opaque', 4.5, 'permission bubble text'],
-  ['--text-secondary', '--pet-bubble-surface-opaque', 4.5, 'permission bubble secondary text'],
-  ['--state-warn-bright', '--pet-bubble-surface-opaque', 4.5, 'permission bubble warning text'],
-  ['--state-error-soft', '--pet-bubble-surface-opaque', 4.5, 'permission bubble danger text'],
-  ['--state-success', '--pet-bubble-surface-opaque', 3, 'permission bubble allow button label (bold)'],
-  ['--text-primary', '--pet-bubble-surface-opaque', 4.5, 'pet glass text'],
-  ['--text-muted', '--pet-bubble-surface-opaque', 4.5, 'pet glass muted text'],
-  ['--focus-ring-color', '--pet-bubble-surface-opaque', 3, 'focus ring'],
-  ['--organic-status-text', '--organic-status-surface-fallback', 4.5, 'pet status line text'],
-  ['--organic-status-tooltip-text', '--organic-status-surface-fallback', 4.5, 'pet quota tooltip text'],
-  ['--text-primary', '--organic-status-surface-fallback', 4.5, 'pet mini badge text'],
-  ['--pet-bubble-info-accent', '--organic-status-surface-fallback', 4.5, 'pet plugin badge info text'],
-  ['--pet-bubble-warn-accent', '--organic-status-surface-fallback', 4.5, 'pet plugin badge warning text'],
+  ['--pet-bubble-text', '--pet-bubble-surface', 4.5, 'bubble text'],
+  ['--pet-bubble-success-text', '--pet-bubble-surface', 4.5, 'bubble success text'],
+  ['--pet-bubble-error-text', '--pet-bubble-surface', 4.5, 'bubble error text'],
+  ['--pet-bubble-warn-accent', '--pet-bubble-surface', 4.5, 'bubble waiting text'],
+  ['--pet-bubble-info-accent', '--pet-bubble-surface', 4.5, 'bubble info text and icon'],
+  ['--color-text-2', '--pet-bubble-surface', 4.5, 'bubble secondary text'],
+  ['--color-text-3', '--pet-bubble-surface', 4.5, 'bubble source and time text'],
+  ['--text-bright', '--surface-overlay', 4.5, 'permission bubble text'],
+  ['--text-secondary', '--surface-overlay', 4.5, 'permission bubble secondary text'],
+  ['--state-warn-bright', '--surface-overlay', 4.5, 'permission bubble warning text'],
+  ['--state-error-soft', '--surface-overlay', 4.5, 'permission bubble danger text'],
+  ['--state-success', '--surface-overlay', 4.5, 'permission bubble allow label'],
+  ['--focus-ring-color', '--pet-bubble-surface', 3, 'focus ring on a bubble'],
+  ['--focus-ring-color', '--organic-status-surface', 3, 'focus ring on the pill'],
+  ['--organic-status-text', '--organic-status-surface', 4.5, 'pet status line text'],
+  ['--organic-status-tooltip-text', '--organic-status-tooltip-surface', 4.5, 'pet quota tooltip text'],
+  ['--organic-status-tooltip-muted', '--organic-status-tooltip-surface', 4.5, 'pet quota tooltip secondary text'],
+  ['--organic-quota-sage', '--organic-status-surface', 3, 'quota fill (normal)'],
+  ['--organic-quota-accent', '--organic-status-surface', 3, 'quota fill (Claude)'],
+  ['--organic-quota-warning', '--organic-status-surface', 3, 'quota fill (low)'],
+  ['--organic-quota-error', '--organic-status-surface', 3, 'quota fill (critical)'],
+  ['--state-active', '--organic-status-surface', 3, 'thinking/tool state dot'],
+  ['--state-idle', '--organic-status-surface', 3, 'idle state dot'],
+  ['--color-bg', '--state-error', 4.5, 'error badge label'],
+  ['--color-bg', '--state-success', 4.5, 'result badge label'],
 ]
 
 const BLACK = { r: 0, g: 0, b: 0, a: 1 }

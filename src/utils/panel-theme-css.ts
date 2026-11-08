@@ -9,13 +9,15 @@ import {
   PANEL_THEME_PX_PATTERN,
   PANEL_THEME_RGB_PATTERN,
   PET_STATUS_PROPERTIES,
+  PET_THEME_COLOR_PROPERTIES,
   type PanelThemeBackgroundState,
   type PanelThemeCatalogEntry,
   type PanelThemeCssProperty,
   type PanelThemeMode,
   type PanelThemePosition,
   type PanelThemeState,
-  type PetStatusThemeState,
+  type PetThemeModeState,
+  type PetThemeState,
 } from '../types/panel-theme.ts'
 
 // 渲染端、純函式：每個主機建構的名稱與值在進入 style.setProperty 之前
@@ -31,7 +33,6 @@ export interface PanelThemeMediaFlags {
 }
 
 const ALLOWED: ReadonlySet<string> = new Set(PANEL_THEME_CSS_PROPERTIES)
-const PET_STATUS_ALLOWED: ReadonlySet<string> = new Set(PET_STATUS_PROPERTIES)
 const COLOR_PROPERTIES: ReadonlySet<string> = new Set(PANEL_THEME_COLOR_PROPERTIES)
 const FAMILY_PROPERTIES: ReadonlySet<string> = new Set(PANEL_THEME_FAMILY_PROPERTIES)
 
@@ -167,14 +168,37 @@ export function panelThemeSettingsTarget(state: PanelThemeState | null): string 
   return state.themes[0]?.ref.pluginId ?? null
 }
 
-/** 只保留允許清單內、值為主機標準 rgb() 的名稱；其餘一律丟棄。 */
-export function petStatusTargetProperties(state: PetStatusThemeState | null, mode: 'light' | 'dark', forcedColors: boolean): Map<string, string> {
+function canonicalSet(source: unknown, names: readonly string[]): Map<string, string> | null {
+  if (!source || typeof source !== 'object') return null
+  const record = source as Record<string, unknown>
   const properties = new Map<string, string>()
-  const source = forcedColors ? null : state?.[mode]
-  if (!source || typeof source !== 'object') return properties
-  for (const [name, value] of Object.entries(source)) {
-    if (PET_STATUS_ALLOWED.has(name) && typeof value === 'string' && value.length <= 32 && PANEL_THEME_RGB_PATTERN.test(value)) properties.set(name, value)
+  for (const name of names) {
+    const value = record[name]
+    if (typeof value !== 'string' || value.length > 32 || !PANEL_THEME_RGB_PATTERN.test(value)) return null
+    properties.set(name, value)
   }
-  // 全有或全無：只設定一部分會在未經檢查的情況下混用主題色與內建色。
-  return properties.size === PET_STATUS_PROPERTIES.length ? properties : new Map()
+  // 多出允許清單以外的名稱代表內容不是主程序建構的：整組拒絕。
+  return Object.keys(record).length === names.length ? properties : null
+}
+
+/**
+ * 寵物視窗在 `mode` 下要設定的屬性：色盤子集（PET_THEME_COLOR_PROPERTIES）加上選填的
+ * 狀態膠囊顏色。每一組都是全有或全無、值必須是主機標準 rgb()；只設一部分會在未經
+ * 驗證的情況下混用主題色與內建色。forced colors 下為空。`highContrast` 時與面板相同，
+ * 以主題的文字色加強邊框。
+ */
+export function petThemeTargetProperties(state: PetThemeState | null, mode: PanelThemeMode, flags: PanelThemeMediaFlags): Map<string, string> {
+  const source: PetThemeModeState | null | undefined = flags.forcedColors ? null : state?.[mode]
+  const colors = canonicalSet(source?.colors, PET_THEME_COLOR_PROPERTIES)
+  if (!colors) return new Map()
+  const strong = flags.highContrast ? withAlpha(colors.get('--organic-text')!, '0.6') : null
+  const soft = flags.highContrast ? withAlpha(colors.get('--organic-text')!, '0.4') : null
+  if (strong && soft) colors.set('--organic-border', strong).set('--organic-border-soft', soft)
+  const status = source?.status == null ? new Map<string, string>() : canonicalSet(source.status, PET_STATUS_PROPERTIES)
+  return status ? new Map([...colors, ...status]) : colors
+}
+
+/** 主題預覽裡的膠囊：只取狀態膠囊顏色（全有或全無）。 */
+export function petStatusPreviewProperties(status: Record<string, string> | null | undefined): Map<string, string> {
+  return canonicalSet(status, PET_STATUS_PROPERTIES) ?? new Map()
 }

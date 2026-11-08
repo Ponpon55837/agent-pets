@@ -15,7 +15,7 @@ import {
 import { PanelThemeStore, PANEL_THEME_USER_IMAGE_FILE } from '../panel-theme-store.ts'
 import { panelThemePluginImageDirectory, removePluginImages, sweepOrphanUserImages, deleteUserImage } from '../panel-theme-images.ts'
 import type { PluginLocalizedText, PluginManifest } from '../../src/types/plugin.ts'
-import type { PanelThemeMode, PanelThemeState, PetStatusThemeState } from '../../src/types/panel-theme.ts'
+import { PET_THEME_COLOR_PROPERTIES, type PanelThemeMode, type PanelThemeState, type PetThemeModeState, type PetThemeState } from '../../src/types/panel-theme.ts'
 import type { PluginThemeSnapshot } from '../../src/types/plugin-theme.ts'
 import { buildPluginThemeSnapshot } from '../plugin-theme-tokens.ts'
 
@@ -57,7 +57,7 @@ export interface PanelThemeRuntimeOptions {
   /** 只把新狀態送給面板視窗。 */
   send(state: PanelThemeState): void
   /** 只把寵物狀態膠囊顏色送給寵物視窗。 */
-  sendPetStatus(state: PetStatusThemeState): void
+  sendPetStatus(state: PetThemeState): void
   /** 允許跨來源讀取字型的來源（受信任的面板渲染端）。 */
   rendererOrigin(): string | null
   /** 插件主題快照有變動時送給所有 Worker 與開啟中的 panelView（已合併、去重）。 */
@@ -92,7 +92,7 @@ export class PanelThemeRuntime {
   private tokens = new Map<string, TokenAsset>()
   private state: PanelThemeState = emptyPanelThemeState()
   private stateHash = ''
-  private petStatus: PetStatusThemeState = { light: null, dark: null }
+  private petStatus: PetThemeState = { light: null, dark: null }
   private petStatusHash = JSON.stringify({ light: null, dark: null })
   private installed = new Set<string>()
   private knownManifests = new Set<string>()
@@ -134,7 +134,7 @@ export class PanelThemeRuntime {
   }
 
   /** 各模式啟用中主題的膠囊顏色（null = 內建）。 */
-  getPetStatus(): PetStatusThemeState {
+  getPetStatus(): PetThemeState {
     return this.petStatus
   }
 
@@ -220,14 +220,18 @@ export class PanelThemeRuntime {
     this.options.send(state)
   }
 
+  /** 寵物視窗只收到它用得到的色盤子集與狀態膠囊顏色（spec §16.5）。 */
   private publishPetStatus(state: PanelThemeState): void {
-    const forMode = (mode: PanelThemeMode) => {
+    const forMode = (mode: PanelThemeMode): PetThemeModeState | null => {
       const slot = state.slots[mode]
       if (slot.status !== 'active' || !slot.ref) return null
       const entry = state.themes.find(theme => theme.ref.pluginId === slot.ref!.pluginId && theme.ref.themeId === slot.ref!.themeId)
-      return entry?.modes[mode]?.petStatus ? { ...entry.modes[mode]!.petStatus! } : null
+      const modeState = entry?.modes[mode]
+      if (!modeState) return null
+      const colors = Object.fromEntries(PET_THEME_COLOR_PROPERTIES.map(name => [name, modeState.properties[name]])) as PetThemeModeState['colors']
+      return { colors, status: modeState.petStatus ? { ...modeState.petStatus } : null }
     }
-    const next: PetStatusThemeState = { light: forMode('light'), dark: forMode('dark') }
+    const next: PetThemeState = { light: forMode('light'), dark: forMode('dark') }
     const hash = JSON.stringify(next)
     this.petStatus = next
     if (hash === this.petStatusHash) return
