@@ -79,6 +79,62 @@ export interface PluginPanelViewContribution {
   preferredSize?: { width: number; height: number }
 }
 
+export type PluginPanelThemeFit = 'cover' | 'contain' | 'tile'
+export type PluginPanelThemePosition =
+  | 'center' | 'top' | 'bottom' | 'left' | 'right'
+  | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
+export type PluginPanelThemeColorKey =
+  | 'bg' | 'surface' | 'surface2' | 'surfaceWarm' | 'surfaceSage' | 'surfaceSageSoft' | 'surfaceOff'
+  | 'text' | 'textSecondary' | 'textMuted' | 'textFaint'
+  | 'accent' | 'accentHover' | 'accentText' | 'onAccent' | 'accentGlow' | 'accentTrack' | 'accentOnHover'
+  | 'sage' | 'sageDeep' | 'sageDark' | 'sageTrack'
+  | 'border' | 'borderSoft' | 'borderOnAccent'
+  | 'dangerText' | 'successText' | 'warnText' | 'scrim'
+
+/** Normalised manifest colours: host-canonical `rgb(R G B / A)` strings (spec §3.3). */
+export type PluginPanelThemeColors = Partial<Record<PluginPanelThemeColorKey, string>>
+
+export interface PluginPanelThemeOverlay { color: string; opacity: number }
+
+export type PluginPanelThemeBackground =
+  | { type: 'solid' }
+  | { type: 'gradient'; kind: 'linear'; angle: number; stops: Array<{ color: string; at: number }> }
+  | { type: 'gradient'; kind: 'radial'; position: PluginPanelThemePosition; stops: Array<{ color: string; at: number }> }
+  | {
+      type: 'image'
+      src: string
+      fit: PluginPanelThemeFit
+      position: PluginPanelThemePosition
+      opacity: number
+      blur: number
+      overlay: PluginPanelThemeOverlay
+    }
+
+export interface PluginPanelThemeModeDefinition {
+  colors: PluginPanelThemeColors
+  background: PluginPanelThemeBackground
+  userImage?: { allowed: true; fit: PluginPanelThemeFit; overlay: PluginPanelThemeOverlay }
+}
+
+export interface PluginPanelThemeFontFace {
+  id: string
+  src: string
+  weight: 400 | 600 | 700
+  style: 'normal' | 'italic'
+}
+
+/** A validated `contributes.panelThemes[]` entry with defaults applied (electron/plugin-panel-themes.ts). */
+export interface PluginPanelThemeContribution {
+  id: string
+  displayName: PluginLocalizedText
+  description?: PluginLocalizedText
+  fonts: PluginPanelThemeFontFace[]
+  typography: { body?: string[]; heading?: string[]; scale: number }
+  shape: { radiusSm: number; radiusMd: number; radiusLg: number }
+  modes: Partial<Record<'light' | 'dark', PluginPanelThemeModeDefinition>>
+}
+
 /** One registry row owns the contribution identifier, implementation entry point, and public API mapping. */
 export const PLUGIN_CONTRIBUTION_REGISTRY = Object.freeze({
   feed: { implementationFile: 'electron/plugin-feed.ts', hostApi: 'feed.notify' },
@@ -90,6 +146,7 @@ export const PLUGIN_CONTRIBUTION_REGISTRY = Object.freeze({
   badge: { implementationFile: 'electron/plugin-badges.ts', hostApi: 'badge.set' },
   skins: { implementationFile: 'electron/plugin-skins.ts', hostApi: null, allowsWorkerlessPlugin: true },
   eventSource: { implementationFile: 'electron/plugin-event-source.ts', hostApi: 'agent.emit' },
+  panelThemes: { implementationFile: 'electron/plugin-panel-themes.ts', hostApi: null, allowsWorkerlessPlugin: true },
 } as const)
 
 export type PluginContributionId = keyof typeof PLUGIN_CONTRIBUTION_REGISTRY
@@ -104,6 +161,7 @@ export interface PluginContributionValueMap {
   badge: boolean
   skins: PluginSkinContribution[]
   eventSource: PluginEventSourceContribution
+  panelThemes: PluginPanelThemeContribution[]
 }
 
 type AssertPluginContributionKeysMatch<T extends true> = T
@@ -303,4 +361,7 @@ export interface PluginNotificationRecord {
   read: boolean
 }
 
-export type PluginPanelResult<T> = { ok: true; value: T } | { ok: false; error: import('./ipc').IpcErrorCode; cancelled?: boolean }
+export type PluginPanelResult<T> =
+  | { ok: true; value: T }
+  /** `diagnostic`: developer-mode install hint, sanitised and at most 200 characters. */
+  | { ok: false; error: import('./ipc').IpcErrorCode; cancelled?: boolean; diagnostic?: string }
