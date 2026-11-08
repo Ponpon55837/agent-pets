@@ -223,7 +223,7 @@ Both build commands first close project-owned Agent Pets processes. To check a c
 
 ## Versioning and release
 
-Bump `version` in `package.json` (patch by default; minor for a persistent-schema, public-contract or security-boundary change). When that commit lands on `main` and no `v<version>` tag exists, `.github/workflows/release.yml` runs the type check and unit tests, builds the macOS arm64 and x64 `.dmg` files and the Windows portable `.exe`, then creates the tag and a GitHub Release with generated notes. It can also be re-run from the Actions tab and skips versions that are already tagged. Builds are unsigned.
+Bump `version` in `package.json` (patch by default; minor for a persistent-schema, public-contract or security-boundary change). When that commit lands on `main` and no `v<version>` tag exists, `.github/workflows/release.yml` runs the type check and unit tests, builds the macOS arm64 and x64 `.dmg` files and the Windows portable `.exe`, then creates the tag and a GitHub Release with generated notes. It can also be re-run from the Actions tab and skips versions that are already tagged. Builds are unsigned. If electron-builder fails to download Electron or its tools from GitHub releases, the job retries twice through `scripts/release-asset-mirror.mjs`, a 127.0.0.1-only proxy that fetches the same release assets through the GitHub API; checksums are still verified by electron-builder.
 
 ## License
 
