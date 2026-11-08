@@ -201,10 +201,6 @@
   --organic-info-text: var(--ap-info, var(--builtin-organic-info-text));
   --organic-shadow: var(--ap-shadow, var(--builtin-organic-shadow));
   --organic-highlight: var(--ap-highlight, var(--builtin-organic-highlight));
-  --organic-panel-shadow: 0 12px 32px color-mix(in srgb, var(--organic-shadow) 32%, transparent);
-  --organic-card-shadow: 0 1px 2px color-mix(in srgb, var(--organic-shadow) 14%, transparent);
-  --organic-hero-shadow: 0 3px 10px color-mix(in srgb, var(--organic-shadow) 16%, transparent);
-  --organic-thumb-shadow: 0 1px 2px color-mix(in srgb, var(--organic-shadow) 24%, transparent);
 
 }
 
@@ -297,11 +293,58 @@
   --toggle-off: var(--organic-surface-off);
   --scrollbar-thumb: color-mix(in srgb, var(--color-text) 28%, transparent);
   --scrollbar-thumb-hover: color-mix(in srgb, var(--color-text) 45%, transparent);
+  --organic-panel-shadow: 0 12px 32px color-mix(in srgb, var(--color-shadow) var(--elevation-panel), transparent);
+  --organic-card-shadow: 0 1px 2px color-mix(in srgb, var(--color-shadow) var(--elevation-card), transparent);
+  --organic-hero-shadow: 0 3px 10px color-mix(in srgb, var(--color-shadow) var(--elevation-hero), transparent);
+  --organic-thumb-shadow: 0 1px 2px color-mix(in srgb, var(--color-shadow) var(--elevation-thumb), transparent);
   --shadow-raised: var(--organic-card-shadow);
   --shadow-hero: var(--organic-hero-shadow);
   --shadow-panel: var(--organic-panel-shadow);
   --toggle-thumb-shadow: var(--organic-thumb-shadow);
+}
+
+/* ── 陰影與高光強度（依模式）──────────────────────────────────────────────
+   同一個陰影色／高光色，依模式用不同比例（與 1.11.5 的內建外觀相同）：淺色的陰影淡、
+   玻璃高光亮；深色的陰影濃、高光只有一點，且寵物文字下有一道深色文字陰影。
+   宣告在 .panel-theme-preview[data-mode] 上：預覽要用「被預覽的模式」，而不是面板目前的
+   模式（上方與寵物區塊的組合 token 在預覽元素上重新解析）。 */
+:root,
+.panel-theme-preview[data-mode='light'] {
+  --elevation-panel: 32%;
+  --elevation-card: 14%;
+  --elevation-hero: 16%;
+  --elevation-thumb: 24%;
+  --pet-sheen-strength: 70%;
+  --pet-gloss-strength: 60%;
+  --pet-bubble-shadow-strength: 20%;
+  --pet-bubble-highlight-strength: 80%;
+  --pet-drag-shadow-strength: 28%;
+  --pet-status-shadow-strength: 16%;
+  --pet-status-highlight-strength: 80%;
+  --pet-tooltip-shadow-strength: 24%;
+  --pet-handle-shadow-strength: 22%;
+  --pet-handle-highlight-strength: 80%;
   --text-shadow-panel: none;
+}
+
+:root[data-theme='dark'],
+.panel-theme-preview[data-mode='dark'] {
+  --elevation-panel: 50%;
+  --elevation-card: 40%;
+  --elevation-hero: 40%;
+  --elevation-thumb: 50%;
+  --pet-sheen-strength: 10%;
+  --pet-gloss-strength: 8%;
+  --pet-bubble-shadow-strength: 34%;
+  --pet-bubble-highlight-strength: 14%;
+  --pet-drag-shadow-strength: 35%;
+  --pet-status-shadow-strength: 25%;
+  --pet-status-highlight-strength: 18%;
+  --pet-tooltip-shadow-strength: 38%;
+  --pet-handle-shadow-strength: 28%;
+  --pet-handle-highlight-strength: 12%;
+  /* 淺色文字浮在任意桌面上時的深色描邊（套用 petStatus 的膠囊不使用，見 DesktopPet.css）。 */
+  --text-shadow-panel: 0 1px 2px color-mix(in srgb, var(--color-shadow) 55%, transparent);
 }
 
 /* ── 面板視窗的字型與形狀 ────────────────────────────────────────────────
@@ -387,10 +430,12 @@
   --pet-bubble-surface: color-mix(in srgb, var(--color-surface) 93%, transparent);
   --pet-bubble-surface-opaque: var(--color-surface);
   --pet-bubble-border: var(--color-border-strong);
-  --pet-bubble-sheen: linear-gradient(155deg, color-mix(in srgb, var(--color-highlight) 40%, transparent), transparent 54%);
+  --pet-bubble-sheen: linear-gradient(155deg, color-mix(in srgb, var(--color-highlight) var(--pet-sheen-strength), transparent), transparent 54%);
+  /* 膠囊、提示與邊緣把手左上角的玻璃反光。 */
+  --pet-gloss: color-mix(in srgb, var(--color-highlight) var(--pet-gloss-strength), transparent);
   --pet-bubble-shadow:
-    0 6px 18px color-mix(in srgb, var(--color-shadow) 28%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--color-highlight) 40%, transparent);
+    0 6px 18px color-mix(in srgb, var(--color-shadow) var(--pet-bubble-shadow-strength), transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--color-highlight) var(--pet-bubble-highlight-strength), transparent);
   --pet-bubble-text: var(--color-text);
   --pet-bubble-success-text: var(--color-success);
   --pet-bubble-error-text: var(--color-danger);
@@ -402,7 +447,7 @@
   --pet-bubble-info-accent: var(--color-info);
   --pet-bubble-plugin-border: color-mix(in srgb, var(--organic-sage) 56%, transparent);
   --pet-bubble-plugin-text: var(--color-text);
-  --pet-drag-shadow: drop-shadow(0 10px 14px color-mix(in srgb, var(--color-shadow) 32%, transparent));
+  --pet-drag-shadow: drop-shadow(0 10px 14px color-mix(in srgb, var(--color-shadow) var(--pet-drag-shadow-strength), transparent));
   --organic-status-surface: color-mix(in srgb, var(--color-surface) 92%, transparent);
   --organic-status-surface-fallback: var(--color-surface);
   --organic-status-border: var(--color-border-strong);
@@ -415,9 +460,9 @@
   --organic-status-grid: color-mix(in srgb, var(--color-shadow) 42%, transparent);
   --organic-status-flash: color-mix(in srgb, var(--color-highlight) 92%, transparent);
   --organic-status-sheen: color-mix(in srgb, var(--color-highlight) 72%, transparent);
-  --organic-status-shadow: 0 2px 8px color-mix(in srgb, var(--color-shadow) 20%, transparent);
-  --organic-status-highlight: inset 0 1px 0 color-mix(in srgb, var(--color-highlight) 40%, transparent);
-  --organic-status-tooltip-shadow: 0 5px 16px color-mix(in srgb, var(--color-shadow) 30%, transparent);
+  --organic-status-shadow: 0 2px 8px color-mix(in srgb, var(--color-shadow) var(--pet-status-shadow-strength), transparent);
+  --organic-status-highlight: inset 0 1px 0 color-mix(in srgb, var(--color-highlight) var(--pet-status-highlight-strength), transparent);
+  --organic-status-tooltip-shadow: 0 5px 16px color-mix(in srgb, var(--color-shadow) var(--pet-tooltip-shadow-strength), transparent);
   /* 額度條：一般＝ sageDeep、Claude ＝ accentText、低額度＝警告色、危急＝危險色；
      驗證器保證四者在膠囊與軌道上 >= 3:1。 */
   --organic-quota-sage: var(--organic-sage-deep);
@@ -439,8 +484,8 @@
     inset 0 1px 0 color-mix(in srgb, var(--color-highlight) 18%, transparent);
   --shadow-raised: inset 0 1px 0 color-mix(in srgb, var(--color-highlight) 6%, transparent);
   --shadow-edge-handle:
-    0 4px 12px color-mix(in srgb, var(--color-shadow) 28%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--color-highlight) 40%, transparent);
+    0 4px 12px color-mix(in srgb, var(--color-shadow) var(--pet-handle-shadow-strength), transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--color-highlight) var(--pet-handle-highlight-strength), transparent);
   --focus-ring-offset: 1px;
 }
 
@@ -482,11 +527,6 @@
   --builtin-organic-scrim: rgba(0, 0, 0, 0.55);
   --builtin-organic-shadow: #000000;
   --builtin-organic-info-text: #9cc3f0;
-  /* 深色模式的陰影較濃（同一個陰影色，不同比例）。 */
-  --organic-panel-shadow: 0 12px 32px color-mix(in srgb, var(--organic-shadow) 50%, transparent);
-  --organic-card-shadow: 0 1px 2px color-mix(in srgb, var(--organic-shadow) 40%, transparent);
-  --organic-hero-shadow: 0 3px 10px color-mix(in srgb, var(--organic-shadow) 40%, transparent);
-  --organic-thumb-shadow: 0 1px 2px color-mix(in srgb, var(--organic-shadow) 50%, transparent);
   --builtin-organic-danger-text: #ff9a8a;
   --builtin-organic-success-text: #b6d48a;
   --builtin-organic-warn-text: #f0c866;

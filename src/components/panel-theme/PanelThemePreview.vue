@@ -36,6 +36,9 @@ const style = computed(() => {
   return result
 })
 
+// 套用 petStatus 的膠囊在寵物視窗不畫文字陰影（DesktopPet.css），預覽照做。
+const themedPill = computed(() => !props.forcedColors && Boolean(props.entry?.modes[props.mode]?.petStatus))
+
 const backdrop = computed<PanelThemeBackdropView | null>(() => {
   const modeState = props.entry?.modes[props.mode]
   if (!modeState || props.forcedColors) return null
@@ -51,7 +54,8 @@ const backdrop = computed<PanelThemeBackdropView | null>(() => {
 </script>
 
 <template>
-  <div class="panel-theme-preview" role="img" :aria-label="label" :style="style">
+  <!-- data-mode：陰影與高光強度依「被預覽的模式」解析（tokens.css），不是面板目前的模式。 -->
+  <div class="panel-theme-preview" role="img" :aria-label="label" :data-mode="mode" :style="style">
     <PanelThemeBackdrop :backdrop="backdrop" />
     <div class="preview-content" inert aria-hidden="true">
       <div class="preview-header">{{ t('design.panelTheme.previewTitle') }}</div>
@@ -66,7 +70,7 @@ const backdrop = computed<PanelThemeBackdropView | null>(() => {
         <span class="preview-button">{{ t('design.panelTheme.previewButton') }}</span>
       </div>
       <!-- 寵物的狀態膠囊（寵物唯一可套主題的介面）。 -->
-      <div class="preview-pill">
+      <div class="preview-pill" :class="{ themed: themedPill }">
         <span class="preview-pill-dot" />
         <span class="preview-pill-text">{{ t('design.panelTheme.previewPillAgent') }}<span class="preview-pill-sep">·</span>{{ t('design.panelTheme.previewPillState') }}</span>
         <span class="preview-pill-percent">62%</span>
@@ -115,6 +119,7 @@ const backdrop = computed<PanelThemeBackdropView | null>(() => {
   border: 1px solid var(--organic-border-soft);
   border-radius: var(--organic-radius-sm);
   background: var(--organic-surface);
+  box-shadow: var(--organic-card-shadow);
   font-size: var(--organic-font-body-sm);
 }
 
@@ -158,10 +163,18 @@ const backdrop = computed<PanelThemeBackdropView | null>(() => {
   padding: 2px var(--space-2) 5px;
   border: 1px solid var(--pet-status-border, var(--organic-status-border));
   border-radius: var(--organic-status-radius);
-  background: var(--pet-status-background, var(--organic-status-surface-fallback));
+  background:
+    linear-gradient(160deg, var(--pet-gloss) 0%, transparent 55%),
+    var(--pet-status-background, var(--organic-status-surface-fallback));
+  box-shadow: var(--organic-status-shadow), var(--organic-status-highlight);
   color: var(--pet-status-text, var(--organic-status-text));
+  text-shadow: var(--text-shadow-panel);
   font-size: var(--font-xs);
   white-space: nowrap;
+}
+
+.preview-pill.themed {
+  text-shadow: none;
 }
 
 .preview-pill-dot {

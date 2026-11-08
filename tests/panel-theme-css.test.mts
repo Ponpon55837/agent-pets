@@ -136,3 +136,26 @@ test('the permission card keeps its text on the overlay surface, never on the ac
   assert.match(rule, /color: var\(--text-primary\);/)
   assert.doesNotMatch(card, /opacity: 0\.\d/)
 })
+
+test('previews resolve shadow and sheen strengths from the previewed mode, and the strengths match the 1.11.5 look', () => {
+  const css = readFileSync('src/styles/tokens.css', 'utf8')
+  const block = (selector: string) => {
+    const start = css.indexOf(`${selector} {`)
+    assert.ok(start >= 0, selector)
+    return css.slice(start, css.indexOf('\n}', start))
+  }
+  const strengths = (source: string) => Object.fromEntries([...source.matchAll(/^ {2}(--(?:elevation|pet)-[a-z-]+): (\d+%);$/gm)].map(match => [match[1], match[2]]))
+  const light = strengths(block(":root,\n.panel-theme-preview[data-mode='light']"))
+  const dark = strengths(block(":root[data-theme='dark'],\n.panel-theme-preview[data-mode='dark']"))
+  assert.deepEqual(Object.keys(light).sort(), Object.keys(dark).sort())
+  assert.equal(Object.keys(light).length, 14)
+  // 1.11.5：深色泡泡高光 10%、膠囊陰影 25%；淺色泡泡高光 70%、膠囊陰影 16%。
+  assert.deepEqual([light['--pet-sheen-strength'], dark['--pet-sheen-strength']], ['70%', '10%'])
+  assert.deepEqual([light['--pet-status-shadow-strength'], dark['--pet-status-shadow-strength']], ['16%', '25%'])
+  assert.match(block(":root[data-theme='dark'],\n.panel-theme-preview[data-mode='dark']"), /--text-shadow-panel: 0 1px 2px color-mix\(in srgb, var\(--color-shadow\) 55%, transparent\);/)
+  // 組合 token 宣告在預覽元素上（否則會繼承面板模式已代換好的值）。
+  const semantic = block(':root,\n.panel-theme-preview')
+  for (const name of ['--organic-card-shadow', '--organic-panel-shadow', '--shadow-raised']) assert.match(semantic, new RegExp(`^ {2}${name}:`, 'm'), name)
+  assert.doesNotMatch(block(':root'), /--organic-card-shadow:/)
+  assert.match(readFileSync('src/components/panel-theme/PanelThemePreview.vue', 'utf8'), /class="panel-theme-preview"[^>]*:data-mode="mode"/)
+})
