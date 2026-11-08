@@ -24,52 +24,56 @@ export function panelThemeContentHash(declared: unknown): string {
   return createHash('sha256').update(canonicalJson(declared), 'utf8').digest('hex')
 }
 
-export class PanelThemeResolveCache {
-  private readonly entries = new Map<string, ResolvedPanelTheme[] | null>()
+/**
+ * 以內容雜湊為鍵、有上限的 LRU：同樣的內容（不論屬性順序）只計算一次。插件主題的解析結果與
+ * 主題編輯器的驗證診斷共用這個實作（spec R17、R20）。
+ */
+export class ContentHashCache<T> {
+  private readonly entries = new Map<string, T>()
   // 同一份 manifest 物件在多次 sync 之間不變：記住它的雜湊，不必每次重新序列化。
   private readonly hashes = new WeakMap<object, string>()
   private readonly maxEntries: number
-  private readonly resolve: Resolve
+  private readonly compute: (value: unknown) => T
   private hitCount = 0
   private missCount = 0
 
-  constructor(options: { maxEntries?: number; resolve?: Resolve } = {}) {
-    this.maxEntries = Math.max(1, options.maxEntries ?? PANEL_THEME_CACHE_MAX_ENTRIES)
-    this.resolve = options.resolve ?? resolvePanelThemes
+  constructor(compute: (value: unknown) => T, maxEntries = PANEL_THEME_CACHE_MAX_ENTRIES) {
+    this.maxEntries = Math.max(1, maxEntries)
+    this.compute = compute
   }
 
-  keyOf(declared: unknown): string {
-    if (!declared || typeof declared !== 'object') return panelThemeContentHash(declared)
-    const known = this.hashes.get(declared)
+  keyOf(value: unknown): string {
+    if (!value || typeof value !== 'object') return panelThemeContentHash(value)
+    const known = this.hashes.get(value)
     if (known) return known
-    const hash = panelThemeContentHash(declared)
-    this.hashes.set(declared, hash)
+    const hash = panelThemeContentHash(value)
+    this.hashes.set(value, hash)
     return hash
   }
 
-  /** 回傳解析結果與它的鍵；未命中時驗證一次並存入（最近使用的排在最後）。 */
-  get(declared: unknown): { key: string; themes: ResolvedPanelTheme[] | null } {
-    const key = this.keyOf(declared)
+  /** 回傳結果與它的鍵；未命中時計算一次並存入（最近使用的排在最後）。 */
+  lookup(value: unknown): { key: string; result: T } {
+    const key = this.keyOf(value)
     if (this.entries.has(key)) {
-      const themes = this.entries.get(key)!
+      const result = this.entries.get(key)!
       this.entries.delete(key)
-      this.entries.set(key, themes)
+      this.entries.set(key, result)
       this.hitCount += 1
-      return { key, themes }
+      return { key, result }
     }
     this.missCount += 1
-    const themes = this.resolve(declared)
-    this.entries.set(key, themes)
+    const result = this.compute(value)
+    this.entries.set(key, result)
     while (this.entries.size > this.maxEntries) this.entries.delete(this.entries.keys().next().value!)
-    return { key, themes }
+    return { key, result }
   }
 
-  /** 只依鍵取值（插件暫時沒有 manifest 時沿用最後一次的結果），不改變使用順序。 */
-  peek(key: string): ResolvedPanelTheme[] | null | undefined {
+  /** 只依鍵取值，不改變使用順序。 */
+  peek(key: string): T | undefined {
     return this.entries.get(key)
   }
 
-  /** 丟掉不在 `live` 裡的項目（插件移除或更新成不同內容後）。 */
+  /** 丟掉不在 `live` 裡的項目。 */
   retain(live: ReadonlySet<string>): void {
     for (const key of [...this.entries.keys()]) if (!live.has(key)) this.entries.delete(key)
   }
@@ -80,5 +84,17 @@ export class PanelThemeResolveCache {
 
   get stats(): { hits: number; misses: number } {
     return { hits: this.hitCount, misses: this.missCount }
+  }
+}
+
+/** 解析後插件主題的快取；插件暫時沒有 manifest 時以 `peek` 沿用最後一次的結果。 */
+export class PanelThemeResolveCache extends ContentHashCache<ResolvedPanelTheme[] | null> {
+  constructor(options: { maxEntries?: number; resolve?: Resolve } = {}) {
+    super(options.resolve ?? resolvePanelThemes, options.maxEntries)
+  }
+
+  get(declared: unknown): { key: string; themes: ResolvedPanelTheme[] | null } {
+    const { key, result } = this.lookup(declared)
+    return { key, themes: result }
   }
 }

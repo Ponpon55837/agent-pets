@@ -475,14 +475,39 @@ interface ContrastFailure {
   blame?: string
 }
 
-function firstBackdropFailure(colors: ColorSet, backdrops: readonly Backdrop[]): ContrastFailure | null {
+export type PanelThemeIssueKind = 'alpha' | 'direction' | 'luminance' | 'chroma' | 'hue' | 'distance' | 'contrast' | 'overlay'
+
+/**
+ * 一個語意問題。`path` 相對於模式（`colors.textMuted`、`petStatus.text`、`background.overlay.opacity`、
+ * `userImage.overlay.opacity`）；`problem` 與 manifest 診斷的文字相同。只含主機已知的名稱與數字。
+ */
+export interface PanelThemeIssue {
+  path: string
+  kind: PanelThemeIssueKind
+  problem: string
+  foreground?: string
+  background?: string
+  measured?: number
+  required?: number
+}
+
+function* backdropFailures(colors: ColorSet, backdrops: readonly Backdrop[]): Generator<ContrastFailure> {
   for (const backdrop of backdrops) {
     for (const [key, minimum] of BACKDROP_PAIRS) {
       const ratio = contrastRatio(colors[key], backdrop.color)
-      if (!(ratio >= minimum)) return { foreground: key, background: backdrop.name, ratio, minimum }
+      if (!(ratio >= minimum)) yield { foreground: key, background: backdrop.name, ratio, minimum }
     }
   }
+}
+
+/** 產生器的第一個值；驗證器只需要第一個違規，編輯器的診斷則會走完全部。 */
+function firstOf<T>(values: Iterable<T>): T | null {
+  for (const value of values) return value
   return null
+}
+
+function firstBackdropFailure(colors: ColorSet, backdrops: readonly Backdrop[]): ContrastFailure | null {
+  return firstOf(backdropFailures(colors, backdrops))
 }
 
 // 狀態色必須維持語意：危險是紅、成功是綠、警告是琥珀、資訊是藍（OKLCH 色相區間與最低色度），
@@ -503,12 +528,22 @@ export const PANEL_THEME_STATE_MIN_DISTANCE = 0.08
  */
 export const PANEL_THEME_STATE_ACCENT_MIN_DISTANCE = 0.06
 
-function stateMeaningFailure(colors: ColorSet): { key: string; problem: string } | null {
+interface StateMeaningIssue {
+  key: PluginPanelThemeColorKey
+  kind: 'chroma' | 'hue' | 'distance'
+  problem: string
+  measured: number
+  required: number
+  other?: PluginPanelThemeColorKey
+}
+
+function* stateMeaningIssues(colors: ColorSet): Generator<StateMeaningIssue> {
   for (const [key, ranges] of Object.entries(PANEL_THEME_STATE_HUES) as Array<[keyof typeof PANEL_THEME_STATE_HUES, readonly HueRange[]]>) {
     const { c, h } = rgbToOklch(colors[key])
-    if (c < PANEL_THEME_STATE_MIN_CHROMA) return { key, problem: `chroma ${c.toFixed(3)} < ${PANEL_THEME_STATE_MIN_CHROMA} (too grey to read as a state colour)` }
-    if (!ranges.some(([from, to]) => h >= from && h <= to)) {
-      return { key, problem: `OKLCH hue ${Math.round(h)}° is outside ${ranges.map(([from, to]) => `${from}–${to}°`).join(' or ')}` }
+    if (c < PANEL_THEME_STATE_MIN_CHROMA) {
+      yield { key, kind: 'chroma', measured: c, required: PANEL_THEME_STATE_MIN_CHROMA, problem: `chroma ${c.toFixed(3)} < ${PANEL_THEME_STATE_MIN_CHROMA} (too grey to read as a state colour)` }
+    } else if (!ranges.some(([from, to]) => h >= from && h <= to)) {
+      yield { key, kind: 'hue', measured: h, required: ranges[0]![0], problem: `OKLCH hue ${Math.round(h)}° is outside ${ranges.map(([from, to]) => `${from}–${to}°`).join(' or ')}` }
     }
   }
   const pairs: Array<[PluginPanelThemeColorKey, PluginPanelThemeColorKey, number]> = [
@@ -525,9 +560,8 @@ function stateMeaningFailure(colors: ColorSet): { key: string; problem: string }
   ]
   for (const [first, second, minimum] of pairs) {
     const distance = oklabDistance(colors[first], colors[second])
-    if (distance < minimum) return { key: first, problem: `OKLab ΔE ${distance.toFixed(3)} to ${second} < ${minimum}` }
+    if (distance < minimum) yield { key: first, kind: 'distance', other: second, measured: distance, required: minimum, problem: `OKLab ΔE ${distance.toFixed(3)} to ${second} < ${minimum}` }
   }
-  return null
 }
 
 // ── 主機強制的不變量（spec R14）──────────────────────────────────────
@@ -612,6 +646,11 @@ function themeSurfaces(colors: ColorSet): Surface[] {
 
 /** 依固定順序找出第一個不符合的配對；同一組輸入一定得到同一個診斷。 */
 export function panelThemeInvariantFailure(colors: ColorSet): ContrastFailure | null {
+  return firstOf(panelThemeInvariantFailures(colors))
+}
+
+/** 依固定順序列出所有不符合的配對（第一個就是 panelThemeInvariantFailure 的結果）。 */
+export function* panelThemeInvariantFailures(colors: ColorSet): Generator<ContrastFailure> {
   const check = (foreground: PanelThemeRgba, background: PanelThemeRgba, minimum: number, names: { foreground: string; background: string; blame?: string }): ContrastFailure | null => {
     const ratio = contrastRatio(foreground, background)
     return ratio >= minimum ? null : { ...names, ratio, minimum }
@@ -621,21 +660,22 @@ export function panelThemeInvariantFailure(colors: ColorSet): ContrastFailure | 
     const blame = surface.blame
     for (const key of surface.text) {
       const failure = check(colors[key], surface.color, 4.5, { foreground: key, background: surface.name, ...(blame ? { blame } : {}) })
-      if (failure) return failure
+      if (failure) yield failure
     }
     // 焦點環不會畫在狀態晶片上（晶片不可聚焦）。
     const focus = surface.focus
       ? check(colors.accentText, surface.color, 3, { foreground: 'accentText', background: `${surface.name} (focus ring)`, ...(blame ? { blame } : {}) })
       : null
-    if (focus) return focus
+    if (focus) yield focus
     if (surface.pill) {
       // 膠囊的額度條：一般（sageDeep）、Claude（accentText）、低額度（warnText）、危急（dangerText），
       // 在膠囊上與疊在額度軌道上都要 >= 3:1。
       const track = compositeColor(withAlphaUnrounded(colors.text, PET_PILL_TRACK_ALPHA), surface.color)
       for (const key of ['sageDeep', 'accentText', 'warnText', 'dangerText'] as const) {
-        const failure = check(colors[key], surface.color, 3, { foreground: key, background: `${surface.name} (quota fill)` })
-          ?? check(colors[key], track, 3, { foreground: key, background: `the quota track on the ${surface.name}` })
-        if (failure) return failure
+        const onPill = check(colors[key], surface.color, 3, { foreground: key, background: `${surface.name} (quota fill)` })
+        if (onPill) yield onPill
+        const onTrack = check(colors[key], track, 3, { foreground: key, background: `the quota track on the ${surface.name}` })
+        if (onTrack) yield onTrack
       }
     }
   }
@@ -656,9 +696,8 @@ export function panelThemeInvariantFailure(colors: ColorSet): ContrastFailure | 
   ]
   for (const [key, background, minimum, name] of pairs) {
     const failure = check(colors[key], background, minimum, { foreground: key, background: name })
-    if (failure) return failure
+    if (failure) yield failure
   }
-  return null
 }
 
 function imageBackdrops(colors: ColorSet, overlay: PanelThemeRgba, overlayOpacity: number, imageOpacity: number, label: string): Backdrop[] {
@@ -691,20 +730,20 @@ export function minimumPanelThemeOverlay(colors: ColorSet, overlay: PanelThemeRg
   return minimum
 }
 
-/** 驗證宣告的覆蓋層並回傳最小值；診斷訊息會指出未通過的配對。 */
-function checkOverlay(colors: ColorSet, overlay: { color: PanelThemeRgba; opacity: number }, imageOpacity: number, path: string, label: string): number {
+/** 覆蓋層的問題（沒有任何不透明度能通過，或宣告值低於最小值）；通過時為 null。 */
+function overlayIssue(colors: ColorSet, overlay: { color: PanelThemeRgba; opacity: number }, imageOpacity: number, path: string, label: string): PanelThemeIssue | null {
   const minimum = minimumPanelThemeOverlay(colors, overlay.color, imageOpacity)
   const probe = minimum === null ? PANEL_THEME_OVERLAY_CEILING : overlay.opacity
   const failure = firstBackdropFailure(colors, imageBackdrops(colors, overlay.color, probe, imageOpacity, label))
   if (minimum === null) {
     const detail = failure ? `${failure.foreground} ${ratioText(failure.ratio)}:1 < ${failure.minimum}:1 on ${failure.background}` : 'text unreadable'
-    fail(`${path}.opacity`, `no overlay up to 0.95 passes (${detail} at 0.95); change the overlay colour or text colours`)
+    return { path: `${path}.opacity`, kind: 'overlay', problem: `no overlay up to 0.95 passes (${detail} at 0.95); change the overlay colour or text colours`, measured: overlay.opacity }
   }
   if (overlay.opacity < minimum) {
     const detail = failure ? `; ${failure.foreground} ${ratioText(failure.ratio)}:1 < ${failure.minimum}:1 on ${failure.background}` : ''
-    fail(`${path}.opacity`, `${overlay.opacity} < minimum ${minimum.toFixed(2)}${detail}`)
+    return { path: `${path}.opacity`, kind: 'overlay', problem: `${overlay.opacity} < minimum ${minimum.toFixed(2)}${detail}`, measured: overlay.opacity, required: minimum }
   }
-  return minimum
+  return null
 }
 
 function parseOverlay(value: unknown, path: string): { color: PanelThemeRgba; opacity: number } {
@@ -777,9 +816,75 @@ function gradientBackdrops(stops: ReadonlyArray<{ color: PanelThemeRgba }>): Bac
   return backdrops
 }
 
-function failContrast(path: string, failure: ContrastFailure): never {
+function contrastIssue(failure: ContrastFailure): PanelThemeIssue {
   const subject = failure.blame ? `${failure.foreground} ${ratioText(failure.ratio)}:1` : `${ratioText(failure.ratio)}:1`
-  fail(`${path}.colors.${failure.blame ?? failure.foreground}`, `${subject} < ${failure.minimum}:1 on ${failure.background}`)
+  return {
+    path: `colors.${failure.blame ?? failure.foreground}`,
+    kind: 'contrast',
+    problem: `${subject} < ${failure.minimum}:1 on ${failure.background}`,
+    foreground: failure.foreground,
+    background: failure.background,
+    measured: failure.ratio,
+    required: failure.minimum,
+  }
+}
+
+/** 一個模式在文法檢查之後要判斷的內容（全部是已解析、已推導的值）。 */
+export interface PanelThemeModeCheckInput {
+  mode: PanelThemeMode
+  colors: ColorSet
+  background: ResolvedPanelThemeBackground
+  userImageOverlay?: { color: PanelThemeRgba; opacity: number }
+  petStatus?: Record<PetStatusColorKey, PanelThemeRgba>
+}
+
+/**
+ * 依驗證器的固定順序列出一個模式的所有語意問題（alpha、明暗方向、陰影／高光、狀態色語意、
+ * 不變量、背景、覆蓋層、寵物膠囊）。驗證器取第一個；主題編輯器的診斷走完全部，
+ * 所以兩者對「哪裡錯」的判斷永遠一致。
+ */
+export function* panelThemeModeIssues(input: PanelThemeModeCheckInput): Generator<PanelThemeIssue> {
+  const { mode, colors, background } = input
+  for (const token of PANEL_THEME_COLOR_TOKENS) {
+    const [min, max] = ALPHA_RANGES[token.alpha]
+    const alpha = colors[token.key].a
+    if (alpha < min || alpha > max) {
+      yield { path: `colors.${token.key}`, kind: 'alpha', problem: token.alpha === 'opaque' ? 'must be opaque' : `alpha must be ${min}-${max}`, measured: alpha, required: min }
+    }
+  }
+  const bgLuminance = relativeLuminance(colors.bg)
+  const textLuminance = relativeLuminance(colors.text)
+  if (mode === 'light' && !(textLuminance < bgLuminance && bgLuminance >= 0.45)) {
+    yield { path: 'colors.bg', kind: 'direction', problem: 'light mode needs a light bg (luminance >= 0.45) and darker text', measured: bgLuminance, required: 0.45 }
+  }
+  if (mode === 'dark' && !(textLuminance > bgLuminance && bgLuminance <= 0.12)) {
+    yield { path: 'colors.bg', kind: 'direction', problem: 'dark mode needs a dark bg (luminance <= 0.12) and lighter text', measured: bgLuminance, required: 0.12 }
+  }
+  const shadowLuminance = relativeLuminance(colors.shadow)
+  if (shadowLuminance > PANEL_THEME_SHADOW_MAX_LUMINANCE) {
+    yield { path: 'colors.shadow', kind: 'luminance', problem: `luminance ${shadowLuminance.toFixed(3)} > ${PANEL_THEME_SHADOW_MAX_LUMINANCE} (a shadow must be dark)`, measured: shadowLuminance, required: PANEL_THEME_SHADOW_MAX_LUMINANCE }
+  }
+  const highlightLuminance = relativeLuminance(colors.highlight)
+  if (highlightLuminance < PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE) {
+    yield { path: 'colors.highlight', kind: 'luminance', problem: `luminance ${highlightLuminance.toFixed(3)} < ${PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE} (a highlight must be light)`, measured: highlightLuminance, required: PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE }
+  }
+  for (const issue of stateMeaningIssues(colors)) {
+    yield { path: `colors.${issue.key}`, kind: issue.kind, problem: issue.problem, measured: issue.measured, required: issue.required, ...(issue.other ? { background: issue.other } : {}) }
+  }
+  for (const failure of panelThemeInvariantFailures(colors)) yield contrastIssue(failure)
+  const backdrops: Backdrop[] = [{ name: 'bg', color: colors.bg }]
+  if (background.type === 'gradient') backdrops.push(...gradientBackdrops(background.stops))
+  for (const failure of backdropFailures(colors, backdrops)) yield contrastIssue(failure)
+  // 圖片背景：以最小覆蓋層檢查，讓診斷訊息可據以修正。
+  if (background.type === 'image') {
+    const issue = overlayIssue(colors, background.overlay, background.opacity, 'background.overlay', 'a black/white image pixel')
+    if (issue) yield issue
+  }
+  if (input.userImageOverlay) {
+    const issue = overlayIssue(colors, input.userImageOverlay, 1, 'userImage.overlay', 'a black/white image pixel')
+    if (issue) yield issue
+  }
+  if (input.petStatus) yield* petStatusIssues(input.petStatus)
 }
 
 function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contribution: PluginPanelThemeModeDefinition; resolved: ResolvedPanelThemeMode } {
@@ -804,57 +909,20 @@ function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contri
     if (token.kind === 'required' && !declared[token.key]) fail(`${path}.colors.${token.key}`, 'is required')
   }
   const colors = derivePanelThemeColors(declared, mode)
-  for (const token of PANEL_THEME_COLOR_TOKENS) {
-    const [min, max] = ALPHA_RANGES[token.alpha]
-    const alpha = colors[token.key].a
-    if (alpha < min || alpha > max) {
-      fail(`${path}.colors.${token.key}`, token.alpha === 'opaque' ? 'must be opaque' : `alpha must be ${min}-${max}`)
-    }
-  }
-
-  const bgLuminance = relativeLuminance(colors.bg)
-  const textLuminance = relativeLuminance(colors.text)
-  if (mode === 'light' && !(textLuminance < bgLuminance && bgLuminance >= 0.45)) {
-    fail(`${path}.colors.bg`, 'light mode needs a light bg (luminance >= 0.45) and darker text')
-  }
-  if (mode === 'dark' && !(textLuminance > bgLuminance && bgLuminance <= 0.12)) {
-    fail(`${path}.colors.bg`, 'dark mode needs a dark bg (luminance <= 0.12) and lighter text')
-  }
-  const shadowLuminance = relativeLuminance(colors.shadow)
-  if (shadowLuminance > PANEL_THEME_SHADOW_MAX_LUMINANCE) {
-    fail(`${path}.colors.shadow`, `luminance ${shadowLuminance.toFixed(3)} > ${PANEL_THEME_SHADOW_MAX_LUMINANCE} (a shadow must be dark)`)
-  }
-  const highlightLuminance = relativeLuminance(colors.highlight)
-  if (highlightLuminance < PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE) {
-    fail(`${path}.colors.highlight`, `luminance ${highlightLuminance.toFixed(3)} < ${PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE} (a highlight must be light)`)
-  }
-
   const background = parseBackground(value.background, `${path}.background`)
-  const backdrops: Backdrop[] = [{ name: 'bg', color: colors.bg }]
-  if (background.type === 'gradient') backdrops.push(...gradientBackdrops(background.stops))
-  const meaningFailure = stateMeaningFailure(colors)
-  if (meaningFailure) fail(`${path}.colors.${meaningFailure.key}`, meaningFailure.problem)
-  const invariantFailure = panelThemeInvariantFailure(colors)
-  if (invariantFailure) failContrast(path, invariantFailure)
-  const backdropFailure = firstBackdropFailure(colors, backdrops)
-  if (backdropFailure) failContrast(path, backdropFailure)
-  // 圖片背景：以最小覆蓋層檢查，讓診斷訊息可據以修正。
-  if (background.type === 'image') {
-    checkOverlay(colors, background.overlay, background.opacity, `${path}.background.overlay`, 'a black/white image pixel')
-  }
 
   let userImage: ResolvedPanelThemeMode['userImage']
   let userImageContribution: PluginPanelThemeModeDefinition['userImage']
+  let userImageOverlay: { color: PanelThemeRgba; opacity: number } | undefined
   if (value.userImage !== undefined) {
     const userPath = `${path}.userImage`
     if (!isRecord(value.userImage)) fail(userPath, 'must be an object')
     assertKeys(value.userImage, ['allowed', 'fit', 'overlay'], userPath)
     if (value.userImage.allowed !== true) fail(`${userPath}.allowed`, 'must be true')
     const fit = enumOf<PluginPanelThemeFit>(value.userImage.fit, FITS, 'cover', `${userPath}.fit`)
-    const overlay = parseOverlay(value.userImage.overlay, `${userPath}.overlay`)
-    const minimum = checkOverlay(colors, overlay, 1, `${userPath}.overlay`, 'a black/white image pixel')
-    userImage = { fit, overlayColor: overlay.color, defaultDim: overlay.opacity, minDim: minimum }
-    userImageContribution = { allowed: true, fit, overlay: { color: formatPanelThemeColor(overlay.color), opacity: overlay.opacity } }
+    userImageOverlay = parseOverlay(value.userImage.overlay, `${userPath}.overlay`)
+    userImageContribution = { allowed: true, fit, overlay: { color: formatPanelThemeColor(userImageOverlay.color), opacity: userImageOverlay.opacity } }
+    userImage = { fit, overlayColor: userImageOverlay.color, defaultDim: userImageOverlay.opacity, minDim: PANEL_THEME_OVERLAY_FLOOR }
   }
 
   let petStatus: Record<PetStatusColorKey, PanelThemeRgba> | undefined
@@ -863,6 +931,13 @@ function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contri
     const parsed = parsePetStatus(value.petStatus, colors, `${path}.petStatus`)
     petStatus = parsed.resolved
     petStatusContribution = parsed.contribution
+  }
+
+  const issue = firstOf(panelThemeModeIssues({ mode, colors, background, ...(userImageOverlay ? { userImageOverlay } : {}), ...(petStatus ? { petStatus } : {}) }))
+  if (issue) fail(`${path}.${issue.path}`, issue.problem)
+  if (userImage && userImageOverlay) {
+    // 上面已確認存在且不高於宣告值。
+    userImage.minDim = minimumPanelThemeOverlay(colors, userImageOverlay.color, 1)!
   }
 
   const contributionColors: PluginPanelThemeColors = {}
@@ -923,22 +998,14 @@ function petStatusBackdrops(background: PanelThemeRgba): Backdrop[] {
   }))
 }
 
-function parsePetStatus(value: unknown, modeColors: ColorSet, path: string) {
-  if (!isRecord(value)) fail(path, 'must be an object')
-  assertKeys(value, PET_STATUS_KEYS, path)
-  const declared: Partial<Record<PetStatusColorKey, PanelThemeRgba>> = {}
-  for (const token of PET_STATUS_TOKENS) {
-    if (value[token.key] === undefined) {
-      if (token.required) fail(`${path}.${token.key}`, 'is required')
-      continue
-    }
-    declared[token.key] = colorAt(value[token.key], `${path}.${token.key}`)
-  }
-  const resolved = derivePetStatusColors(declared as Parameters<typeof derivePetStatusColors>[0], modeColors)
+/** 膠囊的 alpha 與對比問題（疊在黑色與白色桌面上）。 */
+function* petStatusIssues(resolved: Record<PetStatusColorKey, PanelThemeRgba>): Generator<PanelThemeIssue> {
   for (const token of PET_STATUS_TOKENS) {
     const [min, max] = token.alpha
     const alpha = resolved[token.key].a
-    if (alpha < min || alpha > max) fail(`${path}.${token.key}`, min === 1 ? 'must be opaque' : `alpha must be ${min}-${max}`)
+    if (alpha < min || alpha > max) {
+      yield { path: `petStatus.${token.key}`, kind: 'alpha', problem: min === 1 ? 'must be opaque' : `alpha must be ${min}-${max}`, measured: alpha, required: min }
+    }
   }
   for (const backdrop of petStatusBackdrops(resolved.background)) {
     const track = compositeColor(resolved.quotaTrack, backdrop.color)
@@ -952,9 +1019,25 @@ function parsePetStatus(value: unknown, modeColors: ColorSet, path: string) {
     ]
     for (const [key, background, name, minimum] of pairs) {
       const ratio = contrastRatio(resolved[key], background)
-      if (!(ratio >= minimum)) fail(`${path}.${key}`, `${ratioText(ratio)}:1 < ${minimum}:1 on ${name}`)
+      if (!(ratio >= minimum)) {
+        yield { path: `petStatus.${key}`, kind: 'contrast', problem: `${ratioText(ratio)}:1 < ${minimum}:1 on ${name}`, foreground: key, background: name, measured: ratio, required: minimum }
+      }
     }
   }
+}
+
+function parsePetStatus(value: unknown, modeColors: ColorSet, path: string) {
+  if (!isRecord(value)) fail(path, 'must be an object')
+  assertKeys(value, PET_STATUS_KEYS, path)
+  const declared: Partial<Record<PetStatusColorKey, PanelThemeRgba>> = {}
+  for (const token of PET_STATUS_TOKENS) {
+    if (value[token.key] === undefined) {
+      if (token.required) fail(`${path}.${token.key}`, 'is required')
+      continue
+    }
+    declared[token.key] = colorAt(value[token.key], `${path}.${token.key}`)
+  }
+  const resolved = derivePetStatusColors(declared as Parameters<typeof derivePetStatusColors>[0], modeColors)
   const contribution: Partial<Record<PetStatusColorKey, string>> = {}
   for (const [key, color] of Object.entries(declared)) contribution[key as PetStatusColorKey] = formatPanelThemeColor(color)
   return { resolved, contribution }
