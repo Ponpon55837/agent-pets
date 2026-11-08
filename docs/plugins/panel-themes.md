@@ -62,6 +62,45 @@ Omitted optional colours are derived deterministically (spec §3.5, §3.7). `acc
 
 Permission and risk prompts, the plugin install sheet, plugin content frames, confirmation dialogs, the server health banner and the theme controls themselves always use the built-in palette. In the pet window only the status pill takes theme colours; bubbles, the permission bubble, state dots, completion markers, badges and the sprite never do. The critical (< 20%) quota colour stays built-in.
 
+## Reading the theme in your plugin (`--ap-*`, Host API `theme`)
+
+Any plugin can follow the theme the user is looking at; this needs no permission and no `panelThemes` contribution. The values are the active theme for the panel's current light/dark mode, or the built-in palette when no theme is active, the theme plugin is disabled, the mode has no theme, or Windows high-contrast (`forced-colors`) is on.
+
+- **Panel pages**: the host writes every `--ap-*` property on the page's `<html>` element before your scripts run and updates them live when the theme or mode changes. Use `var(--ap-surface, #292420)` with your own fallback for standalone previews.
+- **Worker and panel page**: `api.theme.get()` returns `{ apiVersion: 1, mode: 'light' | 'dark', tokens }`; `api.theme.onDidChange(callback)` returns an unsubscribe function. Change events are coalesced (one event per 100 ms burst, never a duplicate of the previous snapshot). Each callback receives its own frozen copy.
+
+| Token | Meaning | Guarantee (validated per mode) |
+| --- | --- | --- |
+| `--ap-bg` | Page background | Opaque |
+| `--ap-surface`, `--ap-surface-2` | Raised surfaces (cards, inputs) | Opaque |
+| `--ap-text`, `--ap-text-secondary`, `--ap-text-muted` | Text levels | ≥ 4.5:1 on `bg`, `surface`, `surface-2` |
+| `--ap-accent` | Accent fill (primary button) | ≥ 3:1 on `bg` |
+| `--ap-accent-hover` | Accent fill on hover/press | `on-accent` ≥ 4.5:1 on it |
+| `--ap-accent-text` | Accent-coloured text and links | ≥ 4.5:1 on `bg` |
+| `--ap-on-accent` | Text and icons on `accent` | ≥ 3:1 on `accent`, ≥ 4.5:1 on `accent-hover` |
+| `--ap-border`, `--ap-border-soft` | Borders and dividers | Translucent |
+| `--ap-focus` | Focus ring | Equals `accent` (≥ 3:1 on `bg`) |
+| `--ap-danger`, `--ap-success`, `--ap-warn` | State text | ≥ 4.5:1 on `surface`/`surface-2`; hue stays red / green / amber |
+| `--ap-info` | Informational text | Currently equals `accent-text` |
+| `--ap-scrim` | Modal backdrop | Alpha ≥ 0.3 |
+| `--ap-radius-sm`, `--ap-radius-md`, `--ap-radius-lg` | Corner radii | `Npx`, sm ≤ md ≤ lg |
+| `--ap-font-body`, `--ap-font-heading` | Font-family lists | Local and generic families only |
+| `--ap-font-scale` | Font-size multiplier | Unitless, 0.92–1.15 |
+
+Colours are always `rgb(R G B / A)`. A theme's packaged fonts are registered only in the settings panel, so the font lists leave them out and start at the theme's next fallback. The token list is the apiVersion 1 contract: names and formats do not change; new tokens may be added.
+
+The snapshot carries no plugin or theme id, image, font file, path or user-imported background, and it is identical for every plugin. Because the colours are the ones on screen, a plugin could guess which theme is active by comparing values; this is accepted as display information and is why no permission is asked for.
+
+```js
+export default {
+  async activate(api) {
+    const theme = await api.theme.get()
+    api.log.info('Mode', theme.mode, theme.tokens['--ap-accent'])
+    api.theme.onDidChange(next => api.log.info('Theme changed to', next.mode))
+  },
+}
+```
+
 ## Packaging and the catalog
 
 A package with themes is an asset package: ≤ 25 MiB and ≤ 64 files; background images ≤ 8 MiB, 64–4096 px per side, ≤ 8.39 MP, static, EXIF orientation 1; fonts ≤ 1 MiB. Catalog versions with `panelThemes` must set `"minAppVersion": "1.12.0"`; older apps hide them. Consent shows "Provide N panel themes" (low) and, with fonts, "Include custom fonts for the panel" (medium); adding themes or fonts asks again.

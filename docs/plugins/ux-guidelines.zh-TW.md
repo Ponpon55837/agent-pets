@@ -51,8 +51,11 @@ zh-TW 文字請用道地的中文撰寫，不要逐字翻譯，並讓兩種語�
 玻璃由 Host 繪製：外框是功能層，你的頁面是**內容層**，因此：
 
 - 不要加 `backdrop-filter` 或自己的模糊；設計規範禁止玻璃疊玻璃，請用平面填色。
-- 載入 `agent-pets://plugin/_shared/tokens.css`（App 自己的 token 檔，唯讀），只用 token 設計樣式，並為獨立預覽提供後備值。頁面不會收到 App 的淺色／深色切換，永遠使用預設的深色色盤，請設定 `color-scheme: dark`。
-- 頁面檢視一開始是透明的。若要獨立完整的外觀，請為 `body` 設 `background: var(--surface-panel)`（半透明深色）；不上色則會透出 Host 的表面。
+- 顏色、圓角與字型請用宿主注入的 `--ap-*` token，它們會即時跟著使用者的面板主題與淺色／深色模式變化（清單見[面板主題](panel-themes.zh-TW.md#在插件中讀取主題--ap-host-api-theme)）。為獨立預覽提供後備值，例如 `var(--ap-text, #f3ede4)`；若使用原生表單控制項，請依 `api.theme.get()`／`onDidChange` 設定 `color-scheme`。
+- `agent-pets://plugin/_shared/tokens.css`（App 自己的 token 檔，唯讀）仍提供間距、字級與互動 token。下表中的顏色 token 是固定的深色色盤，不會跟著主題變化；顏色請優先使用 `--ap-*`。
+- 頁面檢視一開始是透明的，底下是可能為淺色的主題面板表面。若要獨立完整的外觀，請為 `body` 設 `background: var(--ap-bg)`；不上色時請用 `--ap-*` 文字色，兩種模式下文字才清楚。
+
+共用樣式表的 token（顏色列為固定深色色盤）：
 
 | 需求 | Token |
 |---|---|

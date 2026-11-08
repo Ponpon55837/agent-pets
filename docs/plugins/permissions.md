@@ -24,6 +24,8 @@ Declare only the capabilities you need. The install confirmation lists requested
 
 `links.hosts` is a separate exact-host allowlist for `links.openExternal()` in a contributed panel page. It does not grant network access. The host opens only after a current trusted click or Enter/Space activation, must use HTTPS without credentials or a custom port, and is limited to five attempts per plugin per minute. Wildcards are not accepted.
 
+`theme.get()`, `theme.onDidChange()` and the `--ap-*` tokens on panel pages need no permission and add nothing to the install sheet; they expose only the display values the user already sees (see [Panel themes](panel-themes.md#reading-the-theme-in-your-plugin---ap--host-api-theme)).
+
 ## What the install sheet shows
 
 Before installing, updating, downgrading or reinstalling, the sheet shows the source (catalog, local file or developer folder), the version change, the author signature state, and every permission as a plain-language sentence **grouped by risk**: network and links and secrets are high, storage, schedule and Agent status are medium, display contributions are low. For an update the new permissions are listed apart from the existing ones. Unknown permission units are always shown as high risk.

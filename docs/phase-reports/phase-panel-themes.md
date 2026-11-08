@@ -14,7 +14,8 @@
 | §7 | `panel-theme.json`、同步與廣播、`agent-pets://panel-theme/<token>`、生命週期 | 完成 |
 | §8 | 設定介面：依使用者決定移到「設定 → 插件 → 該插件 → 面板主題」；「通用 → 外觀」只留狀態卡與恢復內建 | 完成 |
 | §10 | 授權單位、套件規則、目錄 `minAppVersion` 與探索頁「需要 Agent Pets X」 | 完成 |
-| §16 | 全介面統一主題、插件讀取主題 API | **未實作**，已寫入規格 §16 作為下一階段 |
+| §16.4 | 插件讀取主題 API：`--ap-*` token、`theme.get()`／`theme.onDidChange`（規格 R13） | 完成 |
+| §16 其餘 | 全介面統一主題（彈出視窗、按鈕、對話框等全部改用同一色盤） | **進行中**，工作清單見 `docs/design/theme-token-audit.md` |
 
 ## 與規格的差異
 
@@ -31,7 +32,8 @@
 - 插件字串不會進入 CSS：主程式以封閉語法解析並重新輸出；渲染端用白名單與逐屬性正規式再檢查，只用 `style.setProperty`，不使用 `cssText`、`<style>` 或 `innerHTML`（有測試把關）。
 - 沒有遠端網址；圖片與字型只能從 `agent-pets://panel-theme/<token>` 取得，token 為每次啟動不同的 HMAC，插件分區沒有這個 host。提供前會對讀到的位元組重跑檔頭檢查。
 - 圖片只讀檔頭判斷尺寸、像素數、動畫與方向，不解碼；使用者圖片只讀一次（lstat、`O_NOFOLLOW`、fstat 比對 dev/ino/size）。
-- 新 IPC：5 個面板頻道（只允許設定面板 main frame）、1 個寵物頻道（只允許寵物視窗 main frame）、2 個由主程式送出的廣播；`docs/security/ipc-inventory.md` 已重新產生。
+- 新 IPC：6 個面板頻道（只允許設定面板 main frame，含單向的 `panel-theme-appearance-set`）、1 個寵物頻道（只允許寵物視窗 main frame）、3 個由主程式送出的廣播（含送給插件面板頁的 `plugin-panel-theme-changed`）；`docs/security/ipc-inventory.md` 已重新產生，產生器也修正為依實際 sender guard 與 `_event` 參數判斷。
+- 插件主題 API（`theme.get`、`theme.onDidChange`、面板頁 `--ap-*`）不需要權限：快照只含畫面上已可見的顏色、圓角、字族與字級倍率，每個插件相同，不含插件或主題 id、字型別名、圖片或路徑；變更以 100 ms 合併並在送出時去重。
 - 權限／風險介面、安裝確認、插件內容框、確認對話框、伺服器狀態橫幅與主題設定本身標記 `.host-protected`，永遠使用內建配色；寵物視窗只有狀態列可套用顏色。
 
 ## 規格以外一併修正的問題
@@ -52,7 +54,7 @@
 
 - 字型：測試用 `.woff2` 只有檔頭，實際被 OTS 拒絕而改用備援字型；真正字型的渲染結果尚未驗證。
 - 只在 macOS 驗證；Windows（高對比模式、字型、路徑）與 125%／150% 縮放未測。
-- 規格 §16（全介面統一主題、插件讀取 API、狀態色色相限制）未實作。
+- 規格 §16 的全介面統一主題尚未完成（插件讀取 API 與狀態色色相限制已完成）。
 - 新增註解仍以英文為主，與專案技能「新增註解用繁體中文」不一致。
 
 ## 版本建議

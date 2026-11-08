@@ -20,6 +20,7 @@ Decided during implementation on `feat/panel-themes`. The manifest shape, field 
 | R9 | §5.2 | Diagnostics travel on the failed result (`{ ok: false, error: 'invalid_panel_theme', diagnostic }`) of developer-folder installs and are shown in the error toast; there is no plan for an invalid manifest. |
 | R10 | §15 | Verified: `check-contrast.mjs` resolves `--organic-*` → `--builtin-organic-*` aliases including the dark block (no change needed). `ConfirmDialog`/`Dialog` mount inline inside `.status-panel` (no Teleport), so `.host-protected` matters. The packaged-app CSP is the `index.html` meta tag. |
 | R12 | §6.1 | State colours keep their meaning (validated per mode, rejects with the measured value): OKLCH hue of `dangerText` in 0–50° or 340–360°, `successText` 105–170°, `warnText` 55–105°, each chroma ≥ 0.05; OKLab ΔE ≥ 0.08 between the three state colours and ≥ 0.06 from the `accent` fill. The built-in palettes and the §2.1 example pass. |
+| R13 | §16.4 | Implemented in 1.12.0 (step 1 of §16): the `--ap-*` read API. 24 tokens (`src/types/plugin-theme.ts`, table in `docs/plugins/panel-themes.md`) built in main from the active slot for the panel's effective mode (`panel-theme-appearance-set`, panel main frame only, `{ mode, forcedColors }`), built-in under `forced-colors` or without an active slot. Host font aliases are dropped from the family lists (they are registered only in the settings panel and are salt-derived identifiers). `theme.get()` / `theme.onDidChange` in the Worker and panel bridge, no permission; pushes are coalesced (100 ms) and de-duplicated at send time; panel pages also get the tokens on `<html>`. `--ap-focus` = accent, `--ap-info` = accentText until the manifest gains an info colour. |
 | R11 | §3.1 | `--panel-theme-background` and the `--pet-status-*` hooks are declared `initial` (guaranteed-invalid) in `tokens.css`, so `var()` fallbacks apply until a theme sets them. |
 
 ## 1. Goals / non-goals
@@ -34,10 +35,10 @@ Decided during implementation on `feat/panel-themes`. The manifest shape, field 
 
 ### Non-goals (1.12.0)
 - Theming the **pet window** (pet sprite, pet bubbles, status pills, `PermissionBubble`). It keeps its own pet appearance (`data-pet-theme`).
-- Theming the Setup Wizard (`.setup-overlay`), Project MCP panel (`.mcp-overlay`), or plugin `panelView` pages (they keep the static `_shared/tokens.css`).
+- Theming the Setup Wizard (`.setup-overlay`) or Project MCP panel (`.mcp-overlay`) (superseded by §16). Plugin `panelView` pages keep the static `_shared/tokens.css` and additionally receive the read-only `--ap-*` tokens (R13).
 - Shadows, spacing, font weights, motion, z-index, the quota/data-visualisation colours (`--organic-quota-*`), the pet-layer `--organic-status-*` tokens.
 - Backdrop blur / glass on panel surfaces.
-- Any Host API (`hostApi: null`). A plugin cannot read or change the active theme.
+- A Host API for theme contributions (`hostApi: null`). No plugin can change the active theme; any plugin can read it through the R13 read API.
 - Remote URLs of any kind; JPEG or TTF inside packages.
 
 ## 2. Manifest shape
@@ -1004,13 +1005,13 @@ Order: (1) merge the validator change (§10.2), (2) release Agent Pets 1.12.0, (
 - Precedence between `tokens.css` `.status-panel { --focus-ring-color: var(--focus-ring-color-on-light) }` and `StatusPanel.css` `--focus-ring-color: var(--organic-accent)`. The spec assumes the StatusPanel.css value wins (it loads later), which is why the accent has a 3:1 rule.
 - Prod app CSP comes from the `index.html` meta tag (the protocol handler adds no CSP header for `agent-pets://app`). Dev uses the Vite origin, where `agent-pets://panel-theme` must still be listed explicitly.
 
-## 16. Phase 2 (requested, not yet implemented): one theme for every surface
+## 16. Phase 2 (in progress): one theme for every surface
 
-Requested after this phase was built. It supersedes "panel-only" and "protected regions never themed". Design to implement in a follow-up phase; nothing in this section ships in 1.12.0.
+Requested after this phase was built. It supersedes "panel-only" and "protected regions never themed". Item 4 is implemented (R13). Items 1–3 and 5 are the next steps of the same 1.12.0 release and work from the raw-colour inventory in `docs/design/theme-token-audit.md`.
 
 1. **One semantic token layer** for both windows: surface levels (base, raised, sunken, overlay), text levels, accent / onAccent / accentHover, border / divider, focus ring, scrim, input bg/border, state success/warn/error/info with on-colours, tooltip / popover / menu surfaces, toast, pet pill and bubble surfaces. Every `src/**` colour, radius and font goes through it; `check:design:strict` fails on any raw colour outside `tokens.css`.
 2. **Manifest**: `modes.<mode>.colors` grows to the full semantic set (current required core + optional extended keys derived from the core). Typography and shape apply app-wide. Background images stay limited to the panel/dialog backdrop.
 3. **Safety by invariants instead of protected regions**: permission/risk UI is themed, but layout, labels and hold-to-confirm stay host-fixed; danger / success / warn must stay inside OKLCH hue/chroma bands (red, green, amber), risk badges and accent must be separated by a minimum OKLab ΔE, the focus ring ≥ 3:1 on every surface, and every token pair is contrast-checked on every surface it can appear on. Failures reject with pair, measured and required values.
-4. **Read API for plugins**: a versioned public subset `--ap-*` injected into plugin panelView documents and updated live, plus `theme.get()` / `theme.onDidChange` in the worker and panel bridge returning the canonical token map and mode name (no user image, no other plugin ids). No permission (display-only data); documented with a stable token table and d.ts types.
+4. **Read API for plugins** (implemented, see R13): a versioned public subset `--ap-*` injected into plugin panelView documents and updated live, plus `theme.get()` / `theme.onDidChange` in the worker and panel bridge returning the canonical token map and mode name (no user image, no other plugin ids). No permission (display-only data); documented with a stable token table and d.ts types.
 5. **Performance**: one style recalculation per window per switch (single generated rule set or one batched frame), no per-component watchers, validation cached by theme hash, the pet window receives only its tokens.
 

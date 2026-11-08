@@ -51,8 +51,11 @@ Write the zh-TW text natively rather than translating word for word, and keep bo
 The host draws the glass: the frame is the functional layer. Your page is the **content layer**, so:
 
 - Do not add `backdrop-filter` or your own blur; glass inside glass is rejected by the design contract. Use flat fills.
-- Load `agent-pets://plugin/_shared/tokens.css` (the app's own token file, read-only) and style with tokens only, with fallbacks for standalone preview. The page does not receive the app's light/dark switch, so it gets the default dark palette; set `color-scheme: dark`.
-- The page view starts transparent. Give `body` `background: var(--surface-panel)` (translucent dark) for a self-contained look, or leave it unpainted to show the host surface.
+- Colour, radius and font come from the host-injected `--ap-*` tokens, which follow the user's panel theme and light/dark mode live (table in [Panel themes](panel-themes.md#reading-the-theme-in-your-plugin---ap--host-api-theme)). Give each a fallback for standalone preview, e.g. `var(--ap-text, #f3ede4)`, and set `color-scheme` from `api.theme.get()` / `onDidChange` if you use native form controls.
+- `agent-pets://plugin/_shared/tokens.css` (the app's own token file, read-only) still provides spacing, type sizes and interaction tokens. Its colour tokens below are the fixed dark palette and do not follow the theme; prefer `--ap-*` for colour.
+- The page view starts transparent and sits on the themed panel surface, which can be light. Give `body` `background: var(--ap-bg)` for a self-contained look, or leave it unpainted and use `--ap-*` text colours so text stays legible in both modes.
+
+Shared stylesheet tokens (colour rows are the fixed dark palette):
 
 | Need | Tokens |
 |---|---|

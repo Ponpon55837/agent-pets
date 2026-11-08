@@ -240,3 +240,13 @@ test('panel views receive pushes on their own channel and the worker runtime for
   assert.match(bootstrap, /theme: Object\.freeze\(\{\s*get: \(\) => rpc\('theme\.get', \[\]\)/)
   assert.match(bootstrap, /themeListeners\.clear\(\)/)
 })
+
+test('the public d.ts and docs list exactly the runtime token set', () => {
+  const declaration = fs.readFileSync(new URL('../docs/plugins/agent-pets-plugin.d.ts', import.meta.url), 'utf8')
+  const union = declaration.slice(declaration.indexOf('export type PluginThemeToken ='), declaration.indexOf('export interface PluginThemeSnapshot'))
+  assert.deepEqual([...union.matchAll(/'(--ap-[a-z0-9-]+)'/g)].map(match => match[1]).sort(), [...PLUGIN_THEME_TOKENS].sort())
+  for (const doc of ['panel-themes.md', 'panel-themes.zh-TW.md']) {
+    const text = fs.readFileSync(new URL(`../docs/plugins/${doc}`, import.meta.url), 'utf8')
+    for (const token of PLUGIN_THEME_TOKENS) assert.ok(text.includes(`\`${token}\``), `${doc} documents ${token}`)
+  }
+})

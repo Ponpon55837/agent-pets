@@ -227,6 +227,42 @@ export interface PluginSettings {
 
 export type PluginJsonValue = string | number | boolean | null | PluginJsonValue[] | { [key: string]: PluginJsonValue }
 
+/** Public theme tokens (apiVersion 1). Names and value formats are stable; new tokens may be added. */
+export type PluginThemeToken =
+  | '--ap-bg' | '--ap-surface' | '--ap-surface-2'
+  | '--ap-text' | '--ap-text-secondary' | '--ap-text-muted'
+  | '--ap-accent' | '--ap-accent-hover' | '--ap-accent-text' | '--ap-on-accent'
+  | '--ap-border' | '--ap-border-soft' | '--ap-focus'
+  | '--ap-danger' | '--ap-success' | '--ap-warn' | '--ap-info'
+  | '--ap-scrim'
+  | '--ap-radius-sm' | '--ap-radius-md' | '--ap-radius-lg'
+  | '--ap-font-body' | '--ap-font-heading' | '--ap-font-scale'
+
+/**
+ * The theme the user currently sees. Colours are `rgb(R G B / A)`, radii `Npx`, font lists contain only local and
+ * generic families, `--ap-font-scale` is a unitless number. Identical for every plugin; no ids, images or paths.
+ */
+export interface PluginThemeSnapshot {
+  readonly apiVersion: 1
+  readonly mode: 'light' | 'dark'
+  readonly tokens: Readonly<Record<PluginThemeToken, string>>
+}
+
+/** Read and follow the active theme. No permission required. */
+export interface PluginThemeApi {
+  /**
+   * Read the current theme snapshot. Rejects: invalid_request, disabled.
+   * Example: `const { mode, tokens } = await api.theme.get()`
+   */
+  get(): Promise<PluginThemeSnapshot>
+  /**
+   * Subscribe to theme or light/dark changes. Events are coalesced (one per 100 ms burst) and never repeat the previous
+   * snapshot. Returns an unsubscribe function. Throws coded error immediately: invalid_request.
+   * Example: `const off = api.theme.onDidChange(theme => api.log.info(theme.mode))`
+   */
+  onDidChange(callback: (theme: PluginThemeSnapshot) => void): () => void
+}
+
 export interface AgentPetsPluginApi {
   agent: {
     /**
@@ -376,6 +412,7 @@ export interface AgentPetsPluginApi {
      */
     onMessage(callback: (data: PluginJsonValue) => void): () => void
   }
+  theme: PluginThemeApi
 }
 
 /** API exposed by `window.agentPetsPlugin` inside a contributed panel page. */
@@ -405,6 +442,8 @@ export interface AgentPetsPluginPanelApi {
     postMessage(data: PluginJsonValue): Promise<{ delivered: boolean }>
     onMessage(callback: (data: PluginJsonValue) => void): () => void
   }
+  /** Same as the Worker API. The page also receives every token as a CSS custom property on `<html>`, updated live. */
+  theme: PluginThemeApi
 }
 
 declare global {

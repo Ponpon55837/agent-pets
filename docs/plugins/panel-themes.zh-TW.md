@@ -45,6 +45,45 @@
 
 權限與風險提示、插件安裝確認、插件內容框、確認對話框、伺服器狀態橫幅與主題設定本身永遠使用內建配色。寵物視窗只有狀態列會套用主題顏色；泡泡、權限泡泡、狀態圓點、完成標記、徽章與寵物圖像都不會。配額低於 20% 的警示色維持內建。
 
+## 在插件中讀取主題（`--ap-*`、Host API `theme`）
+
+任何插件都能跟著使用者目前看到的主題變化，不需要權限，也不需要 `panelThemes` 貢獻。數值來自面板目前淺色／深色模式所套用的主題；沒有套用主題、主題插件停用、該模式沒有主題，或 Windows 高對比（`forced-colors`）開啟時，使用內建色盤。
+
+- **面板頁**：宿主在你的腳本執行前，把所有 `--ap-*` 屬性寫在頁面的 `<html>` 元素上，主題或模式變更時即時更新。請寫成 `var(--ap-surface, #292420)` 並自備 fallback，方便在瀏覽器單獨預覽。
+- **Worker 與面板頁**：`api.theme.get()` 回傳 `{ apiVersion: 1, mode: 'light' | 'dark', tokens }`；`api.theme.onDidChange(callback)` 回傳取消訂閱函式。變更事件會合併（100 ms 內連續變動只送一次，且不會送出與上一份相同的快照），每個回呼拿到各自的凍結複本。
+
+| Token | 用途 | 保證（每個模式分別驗證） |
+| --- | --- | --- |
+| `--ap-bg` | 頁面背景 | 不透明 |
+| `--ap-surface`、`--ap-surface-2` | 浮起的表面（卡片、輸入框） | 不透明 |
+| `--ap-text`、`--ap-text-secondary`、`--ap-text-muted` | 文字層級 | 在 `bg`、`surface`、`surface-2` 上 ≥ 4.5:1 |
+| `--ap-accent` | 強調色填色（主要按鈕） | 在 `bg` 上 ≥ 3:1 |
+| `--ap-accent-hover` | 強調色的 hover／按下 | `on-accent` 在其上 ≥ 4.5:1 |
+| `--ap-accent-text` | 強調色文字與連結 | 在 `bg` 上 ≥ 4.5:1 |
+| `--ap-on-accent` | `accent` 上的文字與圖示 | 在 `accent` 上 ≥ 3:1，在 `accent-hover` 上 ≥ 4.5:1 |
+| `--ap-border`、`--ap-border-soft` | 邊框與分隔線 | 半透明 |
+| `--ap-focus` | 焦點框 | 等於 `accent`（在 `bg` 上 ≥ 3:1） |
+| `--ap-danger`、`--ap-success`、`--ap-warn` | 狀態文字 | 在 `surface`／`surface-2` 上 ≥ 4.5:1；色相維持紅／綠／琥珀 |
+| `--ap-info` | 資訊文字 | 目前等於 `accent-text` |
+| `--ap-scrim` | 對話框遮罩 | 透明度 ≥ 0.3 |
+| `--ap-radius-sm`、`--ap-radius-md`、`--ap-radius-lg` | 圓角 | `Npx`，sm ≤ md ≤ lg |
+| `--ap-font-body`、`--ap-font-heading` | 字族清單 | 只含本機字型與通用字族 |
+| `--ap-font-scale` | 字級倍率 | 無單位，0.92–1.15 |
+
+顏色一律是 `rgb(R G B / A)`。主題附帶的字型只在設定面板註冊，所以字族清單會略過它們，從主題的下一個備援字型開始。這份 token 清單是 apiVersion 1 的契約：名稱與格式不會改變，之後只會新增。
+
+快照不含任何插件或主題 id、圖片、字型檔、路徑或使用者匯入的背景，且每個插件拿到的內容都相同。由於顏色就是畫面上的顏色，插件可以比對數值猜出目前的主題；這屬於顯示資訊，因此不另外要求權限。
+
+```js
+export default {
+  async activate(api) {
+    const theme = await api.theme.get()
+    api.log.info('Mode', theme.mode, theme.tokens['--ap-accent'])
+    api.theme.onDidChange(next => api.log.info('Theme changed to', next.mode))
+  },
+}
+```
+
 ## 封裝與線上目錄
 
 含主題的套件屬於素材套件：總計 ≤ 25 MiB、≤ 64 個檔案；背景圖 ≤ 8 MiB、每邊 64–4096 px、≤ 8.39 MP、靜態且 EXIF 方向為 1；字型 ≤ 1 MiB。線上目錄中含 `panelThemes` 的版本必須設定 `"minAppVersion": "1.12.0"`，舊版 App 會隱藏它。授權畫面顯示「提供 N 個面板主題」（低風險），有字型時另顯示「附帶面板用的自訂字型」（中風險）；新增主題或字型時會重新詢問。
