@@ -80,7 +80,7 @@ function parseRgb(match: RegExpExecArray): PanelThemeColorResult {
   if (values.some(value => value > (percent ? 100 : 255))) return { ok: false, error: 'out_of_range' }
   const alpha = parseAlpha(match[4])
   if (alpha === null) return { ok: false, error: 'out_of_range' }
-  const [r, g, b] = values.map(value => channel(percent ? value * 2.55 : value))
+  const [r, g, b] = values.map(value => channel(percent ? (value * 255) / 100 : value))
   return { ok: true, color: { r: r!, g: g!, b: b!, a: roundAlpha(alpha) } }
 }
 
