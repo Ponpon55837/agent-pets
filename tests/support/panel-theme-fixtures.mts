@@ -149,4 +149,3 @@ export function builtinDefinition(): UserPanelThemeDefinition {
   }
   return { typography: { body: 'builtin', heading: 'builtin', scale: 1 }, shape: { radiusSm: 8, radiusMd: 16, radiusLg: 28 }, modes: { light: mode('light'), dark: mode('dark') } }
 }
-
