@@ -6,7 +6,7 @@ The authoritative contract is [docs/design/Plugin-Panel-Theme-Spec.md](../design
 
 ## Where users pick a theme
 
-Settings → Plugins → *your plugin* → **Panel themes**. Each theme shows a light and a dark preview (including the pet status pill) and has **Use in light mode**, **Use in dark mode** and **Use for both modes**. There is one theme slot per mode for the whole app, so applying a theme replaces the one in use. Settings → General → Appearance only shows which theme each mode uses, **Open plugin settings** and **Restore built-in**.
+Your plugin's dashboard tab (after Sessions, Quota and History) shows its themes as the tab's main content; the same list is also in Settings → Plugins → *your plugin* → **Panel themes** (the only place when your plugin also has a `panelView`, which fills the tab). Each theme shows a light and a dark preview (including the pet status pill) and has **Use in light mode**, **Use in dark mode** and **Use for both modes**. There is one theme slot per mode for the whole app, so applying a theme replaces the one in use. Settings → General → Appearance only shows which theme each mode uses, **Open plugin settings** (opens your tab, or the detail page section without a tab) and **Restore built-in**.
 
 ## What you declare
 

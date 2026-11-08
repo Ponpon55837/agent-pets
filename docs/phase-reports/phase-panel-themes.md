@@ -1,13 +1,13 @@
 # 階段報告：插件面板主題（`panelThemes`）
 
-分支 `feat/panel-themes`，基準 1.11.5（`f16676e`，第 2 步前重定基底）。規格：`docs/design/Plugin-Panel-Theme-Spec.md`（§0 記錄實作時的決定）。版本尚未變更。
+分支 `feat/panel-themes`，基準 1.11.5（`f16676e`，第 2 步前重定基底）。分三步完成：第 1 步面板主題與插件讀取 API，第 2 步全介面統一主題與主機不變量，第 3 步 manifest 擴充顏色鍵、共用驗證、快取與最終驗證。規格：`docs/design/Plugin-Panel-Theme-Spec.md`（§0 記錄實作時的決定）。版本尚未變更。
 
 ## 範圍與結果
 
 | 規格章節 | 內容 | 狀態 |
 | --- | --- | --- |
 | §2 | manifest 驗證（執行期驗證為準、只拒絕不夾值）、免 Worker 規則（`skins`／`panelThemes`）、`invalid_panel_theme` 錯誤碼、開發者模式診斷 | 完成 |
-| §3 | 封閉顏色語法與 `rgb(R G B / A)` 重新輸出、選填色推導、字型清單與尺寸、`tokens.css` 凍結內建值（`--builtin-organic-*`）與 `.host-protected` | 完成 |
+| §3 | 封閉顏色語法與 `rgb(R G B / A)` 重新輸出、選填色推導、字型清單與尺寸、`tokens.css` 凍結內建值（`--builtin-organic-*`）；第 1 步的 `.host-protected` 已由第 2 步的不變量取代（R14） | 完成 |
 | §3.7 | 寵物狀態列顏色 `petStatus`（新增，見規格 §3.7） | 完成 |
 | §4 | 背景（純色／漸層／圖片＋遮罩）、woff2 字型、使用者匯入背景圖（原生對話框、記憶體內驗證、`userData/panel-theme-images`、0o700／0o600、temp＋rename、清除、孤兒清理） | 完成 |
 | §5、§6 | 素材檢查、對比規則（各模式分開、最小遮罩、0.50 下限） | 完成 |
@@ -16,17 +16,21 @@
 | §10 | 授權單位、套件規則、目錄 `minAppVersion` 與探索頁「需要 Agent Pets X」 | 完成 |
 | §16.4 | 插件讀取主題 API：`--ap-*` token、`theme.get()`／`theme.onDidChange`（規格 R13） | 完成 |
 | §16.1、§16.3、§16.5 | 全介面統一主題：兩個視窗的每個介面（按鈕、輸入、分頁、卡片、對話框、選單、提示、通知、精靈、Project MCP、插件安裝與內容框、權限與風險介面、寵物泡泡、狀態列、狀態點）都讀同一組由色盤衍生的語意層；以主機強制的不變量取代保護區域（規格 R14、R15） | 完成；`src/**` 寫死的顏色為 0，`check:design:strict` 以 `--raw-colors=fail` 把關 |
-| §16.2 | manifest 擴充顏色鍵 | 第 3 步 |
+| §16.2 | manifest 擴充顏色鍵 `infoText`、`shadow`、`highlight`；`borderOnAccent` 停用（接受但忽略）；`accentOnHover` 成為語意層的懸停底 `--color-hover`（規格 R16） | 完成 |
 
 ## 與規格的差異
 
-見規格 §0 R1–R11。重點：
+見規格 §0 R1–R18。重點：
 
 - R1：`accentHover` 改為「往 text 混合到 onAccent 達 4.5:1 的第一個比例」，只給 10 個必填內建淺色值時原公式只有 4.43:1。
 - R2／R3／R4：遮罩色必須不透明；圖片背景合成不取整；最小遮罩採「之後所有比例都通過」的定義。
 - R6：設定位置改到插件詳情頁。
 - R7：新增 `petStatus`（寵物狀態列）。
 - R8：`agent-pets` scheme 加上 `corsEnabled`。字型一定是 CORS 請求，實測沒有它會被 Chromium 擋下；只有 `panel-theme` 路由會回 `Access-Control-Allow-Origin`，且只給面板來源。
+- R13–R15：插件讀取主題 API、單一語意層與主機不變量、寵物視窗套用主題（第 1、2 步）。
+- R16（第 3 步）：manifest 新增選填的 `infoText`、`shadow`、`highlight`（不透明，省略時取該模式內建值）。`infoText` 加入色相（200–290°）、色度與色差規則及文字矩陣；`shadow` 相對亮度 ≤ 0.05、`highlight` ≥ 0.7。`borderOnAccent` 停用：照樣檢查文法與 alpha、但不輸出，舊 manifest 不會失效。`accentOnHover` 保留，成為精靈與 Project MCP 的懸停底。不變量矩陣補上元件實際畫出的組合（由 `background`／`color` 規則逐一盤點）：sage 文字、懸停底、12% 狀態晶片、`textFaint` 在 `bg` 上。`--ap-info` 改為主題的 `infoText`，新增 `--ap-shadow`、`--ap-highlight`（共 26 個）。
+- R17（第 3 步）：「驗證以主題雜湊快取」原本沒有做到（以 `id@version` 快取，開發者資料夾改了顏色但版本沒變時會沿用舊主題）；改為以宣告內容的 SHA-256 為鍵、上限 32 項的 LRU，sync 時丟掉沒有插件使用的項目。
+- R18（第 3 步）：陰影與高光強度依模式（與 1.11.5 相同），主題預覽依「被預覽的模式」解析，不再沿用面板目前的模式；深色寵物文字陰影恢復。
 
 ## 安全
 
@@ -35,7 +39,7 @@
 - 圖片只讀檔頭判斷尺寸、像素數、動畫與方向，不解碼；使用者圖片只讀一次（lstat、`O_NOFOLLOW`、fstat 比對 dev/ino/size）。
 - 新 IPC：6 個面板頻道（只允許設定面板 main frame，含單向的 `panel-theme-appearance-set`）、1 個寵物頻道（只允許寵物視窗 main frame）、3 個由主程式送出的廣播（含送給插件面板頁的 `plugin-panel-theme-changed`）；`docs/security/ipc-inventory.md` 已重新產生，產生器也修正為依實際 sender guard 與 `_event` 參數判斷。
 - 插件主題 API（`theme.get`、`theme.onDidChange`、面板頁 `--ap-*`）不需要權限：快照只含畫面上已可見的顏色、圓角、字族與字級倍率，每個插件相同，不含插件或主題 id、字型別名、圖片或路徑；變更以 100 ms 合併並在送出時去重。
-- 沒有保護區域（R14）：主題也套用到權限／風險介面、安裝確認、插件內容框、確認對話框、伺服器狀態橫幅、主題設定與寵物視窗。驗證器在接受主題前證明每個文字 token 在它可能出現的每個表面上 ≥ 4.5:1（寵物泡泡與狀態列以疊在全黑與全白桌面上計算）、焦點環 ≥ 3:1、主要按鈕懸停的標籤 ≥ 4.5:1、狀態色維持色相與色差、主機固定的資訊色與狀態色及強調色保持距離；版面、文字標籤、風險徽章文字與「按住才允許」由主機程式碼決定。
+- 沒有保護區域（R14）：主題也套用到權限／風險介面、安裝確認、插件內容框、確認對話框、伺服器狀態橫幅、主題設定與寵物視窗。驗證器在接受主題前證明每個文字 token 在它可能出現的每個表面上 ≥ 4.5:1（寵物泡泡與狀態列以疊在全黑與全白桌面上計算）、焦點環 ≥ 3:1、主要按鈕懸停的標籤 ≥ 4.5:1、狀態色（含第 3 步起可設定的資訊色）維持色相與色差；版面、文字標籤、風險徽章文字與「按住才允許」由主機程式碼決定。
 - 寵物視窗只收到它用得到的 19 個色盤屬性與選填的狀態列顏色（測試由 `tokens.css` 反推這個集合），在同一個 frame 內寫入 `<html>`；不收字型、圓角、圖片或模糊。
 
 ## 規格以外一併修正的問題
@@ -52,16 +56,36 @@
 
 - `pnpm exec vue-tsc --noEmit`、`pnpm run lint`、`pnpm run test:unit`（第 2 步後 1125 項全過）、`pnpm exec vite build`、`pnpm run check:bundle-size`、`pnpm run check:bundle`、`pnpm run check:contrast`、`pnpm run check:design:strict`（第 2 步起含 `--raw-colors=fail`）、`pnpm audit --prod`（無已知弱點）、`git diff --check`。
 - 新增測試：顏色語法與注入字串、驗證器與對比、儲存、使用者圖片、IPC 寄件者、協定路由、渲染端白名單、寵物狀態列、插件整合（manifest、套件、授權、目錄、設定搜尋、語系）。
-- 隔離 Electron（暫時 HOME／userData、假 safeStorage、未觸發鑰匙圈）：以開發者模式安裝測試主題插件，套用淺色與深色、匯入背景圖、切換插件停用／移除（檔案與設定一併清除）、權限卡在高彩度主題下維持內建外觀、forced-colors／prefers-contrast／reduced-transparency、寵物狀態列淺色與深色。
+- 隔離 Electron（暫時 HOME／userData、假 safeStorage、未觸發鑰匙圈）：以開發者模式安裝測試主題插件，套用淺色與深色、匯入背景圖、切換插件停用／移除（檔案與設定一併清除）、權限卡在高彩度主題下維持內建外觀（第 1 步當時的設計；第 2 步起權限卡跟著主題，由不變量保證可讀）、forced-colors／prefers-contrast／reduced-transparency、寵物狀態列淺色與深色。
 - 插件主題 API（隔離 Electron，hook 埠 37373–37375）：以開發者模式安裝 `ok-panel-theme` 與 `ok-theme-reader`（無權限的面板頁插件），面板淺色→深色時 panelView `<html>` 上的 24 個 `--ap-*` 立即更新，一次切換只收到一個 `onDidChange` 事件；恢復內建後回到內建深色色盤；Worker 的 `theme.get()`／`onDidChange` 記錄與面板一致。
 
 - 第 2 步（隔離 Electron，hook 埠 37373–37375、假 safeStorage）：內建與 `ok-panel-theme` 的 aurora 主題下，面板（工作階段、設定精靈）與寵物視窗（狀態列、狀態點）的淺色與深色截圖；寵物外觀與面板外觀分開切換時，寵物視窗 `<html data-theme>` 跟著寵物外觀、只收到 19 個色盤屬性與狀態列顏色（29 個 inline 屬性）。
+
+## 第 3 步（manifest 擴充鍵、共用驗證、快取、最終驗證）
+
+| 項目 | 結果 |
+| --- | --- |
+| 擴充顏色鍵 | `infoText`、`shadow`、`highlight`（R16）；schema、d.ts、EN／zh-TW 文件與驗證器測試同步；schema 與 d.ts 的鍵集合由測試對照執行期清單 |
+| 共用驗證 | `src/types/id-patterns.ts` 統一插件 id、命令 id、項目 id、金鑰指紋、專案 id、`x.y.z` 版本與 v4 UUID（原本約 40 處複製的 regex，含 Worker 宿主字串）；`electron/value-guards.ts` 取代 20 份相同的 `isRecord`；測試防止複製品回來。`_host`／`_shared` 的負向前瞻是死碼（底線不在字元集內），已移除 |
+| 範例 | `docs/plugins/examples` 的兩個面板頁只用 `--ap-*` 取得顏色、圓角與字族，依 `api.theme` 設定 `color-scheme`（原本寫死 `dark`）；測試把關 |
+| 快取 | R17；命中、未命中、同版本改內容、移除、上限皆有測試 |
+| 預覽與寵物陰影 | R18 |
+| 插件作者版本說明 | `docs/plugins/whats-new-1.12.md`（EN／zh-TW），兩份手冊索引與 README 都有連結 |
+
+第 3 步一併修正的問題：
+
+- 使用者回報：主題插件在儀表板有自己的分頁，但分頁內容是空的通知中心（主題插件根本不能發通知）。分頁改為只顯示插件真的有的區塊（`pluginTabSections`）：主題插件的分頁主體是主題清單（`PluginThemeTab` 包住與詳情頁共用的 `PluginPanelThemes`，之後的主題編輯器可作為下一個區塊掛入）；通知區只給有 `contributes.feed` 的插件，設定連結只給有設定欄位的插件；什麼都沒有的插件（只提供寵物造型）不再有分頁。外觀狀態卡的「開啟插件設定」與設定搜尋改為先前往分頁，沒有分頁才開詳情頁（規格 R19）。
+
+- 寵物的權限泡泡放在精靈上方 190 px 的預留空間，但標題加兩個 pattern 的高風險請求高 241 px，視窗把頂端裁掉：來源列與「高風險」徽章看不到（1.11.5 就是如此）。泡泡改為不超過預留高度，只有指令細節縮短後捲動，來源、風險徽章、倒數與按鈕一定看得到。
+- 元件畫在未驗證組合上的文字：主動分頁上的數字徽章（`accent` 字在 `onAccent` 上，只有 3:1）、成就「新」徽章（`text` 在 `accent` 上）、精靈與 Project MCP 的待處理晶片（`accentText` 在 `onAccent` 上）改用已驗證的組合；Project MCP 已連線卡片改用 `sageDark`。
+- 主題設定說明、插件卡提示與高彩度測試主題的說明仍寫著「權限與風險提示永遠維持內建外觀」（R14 後已不成立），已改寫；`docs/plugins/security.md`、`contribution-points.md`（EN／zh-TW）同樣的過時敘述也已更正。
+- 主題讀取測試插件把 `onAccent` 文字放在 `accent` 上（只保證 3:1），改用 `accentHover`。
+- `ipc/plugin-install.ts` 未使用的匯出、`plugin-settings.ts` 與其他守衛同名但語意不同的 `isRecord`（改名 `isPlainRecord`）。
 
 ## 剩餘風險
 
 - 字型：測試用 `.woff2` 只有檔頭，實際被 OTS 拒絕而改用備援字型；真正字型的渲染結果尚未驗證。
 - 只在 macOS 驗證；Windows（高對比模式、字型、路徑）與 125%／150% 縮放未測。
-- manifest 尚無 §16.2 的擴充顏色鍵（資訊色、陰影、高光目前由主機固定），留給第 3 步。
 
 ## 版本建議
 

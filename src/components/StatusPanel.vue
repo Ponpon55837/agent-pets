@@ -21,7 +21,8 @@ import StatusPanelUsage from '@/components/status-panel/StatusPanelUsage.vue'
 import PluginTabContent from '@/components/status-panel/PluginTabContent.vue'
 import { usePluginTabs } from '@/composables/usePluginTabs'
 import { isBuiltInDashboardTab, parseStoredDashboardTab, pluginIdOfTab, resolveDashboardTab } from '@/utils/plugin-tabs'
-import { requestPluginDetail } from '@/utils/plugin-detail-request'
+import { requestPluginDetail, type PluginDetailRequestSection } from '@/utils/plugin-detail-request'
+import { panelThemeTargetRequest } from '@/utils/settings-navigation'
 import { countByBucket } from '@/utils/session-view'
 import { DEFAULT_SETTINGS_GROUP, SETTINGS_GROUPS, isSettingsGroupId, type SettingsGroupId } from '@/utils/settingsRegistry'
 
@@ -177,10 +178,22 @@ function selectDashboardTab(tab: DashboardTab): void {
   if (tab === 'sessions' || tab === 'usage') void store.refreshQuota()
 }
 
-function openPluginTabSettings(pluginId: string, section: 'overview' | 'settings' = 'settings'): void {
+function openPluginTabSettings(pluginId: string, section: PluginDetailRequestSection = 'settings'): void {
   requestPluginDetail(pluginId, section)
   openPluginSettings()
 }
+
+// 主題設定的目的地：有分頁就回到儀表板並切到該插件的分頁，否則開詳情頁的面板主題。
+watch(panelThemeTargetRequest, request => {
+  if (!request) return
+  const tab = pluginTabs.tabs.value.find(candidate => candidate.pluginId === request.pluginId && candidate.sections.panelThemes)
+  if (!tab) {
+    openPluginTabSettings(request.pluginId, 'themes')
+    return
+  }
+  if (store.panelView === 'settings') store.backToSessions()
+  selectDashboardTab(tab.value)
+})
 
 // Restore the remembered tab once the plugin list is known, but only if it still qualifies;
 // a plugin tab that disappears later (disabled, removed, crashed) falls back to Sessions.
@@ -343,6 +356,7 @@ onUnmounted(() => {
         :loading="pluginTabs.loading.value"
         @open-settings="openPluginTabSettings($event, 'settings')"
         @open-detail="openPluginTabSettings($event, 'overview')"
+        @open-themes="openPluginTabSettings($event, 'themes')"
       />
     </template>
 
