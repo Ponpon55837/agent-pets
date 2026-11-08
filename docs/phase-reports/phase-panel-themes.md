@@ -82,10 +82,15 @@
 - 主題讀取測試插件把 `onAccent` 文字放在 `accent` 上（只保證 3:1），改用 `accentHover`。
 - `ipc/plugin-install.ts` 未使用的匯出、`plugin-settings.ts` 與其他守衛同名但語意不同的 `isRecord`（改名 `isPlainRecord`）。
 
+- 第 3 步最終驗證（隔離 Electron，hook 埠 37373–37375、假 safeStorage：`encryptString`／`decryptString` 呼叫 0 次，`security` 與 `claude` 執行檔被攔下，未觸發鑰匙圈；`vite build` 而非完整打包）：內建與 `ok-panel-theme` 的 aurora 主題 × 淺色／深色，共 92 張截圖加 12 張媒體查詢抽查（減少透明度、增加對比、forced-colors，面板與寵物視窗）：工作階段、額度、歷史、ActionMenu、通用設定、外觀狀態卡、插件詳情的面板主題與預覽、ConfirmDialog、安裝確認、伺服器狀態橫幅、高風險的內嵌權限卡與寵物權限泡泡（經權限轉接器 `POST /v1/permission/request`）、寵物狀態列（單一／多寵物）與額度提示、通知（toast）、設定精靈、Project MCP、使用 `--ap-*` 的插件面板頁、主題插件自己的分頁。抽查發現並修正：forced-colors 下狀態點消失（已改用 CanvasText）。
+- 第 3 步閘門：`vue-tsc --noEmit`、`lint`、`test:unit`（1143 項全過）、`vite build`、`check:bundle-size`、`check:bundle`、`check:contrast`（104 組全過）、`check:design:strict`（寫死顏色 0）、`pnpm audit --prod`（無已知弱點）、`git diff --check`。
+
 ## 剩餘風險
 
 - 字型：測試用 `.woff2` 只有檔頭，實際被 OTS 拒絕而改用備援字型；真正字型的渲染結果尚未驗證。
-- 只在 macOS 驗證；Windows（高對比模式、字型、路徑）與 125%／150% 縮放未測。
+- 只在 macOS 驗證；Windows（分層視窗裁切、真正的高對比模式、字型、路徑）與 125%／150% 縮放未測；forced-colors 只以 Chromium 媒體模擬檢查。
+- 與 1.11.5 的陰影與高光比對是以 `f16676e` 的 token 數值對照，沒有並排截圖。
+- 寵物權限泡泡在指令很長時，指令細節區只留約兩行並在區內捲動；完整內容仍可用「展開」「複製」或面板的內嵌權限卡查看。
 
 ## 版本建議
 
