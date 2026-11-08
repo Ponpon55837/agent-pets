@@ -140,3 +140,26 @@ export function diffPanelThemeProperties(
   const set = [...next].filter(([name, value]) => current.get(name) !== value)
   return { remove, set }
 }
+
+/** Modes whose slot holds `ref` and is active (the one theme per mode that is "in use"). */
+export function activePanelThemeModes(state: PanelThemeState | null, ref: { pluginId: string; themeId: string }): PanelThemeMode[] {
+  if (!state) return []
+  return (['light', 'dark'] as const).filter(mode => {
+    const slot = state.slots[mode]
+    return slot.status === 'active' && slot.ref?.pluginId === ref.pluginId && slot.ref.themeId === ref.themeId
+  })
+}
+
+/**
+ * Where "Panel theme" settings live: the plugin that owns the active slot
+ * (light first), else the first plugin offering a theme; null means no theme
+ * plugin is available, so the Appearance status row is the target.
+ */
+export function panelThemeSettingsTarget(state: PanelThemeState | null): string | null {
+  if (!state) return null
+  for (const mode of ['light', 'dark'] as const) {
+    const ref = state.slots[mode].ref
+    if (ref && state.themes.some(theme => theme.ref.pluginId === ref.pluginId)) return ref.pluginId
+  }
+  return state.themes[0]?.ref.pluginId ?? null
+}

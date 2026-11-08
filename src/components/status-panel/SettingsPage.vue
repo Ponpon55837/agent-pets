@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { settingsSectionRequest } from '@/utils/settings-navigation'
+import { openPanelThemeSettings, settingsSectionRequest } from '@/utils/settings-navigation'
+import { panelThemeSettingsTarget } from '@/utils/panel-theme-css'
+import { panelThemeState } from '@/composables/usePanelTheme'
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
@@ -12,6 +14,7 @@ import {
   SETTINGS_GROUPS,
   groupOfSection,
   searchSettings,
+  type SettingsEntry,
   type SettingsGroupId,
   type SettingsSectionId,
 } from '@/utils/settingsRegistry'
@@ -75,6 +78,20 @@ async function openResult(section: SettingsSectionId): Promise<void> {
   await nextTick()
   await nextTick()
   scrollToSection(section)
+}
+
+// "Panel theme" lands on the owning plugin's Panel themes section when a theme
+// plugin is available, otherwise on the Appearance status card.
+function openHit(entry: SettingsEntry): void {
+  if (entry.id === 'panelThemeStyle') {
+    const pluginId = panelThemeSettingsTarget(panelThemeState.value)
+    if (pluginId) {
+      query.value = ''
+      openPanelThemeSettings(pluginId)
+      return
+    }
+  }
+  void openResult(entry.section)
 }
 
 watch(settingsSectionRequest, request => {
@@ -164,7 +181,7 @@ defineExpose({ scrollToSection })
         <p class="sr-only" role="status" aria-live="polite">{{ t('panel.searchCount', { count: results.length }) }}</p>
         <ul v-if="results.length > 0" class="settings-result-list">
           <li v-for="hit in results" :key="hit.entry.id">
-            <button type="button" class="settings-result" @click="openResult(hit.entry.section)">
+            <button type="button" class="settings-result" @click="openHit(hit.entry)">
               <span class="settings-result-copy">
                 <span class="settings-result-label">{{ hit.label }}</span>
                 <span v-if="hit.help" class="settings-result-help">{{ hit.help }}</span>

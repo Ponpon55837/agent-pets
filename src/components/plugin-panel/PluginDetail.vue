@@ -15,7 +15,7 @@ import PluginDiagnostics from '@/components/plugin-panel/PluginDiagnostics.vue'
 import PluginHostTable from '@/components/plugin-panel/PluginHostTable.vue'
 import PluginSettingsForm from '@/components/plugin-panel/PluginSettingsForm.vue'
 import { usePluginController } from '@/composables/plugin/context'
-import { requestSettingsSection } from '@/utils/settings-navigation'
+import PluginPanelThemes from '@/components/plugin-panel/PluginPanelThemes.vue'
 import type { PluginDetailSection } from '@/composables/usePluginPanelController'
 
 const {
@@ -45,6 +45,7 @@ const sections = computed(() => [
   { id: 'overview', label: t('plugins.sectionOverview') },
   ...(hasSettings.value ? [{ id: 'settings', label: t('plugins.sectionSettings') }] : []),
   ...(commands.value.length ? [{ id: 'commands', label: t('plugins.sectionCommands') }] : []),
+  ...(panelThemeCount.value ? [{ id: 'themes', label: t('plugins.sectionPanelThemes') }] : []),
   { id: 'diagnostics', label: t('plugins.sectionDiagnostics') },
 ])
 const section = computed({
@@ -186,7 +187,7 @@ watch(plugin, async (value, previous) => {
             <li v-if="skinCount">{{ t('plugins.presenceSkins', { count: skinCount }) }}</li>
             <li v-if="panelThemeCount">
               {{ t('plugins.presencePanelThemes', { count: panelThemeCount }) }}
-              <Button variant="ghost" size="sm" @click="requestSettingsSection('appearance')">{{ t('plugins.presencePanelThemesOpen') }}</Button>
+              <Button variant="ghost" size="sm" @click="section = 'themes'">{{ t('plugins.presencePanelThemesOpen') }}</Button>
             </li>
             <li v-if="plugin.manifest?.contributes.eventSource">{{ eventSource ? t('plugins.presenceEventSource', { name: eventSource.displayName[locale] }) : t('plugins.presenceEventSourceNone') }}</li>
           </ul>
@@ -214,6 +215,10 @@ watch(plugin, async (value, previous) => {
             {{ invokingCommandId === command.id ? t('plugins.commandRunning') : commandTitle(command) }}
           </Button>
         </div>
+      </Card>
+
+      <Card v-else-if="section === 'themes'" :title="t('plugins.sectionPanelThemes')">
+        <PluginPanelThemes :plugin-id="plugin.id" :plugin-enabled="enabledGlobally && plugin.preference.enabled" />
       </Card>
 
       <Card v-else :title="t('pluginDiagnosticsHeading')">

@@ -40,7 +40,7 @@ import {
   defaultSettingsDraft, isSettingsDirty, validateSettings, type SettingErrorCode,
 } from '@/utils/plugin-settings-form'
 import { usePluginNotify } from '@/composables/plugin/usePluginNotify'
-import { takePluginDetailRequest } from '@/utils/plugin-detail-request'
+import { pluginDetailRequestNonce, takePluginDetailRequest } from '@/utils/plugin-detail-request'
 import { formatDateParts, formatDateTime, formatNumber } from '@/utils/intl-format'
 export interface PermissionEntryView {
   unit: string
@@ -61,7 +61,7 @@ let consumedPanelRequestNonce = 0
 
 export type PluginInstalledFilter = 'all' | 'enabled' | 'updates' | 'issues'
 
-export type PluginDetailSection = 'overview' | 'settings' | 'commands' | 'diagnostics'
+export type PluginDetailSection = 'overview' | 'settings' | 'commands' | 'themes' | 'diagnostics'
 
 export function usePluginPanelController(props: { requestedPluginId?: string; requestNonce?: number }) {
 
@@ -1320,6 +1320,14 @@ function consumePanelRequest(): void {
 }
 
 watch(() => [props.requestedPluginId, props.requestNonce] as const, consumePanelRequest)
+
+// A detail request made while this panel is already mounted (for example the
+// Appearance card's "Open plugin settings" from search) is consumed here.
+watch(pluginDetailRequestNonce, () => {
+  if (!snapshot.value) return
+  const detailRequest = takePluginDetailRequest()
+  if (detailRequest) openPluginDetail(detailRequest.pluginId, detailRequest.section)
+})
 
 onMounted(() => {
   void refreshPanel().then(() => {
