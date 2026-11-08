@@ -31,6 +31,7 @@ import type {
 } from '../src/types/plugin.ts'
 import type { PluginCatalogPanelItem } from '../src/types/plugin-catalog.ts'
 import type { PanelThemeIpcResult, PanelThemeMode, PanelThemeRef, PanelThemeState, PanelThemeUserImageOptions, PetThemeState } from '../src/types/panel-theme.ts'
+import type { PanelThemeValidateIpcResult, UserPanelThemeDefinition, UserPanelThemeIpcResult } from '../src/types/panel-theme-user.ts'
 import type {
   ProjectMcpApplyRequest,
   ProjectMcpPlan,
@@ -104,6 +105,15 @@ const electronAPI: ElectronAPI = {
   importPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserImageImport, ref, mode),
   clearPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserImageClear, ref, mode),
   setPanelThemeUserImageOptions: (ref: PanelThemeRef, mode: PanelThemeMode, options: PanelThemeUserImageOptions): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserImageOptionsSet, ref, mode, options),
+  validatePanelTheme: (definition: unknown): Promise<PanelThemeValidateIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeValidate, definition),
+  listUserPanelThemes: (): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserList),
+  createUserPanelTheme: (name: string, definition: UserPanelThemeDefinition): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserCreate, name, definition),
+  updateUserPanelTheme: (id: string, definition: UserPanelThemeDefinition): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserUpdate, id, definition),
+  renameUserPanelTheme: (id: string, name: string): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserRename, id, name),
+  duplicateUserPanelTheme: (id: string, name: string): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserDuplicate, id, name),
+  deleteUserPanelTheme: (id: string): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserDelete, id),
+  exportUserPanelTheme: (id: string): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserExport, id),
+  importUserPanelTheme: (): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserImport),
   getPetStatusTheme: (): Promise<PetThemeState> => ipcRenderer.invoke(IPC_CHANNELS.panelThemePetStatusGet),
   onPetStatusThemeChanged: (callback: (state: PetThemeState) => void) => {
     const handler = (_event: unknown, state: PetThemeState) => callback(state)

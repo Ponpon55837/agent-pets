@@ -4,7 +4,7 @@ import * as path from 'node:path'
 import { renameSyncWithRetry } from './fs-rename.ts'
 import { checkPanelThemeUserImage, PANEL_THEME_USER_IMAGE_MAX_BYTES, type PanelThemeImageKind } from './plugin-panel-themes.ts'
 import { PANEL_THEME_USER_IMAGE_FILE } from './panel-theme-store.ts'
-import { isPluginId } from '../src/types/id-patterns.ts'
+import { isPanelThemeOwnerId } from '../src/types/panel-theme-user.ts'
 
 // 使用者匯入的面板背景圖片（spec §4.3）。來源檔案只透過一個已檢查的
 // descriptor 讀取一次；所有檢查都在這份位元組上執行。
@@ -98,7 +98,7 @@ export function panelThemeImagesRoot(userDataDirectory: string): string {
 
 /** 單一插件的圖片目錄；id 無效時為 null。 */
 export function panelThemePluginImageDirectory(userDataDirectory: string, pluginId: string): string | null {
-  return isPluginId(pluginId) ? path.join(panelThemeImagesRoot(userDataDirectory), pluginId) : null
+  return isPanelThemeOwnerId(pluginId) ? path.join(panelThemeImagesRoot(userDataDirectory), pluginId) : null
 }
 
 /** 將驗證過的位元組寫成 `<root>/<pluginId>/<sha256>.<ext>`（暫存檔 + rename）。 */
@@ -173,7 +173,7 @@ export function sweepOrphanUserImages(userDataDirectory: string, referenced: Rea
     if (examined >= limit) break
     examined += 1
     const pluginDirectory = path.join(root, plugin.name)
-    if (!plugin.isDirectory() || plugin.isSymbolicLink() || !isPluginId(plugin.name)) {
+    if (!plugin.isDirectory() || plugin.isSymbolicLink() || !isPanelThemeOwnerId(plugin.name)) {
       try { fs.rmSync(pluginDirectory, { force: true, recursive: plugin.isDirectory() && !plugin.isSymbolicLink() }) } catch {}
       removed += 1
       continue

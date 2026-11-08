@@ -88,5 +88,7 @@
   "design.panelTheme.useDark": "用於深色模式",
   "design.panelTheme.pluginOff": "開啟此插件後才能使用它的面板主題。",
   "design.panelTheme.previewPillState": "執行中",
-  "design.panelTheme.previewPillAgent": "Claude Code"
+  "design.panelTheme.previewPillAgent": "Claude Code",
+  "design.themeEditor.importDialogTitle": "匯入主題",
+  "design.themeEditor.exportDialogTitle": "匯出主題"
 }

@@ -88,5 +88,7 @@
   "design.panelTheme.useDark": "Use in dark mode",
   "design.panelTheme.pluginOff": "Turn this plugin on to use its panel themes.",
   "design.panelTheme.previewPillState": "Running",
-  "design.panelTheme.previewPillAgent": "Claude Code"
+  "design.panelTheme.previewPillAgent": "Claude Code",
+  "design.themeEditor.importDialogTitle": "Import a theme",
+  "design.themeEditor.exportDialogTitle": "Export theme"
 }

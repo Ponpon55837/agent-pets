@@ -17,7 +17,11 @@ import type { PluginLocalizedText, PluginManifest } from '../../src/types/plugin
 import { PET_THEME_COLOR_PROPERTIES, type PanelThemeMode, type PanelThemeState, type PetThemeModeState, type PetThemeState } from '../../src/types/panel-theme.ts'
 import type { PluginThemeSnapshot } from '../../src/types/plugin-theme.ts'
 import { buildPluginThemeSnapshot } from '../plugin-theme-tokens.ts'
-import { PanelThemeResolveCache } from './panel-theme-cache.ts'
+import { ContentHashCache, PanelThemeResolveCache } from './panel-theme-cache.ts'
+import { UserPanelThemeStore } from '../panel-theme-user-store.ts'
+import { userPanelThemeContribution } from '../panel-theme-user.ts'
+import { validateUserPanelTheme } from '../panel-theme-diagnostics.ts'
+import { USER_PANEL_THEME_MAX_COUNT, USER_PANEL_THEME_OWNER, USER_PANEL_THEME_SOURCE_NAME, type PanelThemeValidation } from '../../src/types/panel-theme-user.ts'
 
 // 主程序中插件面板主題的擁有者：store、每個工作階段的
 // salt、由 `agent-pets://panel-theme/<token>` 提供的 token -> 資產對應表、
@@ -87,19 +91,26 @@ function hmacHex(salt: Uint8Array, value: string): string {
 
 export class PanelThemeRuntime {
   readonly store: PanelThemeStore
+  readonly userThemes: UserPanelThemeStore
   private readonly options: PanelThemeRuntimeOptions
   private readonly salt: Uint8Array
   private readonly resolvedCache: PanelThemeResolveCache
   /** `id@version` → 最後一次解析的內容鍵；插件暫時沒有 manifest（載入失敗）時沿用。 */
   private lastKeyByVersion = new Map<string, string>()
   private sources: PanelThemeSourcePlugin[] = []
+  /** 最後一次 sync 的插件來源；「我的主題」變動時只重建使用者來源。 */
+  private pluginSources: PanelThemeSourcePlugin[] = []
+  /** 每個使用者主題各自解析（一個無效不影響其他），以內容雜湊快取。 */
+  private readonly userResolveCache = new PanelThemeResolveCache({ maxEntries: USER_PANEL_THEME_MAX_COUNT })
+  /** 編輯器的驗證請求：同樣的草稿只驗證一次（spec R21，沿用 R17 的 LRU）。 */
+  private readonly validationCache = new ContentHashCache<PanelThemeValidation>(validateUserPanelTheme)
   private tokens = new Map<string, TokenAsset>()
   private state: PanelThemeState = emptyPanelThemeState()
   private stateHash = ''
   private petStatus: PetThemeState = { light: null, dark: null }
   private petStatusHash = JSON.stringify({ light: null, dark: null })
-  private installed = new Set<string>()
-  private knownManifests = new Set<string>()
+  private installed = new Set<string>([USER_PANEL_THEME_OWNER])
+  private knownManifests = new Set<string>([USER_PANEL_THEME_OWNER])
   private appearance: PanelAppearance
   private pluginTheme: PluginThemeSnapshot
   private pluginThemeSentHash: string
@@ -111,6 +122,7 @@ export class PanelThemeRuntime {
     this.salt = options.salt ?? randomBytes(32)
     this.resolvedCache = options.resolveCache ?? new PanelThemeResolveCache()
     this.store = new PanelThemeStore(options.userDataDirectory)
+    this.userThemes = new UserPanelThemeStore(options.userDataDirectory, { validate: definition => this.validate(definition) })
     this.appearance = { mode: options.initialMode ?? 'light', forcedColors: false }
     this.pluginTheme = buildPluginThemeSnapshot(null, this.appearance.mode)
     this.pluginThemeSentHash = JSON.stringify(this.pluginTheme)
@@ -145,6 +157,31 @@ export class PanelThemeRuntime {
 
   getSources(): readonly PanelThemeSourcePlugin[] {
     return this.sources
+  }
+
+  /** 驗證一份「我的主題」草稿（不安裝、不儲存），結果以內容雜湊快取。 */
+  validate(definition: unknown): PanelThemeValidation {
+    return this.validationCache.lookup(definition).result
+  }
+
+  /** 「我的主題」新增、修改或刪除之後：重建使用者來源、修剪 store（刪掉的主題的插槽與圖片），再發布。 */
+  refreshUserThemes(): void {
+    this.sources = [...this.pluginSources, this.userSource()]
+    this.prune()
+    this.publish()
+  }
+
+  /** 使用者主題永遠可用（不受插件開關影響）；無效的記錄不會出現在目錄中。 */
+  private userSource(): PanelThemeSourcePlugin {
+    const themes: ResolvedPanelTheme[] = []
+    const live = new Set<string>()
+    for (const record of this.userThemes.list()) {
+      const { key, themes: resolved } = this.userResolveCache.get([userPanelThemeContribution(record.id, record.name, record.definition)])
+      live.add(key)
+      if (resolved?.[0]) themes.push(resolved[0])
+    }
+    this.userResolveCache.retain(live)
+    return { pluginId: USER_PANEL_THEME_OWNER, version: '1', pluginName: { ...USER_PANEL_THEME_SOURCE_NAME }, available: true, themes }
   }
 
   /** 從插件 runtime 重新推導來源、修剪 store，有變動時才發布。 */
@@ -186,9 +223,10 @@ export class PanelThemeRuntime {
     // 只保留仍安裝中的插件用到的內容：已移除或被不同內容取代的項目會被丟棄。
     this.resolvedCache.retain(liveKeys)
     this.lastKeyByVersion = keyByVersion
-    this.sources = sources
-    this.prune()
-    this.publish()
+    this.pluginSources = sources
+    this.installed.add(USER_PANEL_THEME_OWNER)
+    this.knownManifests.add(USER_PANEL_THEME_OWNER)
+    this.refreshUserThemes()
   }
 
   /** 依目前來源與 store 重建狀態與 token 對應表；狀態有變動時才送出。 */
@@ -330,7 +368,9 @@ export class PanelThemeRuntime {
       'x-content-type-options': 'nosniff',
       'cache-control': 'private, max-age=31536000, immutable',
     }
-    const origin = asset.kind === 'font' ? this.options.rendererOrigin() : null
+    // 字型一定是 CORS 請求；使用者圖片要讓主題編輯器在 canvas 上取色（crossOrigin 載入）。
+    // 只回給受信任的面板來源，插件分區根本沒有這個 host。
+    const origin = asset.kind === 'image' ? null : this.options.rendererOrigin()
     if (origin) {
       headers['access-control-allow-origin'] = origin
       headers.vary = 'Origin'

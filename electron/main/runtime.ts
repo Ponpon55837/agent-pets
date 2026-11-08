@@ -100,6 +100,8 @@ import { registerPluginPreferencesIpc } from '../ipc/plugin-preferences'
 import { registerPluginCatalogIpc } from '../ipc/plugin-catalog'
 import { registerPluginInstallIpc } from '../ipc/plugin-install'
 import { registerPanelThemeIpc } from '../ipc/panel-theme'
+import { registerUserPanelThemeIpc } from '../ipc/panel-theme-user'
+import { readUserPanelThemeImportFile, writeUserPanelThemeExportFile } from '../panel-theme-user-store'
 import { PanelThemeRuntime } from './panel-theme-runtime'
 import { emptyPanelThemeState } from '../plugin-panel-themes'
 import { deleteUserImage, prepareUserImage, readUserImageSource, storeUserImage } from '../panel-theme-images'
@@ -1472,6 +1474,20 @@ export async function createPluginServices(): Promise<void> {
     deleteUserImage: (pluginId, file) => deleteUserImage(app.getPath('userData'), pluginId, file),
     pluginPanelError,
     now: Date.now,
+  })
+
+  registerUserPanelThemeIpc({
+    ipcMain,
+    assertPluginPanelSender,
+    getRuntime: () => mainState.panelThemeRuntime,
+    getPanelWindow: () => mainState.panelWindow,
+    isDialogOpen: () => mainState.dialogOpen,
+    setDialogOpen: value => { mainState.dialogOpen = value },
+    showOpenDialog: (window, options) => dialog.showOpenDialog(window, options),
+    showSaveDialog: (window, options) => dialog.showSaveDialog(window, options),
+    translate: key => t(key),
+    readImportFile: readUserPanelThemeImportFile,
+    writeExportFile: writeUserPanelThemeExportFile,
   })
 
 }

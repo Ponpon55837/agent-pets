@@ -15,6 +15,7 @@ import type { AgentAdapterId } from './agent-adapter'
 import type { LocalServerHealthSnapshot, LocalServerId } from './reliability'
 import type { PresentationIntent, PresentationStatusUpdate } from './presentation'
 import type { PanelThemeIpcResult, PanelThemeMode, PanelThemeRef, PanelThemeState, PanelThemeUserImageOptions, PetThemeState } from './panel-theme'
+import type { PanelThemeValidateIpcResult, UserPanelThemeDefinition, UserPanelThemeIpcResult } from './panel-theme-user'
 import type {
   PluginBadgeView,
   PluginBrokerDiagnostic,
@@ -75,6 +76,15 @@ export interface ElectronAPI {
       importPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode) => Promise<PanelThemeIpcResult>
       clearPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode) => Promise<PanelThemeIpcResult>
       setPanelThemeUserImageOptions: (ref: PanelThemeRef, mode: PanelThemeMode, options: PanelThemeUserImageOptions) => Promise<PanelThemeIpcResult>
+      validatePanelTheme: (definition: unknown) => Promise<PanelThemeValidateIpcResult>
+      listUserPanelThemes: () => Promise<UserPanelThemeIpcResult>
+      createUserPanelTheme: (name: string, definition: UserPanelThemeDefinition) => Promise<UserPanelThemeIpcResult>
+      updateUserPanelTheme: (id: string, definition: UserPanelThemeDefinition) => Promise<UserPanelThemeIpcResult>
+      renameUserPanelTheme: (id: string, name: string) => Promise<UserPanelThemeIpcResult>
+      duplicateUserPanelTheme: (id: string, name: string) => Promise<UserPanelThemeIpcResult>
+      deleteUserPanelTheme: (id: string) => Promise<UserPanelThemeIpcResult>
+      exportUserPanelTheme: (id: string) => Promise<UserPanelThemeIpcResult>
+      importUserPanelTheme: () => Promise<UserPanelThemeIpcResult>
       getPetStatusTheme: () => Promise<PetThemeState>
       onPetStatusThemeChanged: (callback: (state: PetThemeState) => void) => () => void
       onPanelThemeChanged: (callback: (state: PanelThemeState) => void) => () => void

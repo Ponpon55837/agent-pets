@@ -1,5 +1,6 @@
 import type { PanelThemeFit, PanelThemeGradientStop, PanelThemeMode, PanelThemePosition } from './panel-theme.ts'
 import type { PluginPanelThemeColorKey } from './plugin.ts'
+import { isPluginId } from './id-patterns.ts'
 
 // 使用者自己做的面板主題（「我的主題」，spec R20–R24）。主程序與渲染端共用的契約：
 // 主程序是唯一會寫入 `userData/panel-themes-user/` 的地方，並以和插件主題相同的驗證器
@@ -7,6 +8,8 @@ import type { PluginPanelThemeColorKey } from './plugin.ts'
 
 /** 使用者主題在 PanelThemeRef.pluginId 中的保留擁有者 id。插件 id 不能含底線，所以不會撞名。 */
 export const USER_PANEL_THEME_OWNER = '_user'
+/** 「我的主題」在目錄中的來源名稱（介面以「我的主題：<名稱>」顯示，不會寫成插件）。 */
+export const USER_PANEL_THEME_SOURCE_NAME = Object.freeze({ 'zh-TW': '我的主題', 'en-US': 'My themes' })
 export const USER_PANEL_THEME_SCHEMA_VERSION = 1
 export const USER_PANEL_THEME_MAX_COUNT = 50
 /** 單一主題檔、匯入檔與驗證請求的大小上限（序列化後的 UTF-8 位元組）。 */
@@ -116,17 +119,15 @@ export type PanelThemeValidateIpcResult =
   | { ok: true; value: PanelThemeValidation }
   | { ok: false; error: import('./ipc').IpcErrorCode }
 
-export interface UserPanelThemeSummary {
-  id: string
-  name: string
-  createdAt: string
-  updatedAt: string
-}
-
 export type UserPanelThemeIpcResult =
   | { ok: true; value: { themes: UserPanelThemeRecord[]; id?: string } }
   | { ok: false; error: import('./ipc').IpcErrorCode; validation?: PanelThemeValidation; cancelled?: boolean }
 
 export function isUserPanelThemeId(value: unknown): value is string {
   return typeof value === 'string' && USER_PANEL_THEME_ID_PATTERN.test(value)
+}
+
+/** 主題的擁有者：已安裝插件的 id，或「我的主題」的保留 id。 */
+export function isPanelThemeOwnerId(value: unknown): value is string {
+  return value === USER_PANEL_THEME_OWNER || isPluginId(value)
 }

@@ -94,3 +94,6 @@ Host API 與 IPC 結果錯誤碼分別定義於 `src/types/plugin.ts` 和 `src/t
 | `image_invalid` | 選擇的背景圖片不是至少 64 px 的靜態 PNG、JPEG 或 WebP，或無法安全讀取。 |
 | `image_too_large` | 選擇的背景圖片超過 20 MiB、每邊 8192 px 或 16.78 MP。 |
 | `image_not_allowed` | 主題的此模式沒有宣告 `userImage.allowed`。 |
+| `theme_limit_reached` | 「我的主題」已達 50 個；新增、複製或匯入前請先刪除一個。 |
+| `theme_not_found` | 找不到這個 id 的「我的主題」。 |
+| `theme_import_invalid` | 選擇的主題檔不是 16 KiB 以內、Agent Pets 匯出格式的一般 JSON 檔。 |

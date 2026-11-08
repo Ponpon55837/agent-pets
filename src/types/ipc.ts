@@ -46,6 +46,9 @@ const ipcErrorCodeEntries = [
   'image_invalid',
   'image_too_large',
   'image_not_allowed',
+  'theme_limit_reached',
+  'theme_not_found',
+  'theme_import_invalid',
 ] as const
 
 export const IPC_ERROR_CODES = Object.freeze([...new Set(ipcErrorCodeEntries)])

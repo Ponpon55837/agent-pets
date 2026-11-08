@@ -1,6 +1,6 @@
 # IPC 安全清單
 
-由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 114 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
+由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 123 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
 
 | 頻道 | 類型 | 允許的寄件者 | 輸入驗證概況 | Preload API | 對應測試 |
 | --- | --- | --- | --- | --- | --- |
@@ -26,6 +26,15 @@
 | `uninstall-integrations` | `handle` | 設定面板 main frame | isIntegrationTarget；無效輸入回安全預設或錯誤 | uninstallIntegrations (invoke) | `tests/ipc-integrations.test.mts` |
 | `onboarding-get` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getOnboardingState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `onboarding-update` | `handle` | 受信任寵物或設定面板 main frame | isOnboardingAction；無效輸入回安全預設或錯誤 | updateOnboardingState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-validate` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；無效輸入回安全預設或錯誤 | validatePanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-user-list` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；無效輸入回安全預設或錯誤 | listUserPanelThemes (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-user-create` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；無效輸入回安全預設或錯誤 | createUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-user-update` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；isUserPanelThemeId；無效輸入回安全預設或錯誤 | updateUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-user-rename` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；isUserPanelThemeId；無效輸入回安全預設或錯誤 | renameUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-user-duplicate` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；isUserPanelThemeId；無效輸入回安全預設或錯誤 | duplicateUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-user-delete` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；isUserPanelThemeId, isDialogOpen；無效輸入回安全預設或錯誤 | deleteUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-user-export` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；長度／數量上限；isUserPanelThemeId；無效輸入回安全預設或錯誤 | exportUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-user-import` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；無效輸入回安全預設或錯誤 | importUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-state-get` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | getPanelThemeState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-appearance-set` | `on` | 設定面板 main frame（共用 sender guard） | handler／controller 驗證 payload；拒絕無效輸入 | setPanelThemeAppearance (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-pet-status-get` | `handle` | 寵物視窗 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | getPetStatusTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |

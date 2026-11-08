@@ -289,3 +289,27 @@ export class UserPanelThemeStore {
     this.load().set(record.id, structuredClone(record))
   }
 }
+
+/** 讀取使用者選的匯入檔：一般檔案、不跟隨 symlink、≤ 16 KiB、只讀一次；回傳解析後的 JSON。 */
+export function readUserPanelThemeImportFile(filePath: string): { ok: true; value: unknown } | { ok: false } {
+  if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) return { ok: false }
+  const read = readRegularJson(filePath)
+  return read.ok ? { ok: true, value: read.value } : { ok: false }
+}
+
+/**
+ * 寫出匯出檔到使用者在儲存對話框選的位置：同目錄暫存檔（wx、0o600）再 rename，
+ * 所以目標若是 symlink 會被取代，而不是寫穿到連結指向的檔案。
+ */
+export function writeUserPanelThemeExportFile(filePath: string, contents: string): void {
+  if (!path.isAbsolute(filePath)) throw new TypeError('export path must be absolute')
+  if (Buffer.byteLength(contents, 'utf8') > USER_PANEL_THEME_MAX_BYTES) throw new UserPanelThemeStoreError('too_large')
+  const temporary = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${randomUUID()}.tmp`)
+  try {
+    fs.writeFileSync(temporary, contents, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    renameSyncWithRetry(temporary, filePath)
+  } catch (error) {
+    try { fs.rmSync(temporary, { force: true }) } catch {}
+    throw error
+  }
+}

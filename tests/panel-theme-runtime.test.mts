@@ -165,6 +165,9 @@ test('user images get a session token, and broadcasts happen only when the state
     const response = await context.runtime.handleRequest(current.url, 'GET')
     assert.equal(response.status, 200)
     assert.equal(response.headers.get('content-type'), 'image/png')
+    // 主題編輯器以 crossOrigin 載入使用者圖片取色：只回給受信任的面板來源。
+    assert.equal(response.headers.get('access-control-allow-origin'), 'agent-pets://app')
+    assert.equal(response.headers.get('vary'), 'Origin')
     // 移除時會刪除圖片目錄與 store 項目。
     context.runtime.removePlugin('theme-pack')
     assert.equal(fs.existsSync(path.join(context.userData, 'panel-theme-images', 'theme-pack')), false)

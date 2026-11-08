@@ -13,7 +13,7 @@ import {
   type PanelThemeStoredUserImage,
   type PanelThemeUserImageOptions,
 } from '../src/types/panel-theme.ts'
-import { isPluginId } from '../src/types/id-patterns.ts'
+import { isPanelThemeOwnerId } from '../src/types/panel-theme-user.ts'
 import { isRecord } from './value-guards.ts'
 
 // `userData/panel-theme.json`（spec §7.1）：記錄每個模式使用哪個插件主題，
@@ -50,7 +50,7 @@ function isErrorCode(error: unknown, code: string): boolean {
 
 export function isPanelThemeRef(value: unknown): value is PanelThemeRef {
   return isRecord(value) && Object.keys(value).length === 2
-    && isPluginId(value.pluginId)
+    && isPanelThemeOwnerId(value.pluginId)
     && typeof value.themeId === 'string' && THEME_ID.test(value.themeId)
 }
 
@@ -102,7 +102,7 @@ export function parsePanelThemeStoreData(value: unknown): PanelThemeStoreData | 
   }
   let count = 0
   for (const [pluginId, themes] of Object.entries(value.userImages)) {
-    if (!isPluginId(pluginId) || !isRecord(themes)) continue
+    if (!isPanelThemeOwnerId(pluginId) || !isRecord(themes)) continue
     for (const [themeId, modes] of Object.entries(themes)) {
       if (!THEME_ID.test(themeId) || !isRecord(modes)) continue
       for (const mode of PANEL_THEME_MODES) {
@@ -243,7 +243,7 @@ export class PanelThemeStore {
 
   /** 丟棄已移除插件的所有項目與插槽。 */
   removePlugin(pluginId: string): boolean {
-    if (!isPluginId(pluginId)) throw new TypeError('Plugin id is invalid')
+    if (!isPanelThemeOwnerId(pluginId)) throw new TypeError('Plugin id is invalid')
     const current = this.load()
     const next = cloneData(current)
     let changed = false
