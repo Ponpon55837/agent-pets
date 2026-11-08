@@ -252,7 +252,10 @@ app.commandLine.appendSwitch('experimental-sqlite')
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'agent-pets',
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+    // corsEnabled lets the panel load theme fonts from agent-pets://panel-theme
+    // (fonts are always CORS requests). Only that route sends an
+    // Access-Control-Allow-Origin header, and only for the trusted panel origin.
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true },
   },
 ])
 
