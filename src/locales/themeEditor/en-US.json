@@ -211,6 +211,8 @@
   "themeEditor.surface.imagePixel": "a {pixel} image pixel",
   "themeEditor.surface.badgeFill": "the {state} badge",
   "themeEditor.surface.pressed": "the hovered primary button",
+  "themeEditor.surface.other": "another surface",
+  "themeEditor.surface.otherText": "other text",
   "themeEditor.desktop.black": "black",
   "themeEditor.desktop.white": "white"
 }

@@ -117,6 +117,7 @@
   "design.themeEditor.error.importInvalid": "這個檔案不是 Agent Pets 主題。",
   "design.themeEditor.error.invalid": "這個主題沒有通過檢查。",
   "design.themeEditor.error.failed": "操作沒有完成，請再試一次。",
+  "design.themeEditor.error.invalidRequest": "這個要求沒有被接受，請檢查主題後再試一次。",
   "design.themeEditor.imported": "已匯入主題。",
   "design.themeEditor.exported": "已匯出主題。",
   "design.themeEditor.deleted": "已刪除主題。",

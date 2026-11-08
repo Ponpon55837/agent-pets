@@ -211,6 +211,8 @@
   "themeEditor.surface.imagePixel": "圖片的{pixel}像素",
   "themeEditor.surface.badgeFill": "{state}徽章",
   "themeEditor.surface.pressed": "滑鼠移過的主要按鈕",
+  "themeEditor.surface.other": "另一個表面",
+  "themeEditor.surface.otherText": "另一段文字",
   "themeEditor.desktop.black": "黑色",
   "themeEditor.desktop.white": "白色"
 }
