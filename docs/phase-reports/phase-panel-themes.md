@@ -46,9 +46,10 @@
 
 ## 驗證
 
-- `pnpm exec vue-tsc --noEmit`、`pnpm run lint`、`pnpm run test:unit`（1098 項全過）、`pnpm exec vite build`、`pnpm run check:bundle-size`、`pnpm run check:bundle`、`pnpm run check:contrast`、`pnpm run check:design:strict`、`pnpm audit --prod`（無已知弱點）、`git diff --check`。
+- `pnpm exec vue-tsc --noEmit`、`pnpm run lint`、`pnpm run test:unit`（1111 項全過）、`pnpm exec vite build`、`pnpm run check:bundle-size`、`pnpm run check:bundle`、`pnpm run check:contrast`、`pnpm run check:design:strict`、`pnpm audit --prod`（無已知弱點）、`git diff --check`。
 - 新增測試：顏色語法與注入字串、驗證器與對比、儲存、使用者圖片、IPC 寄件者、協定路由、渲染端白名單、寵物狀態列、插件整合（manifest、套件、授權、目錄、設定搜尋、語系）。
 - 隔離 Electron（暫時 HOME／userData、假 safeStorage、未觸發鑰匙圈）：以開發者模式安裝測試主題插件，套用淺色與深色、匯入背景圖、切換插件停用／移除（檔案與設定一併清除）、權限卡在高彩度主題下維持內建外觀、forced-colors／prefers-contrast／reduced-transparency、寵物狀態列淺色與深色。
+- 插件主題 API（隔離 Electron，hook 埠 37373–37375）：以開發者模式安裝 `ok-panel-theme` 與 `ok-theme-reader`（無權限的面板頁插件），面板淺色→深色時 panelView `<html>` 上的 24 個 `--ap-*` 立即更新，一次切換只收到一個 `onDidChange` 事件；恢復內建後回到內建深色色盤；Worker 的 `theme.get()`／`onDidChange` 記錄與面板一致。
 
 ## 剩餘風險
 

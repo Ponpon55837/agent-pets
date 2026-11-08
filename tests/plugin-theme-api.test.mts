@@ -250,3 +250,12 @@ test('the public d.ts and docs list exactly the runtime token set', () => {
     for (const token of PLUGIN_THEME_TOKENS) assert.ok(text.includes(`\`${token}\``), `${doc} documents ${token}`)
   }
 })
+
+test('the theme reader fixture is a valid permission-free panel plugin that styles only with --ap-* tokens', () => {
+  const root = new URL('./fixtures/plugins/ok-theme-reader/', import.meta.url)
+  const parsed = parsePluginManifest(JSON.parse(fs.readFileSync(new URL('plugin.json', root), 'utf8')))
+  assert.ok(parsed.ok)
+  assert.deepEqual(parsed.manifest.permissions, {})
+  const css = fs.readFileSync(new URL('ui/panel.css', root), 'utf8')
+  for (const match of css.matchAll(/var\((--[a-z0-9-]+)/g)) assert.ok((PLUGIN_THEME_TOKENS as readonly string[]).includes(match[1]!), match[1])
+})
