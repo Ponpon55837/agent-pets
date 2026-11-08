@@ -552,6 +552,8 @@ const STATE_DISTANCE_PAIRS: ReadonlyArray<readonly [PluginPanelThemeColorKey, Pl
 /** 寵物泡泡與狀態膠囊的表面＝ surface 以此 alpha 疊在桌面上（與 tokens.css 的 color-mix 比例相同）。 */
 export const PET_BUBBLE_SURFACE_ALPHA = 0.93
 export const PET_PILL_SURFACE_ALPHA = 0.92
+/** 寵物視窗的選單與對話框（tokens.css `.desktop-pet --surface-overlay`）＝ surface 以此 alpha 疊在桌面上。 */
+export const PET_OVERLAY_SURFACE_ALPHA = 0.98
 /** 膠囊額度軌道＝ text 的 alpha（tokens.css --organic-status-track）。 */
 export const PET_PILL_TRACK_ALPHA = 0.14
 /** 主要按鈕懸停＝ accentHover 往 text 混合的比例（Button.vue、InlinePermissionCard.vue）。 */
@@ -560,7 +562,7 @@ export const PANEL_THEME_PRESSED_MIX = 0.12
 export const PANEL_THEME_SHADOW_MAX_LUMINANCE = 0.05
 export const PANEL_THEME_HIGHLIGHT_MIN_LUMINANCE = 0.7
 
-/** 主機在半透明狀態色底上放同色文字（Chip、Badge 的 tone-success/warn/danger）時的底色比例。 */
+/** 主機在半透明狀態色底上放同色文字（Chip、Badge 的 tone-success/warn/danger、危險按鈕懸停）時的底色比例。 */
 export const PANEL_THEME_STATE_TINT_ALPHA = 0.12
 
 /** 文字類 token（>= 4.5:1）；焦點環用 accentText（>= 3:1）。 */
@@ -630,11 +632,24 @@ function surfaceSpecs(): SurfaceSpec[] {
   const translucent: ReadonlyArray<readonly [string, number, boolean]> = [
     ['pet bubble', PET_BUBBLE_SURFACE_ALPHA, false],
     ['pet status pill', PET_PILL_SURFACE_ALPHA, true],
+    ['pet overlay', PET_OVERLAY_SURFACE_ALPHA, false],
   ]
   for (const [label, alpha, pill] of translucent) {
     for (const [desktop, base] of DESKTOPS) {
       surfaces.push({ name: `${label} over a ${desktop} desktop`, reads: ['surface'], color: colors => compositeColor(withAlphaUnrounded(colors.surface, alpha), base), pill, focus: true, text: TEXT_KEYS })
     }
+  }
+  // 危險按鈕懸停：危險色文字放在 12% 的危險色底上（Button.vue）。面板的對話框表面就是 surface，
+  // 已在上面的狀態晶片檢查過；寵物視窗的對話框是半透明的 surface，另外檢查。
+  for (const [desktop, base] of DESKTOPS) {
+    surfaces.push({
+      name: `dangerText at ${PANEL_THEME_STATE_TINT_ALPHA} over the pet overlay over a ${desktop} desktop (danger button hover)`,
+      reads: ['dangerText', 'surface'],
+      color: colors => compositeColor(withAlphaUnrounded(colors.dangerText, PANEL_THEME_STATE_TINT_ALPHA), compositeColor(withAlphaUnrounded(colors.surface, PET_OVERLAY_SURFACE_ALPHA), base)),
+      pill: false,
+      focus: true,
+      text: ['dangerText'],
+    })
   }
   return surfaces
 }

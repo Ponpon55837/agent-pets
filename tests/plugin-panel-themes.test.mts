@@ -18,8 +18,10 @@ import {
   PANEL_THEME_DEPRECATED_COLOR_KEYS,
   PANEL_THEME_STATE_TINT_ALPHA,
   PANEL_THEME_PRESSED_MIX,
+  PET_OVERLAY_SURFACE_ALPHA,
   builtinPanelThemeColors,
   panelThemeInvariantFailure,
+  panelThemeInvariantFailures,
 } from '../electron/plugin-panel-themes.ts'
 import { contrastRatio, parsePanelThemeColor, type PanelThemeRgba } from '../electron/panel-theme-color.ts'
 import { PANEL_THEME_COLOR_PROPERTIES } from '../src/types/panel-theme.ts'
@@ -418,4 +420,16 @@ test('state chips tint at the validated alpha and the components that host sage 
   const light = builtinPanelThemeColors('light')
   const failure = panelThemeInvariantFailure({ ...light, warnText: color('#8a6100') })
   assert.match(failure?.background ?? '', /^warnText at 0\.12 over surface \(state chip\)$/)
+})
+
+test('danger buttons: danger text on the pet overlay and on its 12% danger hover mix are checked', () => {
+  assert.equal(PET_OVERLAY_SURFACE_ALPHA, 0.98)
+  assert.equal(PANEL_THEME_STATE_TINT_ALPHA, 0.12)
+  for (const mode of ['light', 'dark'] as const) assert.equal(panelThemeInvariantFailure(builtinPanelThemeColors(mode)), null, mode)
+  const light = builtinPanelThemeColors('light')
+  // 夠在不透明表面上通過、但在 12% 危險色底上不夠的危險色。
+  const failures = [...panelThemeInvariantFailures({ ...light, dangerText: { r: 205, g: 80, b: 70, a: 1 } })]
+  const backgrounds = failures.filter(failure => failure.foreground === 'dangerText').map(failure => failure.background)
+  assert.ok(backgrounds.some(background => /^dangerText at 0\.12 over the pet overlay over a (black|white) desktop \(danger button hover\)$/.test(background)), backgrounds.join('\n'))
+  assert.ok(backgrounds.some(background => /^pet overlay over a (black|white) desktop$/.test(background)), backgrounds.join('\n'))
 })
