@@ -79,8 +79,9 @@ function onKeydown(event: KeyboardEvent): void {
   color: var(--text-primary);
 }
 
+/* 文字放在實心強調色上時用 accentHover：onAccent 在其上保證 >= 4.5:1（在 accent 上只保證 3:1）。 */
 .segment.active {
-  background: var(--accent);
+  background: var(--accent-hover);
   color: var(--accent-bright);
 }
 

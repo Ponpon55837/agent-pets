@@ -410,19 +410,22 @@
   color: var(--organic-accent-text);
 }
 
+/* 文字放在實心強調色上時用 accentHover：onAccent 在其上保證 >= 4.5:1（在 accent 上只保證 3:1）。 */
 .status-panel :deep(.state-chip.state-waiting-permission), .status-panel :deep(.state-chip.state-waiting-input) {
-  background: var(--organic-accent);
+  background: var(--organic-accent-hover);
   color: var(--organic-accent-contrast);
 }
 
+/* 成功與錯誤用狀態色（受色相限制）放在 surface-2 上，驗證器保證 >= 4.5:1；
+   舊版的錯誤晶片用強調色，看不出是錯誤。 */
 .status-panel :deep(.state-chip.state-success) {
-  background: var(--organic-surface-sage);
-  color: var(--organic-sage-deep);
+  background: var(--color-surface-2);
+  color: var(--color-success);
 }
 
 .status-panel :deep(.state-chip.state-error) {
-  background: var(--organic-surface-warm);
-  color: var(--organic-accent-text);
+  background: var(--color-surface-2);
+  color: var(--color-danger);
 }
 
 .status-panel :deep(.session-time) {
