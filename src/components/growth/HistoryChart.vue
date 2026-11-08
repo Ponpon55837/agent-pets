@@ -5,6 +5,7 @@ import { useHistoryFormat } from '@/composables/useHistoryFormat'
 import type { HistoryDailyStat } from '@/types/history'
 import { niceCeiling } from '@/utils/token-format'
 import { formatDateParts } from '@/utils/intl-format'
+import { axisLabelParts, axisLabelVisible } from '@/utils/history-axis'
 
 const props = defineProps<{ days: HistoryDailyStat[]; todayKey: string; weekdayLabels: boolean }>()
 const { tokens, duration } = useHistoryFormat()
@@ -101,7 +102,10 @@ const detail = computed(() => {
         :key="day.localDate"
         class="axis-label"
         :class="{ today: day.localDate === todayKey }"
-      >{{ (days.length - 1 - index) % labelStep === 0 ? dateLabel(day, weekdayLabels) : '' }}</span>
+      ><template v-if="axisLabelVisible(index, days.length, labelStep)"
+        ><span class="axis-date">{{ axisLabelParts(day.localDate, weekdayLabels, locale).date }}</span
+        ><span v-if="weekdayLabels" class="axis-weekday">{{ axisLabelParts(day.localDate, true, locale).weekday }}</span
+      ></template></span>
     </div>
     <p class="history-detail" aria-live="polite">{{ detail }}</p>
     <table class="sr-only">
@@ -169,6 +173,8 @@ const detail = computed(() => {
 .plot {
   position: relative;
   height: 96px;
+  /* Room for the top grid label, which sits above the plot's first line. */
+  margin-top: var(--space-3);
 }
 
 .grid {
@@ -253,13 +259,35 @@ const detail = computed(() => {
 }
 
 .axis-label {
+  display: flex;
   flex: 1 1 0;
   min-width: 0;
+  flex-direction: column;
+  align-items: center;
   overflow: visible;
   color: var(--text-muted);
   font-size: var(--font-xs);
+  line-height: var(--leading-tight);
   text-align: center;
   white-space: nowrap;
+}
+
+/* The 7-day view labels every column, so a label may not spill into its
+   neighbour; the 30/90-day views label every few columns and may. */
+.axis-label:has(.axis-weekday) {
+  overflow: hidden;
+}
+
+.axis-date,
+.axis-weekday {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.axis-label:not(:has(.axis-weekday)) .axis-date {
+  max-width: none;
+  overflow: visible;
 }
 
 .axis-label.today {

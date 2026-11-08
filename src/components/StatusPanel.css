@@ -235,7 +235,11 @@
   padding: 0 var(--organic-space-4) var(--organic-space-3);
 }
 
-.status-panel :deep(.tab-panel) {
+/* Dashboard-level tab panels only. The <TabPanel> primitive also uses the
+   `.tab-panel` class (History's overview / sessions sub-views), so a rule on
+   `.tab-panel` here would override its `[hidden]` state and squash both
+   sub-views into the same space. */
+.status-panel :deep(.dashboard-tab-panel) {
   display: flex;
   min-height: 0;
   flex: 1;
