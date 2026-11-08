@@ -427,7 +427,7 @@ const sayTargetStyle = usePetBubbleAnchor(
   () => store.presentationSay?.petId,
 )
 
-// Quota 顏色由 CSS 依 data-quota-tier 選 token（DesktopPet.css），可隨主題調整，也讓 token 檢查看得到用處。
+// Quota 顏色由 CSS 依 data-quota-tier 選 token（DesktopPet.css），插件主題可透過 --pet-status-* 重新上色一般與低額度填色（危急 < 20% 維持內建），也讓 token 檢查看得到用處。
 type QuotaTier = 'low' | 'warning' | 'claude' | 'normal'
 
 function quotaTier(familyKey: string): QuotaTier | undefined {

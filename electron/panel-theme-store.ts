@@ -14,10 +14,10 @@ import {
   type PanelThemeUserImageOptions,
 } from '../src/types/panel-theme.ts'
 
-// `userData/panel-theme.json` (spec §7.1): which plugin theme each mode uses,
-// plus the user-imported background image entries. Modelled on
-// PluginPreferencesStore: lstat/symlink refusal, O_NOFOLLOW read, size cap,
-// corrupt-file backup and atomic writes.
+// `userData/panel-theme.json`（spec §7.1）：記錄每個模式使用哪個插件主題，
+// 以及使用者匯入的背景圖片項目。仿照 PluginPreferencesStore：
+// 拒絕 lstat/symlink、O_NOFOLLOW 讀取、大小上限、
+// 損毀檔案備份與原子寫入。
 
 export const PANEL_THEME_STORE_FILENAME = 'panel-theme.json'
 export const PANEL_THEME_STORE_MAX_BYTES = 64 * 1024
@@ -29,7 +29,7 @@ export const PANEL_THEME_USER_IMAGE_FILE = /^[0-9a-f]{64}\.(?:png|jpg|webp)$/
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
-/** Thrown when the store file is a symlink or otherwise unsafe; maps to `preferences_unsafe`. */
+/** store 檔案是 symlink 或其他不安全狀態時拋出；對應 `preferences_unsafe`。 */
 export class PanelThemeStoreFileError extends Error {
   readonly code = 'unsafe_file'
 
@@ -57,7 +57,7 @@ export function isPanelThemeRef(value: unknown): value is PanelThemeRef {
     && typeof value.themeId === 'string' && THEME_ID.test(value.themeId)
 }
 
-/** Dim: a number with at most 2 decimals in [minimum, 0.95]. */
+/** Dim：最多 2 位小數、落在 [minimum, 0.95] 的數字。 */
 export function isPanelThemeDim(value: unknown, minimum: number): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= 0.95
     && /^0\.\d{1,2}$/.test(String(value))
@@ -95,7 +95,7 @@ function parseStoredImage(value: unknown): PanelThemeStoredUserImage | null {
   }
 }
 
-/** Parses stored data; invalid entries are dropped, an invalid root returns null (backed up). */
+/** 解析儲存的資料；無效項目會被丟棄，根節點無效時回傳 null（並備份）。 */
 export function parsePanelThemeStoreData(value: unknown): PanelThemeStoreData | null {
   if (!isRecord(value) || value.version !== 1 || !isRecord(value.slots) || !isRecord(value.userImages)) return null
   const data = emptyPanelThemeStoreData()
@@ -169,11 +169,11 @@ function countImages(data: PanelThemeStoreData): number {
 }
 
 export interface PanelThemeStoreValidity {
-  /** The theme and mode exist in the installed (not necessarily enabled) plugin. */
+  /** 主題與模式存在於已安裝（不一定已啟用）的插件中。 */
   modeExists(pluginId: string, themeId: string, mode: PanelThemeMode): boolean
-  /** The theme mode still declares `userImage`. */
+  /** 該主題模式仍宣告 `userImage`。 */
   allowsUserImage(pluginId: string, themeId: string, mode: PanelThemeMode): boolean
-  /** The plugin is still installed. */
+  /** 插件仍已安裝。 */
   isInstalled(pluginId: string): boolean
 }
 
@@ -188,7 +188,7 @@ export class PanelThemeStore {
     this.filePath = path.join(userDataDirectory, PANEL_THEME_STORE_FILENAME)
   }
 
-  /** A corrupt or unsafe file reads as all built-in. */
+  /** 損毀或不安全的檔案一律視為全部內建。 */
   get(): PanelThemeStoreData {
     return cloneData(this.load())
   }
@@ -210,7 +210,7 @@ export class PanelThemeStore {
     return image ? { ...image } : null
   }
 
-  /** Stores (or replaces) one user image entry. Returns the replaced file name, if any. */
+  /** 儲存（或取代）一筆使用者圖片項目。回傳被取代的檔名（若有）。 */
   setUserImage(ref: PanelThemeRef, mode: PanelThemeMode, image: PanelThemeStoredUserImage): string | null {
     const next = cloneData(this.load())
     const previous = next.userImages[ref.pluginId]?.[ref.themeId]?.[mode]
@@ -231,7 +231,7 @@ export class PanelThemeStore {
     return true
   }
 
-  /** Removes one entry. Returns its file name, if there was one. */
+  /** 移除一筆項目。回傳其檔名（若有）。 */
   clearUserImage(ref: PanelThemeRef, mode: PanelThemeMode): string | null {
     const next = cloneData(this.load())
     const themes = next.userImages[ref.pluginId]
@@ -244,7 +244,7 @@ export class PanelThemeStore {
     return image.file
   }
 
-  /** Drops every entry and slot of a removed plugin. */
+  /** 丟棄已移除插件的所有項目與插槽。 */
   removePlugin(pluginId: string): boolean {
     if (!PLUGIN_ID.test(pluginId)) throw new TypeError('Plugin id is invalid')
     const current = this.load()
@@ -265,10 +265,9 @@ export class PanelThemeStore {
   }
 
   /**
-   * Update/sync pruning (spec §4.3): clear slots whose theme or mode vanished,
-   * drop image entries whose mode no longer allows a user image or whose plugin
-   * is gone. Disabled plugins keep everything. Returns `pluginId/file` paths
-   * that are no longer referenced.
+   * 更新/同步時修剪（spec §4.3）：清除主題或模式已消失的插槽，
+   * 丟棄模式不再允許使用者圖片、或插件已不存在的圖片項目。
+   * 停用的插件保留一切。回傳不再被引用的 `pluginId/file` 路徑。
    */
   prune(validity: PanelThemeStoreValidity): string[] {
     const current = this.load()
@@ -301,7 +300,7 @@ export class PanelThemeStore {
     return removed.filter(file => !stillReferenced.has(file))
   }
 
-  /** `pluginId/file` for every stored entry. */
+  /** 每筆已儲存項目的 `pluginId/file`。 */
   referencedFiles(): Set<string> {
     const files = new Set<string>()
     for (const [pluginId, themes] of Object.entries(this.load().userImages)) {

@@ -686,7 +686,7 @@ export function syncPanelThemes(): void {
   })
 }
 
-/** The trusted panel renderer origin (fonts are fetched cross-origin from agent-pets://panel-theme). */
+/** 受信任的面板渲染端來源（字型會從 agent-pets://panel-theme 跨來源抓取）。 */
 function panelRendererOrigin(): string | null {
   try {
     if (process.env.VITE_DEV_SERVER_URL && !app.isPackaged) return new URL(process.env.VITE_DEV_SERVER_URL).origin

@@ -23,7 +23,7 @@ export function buildPluginCatalogPanelItems(
   for (const plugin of catalog.plugins) {
     const latestVersion = selectLatestCompatiblePluginVersion(plugin, '1', appVersion)
     if (!latestVersion) {
-      // Versions exist for this API but all need a newer app: show "requires Agent Pets X".
+      // 這個 API 有版本，但全都需要更新的 app：顯示 "requires Agent Pets X"。
       const blocked = selectLatestCompatiblePluginVersion(plugin, '1')
       const required = blocked ? lowestRequiredAppVersion(plugin.versions) : null
       if (blocked && required) {

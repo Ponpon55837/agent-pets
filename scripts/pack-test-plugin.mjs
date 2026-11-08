@@ -26,7 +26,7 @@ function collect(directory, relativeDirectory = '') {
 
 collect(sourceDirectory)
 if (!files['plugin.json']) throw new Error(`Fixture ${pluginId} must contain plugin.json`)
-// Workerless fixtures (skins, panelThemes) have no entry; only require what the manifest names.
+// 無 Worker 的 fixture（skins、panelThemes）沒有 entry；只要求 manifest 有列出的檔案。
 const manifest = JSON.parse(Buffer.from(files['plugin.json']).toString('utf8'))
 for (const required of [manifest.entry, manifest.icon]) {
   if (typeof required === 'string' && !files[required]) {

@@ -18,15 +18,15 @@ import {
   type PetStatusThemeState,
 } from '../types/panel-theme.ts'
 
-// Renderer-side, pure: re-validates every host-built name and value before it
-// may reach style.setProperty (defence in depth; main already re-emitted them
-// from closed grammars), builds gradients from structured numbers, and diffs
-// property maps so a switch writes only what changed in one frame.
+// 渲染端、純函式：每個主機建構的名稱與值在進入 style.setProperty 之前
+// 都會重新驗證（縱深防禦；主程序已經從封閉文法重新輸出它們），
+// 以結構化數字建構漸層，並比對屬性對應表的差異，讓切換時
+// 只在同一個 frame 內寫入有變動的部分。
 
 export interface PanelThemeMediaFlags {
-  /** forced-colors: active (Windows high contrast) suspends the plugin theme. */
+  /** forced-colors: active（Windows 高對比）會暫停插件主題。 */
   forcedColors: boolean
-  /** prefers-contrast: more strengthens borders from the theme's text colour. */
+  /** prefers-contrast: more 會以主題的文字色加強邊框。 */
   highContrast: boolean
 }
 
@@ -53,7 +53,7 @@ const POSITION_CSS: Record<PanelThemePosition, string> = {
 const POSITION_ALTERNATION = Object.values(POSITION_CSS).join('|')
 const GRADIENT_PATTERN = new RegExp(`^(?:linear-gradient\\(${ANGLE}, ${STOPS}\\)|radial-gradient\\(ellipse at (?:${POSITION_ALTERNATION}), ${STOPS}\\))$`)
 
-/** CSS `object-position` / `background-position` for a host position enum. */
+/** 主機位置列舉對應的 CSS `object-position` / `background-position`。 */
 export function panelThemePositionCss(position: PanelThemePosition): string {
   return POSITION_CSS[position] ?? 'center'
 }
@@ -67,7 +67,7 @@ export function buildPanelThemeGradient(background: PanelThemeBackgroundState): 
   return GRADIENT_PATTERN.test(value) ? value : null
 }
 
-/** Allowlisted name and a value matching that property's pattern. */
+/** 名稱在允許清單內，且值符合該屬性的 pattern。 */
 export function isPanelThemePropertyValue(name: string, value: unknown): value is string {
   if (!ALLOWED.has(name) || typeof value !== 'string' || value.length === 0 || value.length > 512) return false
   if (COLOR_PROPERTIES.has(name)) return PANEL_THEME_RGB_PATTERN.test(value)
@@ -92,7 +92,7 @@ function withAlpha(color: string, alpha: string): string | null {
   return match ? `rgb(${match[1]} / ${alpha})` : null
 }
 
-/** The catalog entry for the mode's slot, or null when the slot is built-in or unavailable. */
+/** 該模式插槽對應的目錄項目；插槽為內建或不可用時為 null。 */
 export function activePanelTheme(state: PanelThemeState | null, mode: PanelThemeMode): PanelThemeCatalogEntry | null {
   const slot = state?.slots[mode]
   if (!state || !slot?.ref || slot.status !== 'active') return null
@@ -103,11 +103,11 @@ export function activePanelTheme(state: PanelThemeState | null, mode: PanelTheme
 
 export interface PanelThemePropertyPlan {
   properties: Map<PanelThemeCssProperty, string>
-  /** Names or values that failed re-validation (logged, never applied). */
+  /** 未通過重新驗證的名稱或值（會記錄，絕不套用）。 */
   rejected: string[]
 }
 
-/** Every property to set for `entry` in `mode`; empty under forced colours or with no entry. */
+/** `entry` 在 `mode` 下要設定的所有屬性；forced colors 下或沒有 entry 時為空。 */
 export function panelThemeTargetProperties(
   entry: PanelThemeCatalogEntry | null,
   mode: PanelThemeMode,
@@ -134,7 +134,7 @@ export function panelThemeTargetProperties(
   return { properties, rejected }
 }
 
-/** Minimal writes to move from `current` to `next`. */
+/** 從 `current` 變成 `next` 所需的最少寫入。 */
 export function diffPanelThemeProperties(
   current: ReadonlyMap<string, string>,
   next: ReadonlyMap<string, string>,
@@ -144,7 +144,7 @@ export function diffPanelThemeProperties(
   return { remove, set }
 }
 
-/** Modes whose slot holds `ref` and is active (the one theme per mode that is "in use"). */
+/** 插槽持有 `ref` 且為啟用中的模式（每個模式唯一「使用中」的主題）。 */
 export function activePanelThemeModes(state: PanelThemeState | null, ref: { pluginId: string; themeId: string }): PanelThemeMode[] {
   if (!state) return []
   return (['light', 'dark'] as const).filter(mode => {
@@ -154,9 +154,9 @@ export function activePanelThemeModes(state: PanelThemeState | null, ref: { plug
 }
 
 /**
- * Where "Panel theme" settings live: the plugin that owns the active slot
- * (light first), else the first plugin offering a theme; null means no theme
- * plugin is available, so the Appearance status row is the target.
+ * "Panel theme" 設定所在處：擁有啟用中插槽的插件（淺色優先），
+ * 否則為第一個提供主題的插件；null 表示沒有可用的主題插件，
+ * 此時目標為 Appearance 狀態列。
  */
 export function panelThemeSettingsTarget(state: PanelThemeState | null): string | null {
   if (!state) return null
@@ -167,7 +167,7 @@ export function panelThemeSettingsTarget(state: PanelThemeState | null): string 
   return state.themes[0]?.ref.pluginId ?? null
 }
 
-/** Allowlisted names with host-canonical rgb() values only; anything else is dropped. */
+/** 只保留允許清單內、值為主機標準 rgb() 的名稱；其餘一律丟棄。 */
 export function petStatusTargetProperties(state: PetStatusThemeState | null, mode: 'light' | 'dark', forcedColors: boolean): Map<string, string> {
   const properties = new Map<string, string>()
   const source = forcedColors ? null : state?.[mode]
@@ -175,6 +175,6 @@ export function petStatusTargetProperties(state: PetStatusThemeState | null, mod
   for (const [name, value] of Object.entries(source)) {
     if (PET_STATUS_ALLOWED.has(name) && typeof value === 'string' && value.length <= 32 && PANEL_THEME_RGB_PATTERN.test(value)) properties.set(name, value)
   }
-  // All-or-nothing: a partial set would mix theme and built-in colours unchecked.
+  // 全有或全無：只設定一部分會在未經檢查的情況下混用主題色與內建色。
   return properties.size === PET_STATUS_PROPERTIES.length ? properties : new Map()
 }

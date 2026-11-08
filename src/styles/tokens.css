@@ -237,11 +237,11 @@
   --builtin-organic-font-display-sm: 22px;
   --builtin-organic-font-display-md: 22px;
 
-  /* Themable palette. The literal values above are the frozen built-in
-     copy (--builtin-organic-*); --organic-* points at it here, and a plugin
-     panel theme re-points --organic-* inline on .status-panel only (spec
-     docs/design/Plugin-Panel-Theme-Spec.md §3.6). .host-protected below
-     resets them so permission/risk UI always renders built-in. */
+  /* 可套主題的色盤。上方的字面值是凍結的內建副本
+     （--builtin-organic-*）；--organic-* 在此指向它，而插件面板主題
+     只會在 .status-panel 上以 inline 方式重新指向 --organic-*（spec
+     docs/design/Plugin-Panel-Theme-Spec.md §3.6）。下方的 .host-protected
+     會重設它們，讓權限/風險 UI 一律以內建樣式呈現。 */
   --organic-bg: var(--builtin-organic-bg);
   --organic-surface: var(--builtin-organic-surface);
   --organic-surface-2: var(--builtin-organic-surface-2);
@@ -320,10 +320,10 @@
   --font-body: var(--font-ui);
 }
 
-/* ── Pet status pill theme hooks ─────────────────────────────────────────
-   Unset (guaranteed-invalid) by default so every var() falls back to the
-   built-in --organic-status-* look. A plugin panel theme may set them on the
-   pet root (usePetStatusTheme); only .status-line reads them (spec §3.7). */
+/* ── 寵物狀態膠囊主題掛鉤 ─────────────────────────────────────────
+   預設不設定（guaranteed-invalid），讓每個 var() 都退回
+   內建的 --organic-status-* 外觀。插件面板主題可以在寵物根元素
+   （usePetStatusTheme）上設定它們；只有 .status-line 會讀取（spec §3.7）。 */
 :root {
   --pet-status-background: initial;
   --pet-status-background-opaque: initial;
@@ -394,8 +394,8 @@
 }
 
 :root[data-pet-theme='light'] .desktop-pet {
-  /* The permission bubble reads these dark-layer text/state tokens; without a
-     light value its command, details and links were near-white on cream. */
+  /* 權限泡泡會讀取這些深色層的文字/狀態 token；沒有淺色值時，
+     它的指令、細節與連結會在米白底上呈現近乎白色。 */
   --text-bright: #2a2622;
   --text-secondary: #5a5248;
   --text-muted: #645c50;
@@ -424,10 +424,9 @@
   --shadow-edge-handle: 0 3px 12px rgba(46, 43, 37, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
-/* ── Protected regions ──────────────────────────────────────────────────
-   Permission, risk and consent UI, plugin-content markers and the panel
-   theme card itself always render with the built-in palette, whatever
-   panel theme is active. */
+/* ── 受保護區域 ──────────────────────────────────────────────────
+   權限、風險與同意 UI、插件內容標記，以及面板主題卡片本身，
+   不論啟用哪個面板主題，一律以內建色盤呈現。 */
 .host-protected {
   --organic-bg: var(--builtin-organic-bg);
   --organic-surface: var(--builtin-organic-surface);

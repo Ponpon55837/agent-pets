@@ -11,9 +11,9 @@ import {
   type PanelThemeMediaFlags,
 } from '@/utils/panel-theme-css'
 
-// Applies the plugin panel theme for the resolved light/dark mode to the
-// `.status-panel` element only (spec §7.3). Every value was host-built in
-// main and is re-validated here; writes are diffed and batched in one frame.
+// 依解析後的淺色/深色模式，把插件面板主題只套用到 `.status-panel`
+// 元素（spec §7.3）。每個值都由主程序建構，並在此重新驗證；
+// 寫入會先做差異比對，並在同一個 frame 內批次完成。
 
 export interface PanelThemeBackdropView {
   url: string
@@ -27,7 +27,7 @@ export interface PanelThemeBackdropView {
 
 const FONT_LOAD_TIMEOUT_MS = 1500
 
-/** Shared with the Settings card so both see the same state. */
+/** 與 Settings 卡片共用，讓兩者看到相同狀態。 */
 export const panelThemeState = shallowRef<PanelThemeState | null>(null)
 
 export function setPanelThemeState(next: PanelThemeState | null): void {
@@ -36,14 +36,14 @@ export function setPanelThemeState(next: PanelThemeState | null): void {
 
 let refreshInFlight: Promise<void> | null = null
 
-/** Several components mount together; they share one in-flight request. */
+/** 多個元件會同時掛載；它們共用同一個進行中的請求。 */
 export function refreshPanelThemeState(): Promise<void> {
   refreshInFlight ??= (async () => {
     try {
       const result = await window.electronAPI?.getPanelThemeState()
       if (result?.ok) panelThemeState.value = result.value
     } catch {
-      // The live broadcast (onPanelThemeChanged) still updates the state later.
+      // 即時廣播（onPanelThemeChanged）之後仍會更新狀態。
     } finally {
       refreshInFlight = null
     }
@@ -70,7 +70,7 @@ function readMedia(): void {
   }
 }
 
-/** Re-checks every backdrop value against the closed host shapes. */
+/** 以封閉的主機格式重新檢查每個背景值。 */
 export function validBackdrop(view: PanelThemeBackdropView | null): PanelThemeBackdropView | null {
   if (!view || !isPanelThemeAssetUrl(view.url) || !isPanelThemePropertyValue('--organic-bg', view.overlayColor)) return null
   if (!isPanelThemeFit(view.fit) || !isPanelThemePosition(view.position)) return null
@@ -121,7 +121,7 @@ export function usePanelTheme(panelRoot: Ref<HTMLElement | null>) {
     return null
   }
 
-  /** Loads the faces of every theme assigned to a slot; drops faces no slot uses. */
+  /** 載入所有已指派到插槽之主題的字型 face；丟棄沒有插槽使用的 face。 */
   async function syncFonts(): Promise<void> {
     if (typeof FontFace === 'undefined' || typeof document === 'undefined') return
     const wanted = new Map<string, { alias: string; url: string; weight: number; style: string }>()

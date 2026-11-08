@@ -10,10 +10,10 @@ import { usePanelThemeActions } from '@/composables/usePanelThemeActions'
 import { activePanelThemeModes } from '@/utils/panel-theme-css'
 import { PANEL_THEME_MODES, type PanelThemeCatalogEntry, type PanelThemeMode } from '@/types/panel-theme'
 
-// Plugins -> <plugin> -> Panel themes (spec §8). Lists this plugin's themes with
-// light/dark previews and applies one to Light, Dark or Both. There is one slot
-// per mode across all plugins, so applying here replaces whatever was active.
-// The whole section is .host-protected: it always renders built-in.
+// Plugins -> <plugin> -> Panel themes（spec §8）。列出此插件的主題與
+// light/dark 預覽，並可套用到 Light、Dark 或 Both。所有插件每個模式
+// 只有一個插槽，所以在這裡套用會取代原本啟用的主題。
+// 整個區塊是 .host-protected：一律以內建樣式呈現。
 
 const props = defineProps<{ pluginId: string; pluginEnabled: boolean }>()
 const { busy, status, error, applyTheme, restoreBuiltIn } = usePanelThemeActions()

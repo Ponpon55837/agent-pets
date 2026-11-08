@@ -92,7 +92,7 @@ export type PluginPanelThemeColorKey =
   | 'border' | 'borderSoft' | 'borderOnAccent'
   | 'dangerText' | 'successText' | 'warnText' | 'scrim'
 
-/** Normalised manifest colours: host-canonical `rgb(R G B / A)` strings (spec §3.3). */
+/** 正規化後的 manifest 顏色：主機標準的 `rgb(R G B / A)` 字串（spec §3.3）。 */
 export type PluginPanelThemeColors = Partial<Record<PluginPanelThemeColorKey, string>>
 
 export interface PluginPanelThemeOverlay { color: string; opacity: number }
@@ -125,7 +125,7 @@ export interface PluginPanelThemeFontFace {
   style: 'normal' | 'italic'
 }
 
-/** A validated `contributes.panelThemes[]` entry with defaults applied (electron/plugin-panel-themes.ts). */
+/** 已驗證並套用預設值的 `contributes.panelThemes[]` 項目（electron/plugin-panel-themes.ts）。 */
 export interface PluginPanelThemeContribution {
   id: string
   displayName: PluginLocalizedText
@@ -364,5 +364,5 @@ export interface PluginNotificationRecord {
 
 export type PluginPanelResult<T> =
   | { ok: true; value: T }
-  /** `diagnostic`: developer-mode install hint, sanitised and at most 200 characters. */
+  /** `diagnostic`：開發者模式安裝提示，經清理且最多 200 字元。 */
   | { ok: false; error: import('./ipc').IpcErrorCode; cancelled?: boolean; diagnostic?: string }

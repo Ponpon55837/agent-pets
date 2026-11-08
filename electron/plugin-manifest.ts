@@ -37,7 +37,7 @@ export type PluginManifestError =
 
 export type PluginManifestParseResult =
   | { ok: true; manifest: PluginManifest }
-  /** `diagnostic` is a sanitised, at most 200-character author hint (panel themes only). */
+  /** `diagnostic` 是經過清理、最多 200 字元的作者提示（僅限面板主題）。 */
   | { ok: false; error: string; diagnostic?: string }
 
 class ManifestValidationError extends Error {
@@ -406,8 +406,8 @@ function parseManifest(value: unknown): PluginManifest {
     }
   }
   if (!entry) {
-    // Workerless: no permissions, and every declared contribution is a
-    // workerless one (skins, panelThemes) with at least one item.
+    // 無 Worker：沒有權限，且宣告的每項貢獻都是
+    // 無 Worker 類型（skins、panelThemes）並至少含一個項目。
     const workerlessContributionIds = new Set(Object.entries(PLUGIN_CONTRIBUTION_REGISTRY)
       .filter(([, definition]) => 'allowsWorkerlessPlugin' in definition && definition.allowsWorkerlessPlugin === true)
       .map(([id]) => id))

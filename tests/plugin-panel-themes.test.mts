@@ -71,7 +71,7 @@ test('derived tokens follow the documented formulas', () => {
   assert.equal(colors.sageTrack.a, 0.16)
   assert.equal(colors.borderSoft.a, Math.round(0.18 * 0.625 * 1000) / 1000)
   assert.equal(colors.borderOnAccent.a, 0.55)
-  // "B" tokens fall back to the built-in value of the mode.
+  // "B" token 會退回該模式的內建值。
   assert.deepEqual(colors.dangerText, color('#a62f1e'))
   assert.deepEqual(derivePanelThemeColors(declared, 'dark').dangerText, color('#ff9a8a'))
 })
@@ -82,7 +82,7 @@ test('accentHover picks the first mix step that keeps onAccent readable, determi
   const onAccent = color('#fff2eb')
   const hover = deriveAccentHover(accent, text, onAccent)
   assert.ok(contrastRatio(onAccent, hover) >= 4.5)
-  // With only the required built-in light colours, a fixed 0.2 mix would fail (4.43:1); the derivation passes.
+  // 只有必填的內建淺色顏色時，固定 0.2 的混色會失敗（4.43:1）；推導則會通過。
   const required = Object.fromEntries(PANEL_THEME_COLOR_TOKENS.filter(token => token.kind === 'required').map(token => [token.key, token.light]))
   assert.doesNotThrow(() => parsePanelThemes([theme({ modes: { light: { colors: required } } })]))
   assert.deepEqual(deriveAccentHover(accent, text, onAccent), hover)
@@ -110,7 +110,7 @@ test('each contrast pair fails on its own with an actionable diagnostic', () => 
 test('mode direction: light needs a light bg and darker text, dark the opposite', () => {
   rejects([theme({ modes: { light: { colors: DARK_COLORS } } })], /light\.colors\.bg: light mode needs/)
   rejects([theme({ modes: { dark: { colors: LIGHT_COLORS } } })], /dark\.colors\.bg: dark mode needs/)
-  // Mid-grey bg passes contrast with black text but is too dark for light mode (L < 0.45).
+  // 中灰色 bg 與黑色文字的對比通過，但對淺色模式而言太暗（L < 0.45）。
   rejects([lightTheme({ colors: { ...LIGHT_COLORS, bg: '#9a9a9a', surface: '#ffffff', surface2: '#f4f4f4', text: '#000000', textSecondary: '#111111', textMuted: '#151515', accentText: '#0a2a2c', accent: '#0d3436' } })], /luminance >= 0\.45/)
 })
 
@@ -138,10 +138,10 @@ test('image overlays: minimum computed per mode, 0.50 floor, declared below mini
   rejects([image(0.9, { opacity: 0.1 })], /opacity: must be a number 0\.2-1/)
   rejects([image(0.9, { blur: 25 })], /blur: must be an integer 0-24/)
   rejects([image(0.9, { blur: 2.5 })], /blur/)
-  // Reusing built-in light text colours: textMuted is 4.96:1 on bg, so no overlay can pass over black.
+  // 重用內建的淺色文字顏色：textMuted 在 bg 上為 4.96:1，因此任何覆蓋層疊在黑色上都無法通過。
   const builtinLight = theme({ modes: { light: { colors: builtin('light'), background: { type: 'image', src: 'a.png', overlay: { color: '#f5ead8', opacity: 0.95 } } } } })
   rejects([builtinLight], /no overlay up to 0\.95 passes \(textMuted [\d.]+:1 < 4\.5:1 on black image pixel at 0\.95\)/)
-  // The 0.50 floor holds even when contrast would allow less.
+  // 即使對比允許更低，0.50 的下限仍然成立。
   const colors = derivePanelThemeColors(Object.fromEntries(Object.entries(LIGHT_COLORS).map(([key, value]) => [key, color(value)])), 'light')
   const minimum = minimumPanelThemeOverlay(colors, colors.bg, 0.2)
   assert.ok(minimum !== null && minimum >= 0.5)
@@ -226,7 +226,7 @@ test('structure: ids, counts, bilingual text, unknown keys and duplicates', () =
   rejects([lightTheme({ background: { type: 'image', src: 'a.jpg', overlay: { color: '#eef6f6', opacity: 0.9 } } })], /src/)
   rejects([lightTheme({ background: { type: 'solid', color: '#fff' } })], /unknown key/)
   rejects([lightTheme({ background: { type: 'video' } })], /type/)
-  // The diagnostic never echoes plugin-controlled strings.
+  // 診斷訊息絕不回顯插件控制的字串。
   const diagnostic = rejects([lightTheme({ colors: { ...LIGHT_COLORS, text: '<img src=x onerror=alert(1)>' } })])
   assert.doesNotMatch(diagnostic, /onerror|</)
 })
@@ -268,7 +268,7 @@ test('catalog builder: slot status, unavailable reasons and user image dims', ()
   assert.deepEqual(state.slots.light, { ref, status: 'active' })
   assert.deepEqual(state.slots.dark, { ref: { pluginId: 'theme-pack', themeId: 'gone' }, status: 'unavailable', reason: 'theme_removed' })
   const user = state.themes[0]!.modes.light!.userImage!
-  // A stored dim below the current minimum falls back to the default dim.
+  // 儲存的 dim 低於目前最小值時，會退回預設 dim。
   assert.equal(user.current!.dim, user.minDim > 0.5 ? user.defaultDim : 0.5)
   const disabled = buildPanelThemeState([source(themes, false)], store, resolver())
   assert.equal(disabled.themes.length, 0)

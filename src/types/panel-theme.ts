@@ -1,8 +1,8 @@
 import type { PluginLocalizedText } from './plugin.ts'
 
-// Shared main <-> panel renderer contract for plugin panel themes. The main
-// process builds every value; the renderer re-validates names and values with
-// the patterns below before calling style.setProperty (spec §3, §7.3).
+// 主程序 <-> 面板渲染端之間的插件面板主題共用契約。主程序
+// 建構每個值；渲染端在呼叫 style.setProperty 之前，會以下方的 pattern
+// 重新驗證名稱與值（spec §3、§7.3）。
 
 export type PanelThemeMode = 'light' | 'dark'
 export type PanelThemeFit = 'cover' | 'contain' | 'tile'
@@ -18,7 +18,7 @@ export const PANEL_THEME_POSITIONS: readonly PanelThemePosition[] = [
 export const PANEL_THEME_USER_BLURS = [0, 8, 16, 24] as const
 export type PanelThemeUserBlur = typeof PANEL_THEME_USER_BLURS[number]
 
-/** The 29 themable colour properties, in table order (spec §3.2). */
+/** 29 個可套主題的顏色屬性，依表格順序（spec §3.2）。 */
 export const PANEL_THEME_COLOR_PROPERTIES = [
   '--organic-bg', '--organic-surface', '--organic-surface-2', '--organic-surface-warm', '--organic-surface-sage',
   '--organic-surface-sage-soft', '--organic-surface-off', '--organic-text', '--organic-text-secondary',
@@ -39,14 +39,14 @@ export const PANEL_THEME_SIZE_PROPERTIES = [
 export const PANEL_THEME_RADIUS_PROPERTIES = ['--organic-radius-sm', '--organic-radius-md', '--organic-radius-lg'] as const
 export const PANEL_THEME_BACKGROUND_PROPERTY = '--panel-theme-background'
 
-/** Pet status pill properties (set on the pet window's `.desktop-pet` root; read only by `.status-line`). */
+/** 寵物狀態膠囊屬性（設在寵物視窗的 `.desktop-pet` 根元素上；只由 `.status-line` 讀取）。 */
 export const PET_STATUS_PROPERTIES = [
   '--pet-status-background', '--pet-status-border', '--pet-status-text', '--pet-status-text-muted',
   '--pet-status-quota-fill', '--pet-status-quota-track', '--pet-status-quota-warn', '--pet-status-background-opaque',
 ] as const
 export type PetStatusProperty = typeof PET_STATUS_PROPERTIES[number]
 
-/** What main sends to the pet window: the pill colours of each mode's active theme, or null for built-in. */
+/** 主程序送給寵物視窗的內容：各模式啟用中主題的膠囊顏色，內建則為 null。 */
 export interface PetStatusThemeState {
   light: Record<PetStatusProperty, string> | null
   dark: Record<PetStatusProperty, string> | null
@@ -59,7 +59,7 @@ export type PanelThemeSharedProperty =
 
 export type PanelThemeCssProperty = PanelThemeColorProperty | PanelThemeSharedProperty | typeof PANEL_THEME_BACKGROUND_PROPERTY
 
-/** The complete allowlist the renderer may ever set on `.status-panel` / `.panel-theme-preview`. */
+/** 渲染端可在 `.status-panel` / `.panel-theme-preview` 上設定的完整允許清單。 */
 export const PANEL_THEME_CSS_PROPERTIES: readonly PanelThemeCssProperty[] = Object.freeze([
   ...PANEL_THEME_COLOR_PROPERTIES,
   ...PANEL_THEME_FAMILY_PROPERTIES,
@@ -71,7 +71,7 @@ export const PANEL_THEME_CSS_PROPERTIES: readonly PanelThemeCssProperty[] = Obje
 const CHANNEL = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)'
 const ALPHA = '(?:0|1|0\\.\\d{0,2}[1-9])'
 export const PANEL_THEME_RGB_PATTERN = new RegExp(`^rgb\\(${CHANNEL} ${CHANNEL} ${CHANNEL} \\/ ${ALPHA}\\)$`)
-/** One family-list entry as emitted by main: a quoted name (host aliases are `"apt-<16 hex>"`) or a keyword. */
+/** 主程序輸出的一筆字型族清單項目：加引號的名稱（主機別名為 `"apt-<16 hex>"`）或關鍵字。 */
 export const PANEL_THEME_FAMILY_ENTRY_PATTERN = /^(?:"[A-Za-z0-9](?:[A-Za-z0-9 -]{0,46}[A-Za-z0-9])?"|serif|sans-serif|monospace|system-ui|ui-sans-serif|ui-serif|ui-rounded|ui-monospace|-apple-system|BlinkMacSystemFont)$/
 export const PANEL_THEME_PX_PATTERN = /^(?:\d|[1-9]\d)px$/
 export const PANEL_THEME_ASSET_URL_PATTERN = /^agent-pets:\/\/panel-theme\/[0-9a-f]{32}$/
@@ -157,7 +157,7 @@ export interface PanelThemeCatalogEntry {
 export interface PanelThemeState {
   slots: Record<PanelThemeMode, PanelThemeSlotState>
   themes: PanelThemeCatalogEntry[]
-  /** The complete built-in palette per mode (for the Settings previews). */
+  /** 每個模式完整的內建色盤（供 Settings 預覽使用）。 */
   builtin: Record<PanelThemeMode, Record<PanelThemeColorProperty, string>>
 }
 
@@ -168,7 +168,7 @@ export interface PanelThemeUserImageOptions {
   blur: PanelThemeUserBlur
 }
 
-/** One persisted user image (`userData/panel-theme.json`, spec §7.1). */
+/** 一筆持久化的使用者圖片（`userData/panel-theme.json`，spec §7.1）。 */
 export interface PanelThemeStoredUserImage extends PanelThemeUserImageOptions {
   file: string
   type: 'image/png' | 'image/jpeg' | 'image/webp'

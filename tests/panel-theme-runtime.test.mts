@@ -9,7 +9,7 @@ import { prepareUserImage, storeUserImage } from '../electron/panel-theme-images
 import type { PanelThemeState } from '../src/types/panel-theme.ts'
 import { DARK_COLORS, LIGHT_COLORS, manifest, png, theme, woff2 } from './support/panel-theme-fixtures.mts'
 
-// readRegularFileWithin stand-in with the same containment contract.
+// readRegularFileWithin 的替身，具有相同的路徑限制契約。
 async function readWithin(root: string, relativePath: string, maxBytes: number): Promise<Uint8Array | null> {
   const target = path.resolve(root, relativePath)
   const relative = path.relative(root, target)
@@ -158,7 +158,7 @@ test('user images get a session token, and broadcasts happen only when the state
     const response = await context.runtime.handleRequest(current.url, 'GET')
     assert.equal(response.status, 200)
     assert.equal(response.headers.get('content-type'), 'image/png')
-    // Removal deletes the image directory and the store entries.
+    // 移除時會刪除圖片目錄與 store 項目。
     context.runtime.removePlugin('theme-pack')
     assert.equal(fs.existsSync(path.join(context.userData, 'panel-theme-images', 'theme-pack')), false)
     assert.deepEqual(context.runtime.store.get().userImages, {})

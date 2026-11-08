@@ -3,11 +3,10 @@ import { resolvedPetTheme } from '@/composables/useTheme'
 import type { PetStatusThemeState } from '@/types/panel-theme'
 import { diffPanelThemeProperties, petStatusTargetProperties } from '@/utils/panel-theme-css'
 
-// Pet window: applies a plugin theme's status pill colours (spec §3.7). Only
-// the --pet-status-* custom properties are set, on the pet root, and only the
-// .status-line pill reads them; bubbles, permission/risk UI, state dots and the
-// sprite never do. The pill follows the pet appearance (dark, light, or
-// "follow panel", which tracks system/light/dark).
+// 寵物視窗：套用插件主題的狀態膠囊顏色（spec §3.7）。只在寵物根元素上
+// 設定 --pet-status-* 自訂屬性，且只有 .status-line 膠囊會讀取；
+// 對話泡泡、權限/風險 UI、狀態點與 sprite 都不會。膠囊跟隨寵物外觀
+// （dark、light 或 "follow panel"，後者追蹤 system/light/dark）。
 
 export function usePetStatusTheme(root: Ref<HTMLElement | null>) {
   const state = shallowRef<PetStatusThemeState | null>(null)

@@ -21,14 +21,14 @@ export interface PanelThemeIpcDependencies {
   assertPluginPanelSender(event: IpcMainInvokeEvent | IpcMainEvent): void
   /** 面板實際生效的淺色／深色與 forced-colors，供插件主題 API 使用。 */
   setPanelAppearance(appearance: { mode: PanelThemeMode; forcedColors: boolean }): void
-  /** Pet window main frame only (the pill is the one themed pet surface). */
+  /** 只限寵物視窗的主框架（狀態膠囊是寵物唯一可套主題的介面）。 */
   assertPetSender(event: IpcMainInvokeEvent): void
   getPetStatus(): PetStatusThemeState
   getStore(): PanelThemeStore | null
-  /** Plugins that currently contribute themes (installed; `available` = enabled and global switch on). */
+  /** 目前提供主題的插件（已安裝；`available` = 已啟用且全域開關開啟）。 */
   getSources(): readonly PanelThemeSourcePlugin[]
   getState(): PanelThemeState
-  /** Rebuilds the token map and sends `panel-theme-changed` when the state changed. */
+  /** 重建 token 對應表，狀態有變動時才送出 `panel-theme-changed`。 */
   publish(): void
   getPanelWindow(): BrowserWindow | null
   isDialogOpen(): boolean
@@ -72,7 +72,7 @@ export function registerPanelThemeIpc(deps: PanelThemeIpcDependencies): void {
     if (appearance) deps.setPanelAppearance(appearance)
   })
 
-  // No payload: the pet window only reads the resolved pill colours.
+  // 不帶 payload：寵物視窗只讀取解析後的膠囊顏色。
   handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.panelThemePetStatusGet, deps.assertPetSender, () => deps.getPetStatus())
 
   handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.panelThemeSlotSet, deps.assertPluginPanelSender, (_event, mode: unknown, ref: unknown) => {
@@ -118,7 +118,7 @@ export function registerPanelThemeIpc(deps: PanelThemeIpcDependencies): void {
     if (!read.ok) return { ok: false, error: read.error }
     const prepared = deps.prepareUserImage(read.bytes)
     if (!prepared.ok) return { ok: false, error: prepared.error, ...(prepared.reason ? { reason: prepared.reason } : {}) }
-    // The theme may have changed while the dialog was open.
+    // 對話框開著的期間，主題可能已經變動。
     const current = availableMode(deps.getSources(), ref, mode)
     if (!current?.userImage) return { ok: false, error: 'theme_unavailable' }
     const previous = store.getUserImage(ref, mode)
@@ -175,7 +175,7 @@ export function registerPanelThemeIpc(deps: PanelThemeIpcDependencies): void {
     const resolved = availableMode(deps.getSources(), ref, mode)
     if (!resolved) return { ok: false, error: 'theme_unavailable' }
     if (!resolved.userImage) return { ok: false, error: 'image_not_allowed' }
-    // Reject, never clamp: dim below the computed minimum is invalid.
+    // 只拒絕、不夾限：低於計算出的最小值的 dim 一律無效。
     if (!isPanelThemeUserImageOptions(options, resolved.userImage.minDim)) return { ok: false, error: 'invalid_request' }
     try {
       if (!store.updateUserImageOptions(ref, mode, options)) return { ok: false, error: 'invalid_request' }

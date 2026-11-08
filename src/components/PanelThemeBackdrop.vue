@@ -3,14 +3,14 @@ import { computed, ref, watch, type CSSProperties } from 'vue'
 import type { PanelThemeBackdropView } from '@/composables/usePanelTheme'
 import { isPanelThemeAssetUrl, panelThemePositionCss } from '@/utils/panel-theme-css'
 
-// Plugin panel background image + dimming overlay (spec §4.1). Sits behind
-// the panel content (z-index -1 in an isolated .status-panel), never takes
-// pointer events and is hidden from assistive tech. The solid bg stays painted
-// underneath and is what shows if the image fails.
+// 插件面板背景圖片 + 調暗覆蓋層（spec §4.1）。位於面板內容後方
+// （在 isolated 的 .status-panel 中為 z-index -1），不接收指標事件，
+// 也對輔助技術隱藏。純色 bg 仍畫在底下，
+// 圖片載入失敗時顯示的就是它。
 
 const props = defineProps<{ backdrop: PanelThemeBackdropView | null }>()
 
-// The URL actually shown; only swapped after the next image has decoded.
+// 實際顯示的 URL；只在下一張圖片解碼完成後才切換。
 const shownUrl = ref<string | null>(null)
 let request = 0
 
@@ -50,7 +50,7 @@ const tileStyle = computed<CSSProperties>(() => {
   const blur = Number.isInteger(backdrop.blur) && backdrop.blur > 0 && backdrop.blur <= 24 ? backdrop.blur : 0
   return {
     opacity: String(backdrop.opacity),
-    // shownUrl matched ^agent-pets://panel-theme/[0-9a-f]{32}$, so it cannot break out of url("").
+    // shownUrl 已符合 ^agent-pets://panel-theme/[0-9a-f]{32}$，所以無法跳出 url("")。
     backgroundImage: `url("${shownUrl.value}")`,
     backgroundPosition: panelThemePositionCss(backdrop.position),
     filter: blur ? `blur(${blur}px)` : undefined,

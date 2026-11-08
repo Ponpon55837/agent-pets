@@ -377,7 +377,7 @@
   /* A solid dark layer under the sheen keeps text legible over any
      wallpaper/video behind the transparent pet window — the glass read
      comes from the blur + highlight line, not from true see-through. */
-  /* --pet-status-*: optional plugin theme colours (pill only; spec §3.7). */
+  /* --pet-status-*：選用的插件主題顏色（僅限膠囊；spec §3.7）。 */
   background:
     linear-gradient(160deg, var(--surface-raised-hover) 0%, transparent 55%),
     var(--pet-status-background, var(--organic-status-surface));
@@ -427,8 +427,8 @@
   outline-offset: var(--focus-ring-offset);
 }
 
-/* Themed pills are checked for contrast without the dark text shadow and with
-   the secondary text at full opacity. Plugin badges keep the built-in look. */
+/* 套用主題的膠囊在檢查對比時不含深色文字陰影，且次要文字
+   為完全不透明。插件徽章維持內建外觀。 */
 .desktop-pet[data-pet-status-theme] .status-line {
   text-shadow: none;
 }

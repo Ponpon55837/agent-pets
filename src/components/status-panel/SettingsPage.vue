@@ -80,8 +80,8 @@ async function openResult(section: SettingsSectionId): Promise<void> {
   scrollToSection(section)
 }
 
-// "Panel theme" lands on the owning plugin's Panel themes section when a theme
-// plugin is available, otherwise on the Appearance status card.
+// 有可用的主題插件時，"Panel theme" 會跳到所屬插件的 Panel themes 區塊，
+// 否則跳到 Appearance 狀態卡片。
 function openHit(entry: SettingsEntry): void {
   if (entry.id === 'panelThemeStyle') {
     const pluginId = panelThemeSettingsTarget(panelThemeState.value)

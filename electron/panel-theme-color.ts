@@ -1,18 +1,17 @@
-// Closed colour grammar for plugin panel themes (spec §3.3). Pure: no Electron
-// or Node imports, so the catalog validator can vendor this file unchanged.
+// 插件面板主題的封閉顏色文法（spec §3.3）。純函式：不 import Electron
+// 或 Node，讓目錄驗證器可以原封不動地內嵌（vendor）這個檔案。
 //
-// Every accepted form is matched by an anchored regular expression that can
-// only describe one function call made of digits, '.', '%', ',', '/', spaces
-// and a fixed unit, so `;`, `}`, `\`, quotes, url(), var(), calc() and named
-// colours can never get through. Accepted colours are converted to sRGB and
-// re-emitted by the host as `rgb(R G B / A)`; a plugin string never reaches CSS.
+// 每種接受的格式都由錨定的正規表示式比對，該表示式只能描述一個由數字、
+// '.'、'%'、','、'/'、空白與固定單位組成的函式呼叫，因此 `;`、`}`、`\`、
+// 引號、url()、var()、calc() 與具名顏色都不可能通過。接受的顏色會轉成 sRGB，
+// 再由主機以 `rgb(R G B / A)` 重新輸出；插件的字串永遠不會直接進到 CSS。
 
 export interface PanelThemeRgba {
-  /** 0–255, integer after normalisation. */
+  /** 0–255，正規化後為整數。 */
   r: number
   g: number
   b: number
-  /** 0–1, at most 3 decimals after normalisation. */
+  /** 0–1，正規化後最多 3 位小數。 */
   a: number
 }
 
@@ -33,7 +32,7 @@ const HSL_SPACE = new RegExp(String.raw`^hsla?\((${NUM})(?:deg)? (${NUM})% (${NU
 const OKLCH = new RegExp(String.raw`^oklch\((${NUM}%?) (${NUM}) (${NUM})(?:deg)?(?: \/ (${NUM}%?))?\)$`)
 
 const CHANNEL = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)'
-/** The only colour string shape the host ever emits (and the renderer accepts). */
+/** 主機唯一會輸出（也是渲染端唯一接受）的顏色字串格式。 */
 export const PANEL_THEME_CANONICAL_RGB = new RegExp(`^rgb\\(${CHANNEL} ${CHANNEL} ${CHANNEL} \\/ (?:0|1|0\\.\\d{0,2}[1-9])\\)$`)
 
 const GAMUT_EPSILON = 0.0001
@@ -46,7 +45,7 @@ function numberOf(token: string): number {
   return Number(isPercent(token) ? token.slice(0, -1) : token)
 }
 
-/** Alpha: 0–1 or 0–100%. Returns null when out of range. */
+/** Alpha：0–1 或 0–100%。超出範圍時回傳 null。 */
 function parseAlpha(token: string | undefined): number | null {
   if (token === undefined) return 1
   const value = numberOf(token)
@@ -109,7 +108,7 @@ function encodeSrgb(linear: number): number {
   return clamped <= 0.0031308 ? 12.92 * clamped : 1.055 * clamped ** (1 / 2.4) - 0.055
 }
 
-/** OKLCH -> OKLab -> LMS -> linear sRGB (Ottosson). Null when outside the sRGB gamut. */
+/** OKLCH -> OKLab -> LMS -> 線性 sRGB（Ottosson）。超出 sRGB 色域時為 null。 */
 export function oklchToLinearSrgb(lightness: number, chroma: number, hueDegrees: number): [number, number, number] | null {
   const radians = (hueDegrees * Math.PI) / 180
   const a = chroma * Math.cos(radians)
@@ -142,7 +141,7 @@ function parseOklch(match: RegExpExecArray): PanelThemeColorResult {
   return { ok: true, color: { r: r!, g: g!, b: b!, a: roundAlpha(alpha) } }
 }
 
-/** Parses one manifest colour with the closed grammar. Never throws. */
+/** 以封閉文法解析一個 manifest 顏色。絕不拋出例外。 */
 export function parsePanelThemeColor(value: unknown): PanelThemeColorResult {
   if (typeof value !== 'string' || value.length < 4 || value.length > PANEL_THEME_COLOR_MAX_LENGTH) {
     return { ok: false, error: 'invalid_color' }
@@ -166,7 +165,7 @@ function formatAlpha(alpha: number): string {
   return String(rounded)
 }
 
-/** The canonical host string: `rgb(R G B / A)`. */
+/** 主機的標準字串：`rgb(R G B / A)`。 */
 export function formatPanelThemeColor(color: PanelThemeRgba): string {
   return `rgb(${channel(color.r)} ${channel(color.g)} ${channel(color.b)} / ${formatAlpha(color.a)})`
 }
@@ -175,7 +174,7 @@ export function isCanonicalPanelThemeColor(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 32 && PANEL_THEME_CANONICAL_RGB.test(value)
 }
 
-/** Per-channel sRGB mix, rounded (spec §3.5). Alpha of `a` is kept. */
+/** 逐通道的 sRGB 混色並四捨五入（spec §3.5）。保留 `a` 的 alpha。 */
 export function mixColor(a: PanelThemeRgba, b: PanelThemeRgba, t: number): PanelThemeRgba {
   return {
     r: channel(a.r * (1 - t) + b.r * t),
@@ -189,7 +188,7 @@ export function withAlpha(color: PanelThemeRgba, alpha: number): PanelThemeRgba 
   return { r: color.r, g: color.g, b: color.b, a: roundAlpha(alpha) }
 }
 
-/** Source-over in sRGB gamma space (what Chromium paints). Result is opaque and unrounded. */
+/** 在 sRGB gamma 空間做 source-over 合成（與 Chromium 的繪製方式一致）。結果不透明且未經四捨五入。 */
 export function compositeColor(foreground: PanelThemeRgba, background: PanelThemeRgba): PanelThemeRgba {
   const alpha = foreground.a
   return {
@@ -205,12 +204,12 @@ function linearChannel(value: number): number {
   return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
 }
 
-/** WCAG 2.x relative luminance of an opaque colour. */
+/** 不透明顏色的 WCAG 2.x 相對亮度。 */
 export function relativeLuminance(color: PanelThemeRgba): number {
   return 0.2126 * linearChannel(color.r) + 0.7152 * linearChannel(color.g) + 0.0722 * linearChannel(color.b)
 }
 
-/** Contrast ratio; a translucent foreground is composited over the (opaque) background first. */
+/** 對比度；半透明的前景會先合成到（不透明的）背景上。 */
 export function contrastRatio(foreground: PanelThemeRgba, background: PanelThemeRgba): number {
   const painted = foreground.a < 1 ? compositeColor(foreground, background) : foreground
   const first = relativeLuminance(painted)

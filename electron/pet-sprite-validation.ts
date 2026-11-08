@@ -187,7 +187,7 @@ export function readImageOrientation(bytes: Uint8Array): number {
 }
 
 function isPngAnimated(bytes: Uint8Array): boolean {
-  // APNG: an acTL chunk must precede the first IDAT.
+  // APNG：acTL chunk 必須出現在第一個 IDAT 之前。
   let offset = 8
   while (offset + 12 <= bytes.length) {
     const length = u32be(bytes, offset)
@@ -214,9 +214,9 @@ function isWebpAnimated(bytes: Uint8Array): boolean {
 }
 
 /**
- * Header walk for animation: PNG `acTL` before `IDAT`; WebP VP8X animation
- * flag (byte 20, bit 0x02) or an ANIM/ANMF chunk. JPEG is never animated.
- * O(chunks); nothing is decoded.
+ * 動畫的檔頭走訪：PNG 的 `acTL` 在 `IDAT` 之前；WebP 的 VP8X 動畫
+ * 旗標（byte 20、bit 0x02）或 ANIM/ANMF chunk。JPEG 永遠不是動畫。
+ * O(chunks)；不做任何解碼。
  */
 export function readImageAnimated(bytes: Uint8Array): boolean {
   if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50) return isPngAnimated(bytes)

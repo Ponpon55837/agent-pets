@@ -1,11 +1,10 @@
-// Plugin panel themes (`contributes.panelThemes`, spec §2–§7). Pure: no
-// Electron or Node imports, so the catalog validator can vendor this file
-// (plus panel-theme-color.ts and pet-sprite-validation.ts) unchanged.
+// 插件面板主題（`contributes.panelThemes`，spec §2–§7）。純函式：不 import
+// Electron 或 Node，讓目錄驗證器可以原封不動地內嵌這個檔案
+// （連同 panel-theme-color.ts 與 pet-sprite-validation.ts）。
 //
-// Responsibilities: the closed manifest grammar, derivation of optional
-// tokens, the per-mode contrast rules, package asset rules, and the catalog
-// builder that turns validated themes into host-built CSS values. Every
-// violation rejects; nothing is clamped.
+// 職責：封閉的 manifest 文法、選用 token 的推導、各模式的對比規則、
+// 套件資產規則，以及把驗證過的主題轉成主機建構之 CSS 值的目錄建構器。
+// 任何違規都直接拒絕；不做任何夾限。
 
 import {
   PANEL_THEME_BLACK,
@@ -49,7 +48,7 @@ import type {
   PetStatusProperty,
 } from '../src/types/panel-theme.ts'
 
-// ── Limits (spec §5.3) ──────────────────────────────────────────────────
+// ── 限制（spec §5.3）──────────────────────────────────────────────────
 export const PANEL_THEME_MAX_THEMES = 8
 export const PANEL_THEME_MAX_FACES_PER_THEME = 4
 export const PANEL_THEME_MAX_FONT_FILES = 8
@@ -67,7 +66,7 @@ export const PANEL_THEME_OVERLAY_FLOOR = 0.5
 export const PANEL_THEME_OVERLAY_CEILING = 0.95
 export const PANEL_THEME_DIAGNOSTIC_MAX_LENGTH = 200
 
-// ── Token table (spec §3.2) ──────────────────────────────────────────────
+// ── Token 表（spec §3.2）──────────────────────────────────────────────
 type TokenKind = 'required' | 'derived' | 'builtin'
 type AlphaClass = 'opaque' | 'translucent' | 'border' | 'scrim'
 
@@ -112,10 +111,10 @@ export const PANEL_THEME_COLOR_TOKENS: readonly ColorToken[] = Object.freeze([
   { key: 'scrim', property: '--organic-scrim', kind: 'builtin', alpha: 'scrim', light: 'rgba(46,43,37,.42)', dark: 'rgba(0,0,0,.55)' },
 ])
 
-// ── Pet status pill tokens (spec §3.7) ─────────────────────────────────────
-// The one narrow exception to "the pet window is never themed": colours of
-// the status pill under the pet. Bubbles, permission/risk UI, state dots,
-// completion markers and the sprite stay built-in.
+// ── 寵物狀態膠囊 token（spec §3.7）─────────────────────────────────────
+// 「寵物視窗永不套主題」的唯一窄幅例外：寵物下方狀態膠囊的
+// 顏色。對話泡泡、權限/風險 UI、狀態點、完成標記與 sprite
+// 都維持內建。
 export type PetStatusColorKey = 'background' | 'border' | 'text' | 'textMuted' | 'quotaFill' | 'quotaTrack' | 'quotaWarn'
 
 interface PetStatusToken {
@@ -135,7 +134,7 @@ export const PET_STATUS_TOKENS: readonly PetStatusToken[] = Object.freeze([
   { key: 'quotaWarn', property: '--pet-status-quota-warn', required: false, alpha: [1, 1] },
 ])
 const PET_STATUS_KEYS: readonly string[] = PET_STATUS_TOKENS.map(token => token.key)
-/** Built-in low-quota colour (`--organic-quota-warning`), used when quotaWarn is omitted. */
+/** 內建的低額度顏色（`--organic-quota-warning`），省略 quotaWarn 時使用。 */
 const BUILTIN_QUOTA_WARNING = '#e3b64f'
 
 const TOKEN_BY_KEY: ReadonlyMap<string, ColorToken> = new Map(PANEL_THEME_COLOR_TOKENS.map(token => [token.key, token]))
@@ -170,9 +169,9 @@ const POSITIONS: ReadonlySet<string> = new Set([
 ])
 const MODES: readonly PanelThemeMode[] = ['light', 'dark']
 
-// ── Diagnostics ──────────────────────────────────────────────────────────
-// Only host-known names, validated ids, indices and numbers are ever put in a
-// diagnostic, so it is safe to show (developer mode only) without escaping.
+// ── 診斷訊息 ──────────────────────────────────────────────────────────
+// 診斷訊息中只會放入主機已知的名稱、驗證過的 id、索引與數字，
+// 因此不需跳脫即可安全顯示（僅限開發者模式）。
 
 export class PanelThemeValidationError extends Error {
   readonly diagnostic: string
@@ -194,7 +193,7 @@ function ratioText(value: number): string {
   return (Math.floor(value * 100) / 100).toFixed(2)
 }
 
-// ── Small parsers ────────────────────────────────────────────────────────
+// ── 小型解析器 ────────────────────────────────────────────────────────
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -224,7 +223,7 @@ function parseLocalized(value: unknown, maxLength: number, path: string): Plugin
   return { 'zh-TW': zhTW, 'en-US': enUS }
 }
 
-/** Same rules as plugin-manifest.ts normalizeRelativePath. */
+/** 與 plugin-manifest.ts 的 normalizeRelativePath 規則相同。 */
 export function normalizePanelThemeAssetPath(value: unknown, extensions: readonly string[]): string | null {
   if (typeof value !== 'string' || value.length === 0 || value.length > 512) return null
   const normalized = value.normalize('NFC')
@@ -275,7 +274,7 @@ function opaqueColorAt(value: unknown, path: string): PanelThemeRgba {
   return color
 }
 
-// ── Resolved model ───────────────────────────────────────────────────────
+// ── 解析後模型 ───────────────────────────────────────────────────────
 export type PanelThemeFamilyEntry =
   | { kind: 'font'; id: string }
   | { kind: 'local'; name: string }
@@ -317,7 +316,7 @@ export interface PanelThemeParseResult {
   themes: ResolvedPanelTheme[]
 }
 
-// ── Typography / fonts / shape ───────────────────────────────────────────
+// ── 字體排印／字型／形狀 ───────────────────────────────────────────
 function parseFonts(value: unknown, path: string): PluginPanelThemeFontFace[] {
   if (value === undefined) return []
   if (!Array.isArray(value) || value.length > PANEL_THEME_MAX_FACES_PER_THEME) {
@@ -400,7 +399,7 @@ function parseShape(value: unknown, path: string): { radiusSm: number; radiusMd:
   return shape
 }
 
-// ── Colours, derivation and contrast ─────────────────────────────────────
+// ── 顏色、推導與對比 ─────────────────────────────────────
 function builtinColor(token: ColorToken, mode: PanelThemeMode): PanelThemeRgba {
   const parsed = parsePanelThemeColor(mode === 'light' ? token.light : token.dark)
   if (!parsed.ok) throw new TypeError(`built-in ${token.key} is not a valid colour`)
@@ -411,7 +410,7 @@ function round3(value: number): number {
   return Math.round(value * 1000) / 1000
 }
 
-/** Derives the "D" tokens (spec §3.5) and fills "B" tokens with the built-in value for the mode. */
+/** 推導 "D" token（spec §3.5），並以該模式的內建值填入 "B" token。 */
 export function derivePanelThemeColors(
   declared: Partial<Record<PluginPanelThemeColorKey, PanelThemeRgba>>,
   mode: PanelThemeMode,
@@ -439,10 +438,10 @@ export function derivePanelThemeColors(
 }
 
 /**
- * accentHover = mix(accent, text, t) for the first t in 0.20, 0.25, ... 0.60
- * that keeps onAccent >= 4.5:1 on it; 0.20 when none does (the theme is then
- * rejected by the onAccent/accentHover pair). Deterministic, and it moves
- * toward the text colour, so it darkens in light mode and lightens in dark.
+ * accentHover = mix(accent, text, t)，t 取 0.20, 0.25, ... 0.60 中第一個
+ * 能讓 onAccent 在其上維持 >= 4.5:1 的值；都不符合時取 0.20（此時主題會
+ * 因 onAccent/accentHover 這組而被拒絕）。結果是確定性的，且朝文字色
+ * 移動，所以在淺色模式變深、在深色模式變亮。
  */
 export function deriveAccentHover(accent: PanelThemeRgba, text: PanelThemeRgba, onAccent: PanelThemeRgba): PanelThemeRgba {
   for (let step = 20; step <= 60; step += 5) {
@@ -546,10 +545,10 @@ function withAlphaUnrounded(color: PanelThemeRgba, alpha: number): PanelThemeRgb
 }
 
 /**
- * Smallest overlay opacity on the 0.01 grid in [0.50, 0.95] from which every
- * larger step also keeps every backdrop pair readable (worst-case black and
- * white image pixels). Null when no such opacity exists. Suffix-closed so any
- * dim the user later picks at or above the minimum is guaranteed to pass.
+ * 在 [0.50, 0.95] 間以 0.01 為格點、最小的覆蓋層不透明度，從該值起每個
+ * 更大的級距也都能讓所有背景配對保持可讀（以最差情況的黑色與白色圖片
+ * 像素計算）。不存在時為 null。採後綴封閉，所以使用者之後選擇任何
+ * 大於等於最小值的 dim 都保證通過。
  */
 export function minimumPanelThemeOverlay(colors: ColorSet, overlay: PanelThemeRgba, imageOpacity: number): number | null {
   let minimum: number | null = null
@@ -561,7 +560,7 @@ export function minimumPanelThemeOverlay(colors: ColorSet, overlay: PanelThemeRg
   return minimum
 }
 
-/** Validates a declared overlay and returns the minimum; the diagnostic names the failing pair. */
+/** 驗證宣告的覆蓋層並回傳最小值；診斷訊息會指出未通過的配對。 */
 function checkOverlay(colors: ColorSet, overlay: { color: PanelThemeRgba; opacity: number }, imageOpacity: number, path: string, label: string): number {
   const minimum = minimumPanelThemeOverlay(colors, overlay.color, imageOpacity)
   const probe = minimum === null ? PANEL_THEME_OVERLAY_CEILING : overlay.opacity
@@ -691,7 +690,7 @@ function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contri
   if (meaningFailure) fail(`${path}.colors.${meaningFailure.key}`, meaningFailure.problem)
   const backdropFailure = firstBackdropFailure(colors, backdrops)
   if (backdropFailure) failContrast(path, backdropFailure)
-  // Image backdrops: checked through the minimum overlay so the diagnostic is actionable.
+  // 圖片背景：以最小覆蓋層檢查，讓診斷訊息可據以修正。
   if (background.type === 'image') {
     checkOverlay(colors, background.overlay, background.opacity, `${path}.background.overlay`, 'a black/white image pixel')
   }
@@ -732,9 +731,8 @@ function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contri
 }
 
 /**
- * Derives omitted pill tokens from the required background and text, then
- * checks contrast against the pill composited over a worst-case black and a
- * worst-case white desktop pixel (the pill floats over arbitrary content).
+ * 從必填的背景與文字推導省略的膠囊 token，再檢查膠囊合成在
+ * 最差情況的黑色與白色桌面像素上的對比（膠囊浮在任意內容之上）。
  */
 export function derivePetStatusColors(
   declared: Partial<Record<PetStatusColorKey, PanelThemeRgba>> & { background: PanelThemeRgba; text: PanelThemeRgba },
@@ -755,10 +753,9 @@ export function derivePetStatusColors(
 }
 
 /**
- * Omitted quotaWarn: the built-in low-quota amber, moved toward the pill text
- * in 0.10 steps (0.00 … 0.60) until it reaches 3:1 on the pill and on the
- * quota track, each over both a black and a white desktop; the last step when
- * none does (the theme is then rejected).
+ * 省略 quotaWarn 時：以內建的低額度琥珀色為起點，以 0.10 為級距（0.00 … 0.60）
+ * 朝膠囊文字色移動，直到在膠囊與額度軌道上、且分別疊在黑色與白色桌面上
+ * 都達到 3:1；都不符合時取最後一級（此時主題會被拒絕）。
  */
 function deriveQuotaWarn(amber: PanelThemeRgba, declared: { background: PanelThemeRgba; text: PanelThemeRgba }, track: PanelThemeRgba): PanelThemeRgba {
   const pill = petStatusBackdrops(declared.background)
@@ -871,8 +868,8 @@ function parseTheme(value: unknown, index: number): { contribution: PluginPanelT
 }
 
 /**
- * Validates `contributes.panelThemes`. Throws PanelThemeValidationError with a
- * sanitised diagnostic (<= 200 chars) on the first violation.
+ * 驗證 `contributes.panelThemes`。遇到第一個違規時，拋出帶有經清理診斷訊息
+ * （<= 200 字元）的 PanelThemeValidationError。
  */
 export function parsePanelThemes(value: unknown): PanelThemeParseResult {
   if (!Array.isArray(value) || value.length < 1 || value.length > PANEL_THEME_MAX_THEMES) {
@@ -899,7 +896,7 @@ export function parsePanelThemes(value: unknown): PanelThemeParseResult {
   return { contributions, themes }
 }
 
-/** Non-throwing wrapper for callers that only need the resolved themes. */
+/** 給只需要解析後主題之呼叫端的不拋例外包裝。 */
 export function resolvePanelThemes(value: unknown): ResolvedPanelTheme[] | null {
   try {
     return parsePanelThemes(value).themes
@@ -908,7 +905,7 @@ export function resolvePanelThemes(value: unknown): ResolvedPanelTheme[] | null 
   }
 }
 
-// ── Package asset rules (spec §5.1) ──────────────────────────────────────
+// ── 套件資產規則（spec §5.1）──────────────────────────────────────
 export interface PanelThemeAssetPaths {
   images: Set<string>
   fonts: Set<string>
@@ -969,7 +966,7 @@ const USER_IMAGE_RULES: ImageRules = {
   requireUpright: false,
 }
 
-/** Header-only checks; nothing is decoded. */
+/** 只檢查檔頭；不做任何解碼。 */
 function checkImage(bytes: Uint8Array, rules: ImageRules): PanelThemeImageCheck {
   if (bytes.byteLength > rules.maxBytes) return { ok: false, error: 'image_too_large' }
   const type = panelThemeImageType(bytes)
@@ -993,22 +990,22 @@ export function checkPanelThemeUserImage(bytes: Uint8Array): PanelThemeImageChec
   return checkImage(bytes, USER_IMAGE_RULES)
 }
 
-// ── Catalog builder (spec §7.1) ──────────────────────────────────────────
+// ── 目錄建構器（spec §7.1）──────────────────────────────────────────
 export interface PanelThemeSourcePlugin {
   pluginId: string
   version: string
   pluginName: PluginLocalizedText
-  /** Installed, enabled, and the global plugin switch is on. */
+  /** 已安裝、已啟用，且全域插件開關開啟。 */
   available: boolean
   unavailableReason?: Exclude<PanelThemeUnavailableReason, 'theme_removed'>
   themes: readonly ResolvedPanelTheme[]
 }
 
 export interface PanelThemeAssetResolver {
-  /** Returns the protocol URL for a packaged image or font (records its token). */
+  /** 回傳套件內圖片或字型的協定 URL（並記錄其 token）。 */
   packagedUrl(kind: 'image' | 'font', pluginId: string, version: string, relativePath: string): string
   fontAlias(pluginId: string, version: string, themeId: string, fontId: string): string
-  /** Returns the protocol URL for a stored user image, or null when it cannot be served. */
+  /** 回傳已儲存使用者圖片的協定 URL；無法提供時為 null。 */
   userImageUrl(pluginId: string, file: string): string | null
 }
 
@@ -1038,7 +1035,7 @@ export function panelThemeSharedProperties(theme: ResolvedPanelTheme, alias: (fo
 export function petStatusProperties(colors: Record<PetStatusColorKey, PanelThemeRgba>): Record<PetStatusProperty, string> {
   const properties = {} as Record<PetStatusProperty, string>
   for (const token of PET_STATUS_TOKENS) properties[token.property] = formatPanelThemeColor(colors[token.key])
-  // Opaque copy for reduced transparency / increased contrast fallbacks.
+  // 不透明副本，供降低透明度／增加對比的備援使用。
   properties['--pet-status-background-opaque'] = formatPanelThemeColor(withAlpha(colors.background, 1))
   return properties
 }
@@ -1136,7 +1133,7 @@ export function builtinPanelThemeColors(mode: PanelThemeMode): Record<PluginPane
   return colors
 }
 
-/** The full built-in palette for a mode as canonical properties. */
+/** 某模式完整的內建色盤，以標準屬性表示。 */
 export function builtinPanelThemeProperties(mode: PanelThemeMode): Record<PanelThemeColorProperty, string> {
   const properties = {} as Record<PanelThemeColorProperty, string>
   for (const token of PANEL_THEME_COLOR_TOKENS) properties[token.property] = formatPanelThemeColor(builtinColor(token, mode))
@@ -1145,7 +1142,7 @@ export function builtinPanelThemeProperties(mode: PanelThemeMode): Record<PanelT
 
 const BUILTIN_PROPERTIES = { light: builtinPanelThemeProperties('light'), dark: builtinPanelThemeProperties('dark') }
 
-/** Builds the renderer state: slot statuses plus the themes of every available plugin. */
+/** 建構渲染端狀態：插槽狀態加上每個可用插件的主題。 */
 export function buildPanelThemeState(
   sources: readonly PanelThemeSourcePlugin[],
   store: PanelThemeStoreData,
@@ -1175,13 +1172,13 @@ export function emptyPanelThemeState(): PanelThemeState {
   }
 }
 
-/** True when the (plugin, theme, mode) exists in the sources and allows a user image. */
+/** (plugin, theme, mode) 存在於來源中且允許使用者圖片時為 true。 */
 export function panelThemeAllowsUserImage(sources: readonly PanelThemeSourcePlugin[], ref: PanelThemeRef, mode: PanelThemeMode): boolean {
   const theme = sources.find(source => source.pluginId === ref.pluginId)?.themes.find(candidate => candidate.id === ref.themeId)
   return Boolean(theme?.modes[mode]?.userImage)
 }
 
-/** Minimum user dim for a (plugin, theme, mode), or null when user images are not allowed there. */
+/** (plugin, theme, mode) 的使用者 dim 最小值；該處不允許使用者圖片時為 null。 */
 export function panelThemeUserImageMinimum(sources: readonly PanelThemeSourcePlugin[], ref: PanelThemeRef, mode: PanelThemeMode): number | null {
   const theme = sources.find(source => source.pluginId === ref.pluginId)?.themes.find(candidate => candidate.id === ref.themeId)
   return theme?.modes[mode]?.userImage?.minDim ?? null

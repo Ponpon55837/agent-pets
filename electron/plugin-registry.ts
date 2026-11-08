@@ -51,7 +51,7 @@ export interface PluginInstallPlan {
 
 export type { PluginRegistryError } from '../src/types/ipc.ts'
 
-/** `diagnostic` is only set for developer-mode installs (sanitised, <= 200 chars). */
+/** `diagnostic` 只會在開發者模式安裝時設定（經清理，<= 200 字元）。 */
 export type PluginRegistryResult<T> = { ok: true; value: T } | { ok: false; error: PluginRegistryError; diagnostic?: string }
 
 interface PreparedPlan {
@@ -330,7 +330,7 @@ export class PluginRegistry {
     const manifest = parsed.manifest
     const skinPaths = new Set((manifest.contributes.skins ?? []).map(skin => skin.spritesheet))
     const themeAssets = panelThemeAssetPaths(manifest.contributes.panelThemes)
-    // An "asset package" (skins and/or panel themes) gets the larger total limit.
+    // 「資產套件」（skins 及/或面板主題）適用較大的總大小上限。
     const assetPackage = skinPaths.size > 0 || themeAssets.images.size > 0 || themeAssets.fonts.size > 0
     const totalBytes = [...guarded.files.values()].reduce((total, bytes) => total + bytes.byteLength, 0)
     const archiveLimit = assetPackage ? PLUGIN_ARCHIVE_SKIN_MAX_BYTES : PLUGIN_ARCHIVE_MAX_BYTES
@@ -343,7 +343,7 @@ export class PluginRegistry {
           : themeAssets.fonts.has(name) ? PANEL_THEME_FONT_MAX_BYTES
             : PLUGIN_ARCHIVE_MAX_BYTES
       if (bytes.byteLength > fileLimit) return { ok: false, error: 'archive_too_large' }
-      // Every packaged font must be declared by a theme face.
+      // 每個套件內的字型都必須由主題的字型 face 宣告。
       if (path.posix.extname(name).toLowerCase() === '.woff2' && !themeAssets.fonts.has(name)) {
         return { ok: false, error: 'invalid_panel_theme', ...(developerMode ? { diagnostic: 'panelThemes: a packaged .woff2 is not referenced by any fonts[].src' } : {}) }
       }

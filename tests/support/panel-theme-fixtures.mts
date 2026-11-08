@@ -1,7 +1,7 @@
 import { deflateSync } from 'node:zlib'
 
-// Shared builders for panel theme tests: a valid two-mode theme and
-// header-accurate image bytes (PNG, APNG, WebP, JPEG) without real decoders.
+// 面板主題測試共用的建構器：一個有效的雙模式主題，以及
+// 檔頭正確的圖片位元組（PNG、APNG、WebP、JPEG），不需要真正的解碼器。
 
 export const LIGHT_COLORS = {
   bg: '#eef6f6', surface: '#f8fcfc', surface2: '#e2eeee',
@@ -64,7 +64,7 @@ function chunk(type: string, data: Uint8Array): Buffer {
   return Buffer.concat([length, typeBytes, data, crc])
 }
 
-/** A real (decodable) RGB PNG; `animated` inserts an acTL chunk before IDAT. */
+/** 真正（可解碼）的 RGB PNG；`animated` 會在 IDAT 前插入 acTL chunk。 */
 export function png(width: number, height: number, options: { animated?: boolean; exifOrientation?: number } = {}): Uint8Array {
   const header = Buffer.alloc(13)
   header.writeUInt32BE(width, 0)
@@ -81,7 +81,7 @@ export function png(width: number, height: number, options: { animated?: boolean
 }
 
 function tiffOrientation(value: number): Buffer {
-  // Big-endian TIFF with one IFD entry: Orientation (0x0112), SHORT, count 1.
+  // 只有一個 IFD 項目的 big-endian TIFF：Orientation (0x0112)、SHORT、count 1。
   return Buffer.from([0x4d, 0x4d, 0, 42, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, value, 0, 0, 0, 0, 0, 0, 0, 0])
 }
 
@@ -98,7 +98,7 @@ function webpChunk(type: string, data: Buffer): Buffer {
   return Buffer.concat([Buffer.from(type, 'ascii'), size, data, data.length % 2 ? Buffer.from([0]) : Buffer.alloc(0)])
 }
 
-/** WebP with a VP8X header (dimensions only); `animated` sets the flag and adds ANIM. */
+/** 帶 VP8X 檔頭（只有尺寸）的 WebP；`animated` 會設定旗標並加入 ANIM。 */
 export function webp(width: number, height: number, options: { animated?: boolean } = {}): Uint8Array {
   const vp8x = Buffer.alloc(10)
   vp8x[0] = options.animated ? 0x02 : 0
@@ -110,7 +110,7 @@ export function webp(width: number, height: number, options: { animated?: boolea
   return riff(chunks)
 }
 
-/** JPEG with an optional EXIF orientation, one SOF0 and a minimal scan. */
+/** 帶選用 EXIF orientation、一個 SOF0 與最小掃描段的 JPEG。 */
 export function jpeg(width: number, height: number, options: { orientation?: number; secondSof?: boolean } = {}): Uint8Array {
   const parts: Buffer[] = [Buffer.from([0xff, 0xd8])]
   if (options.orientation) {

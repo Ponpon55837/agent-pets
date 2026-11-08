@@ -8,10 +8,10 @@ import { usePanelThemeActions } from '@/composables/usePanelThemeActions'
 import { openPanelThemeSettings } from '@/utils/settings-navigation'
 import { PANEL_THEME_MODES, type PanelThemeMode } from '@/types/panel-theme'
 
-// Settings -> General -> Appearance: a compact, always-present status of the
-// plugin panel theme per mode, a link to the owning plugin's Panel themes
-// section, and the fixed one-click "Restore built-in" (spec §8). Choosing and
-// customising themes happens in Plugins -> <plugin> -> Panel themes.
+// Settings -> General -> Appearance：精簡且常駐的各模式插件面板主題
+// 狀態、通往所屬插件 Panel themes 區塊的連結，以及固定的一鍵
+// "Restore built-in"（spec §8）。選擇與自訂主題則在
+// Plugins -> <plugin> -> Panel themes 中進行。
 
 const MODE_LABEL: Record<PanelThemeMode, TranslationKey> = { light: 'design.panelTheme.lightSlot', dark: 'design.panelTheme.darkSlot' }
 const { busy, status, error, restoreBuiltIn } = usePanelThemeActions()

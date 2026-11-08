@@ -6,9 +6,9 @@ import { isPanelThemePropertyValue, panelThemeTargetProperties, petStatusTargetP
 import { validBackdrop, type PanelThemeBackdropView } from '@/composables/usePanelTheme'
 import PanelThemeBackdrop from '@/components/PanelThemeBackdrop.vue'
 
-// Static mock of the panel with one theme mode applied inline to a
-// .panel-theme-preview element (same validated property map as the panel).
-// Built-in previews use the host's built-in palette for that mode.
+// 面板的靜態模擬，將單一主題模式以 inline 套用到
+// .panel-theme-preview 元素上（與面板使用相同的已驗證屬性對應表）。
+// 內建預覽使用主機該模式的內建色盤。
 
 const props = defineProps<{
   entry: PanelThemeCatalogEntry | null
@@ -65,7 +65,7 @@ const backdrop = computed<PanelThemeBackdropView | null>(() => {
         </span>
         <span class="preview-button">{{ t('design.panelTheme.previewButton') }}</span>
       </div>
-      <!-- The pet's status pill (the only themed pet surface). -->
+      <!-- 寵物的狀態膠囊（寵物唯一可套主題的介面）。 -->
       <div class="preview-pill">
         <span class="preview-pill-dot" />
         <span class="preview-pill-text">{{ t('design.panelTheme.previewPillAgent') }}<span class="preview-pill-sep">·</span>{{ t('design.panelTheme.previewPillState') }}</span>
@@ -78,7 +78,7 @@ const backdrop = computed<PanelThemeBackdropView | null>(() => {
 
 <style scoped>
 .panel-theme-preview {
-  /* Never inherit the live panel's gradient; a gradient preview sets it inline. */
+  /* 絕不繼承即時面板的漸層；漸層預覽會以 inline 設定。 */
   --panel-theme-background: initial;
 
   position: relative;

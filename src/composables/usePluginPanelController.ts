@@ -485,7 +485,7 @@ function setError(code: string, retry?: () => void, diagnostic?: string): void {
   notifier.notify({
     tone: 'error',
     text: localizedError(code),
-    // Developer-mode installs carry a sanitised author hint (<= 200 chars) from main.
+    // 開發者模式安裝會從主程序帶入經清理的作者提示（<= 200 字元）。
     detail: diagnostic ? `${code}: ${diagnostic}` : code,
     action: retry ? { label: t('plugins.retry'), run: retry } : undefined,
   })
@@ -1321,8 +1321,8 @@ function consumePanelRequest(): void {
 
 watch(() => [props.requestedPluginId, props.requestNonce] as const, consumePanelRequest)
 
-// A detail request made while this panel is already mounted (for example the
-// Appearance card's "Open plugin settings" from search) is consumed here.
+// 此面板已掛載時才發出的詳細頁請求（例如從搜尋觸發 Appearance 卡片的
+// "Open plugin settings"）在這裡處理。
 watch(pluginDetailRequestNonce, () => {
   if (!snapshot.value) return
   const detailRequest = takePluginDetailRequest()

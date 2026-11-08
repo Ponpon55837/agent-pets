@@ -19,9 +19,9 @@ import type { PanelThemeMode, PanelThemeState, PetStatusThemeState } from '../..
 import type { PluginThemeSnapshot } from '../../src/types/plugin-theme.ts'
 import { buildPluginThemeSnapshot } from '../plugin-theme-tokens.ts'
 
-// Main-process owner of plugin panel themes: the store, the per-session
-// salt, the token -> asset map served by `agent-pets://panel-theme/<token>`,
-// the resolved-theme cache, and the state broadcast (spec §7).
+// 主程序中插件面板主題的擁有者：store、每個工作階段的
+// salt、由 `agent-pets://panel-theme/<token>` 提供的 token -> 資產對應表、
+// 解析後主題的快取，以及狀態廣播（spec §7）。
 
 type AssetKind = 'image' | 'font' | 'user'
 
@@ -54,11 +54,11 @@ export interface PanelThemeRuntimeOptions {
   userDataDirectory: string
   pluginRoot(pluginId: string, version: string): string
   readRegularFileWithin(root: string, relativePath: string, maxBytes: number): Promise<Uint8Array | null>
-  /** Sends the new state to the panel window only. */
+  /** 只把新狀態送給面板視窗。 */
   send(state: PanelThemeState): void
-  /** Sends the pet status pill colours to the pet window only. */
+  /** 只把寵物狀態膠囊顏色送給寵物視窗。 */
   sendPetStatus(state: PetStatusThemeState): void
-  /** Origin allowed to read fonts cross-origin (the trusted panel renderer). */
+  /** 允許跨來源讀取字型的來源（受信任的面板渲染端）。 */
   rendererOrigin(): string | null
   /** 插件主題快照有變動時送給所有 Worker 與開啟中的 panelView（已合併、去重）。 */
   sendPluginTheme(snapshot: PluginThemeSnapshot): void
@@ -133,7 +133,7 @@ export class PanelThemeRuntime {
     return this.state
   }
 
-  /** Pill colours of each mode's active theme (null = built-in). */
+  /** 各模式啟用中主題的膠囊顏色（null = 內建）。 */
   getPetStatus(): PetStatusThemeState {
     return this.petStatus
   }
@@ -142,7 +142,7 @@ export class PanelThemeRuntime {
     return this.sources
   }
 
-  /** Re-derives sources from the plugin runtime, prunes the store, and publishes on change. */
+  /** 從插件 runtime 重新推導來源、修剪 store，有變動時才發布。 */
   sync(input: PanelThemeSyncInput): void {
     const sources: PanelThemeSourcePlugin[] = []
     const liveKeys = new Set<string>()
@@ -173,7 +173,7 @@ export class PanelThemeRuntime {
         themes,
       })
     }
-    // Bounded by the installed plugins: entries for removed or replaced versions are dropped.
+    // 上限受已安裝插件約束：已移除或被取代版本的項目會被丟棄。
     for (const key of this.resolvedCache.keys()) {
       if (!liveKeys.has(key)) this.resolvedCache.delete(key)
     }
@@ -182,7 +182,7 @@ export class PanelThemeRuntime {
     this.publish()
   }
 
-  /** Rebuilds state and token map from the current sources and store; sends when the state changed. */
+  /** 依目前來源與 store 重建狀態與 token 對應表；狀態有變動時才送出。 */
   publish(): void {
     const tokens = new Map<string, TokenAsset>()
     const imagesRoot = this.options.userDataDirectory
@@ -255,13 +255,13 @@ export class PanelThemeRuntime {
     })
   }
 
-  /** Plugin removed: drop slots, store entries and its image directory. */
+  /** 插件被移除：清掉插槽、store 項目與其圖片目錄。 */
   removePlugin(pluginId: string): void {
     try { this.store.removePlugin(pluginId) } catch {}
     removePluginImages(this.options.userDataDirectory, pluginId)
   }
 
-  /** Startup sweep of unreferenced image files (bounded). */
+  /** 啟動時清掃未被引用的圖片檔（有上限）。 */
   sweep(): number {
     return sweepOrphanUserImages(this.options.userDataDirectory, this.store.referencedFiles())
   }
@@ -283,7 +283,7 @@ export class PanelThemeRuntime {
     }
   }
 
-  /** Unknown manifests (e.g. crash-disabled plugins) are kept, never pruned. */
+  /** 未知的 manifest（例如因當機而被停用的插件）會保留，絕不修剪。 */
   private modeKnown(pluginId: string, themeId: string, mode: PanelThemeMode, needsUserImage: boolean): boolean {
     if (!this.knownManifests.has(pluginId)) return true
     const theme = this.sources.find(source => source.pluginId === pluginId)?.themes.find(candidate => candidate.id === themeId)
@@ -291,7 +291,7 @@ export class PanelThemeRuntime {
     return Boolean(resolved && (!needsUserImage || resolved.userImage))
   }
 
-  /** `agent-pets://panel-theme/<token>`: token-only, GET-only, header re-check on the bytes served. */
+  /** `agent-pets://panel-theme/<token>`：只接受 token、只接受 GET，並對送出的位元組重新檢查檔頭。 */
   async handleRequest(rawUrl: string, method: string): Promise<Response> {
     if (method !== 'GET') return new Response('Method not allowed', { status: 405 })
     let url: URL

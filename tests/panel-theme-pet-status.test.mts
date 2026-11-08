@@ -27,7 +27,7 @@ test('petStatus: background and text are required, the rest is derived determini
   assert.deepEqual(pill.border, { ...color('#e6f4f5'), a: 0.18 })
   assert.deepEqual(pill.quotaTrack, { ...color('#e6f4f5'), a: 0.18 })
   assert.deepEqual(pill.quotaFill, color(DARK_COLORS.accent))
-  // Derivation is a pure function of the inputs.
+  // 推導是輸入的純函式。
   assert.deepEqual(derivePetStatusColors({ background: color('rgb(13 27 34 / 0.9)'), text: color('#e6f4f5') }, { accent: color(DARK_COLORS.accent) }), pill)
   rejects(withPill({ text: '#e6f4f5' }), /petStatus\.background: is required/)
   rejects(withPill({ background: 'rgb(13 27 34 / 0.9)' }), /petStatus\.text: is required/)
@@ -53,7 +53,7 @@ test('petStatus contrast is checked over worst-case black and white desktops', (
   rejects(withPill({ background: 'rgb(248 252 252 / 0.92)', text: '#10282c', quotaFill: '#1f7a80' }, 'light'), /quotaFill: 2\.\d\d:1 < 3:1 on quotaTrack/)
   const [resolved] = parsePanelThemes(withPill({ background: 'rgb(248 252 252 / 0.92)', text: '#10282c', quotaFill: '#0e4f54' }, 'light')).themes
   const pill = resolved!.modes.light!.petStatus!
-  // The derived low-quota colour moves toward the text until it reaches 3:1 everywhere.
+  // 推導出的低額度顏色會朝文字色移動，直到在所有情況下都達到 3:1。
   for (const desktop of [color('#000000'), color('#ffffff')]) {
     const surface = compositeColor(pill.background, desktop)
     assert.ok(contrastRatio(pill.quotaWarn, surface) >= 3)

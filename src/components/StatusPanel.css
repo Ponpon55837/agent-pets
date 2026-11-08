@@ -1,8 +1,8 @@
 /* Organic panel surface. The component primitives inherit these semantic
    values, while the desktop pet keeps the original dark presentation layer. */
 
-/* Aliases re-resolve inside protected regions and theme previews, because an
-   inherited alias arrives already substituted (spec §3.6). */
+/* 別名會在受保護區域與主題預覽內重新解析，因為繼承下來的
+   別名抵達時已經被代換（spec §3.6）。 */
 .status-panel,
 .status-panel :deep(.host-protected),
 :deep(.panel-theme-preview) {
@@ -89,7 +89,7 @@
   flex-direction: column;
   overflow: hidden;
   border-radius: var(--organic-radius-lg);
-  /* A plugin gradient (host-built, renderer-validated) or the solid bg. */
+  /* 插件漸層（主機建構、渲染端驗證）或純色 bg。 */
   background: var(--panel-theme-background, var(--surface-panel));
   color: var(--text-primary);
   font-family: var(--font-ui);

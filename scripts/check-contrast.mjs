@@ -60,7 +60,7 @@ export const PET_BUBBLE_PAIRS = [
   ['--text-primary', '--organic-status-surface-fallback', 4.5, 'pet mini badge text'],
   ['--pet-bubble-info-accent', '--organic-status-surface-fallback', 4.5, 'pet plugin badge info text'],
   ['--pet-bubble-warn-accent', '--organic-status-surface-fallback', 4.5, 'pet plugin badge warning text'],
-  // Permission bubble text (it sits on the pet bubble surface in both appearances).
+  // 權限泡泡文字（兩種外觀下都位於寵物泡泡表面上）。
   ['--text-bright', '--pet-bubble-surface-opaque', 4.5, 'permission bubble text'],
   ['--text-secondary', '--pet-bubble-surface-opaque', 4.5, 'permission bubble secondary text'],
   ['--state-warn-bright', '--pet-bubble-surface-opaque', 4.5, 'permission bubble warning text'],

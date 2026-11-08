@@ -5,7 +5,7 @@ import { ref } from 'vue'
 
 export type PluginDetailRequestSection = 'overview' | 'settings' | 'commands' | 'themes' | 'diagnostics'
 
-/** Bumped on every request so an already-mounted plugin panel can consume it too. */
+/** 每次請求都會遞增，讓已掛載的插件面板也能處理它。 */
 export const pluginDetailRequestNonce = ref(0)
 
 let pending: { pluginId: string; section: PluginDetailRequestSection } | null = null

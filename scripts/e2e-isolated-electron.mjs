@@ -157,9 +157,9 @@ if (typeof app.setAppPath === 'function') app.setAppPath(${JSON.stringify(appRoo
 const calls = { isEncryptionAvailable: 0, encryptString: 0, decryptString: 0 }
 const shellOpenExternalCalls = []
 shell.openExternal = async (url) => { shellOpenExternalCalls.push(String(url)) }
-// Native file dialogs cannot be driven over CDP; tests queue absolute paths here
-// (globalThis.__agentPetsE2E.dialogQueue.push(path)) and the next open dialog
-// returns the first one. An empty queue falls through to the real dialog.
+// 原生檔案對話框無法透過 CDP 操作；測試把絕對路徑排進這裡
+// （globalThis.__agentPetsE2E.dialogQueue.push(path)），下一個開啟的對話框
+// 會回傳第一個。佇列為空時則改用真正的對話框。
 const { dialog } = require('electron')
 const dialogQueue = []
 const realShowOpenDialog = dialog.showOpenDialog.bind(dialog)
@@ -236,7 +236,7 @@ const child = spawn(electronBinary, [
   // Only pass what Electron needs; never the user's tokens, account ids or agent settings.
   env: {
     ...Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'USER', 'LOGNAME', 'SHELL', 'DISPLAY', 'XDG_RUNTIME_DIR', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP',
-      // Port overrides (dev builds only) so an installed Agent Pets can keep 17373–17375.
+      // 連接埠覆寫（僅限 dev build），讓已安裝的 Agent Pets 能保有 17373–17375。
       'AGENT_PETS_EVENT_PORT', 'AGENT_PETS_PERMISSION_PORT', 'AGENT_PETS_PRESENTATION_PORT']
       .filter(key => process.env[key] !== undefined)
       .map(key => [key, process.env[key]])),

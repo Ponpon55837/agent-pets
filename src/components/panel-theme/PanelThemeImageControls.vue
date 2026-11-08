@@ -17,8 +17,8 @@ import {
   type PanelThemeUserImageState,
 } from '@/types/panel-theme'
 
-// User background image controls for one active (theme, mode) slot. The file
-// is picked in a native dialog in main; the renderer never sees its path.
+// 單一啟用中（theme, mode）插槽的使用者背景圖片控制項。檔案在主程序的
+// 原生對話框中選取；渲染端永遠看不到它的路徑。
 
 const props = defineProps<{ themeRef: PanelThemeRef; mode: PanelThemeMode; userImage: PanelThemeUserImageState }>()
 const { busy, status, error, importImage, clearImage, setImageOptions } = usePanelThemeActions()
@@ -38,7 +38,7 @@ const current = computed(() => props.userImage.current ?? null)
 const fitOptions = computed(() => PANEL_THEME_FITS.map(fit => ({ value: fit, label: t(FIT_LABEL[fit]) })))
 const positionOptions = computed(() => PANEL_THEME_POSITIONS.map(position => ({ value: position, label: t(POSITION_LABEL[position]) })))
 const blurOptions = computed(() => PANEL_THEME_USER_BLURS.map(blur => ({ value: String(blur), label: blur === 0 ? t('design.panelTheme.image.blurNone') : String(blur) })))
-/** Presets: the computed minimum, +0.05, +0.10 and 0.95 (never below the minimum). */
+/** 預設選項：計算出的最小值、+0.05、+0.10 與 0.95（絕不低於最小值）。 */
 const dimOptions = computed(() => {
   const minimum = props.userImage.minDim
   const values = [...new Set([minimum, minimum + 0.05, minimum + 0.1, 0.95].map(value => Math.min(0.95, Math.round(value * 100) / 100)))]
