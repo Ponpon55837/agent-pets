@@ -118,7 +118,8 @@ test('no protected regions: every surface reads the semantic layer derived from 
   const tokens = readFileSync('src/styles/tokens.css', 'utf8')
   assert.doesNotMatch(tokens, /host-protected/)
   for (const property of PANEL_THEME_CSS_PROPERTIES.filter(name => name !== '--panel-theme-background')) {
-    assert.match(tokens, new RegExp(`^  ${property}: var\\(--builtin${property.slice(1)}\\);`, 'm'), `${property} aliases the frozen copy`)
+    // 插件頁面上先讀對應的 --ap-*（App 視窗沒有 --ap-*，一律退回內建值）。
+    assert.match(tokens, new RegExp(`^  ${property}: (?:var\\(--ap-[a-z0-9-]+, )?var\\(--builtin${property.slice(1)}\\)\\)?;`, 'm'), `${property} aliases the frozen copy`)
   }
   // 語意層在 :root 衍生，並在預覽上重新解析（預覽帶入另一組色盤）。
   assert.match(tokens, /^:root,\n\.panel-theme-preview \{\n  --color-bg: var\(--organic-bg\);/m)

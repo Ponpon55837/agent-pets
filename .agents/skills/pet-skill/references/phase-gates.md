@@ -84,5 +84,5 @@ Suggested roadmap classification, subject to the actual diff and user confirmati
 ## Design gates (DS-19)
 
 - `pnpm check:contrast` must pass (token foreground/background pairs, light and dark themes).
-- `pnpm check:design` reports undefined `var(--x)`, bare hex/rgba, sub-11px font sizes, literal `blur()`, text-glyph icons and untranslated template text. It is report-only in CI; run `pnpm check:design:strict` locally on files you touched, and do not add new findings. Flip CI to `--strict` once `docs/ux-overhaul/design-followups.md` is cleared.
-- `raw-color` (`node scripts/check-design-tokens.mjs --raw-colors`) inventories every literal colour outside the theme palette source `--builtin-organic-*`, grouped by surface. It is a baseline report until the unified-theme work clears `docs/design/theme-token-audit.md`; then `check:design:strict` adds `--raw-colors=fail`. Do not add new raw colours.
+- `pnpm check:design` reports undefined `var(--x)`, bare hex/rgba, sub-11px font sizes, literal `blur()`, text-glyph icons and untranslated template text. CI runs `pnpm check:design:strict` (`--strict --raw-colors=fail`), which fails on any finding.
+- `raw-color` (`node scripts/check-design-tokens.mjs --raw-colors` lists them) is any literal colour in `src/**` outside the theme palette source `--builtin-organic-*` in `tokens.css`. The count is 0 and `check:design:strict` fails on a new one: add a palette entry or derive the value from the semantic layer (`--color-*`) instead.

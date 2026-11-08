@@ -1,6 +1,6 @@
 # 階段報告：插件面板主題（`panelThemes`）
 
-分支 `feat/panel-themes`，基準 1.11.4（`3435de4`）。規格：`docs/design/Plugin-Panel-Theme-Spec.md`（§0 記錄實作時的決定）。版本尚未變更。
+分支 `feat/panel-themes`，基準 1.11.5（`f16676e`，第 2 步前重定基底）。規格：`docs/design/Plugin-Panel-Theme-Spec.md`（§0 記錄實作時的決定）。版本尚未變更。
 
 ## 範圍與結果
 
@@ -15,7 +15,8 @@
 | §8 | 設定介面：依使用者決定移到「設定 → 插件 → 該插件 → 面板主題」；「通用 → 外觀」只留狀態卡與恢復內建 | 完成 |
 | §10 | 授權單位、套件規則、目錄 `minAppVersion` 與探索頁「需要 Agent Pets X」 | 完成 |
 | §16.4 | 插件讀取主題 API：`--ap-*` token、`theme.get()`／`theme.onDidChange`（規格 R13） | 完成 |
-| §16 其餘 | 全介面統一主題（彈出視窗、按鈕、對話框等全部改用同一色盤） | **進行中**，工作清單見 `docs/design/theme-token-audit.md` |
+| §16.1、§16.3、§16.5 | 全介面統一主題：兩個視窗的每個介面（按鈕、輸入、分頁、卡片、對話框、選單、提示、通知、精靈、Project MCP、插件安裝與內容框、權限與風險介面、寵物泡泡、狀態列、狀態點）都讀同一組由色盤衍生的語意層；以主機強制的不變量取代保護區域（規格 R14、R15） | 完成；`src/**` 寫死的顏色為 0，`check:design:strict` 以 `--raw-colors=fail` 把關 |
+| §16.2 | manifest 擴充顏色鍵 | 第 3 步 |
 
 ## 與規格的差異
 
@@ -34,9 +35,12 @@
 - 圖片只讀檔頭判斷尺寸、像素數、動畫與方向，不解碼；使用者圖片只讀一次（lstat、`O_NOFOLLOW`、fstat 比對 dev/ino/size）。
 - 新 IPC：6 個面板頻道（只允許設定面板 main frame，含單向的 `panel-theme-appearance-set`）、1 個寵物頻道（只允許寵物視窗 main frame）、3 個由主程式送出的廣播（含送給插件面板頁的 `plugin-panel-theme-changed`）；`docs/security/ipc-inventory.md` 已重新產生，產生器也修正為依實際 sender guard 與 `_event` 參數判斷。
 - 插件主題 API（`theme.get`、`theme.onDidChange`、面板頁 `--ap-*`）不需要權限：快照只含畫面上已可見的顏色、圓角、字族與字級倍率，每個插件相同，不含插件或主題 id、字型別名、圖片或路徑；變更以 100 ms 合併並在送出時去重。
-- 權限／風險介面、安裝確認、插件內容框、確認對話框、伺服器狀態橫幅與主題設定本身標記 `.host-protected`，永遠使用內建配色；寵物視窗只有狀態列可套用顏色。
+- 沒有保護區域（R14）：主題也套用到權限／風險介面、安裝確認、插件內容框、確認對話框、伺服器狀態橫幅、主題設定與寵物視窗。驗證器在接受主題前證明每個文字 token 在它可能出現的每個表面上 ≥ 4.5:1（寵物泡泡與狀態列以疊在全黑與全白桌面上計算）、焦點環 ≥ 3:1、主要按鈕懸停的標籤 ≥ 4.5:1、狀態色維持色相與色差、主機固定的資訊色與狀態色及強調色保持距離；版面、文字標籤、風險徽章文字與「按住才允許」由主機程式碼決定。
+- 寵物視窗只收到它用得到的 19 個色盤屬性與選填的狀態列顏色（測試由 `tokens.css` 反推這個集合），在同一個 frame 內寫入 `<html>`；不收字型、圓角、圖片或模糊。
 
 ## 規格以外一併修正的問題
+
+- 第 2 步：設計檢查逐行掃描，漏掉多行的顏色宣告（4 筆）；內嵌權限卡把次要文字、倒數與 `onAccent` 文字放在強調色填色上（淺色約 1.9:1／3.29:1）；寵物泡泡的次要文字是 64–84% 半透明；精靈與 Project MCP 面板使用藍色玻璃層的元件、也讀不到 `--font-body-sm`／`--font-label`；寵物外觀會重畫面板的捲軸；工作階段列的狀態點用寫死的亮色（綠點在米白上約 2:1）；主要按鈕懸停混黑色，深色模式下降低標籤對比；淺色寵物外觀的焦點框在泡泡上只有 1.4:1；`DesktopPet.vue` 的 `:data-pet-mode` 縮排錯誤。
 
 - 淺色寵物外觀下權限泡泡的指令、細節、連結與「允許一次」幾乎是白字配米色（沿用深色層的 `--text-bright` 等 token）。已在淺色寵物範圍補上對應值，並把這些配對加入 `check-contrast`。
 - `rgb()` 百分比換算有浮點誤差（50% 變成 127）。
@@ -46,17 +50,18 @@
 
 ## 驗證
 
-- `pnpm exec vue-tsc --noEmit`、`pnpm run lint`、`pnpm run test:unit`（1111 項全過）、`pnpm exec vite build`、`pnpm run check:bundle-size`、`pnpm run check:bundle`、`pnpm run check:contrast`、`pnpm run check:design:strict`、`pnpm audit --prod`（無已知弱點）、`git diff --check`。
+- `pnpm exec vue-tsc --noEmit`、`pnpm run lint`、`pnpm run test:unit`（第 2 步後 1125 項全過）、`pnpm exec vite build`、`pnpm run check:bundle-size`、`pnpm run check:bundle`、`pnpm run check:contrast`、`pnpm run check:design:strict`（第 2 步起含 `--raw-colors=fail`）、`pnpm audit --prod`（無已知弱點）、`git diff --check`。
 - 新增測試：顏色語法與注入字串、驗證器與對比、儲存、使用者圖片、IPC 寄件者、協定路由、渲染端白名單、寵物狀態列、插件整合（manifest、套件、授權、目錄、設定搜尋、語系）。
 - 隔離 Electron（暫時 HOME／userData、假 safeStorage、未觸發鑰匙圈）：以開發者模式安裝測試主題插件，套用淺色與深色、匯入背景圖、切換插件停用／移除（檔案與設定一併清除）、權限卡在高彩度主題下維持內建外觀、forced-colors／prefers-contrast／reduced-transparency、寵物狀態列淺色與深色。
 - 插件主題 API（隔離 Electron，hook 埠 37373–37375）：以開發者模式安裝 `ok-panel-theme` 與 `ok-theme-reader`（無權限的面板頁插件），面板淺色→深色時 panelView `<html>` 上的 24 個 `--ap-*` 立即更新，一次切換只收到一個 `onDidChange` 事件；恢復內建後回到內建深色色盤；Worker 的 `theme.get()`／`onDidChange` 記錄與面板一致。
+
+- 第 2 步（隔離 Electron，hook 埠 37373–37375、假 safeStorage）：內建與 `ok-panel-theme` 的 aurora 主題下，面板（工作階段、設定精靈）與寵物視窗（狀態列、狀態點）的淺色與深色截圖；寵物外觀與面板外觀分開切換時，寵物視窗 `<html data-theme>` 跟著寵物外觀、只收到 19 個色盤屬性與狀態列顏色（29 個 inline 屬性）。
 
 ## 剩餘風險
 
 - 字型：測試用 `.woff2` 只有檔頭，實際被 OTS 拒絕而改用備援字型；真正字型的渲染結果尚未驗證。
 - 只在 macOS 驗證；Windows（高對比模式、字型、路徑）與 125%／150% 縮放未測。
-- 規格 §16 的全介面統一主題尚未完成（插件讀取 API 與狀態色色相限制已完成）。
-- 新增註解仍以英文為主，與專案技能「新增註解用繁體中文」不一致。
+- manifest 尚無 §16.2 的擴充顏色鍵（資訊色、陰影、高光目前由主機固定），留給第 3 步。
 
 ## 版本建議
 

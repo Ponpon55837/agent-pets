@@ -103,7 +103,7 @@
 .plugin-feed-source {
   overflow: hidden;
   color: var(--color-text-3);
-  font-size: max(var(--font-xs), calc(11px * var(--pet-scale, 1)));
+  font-size: max(var(--font-floor), calc(11px * var(--pet-scale, 1)));
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -126,13 +126,13 @@
 }
 
 .plugin-feed-message strong {
-  font-size: max(var(--font-xs), calc(11px * var(--pet-scale, 1)));
+  font-size: max(var(--font-floor), calc(11px * var(--pet-scale, 1)));
   font-weight: 700;
 }
 
 .plugin-feed-message span {
   color: var(--color-text-2);
-  font-size: max(var(--font-xs), calc(11px * var(--pet-scale, 1)));
+  font-size: max(var(--font-floor), calc(11px * var(--pet-scale, 1)));
   font-weight: 500;
 }
 
@@ -155,7 +155,7 @@
   color: inherit;
   cursor: pointer;
   font: inherit;
-  font-size: max(var(--font-xs), calc(11px * var(--pet-scale, 1)));
+  font-size: max(var(--font-floor), calc(11px * var(--pet-scale, 1)));
 }
 
 .pet-toast .plugin-feed-open-panel:hover {

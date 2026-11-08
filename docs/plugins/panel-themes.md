@@ -83,9 +83,9 @@ Any plugin can follow the theme the user is looking at; this needs no permission
 | `--ap-accent-text` | Accent-coloured text and links | ≥ 4.5:1 on `bg` |
 | `--ap-on-accent` | Text and icons on `accent` | ≥ 3:1 on `accent`, ≥ 4.5:1 on `accent-hover` |
 | `--ap-border`, `--ap-border-soft` | Borders and dividers | Translucent |
-| `--ap-focus` | Focus ring | Equals `accent` (≥ 3:1 on `bg`) |
+| `--ap-focus` | Focus ring | Equals `accent-text`, the app's own focus ring (≥ 3:1 on every surface) |
 | `--ap-danger`, `--ap-success`, `--ap-warn` | State text | ≥ 4.5:1 on `surface`/`surface-2`; hue stays red / green / amber |
-| `--ap-info` | Informational text | Currently equals `accent-text` |
+| `--ap-info` | Informational text | The host's fixed blue info colour (same as the app's), ≥ 4.5:1 on `surface`/`surface-2`/`bg` |
 | `--ap-scrim` | Modal backdrop | Alpha ≥ 0.3 |
 | `--ap-radius-sm`, `--ap-radius-md`, `--ap-radius-lg` | Corner radii | `Npx`, sm ≤ md ≤ lg |
 | `--ap-font-body`, `--ap-font-heading` | Font-family lists | Local and generic families only |

@@ -66,9 +66,9 @@
 | `--ap-accent-text` | 強調色文字與連結 | 在 `bg` 上 ≥ 4.5:1 |
 | `--ap-on-accent` | `accent` 上的文字與圖示 | 在 `accent` 上 ≥ 3:1，在 `accent-hover` 上 ≥ 4.5:1 |
 | `--ap-border`、`--ap-border-soft` | 邊框與分隔線 | 半透明 |
-| `--ap-focus` | 焦點框 | 等於 `accent`（在 `bg` 上 ≥ 3:1） |
+| `--ap-focus` | 焦點框 | 等於 `accent-text`，與 App 自己的焦點框相同（在每個表面上 ≥ 3:1） |
 | `--ap-danger`、`--ap-success`、`--ap-warn` | 狀態文字 | 在 `surface`／`surface-2` 上 ≥ 4.5:1；色相維持紅／綠／琥珀 |
-| `--ap-info` | 資訊文字 | 目前等於 `accent-text` |
+| `--ap-info` | 資訊文字 | 主機固定的藍色資訊色（與 App 相同），在 `surface`／`surface-2`／`bg` 上 ≥ 4.5:1 |
 | `--ap-scrim` | 對話框遮罩 | 透明度 ≥ 0.3 |
 | `--ap-radius-sm`、`--ap-radius-md`、`--ap-radius-lg` | 圓角 | `Npx`，sm ≤ md ≤ lg |
 | `--ap-font-body`、`--ap-font-heading` | 字族清單 | 只含本機字型與通用字族 |

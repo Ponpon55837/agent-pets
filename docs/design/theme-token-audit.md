@@ -1,32 +1,31 @@
 # Theme token audit (raw colours outside the theme palette)
 
-Work list for spec §16 (one theme for every surface). Generated from `node scripts/check-design-tokens.mjs --raw-colors`, which lists every literal colour (hex, `rgb()`/`hsl()`/`oklch()` and other colour functions, CSS named colours in colour properties, colour strings in TS and Vue scripts) in `src/**`. The only allowed source of literal colours is the theme palette layer `--builtin-organic-*` in `src/styles/tokens.css` (the built-in values that plugin themes replace).
+**Status: done (spec §16 step 2, R14/R15).** `node scripts/check-design-tokens.mjs --raw-colors` reports **0** raw colours in `src/**` outside the theme palette source `--builtin-organic-*`, and `check:design:strict` (CI) runs with `--raw-colors=fail`, so a new literal colour fails the build. The tables below record the baseline and where each group went.
 
-Baseline on `feat/panel-themes` after the `--ap-*` read API: **145 raw colours**, 133 in `tokens.css` and 12 elsewhere (141 before the scanner read multi-line declarations; the four it missed are `--shadow-panel`, `--shadow-edge-handle` and the two `--pet-bubble-shadow` values). Every component stylesheet already reads colours through `var()`; the literals sit in token blocks that are not driven by the theme, plus three component literals and two TS/Vue colour tables.
+Baseline on `feat/panel-themes` after the `--ap-*` read API: **145 raw colours**, 133 in `tokens.css` and 12 elsewhere (141 before the scanner read multi-line declarations; the four it missed are `--shadow-panel`, `--shadow-edge-handle` and the two `--pet-bubble-shadow` values).
 
 ## Enforcement
 
-- Now (baseline): `raw-color` is reported in the summary (`rawColors`, `rawColorsByGroup`) and does not fail `check:design` or `check:design:strict`.
-- Switch (end of step 2): when the count reaches 0, change the `check:design:strict` script in `package.json` to `node scripts/check-design-tokens.mjs --strict --raw-colors=fail`. From then on any raw colour outside `--builtin-organic-*` fails CI. `shouldFail()` in the script and `tests/check-design-tokens.test.mts` already cover the flag.
+`package.json` `check:design:strict` = `node scripts/check-design-tokens.mjs --strict --raw-colors=fail`; `shouldFail()` and `tests/check-design-tokens.test.mts` cover the flag. The only literals left are the `--builtin-organic-*` palette entries (themable values plus the host-fixed `info-text`, `shadow` and `highlight`).
 
 ## Summary by surface
 
-"Target" names the theme palette key each group should read in step 2 (manifest keys from spec §3.2; *new* marks a key §16.2 still has to add, derived from the core keys so existing themes stay valid).
+"Target" was the planned palette key; "Result" is what step 2 did (all groups are at 0). Manifest keys for the *new* entries are step 3 (§16.2).
 
-| Group | Count | Where it renders | Target |
-| --- | --- | --- | --- |
-| `shared-glass-layer` | 36 | `:root` defaults of `--surface-*`, `--text-*`, `--accent*`, `--border-*`, `--state-*`: every component rendered outside `.status-panel` (setup wizard, Project MCP panel, pet window, plugin pages via `_shared/tokens.css`). Inside `.status-panel` these names are already aliased to the palette. | surface levels, text levels, accent family, border/borderSoft, state text, scrim (see table below) |
-| `pet-bubbles` | 30 | Pet speech, success/error/warn/info/plugin bubbles and the permission bubble, dark and light pet appearance | *new* `bubbleSurface` (derived from `surface`), `text`, state text, `accentText` for info, *new* `pluginTint` |
-| `pet-status-pill` | 27 | Status pill, quota tooltip and edge track in the pet window (built-in values when no `petStatus` is declared) | `petStatus.*` (§3.7) falling back to `surface`/`text`/`border`; shadows to *new* elevation tokens |
-| `pet-window-glass-light` | 12 | Light pet appearance overrides of the glass layer inside `.desktop-pet` | same targets as `shared-glass-layer`, light mode |
-| `agent-state-colours` | 10 | `STATE_COLORS` in `src/types/agent.ts` (pet status dots, mini ring, session rows) and `--state-idle`/`--state-offline` | `successText`, `warnText`, `dangerText`, `accent` (thinking/tool), `textMuted` (idle/offline); move the TS table to `var(--state-*)` names |
-| `panel-elevation` | 8 | `--organic-{panel,card,hero,thumb}-shadow`, light and dark | *new* `shadow` colour (derived: `text` at low alpha in light, black in dark) |
-| `agent-brand` | 4 | Claude brand gradient, accent, border and surface on cards | keep as brand constants, or *new* `brandClaude`; decide in step 2 (brand colours are identity, not theme) |
-| `scrollbars` | 4 | `--scrollbar-thumb(-hover)` dark and light | `text` at 0.2–0.45 alpha (derived) |
-| `pet-window-chrome` | 4 | Drag shadow (dark/light), edge-peek handle shadow, the error badge `color: white` in `DesktopPet.css:258` | elevation tokens; badge text to `onAccent`-style *new* `onDanger` |
-| `quota-meters` | 3 | `--organic-quota-warning/error/sage` | `warnText`, `dangerText`, `sage`; the < 20 % critical colour stays host-fixed per §3.7 |
-| `shared-controls` | 2 | Primary button hover `color-mix(… 88%, black)` in `src/components/ui/Button.vue:147-148` | `accentHover` (already validated against `onAccent`) |
-| `pet-sprite-effects` | 1 | Aura tint `rgb(235, 242, 255)` in `src/components/PetAnimation.vue:132` | sprite effect, not UI chrome: keep host-fixed or read `accent`; decide in step 2 |
+| Group | Count | Where it renders | Target | Result |
+| --- | --- | --- | --- | --- |
+| `shared-glass-layer` | 36 | `:root` defaults of `--surface-*`, `--text-*`, `--accent*`, `--border-*`, `--state-*`: every component rendered outside `.status-panel` (setup wizard, Project MCP panel, pet window, plugin pages via `_shared/tokens.css`). Inside `.status-panel` these names are already aliased to the palette. | surface levels, text levels, accent family, border/borderSoft, state text, scrim (see table below) | Semantic layer `--color-*` + legacy names on `:root`, derived from the palette (StatusPanel's alias block moved to `tokens.css`); theme applied on `<html>` |
+| `pet-bubbles` | 30 | Pet speech, success/error/warn/info/plugin bubbles and the permission bubble, dark and light pet appearance | *new* `bubbleSurface` (derived from `surface`), `text`, state text, `accentText` for info, *new* `pluginTint` | `surface` at 0.93 over the desktop; text/state/info from `--color-*`; plugin tint from `sage` |
+| `pet-status-pill` | 27 | Status pill, quota tooltip and edge track in the pet window (built-in values when no `petStatus` is declared) | `petStatus.*` (§3.7) falling back to `surface`/`text`/`border`; shadows to *new* elevation tokens | `surface` at 0.92, track `text` at 0.14, shadows/highlights mixed from `--color-shadow` / `--color-highlight`; `petStatus` still overrides |
+| `pet-window-glass-light` | 12 | Light pet appearance overrides of the glass layer inside `.desktop-pet` | same targets as `shared-glass-layer`, light mode | Removed: the pet window's palette mode is the pet appearance (`data-theme`), `.desktop-pet` derives translucent surfaces |
+| `agent-state-colours` | 10 | `STATE_COLORS` in `src/types/agent.ts` (pet status dots, mini ring, session rows) and `--state-idle`/`--state-offline` | `successText`, `warnText`, `dangerText`, `accent` (thinking/tool), `textMuted` (idle/offline); move the TS table to `var(--state-*)` names | `STATE_COLORS` are `var(--state-*)`: success/danger/warn text, thinking/tool `accentText` (the fill is < 3:1 on the light pill), idle `textMuted`, offline `textFaint` |
+| `panel-elevation` | 8 | `--organic-{panel,card,hero,thumb}-shadow`, light and dark | *new* `shadow` colour (derived: `text` at low alpha in light, black in dark) | Mixed from the host `--builtin-organic-shadow` (per-mode strength) |
+| `agent-brand` | 4 | Claude brand gradient, accent, border and surface on cards | keep as brand constants, or *new* `brandClaude`; decide in step 2 (brand colours are identity, not theme) | Claude = `sage` family (as the panel already showed it); unused `--surface-claude` / `--border-claude` deleted |
+| `scrollbars` | 4 | `--scrollbar-thumb(-hover)` dark and light | `text` at 0.2–0.45 alpha (derived) | `text` at 28 % / 45 % |
+| `pet-window-chrome` | 4 | Drag shadow (dark/light), edge-peek handle shadow, the error badge `color: white` in `DesktopPet.css:258` | elevation tokens; badge text to `onAccent`-style *new* `onDanger` | Shadows from `--color-shadow`/`--color-highlight`; badge text `--color-bg` |
+| `quota-meters` | 3 | `--organic-quota-warning/error/sage` | `warnText`, `dangerText`, `sage`; the < 20 % critical colour stays host-fixed per §3.7 | normal `sageDeep`, Claude `accentText`, low `warnText`, critical `dangerText` (not overridable by `petStatus`) |
+| `shared-controls` | 2 | Primary button hover `color-mix(… 88%, black)` in `src/components/ui/Button.vue:147-148` | `accentHover` (already validated against `onAccent`) | Hover mixes 12 % toward `--text-primary` (validated as `PANEL_THEME_PRESSED_MIX`) |
+| `pet-sprite-effects` | 1 | Aura tint `rgb(235, 242, 255)` in `src/components/PetAnimation.vue:132` | sprite effect, not UI chrome: keep host-fixed or read `accent`; decide in step 2 | Fallback aura tint reads `--organic-highlight` |
 
 ## `shared-glass-layer` and `pet-window-glass-light` mapping
 
@@ -45,19 +44,22 @@ Baseline on `feat/panel-themes` after the `--ap-*` read API: **145 raw colours**
 | `--focus-ring-color-on-light` | `#1b5fb0` / `#9dd8ff` | `accent` (focus follows accent, §3.4); token currently unused |
 | `--shadow-raised`, `--text-shadow-panel` | white inset 0.06, black 0.55 | elevation tokens |
 
-## Pre-existing findings carried into step 2
+## Pre-existing findings (fixed in step 2)
 
 - `DesktopPet.css:258` uses the named colour `white` for the error badge text, and `Button.vue` mixes the primary hover with `black`; neither follows the light pet appearance or a theme.
 - `STATE_COLORS` duplicates `--state-*` values in TS, so a palette change must be made twice today.
-- `--focus-ring-color-on-light` is declared (light and dark) but never read; remove it or use it for the unified focus ring.
+- `--focus-ring-color-on-light` is declared (light and dark) but never read; removed, the one focus ring is `--color-focus` (accent text).
+- Also fixed: the inline permission card drew secondary text, the countdown and `onAccent` text on the accent fill; bubble secondary text was 64–84 % translucent; the setup wizard and Project MCP panel used the blue glass primitives and missed `--font-body-sm`/`--font-label`; the pet appearance repainted the panel's scrollbars.
 
 ## Unused tokens (`check:design --verbose`, 20)
 
 `tokens.css` is also served read-only to plugin pages as `agent-pets://plugin/_shared/tokens.css`, so its definitions stay until step 2 decides each case. The checker now counts `var(--x)` inside TS and Vue script/template strings as a use (the pet quota colours were misreported as unused before).
 
-| Tokens | Status | Step 2 decision |
-| --- | --- | --- |
-| `--accent-strong`, `--border-claude`, `--surface-claude`, `--font-xl` | Never read. The dead re-declarations in `StatusPanel.css`, `SetupWizard.css` and `ProjectMcpPanel.css` are removed; the `tokens.css` definitions remain for plugin pages. | Keep in `tokens.css` while plugin pages may use them; the re-tokenised surfaces must not reintroduce panel-scope copies. |
-| `--color-bg` … `--color-scrim` (12 semantic aliases of the palette) | Declared as "the names new panel-layer CSS should use", never adopted. They mirror the `--ap-*` colour subset 1:1. | Adopt as the internal semantic layer that every re-tokenised surface reads (and extend with the *new* keys above), or delete; do not keep two unused layers. |
-| `--accent-primary`, `--surface-secondary`, `--font-2xs` | Compatibility aliases for references that were removed in the UX overhaul; not in the documented plugin token table. | Delete once step 2 confirms no component or documented plugin token uses them. |
-| `--font-floor` | 11 px helper for `max(var(--font-floor), calc(11px * var(--pet-scale)))`; the pet bubbles use `max(var(--font-xs), …)` (also 11 px) instead. | Use it in the pet window's scaled text when that CSS is re-tokenised, otherwise delete. |
+| Tokens | Status | Step 2 decision | Result |
+| --- | --- | --- | --- |
+| `--accent-strong`, `--border-claude`, `--surface-claude`, `--font-xl` | Never read. The dead re-declarations in `StatusPanel.css`, `SetupWizard.css` and `ProjectMcpPanel.css` are removed; the `tokens.css` definitions remain for plugin pages. | Keep in `tokens.css` while plugin pages may use them; the re-tokenised surfaces must not reintroduce panel-scope copies. | `--accent-strong`, `--border-claude`, `--surface-claude` deleted (not in the plugin token table); `--font-xl` kept (part of the documented plugin type scale `--font-xs`…`--font-2xl`) |
+| `--color-bg` … `--color-scrim` (12 semantic aliases of the palette) | Declared as "the names new panel-layer CSS should use", never adopted. They mirror the `--ap-*` colour subset 1:1. | Adopt as the internal semantic layer that every re-tokenised surface reads (and extend with the *new* keys above), or delete; do not keep two unused layers. | Adopted and extended to 23 `--color-*` tokens; every surface reads them |
+| `--accent-primary`, `--surface-secondary`, `--font-2xs` | Compatibility aliases for references that were removed in the UX overhaul; not in the documented plugin token table. | Delete once step 2 confirms no component or documented plugin token uses them. | Deleted (no component or documented plugin token used them); `--status-error` kept as an alias of `--color-danger` |
+| `--font-floor` | 11 px helper for `max(var(--font-floor), calc(11px * var(--pet-scale)))`; the pet bubbles use `max(var(--font-xs), …)` (also 11 px) instead. | Use it in the pet window's scaled text when that CSS is re-tokenised, otherwise delete. | Adopted in the pet bubbles' scaled text |
+
+Remaining `check:design --verbose` unused tokens (2): `--font-xl` (plugin type scale) and `--organic-border-on-accent` (palette entry of the manifest key `borderOnAccent`, which no host CSS reads since the permission card left the accent fill; its fate belongs to the manifest-key work in step 3). The legacy `--border-on-accent` / `--accent-on-hover` aliases were removed.

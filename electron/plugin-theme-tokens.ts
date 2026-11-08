@@ -1,9 +1,10 @@
-import { formatPanelThemeColor, type PanelThemeRgba } from './panel-theme-color.ts'
+import { formatPanelThemeColor, parsePanelThemeColor, type PanelThemeRgba } from './panel-theme-color.ts'
 import {
   builtinPanelThemeColors,
   DEFAULT_BODY_FAMILY,
   DEFAULT_HEADING_FAMILY,
   DEFAULT_RADII,
+  PANEL_THEME_HOST_COLORS,
   type PanelThemeFamilyEntry,
   type ResolvedPanelTheme,
 } from './plugin-panel-themes.ts'
@@ -20,8 +21,11 @@ import {
 // 不輸出主題插件的 id、主題 id、背景圖或使用者圖片；`@font` 別名只在設定面板文件內註冊，
 // 插件頁面載不到，且是以 session salt 推導的識別值，所以一律去掉、只留本機字型與通用字族。
 
-/** 公開 token → 已驗證的色盤鍵。`focus` 跟隨 accent（≥ 3:1）；`info` 目前沿用 accentText（≥ 4.5:1）。 */
-const COLOR_SOURCES: Readonly<Record<PluginThemeColorToken, PluginPanelThemeColorKey>> = Object.freeze({
+/**
+ * 公開 token → 已驗證的色盤鍵。`focus` 與 App 的焦點環相同，是 accentText（在每個表面上都 >= 3:1）；
+ * `info` 是主機固定的資訊色（下方 HOST_INFO），不在這張表裡。
+ */
+const COLOR_SOURCES: Readonly<Record<Exclude<PluginThemeColorToken, '--ap-info'>, PluginPanelThemeColorKey>> = Object.freeze({
   '--ap-bg': 'bg',
   '--ap-surface': 'surface',
   '--ap-surface-2': 'surface2',
@@ -34,11 +38,10 @@ const COLOR_SOURCES: Readonly<Record<PluginThemeColorToken, PluginPanelThemeColo
   '--ap-on-accent': 'onAccent',
   '--ap-border': 'border',
   '--ap-border-soft': 'borderSoft',
-  '--ap-focus': 'accent',
+  '--ap-focus': 'accentText',
   '--ap-danger': 'dangerText',
   '--ap-success': 'successText',
   '--ap-warn': 'warnText',
-  '--ap-info': 'accentText',
   '--ap-scrim': 'scrim',
 })
 
@@ -46,6 +49,17 @@ const BUILTIN_COLORS: Readonly<Record<PanelThemeMode, Record<PluginPanelThemeCol
   light: builtinPanelThemeColors('light'),
   dark: builtinPanelThemeColors('dark'),
 })
+
+const HOST_INFO: Readonly<Record<PanelThemeMode, PanelThemeRgba>> = Object.freeze({
+  light: hostColor(PANEL_THEME_HOST_COLORS.light.info),
+  dark: hostColor(PANEL_THEME_HOST_COLORS.dark.info),
+})
+
+function hostColor(value: string): PanelThemeRgba {
+  const parsed = parsePanelThemeColor(value)
+  if (!parsed.ok) throw new TypeError('host colour is not valid')
+  return parsed.color
+}
 
 function pluginFamily(entries: readonly PanelThemeFamilyEntry[] | null, fallback: string): string {
   if (!entries) return fallback
@@ -70,9 +84,11 @@ export function buildPluginThemeSnapshot(theme: ResolvedPanelTheme | null, mode:
   const resolvedTheme = theme?.modes[mode] ? theme : null
   const colors = resolvedTheme?.modes[mode]?.colors ?? BUILTIN_COLORS[mode]
   const tokens = {} as Record<PluginThemeToken, string>
-  for (const [token, key] of Object.entries(COLOR_SOURCES) as Array<[PluginThemeColorToken, PluginPanelThemeColorKey]>) {
+  for (const [token, key] of Object.entries(COLOR_SOURCES) as Array<[Exclude<PluginThemeColorToken, '--ap-info'>, PluginPanelThemeColorKey]>) {
     tokens[token] = formatPanelThemeColor(colors[key])
   }
+  // 資訊色由主機固定（與 App 的 --color-info 相同），不隨主題改變。
+  tokens['--ap-info'] = formatPanelThemeColor(HOST_INFO[mode])
   const shape = resolvedTheme?.shape ?? DEFAULT_RADII
   tokens['--ap-radius-sm'] = `${shape.radiusSm}px`
   tokens['--ap-radius-md'] = `${shape.radiusMd}px`
