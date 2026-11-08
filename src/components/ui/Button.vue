@@ -143,9 +143,11 @@ withDefaults(defineProps<{
   color: var(--accent-on);
 }
 
+/* 懸停往文字色混 12%（淺色模式變深、深色模式變亮），讓按鈕上的 onAccent 對比只增不減；
+   驗證器以同一個比例檢查（PANEL_THEME_PRESSED_MIX）。 */
 .variant-primary:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent-hover, var(--accent)) 88%, black);
-  background: color-mix(in srgb, var(--accent-hover, var(--accent)) 88%, black);
+  border-color: color-mix(in srgb, var(--accent-hover, var(--accent)) 88%, var(--text-primary));
+  background: color-mix(in srgb, var(--accent-hover, var(--accent)) 88%, var(--text-primary));
   color: var(--accent-on);
 }
 

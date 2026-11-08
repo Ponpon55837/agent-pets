@@ -66,10 +66,15 @@ function readStoredPet(): PetThemePreference {
   }
 }
 
+/** 視窗種類：決定 <html data-window> 與色盤模式（tokens.css 依此選擇區塊）。 */
+export type ThemeWindowKind = 'panel' | 'pet'
+let windowKind: ThemeWindowKind = 'panel'
+
 function apply(): void {
   resolvedTheme.value = resolveTheme(themePreference.value, systemPrefersDark())
   resolvedPetTheme.value = resolvePetTheme(petThemePreference.value, resolvedTheme.value)
   if (typeof document === 'undefined') return
+  document.documentElement.dataset.window = windowKind
   document.documentElement.dataset.theme = resolvedTheme.value
   document.documentElement.dataset.petTheme = resolvedPetTheme.value
 }
@@ -95,9 +100,10 @@ export function setThemePreference(value: unknown): ThemePreference {
 let initialized = false
 
 /** Call once before mounting. Idempotent. */
-export function initTheme(): void {
+export function initTheme(kind: ThemeWindowKind = 'panel'): void {
   if (initialized || typeof window === 'undefined') return
   initialized = true
+  windowKind = kind
   themePreference.value = readStored()
   petThemePreference.value = readStoredPet()
   apply()

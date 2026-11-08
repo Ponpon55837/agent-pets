@@ -28,7 +28,7 @@ import { DEFAULT_SETTINGS_GROUP, SETTINGS_GROUPS, isSettingsGroupId, type Settin
 const store = useAgentStore()
 const panelRoot = ref<HTMLElement | null>(null)
 // 插件面板主題：只在此元素上以 inline 設定 --organic-*（spec §7.3）。
-const { backdrop: panelThemeBackdrop } = usePanelTheme(panelRoot)
+const { backdrop: panelThemeBackdrop } = usePanelTheme()
 const settingsShortcut = /Mac/i.test(navigator.platform) ? '\u2318,' : 'Ctrl+,'
 
 const themeLabel = (preference: ThemePreference) =>

@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { resolvedTheme } from '@/composables/useTheme'
 import { isPanelThemeFit, isPanelThemePosition, type PanelThemeFit, type PanelThemeMode, type PanelThemePosition, type PanelThemeState } from '@/types/panel-theme'
 import {
@@ -11,9 +11,10 @@ import {
   type PanelThemeMediaFlags,
 } from '@/utils/panel-theme-css'
 
-// 依解析後的淺色/深色模式，把插件面板主題只套用到 `.status-panel`
-// 元素（spec §7.3）。每個值都由主程序建構，並在此重新驗證；
-// 寫入會先做差異比對，並在同一個 frame 內批次完成。
+// 依解析後的淺色/深色模式，把插件主題套用到面板視窗的 <html>（spec §7.3、§16）：
+// tokens.css 的語意層在 :root 由色盤衍生，所以面板、對話框、通知、精靈與
+// Project MCP 面板都讀同一組色盤。每個值都由主程序建構，並在此重新驗證；
+// 寫入會先做差異比對，並在同一個 frame 內批次完成（每次切換只有一次樣式重算）。
 
 export interface PanelThemeBackdropView {
   url: string
@@ -86,7 +87,7 @@ function logRejected(names: string[]): void {
   } catch {}
 }
 
-export function usePanelTheme(panelRoot: Ref<HTMLElement | null>) {
+export function usePanelTheme() {
   const applied = new Map<string, string>()
   const loadedFaces = new Map<string, FontFace>()
   let frame = 0
@@ -162,8 +163,8 @@ export function usePanelTheme(panelRoot: Ref<HTMLElement | null>) {
     if (frame) cancelAnimationFrame(frame)
     frame = requestAnimationFrame(() => {
       frame = 0
-      const element = panelRoot.value
-      if (!element || current !== generation) return
+      const element = document.documentElement
+      if (current !== generation) return
       const { remove, set } = diffPanelThemeProperties(applied, plan.properties)
       for (const name of remove) {
         element.style.removeProperty(name)
@@ -205,6 +206,9 @@ export function usePanelTheme(panelRoot: Ref<HTMLElement | null>) {
     unsubscribe?.()
     for (const [list, listener] of queries) list.removeEventListener('change', listener)
     if (frame) cancelAnimationFrame(frame)
+    for (const name of applied.keys()) document.documentElement.style.removeProperty(name)
+    applied.clear()
+    delete document.documentElement.dataset.panelTheme
     for (const face of loadedFaces.values()) document.fonts.delete(face)
     loadedFaces.clear()
   })

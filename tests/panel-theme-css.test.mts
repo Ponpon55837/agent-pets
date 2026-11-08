@@ -121,7 +121,9 @@ test('protected regions and the theme controls keep the built-in palette', () =>
     assert.match(protectedBlock, new RegExp(`${property}: var\\(--builtin${property.slice(1)}\\);`), property)
     assert.match(tokens, new RegExp(`^  ${property}: var\\(--builtin${property.slice(1)}\\);`, 'm'), `${property} aliases the frozen copy`)
   }
-  assert.match(readFileSync('src/components/StatusPanel.css', 'utf8'), /\.status-panel,\n\.status-panel :deep\(\.host-protected\),\n:deep\(\.panel-theme-preview\) \{/)
+  // 語意層在 :root 衍生，並在受保護區域與預覽上重新解析。
+  assert.match(tokens, /^:root,\n\.host-protected,\n\.panel-theme-preview \{\n  --color-bg: var\(--organic-bg\);/m)
+  assert.doesNotMatch(readFileSync('src/components/StatusPanel.css', 'utf8'), /--surface-panel:|host-protected/)
   // 寵物視窗永不套主題：只有面板的 StatusPanel 使用這個 composable。
   assert.doesNotMatch(readFileSync('src/components/DesktopPet.vue', 'utf8'), /usePanelTheme/)
 })

@@ -94,7 +94,8 @@ function rawColorGroup(entry) {
 
 /**
  * 依宣告（而非逐行）切開 CSS：跨多行的值（例如多層 box-shadow）也會完整檢查。
- * 括號內的 `;`、`{`、`}`（如 data: URL）不算分隔。回傳每筆宣告的起始行與所屬選擇器。
+ * 括號內的 `;`、`{`、`}`（如 data: URL）不算分隔。回傳每筆宣告的起始行、所屬選擇器
+ * 與外層路徑（`path`，含 @media 等外層區塊）。
  */
 export function cssDeclarations(css) {
   const out = []
@@ -111,7 +112,7 @@ export function cssDeclarations(css) {
       if (ch === '{') selectors.push(text)
       else if (text) {
         const m = text.match(/^(--[a-z0-9-]+|[a-z-]+)\s*:\s*([\s\S]+)$/i)
-        if (m) out.push({ property: m[1], value: m[2].replace(/\s+/g, ' ').trim(), line: start, selector: selectors.at(-1) ?? '' })
+        if (m) out.push({ property: m[1], value: m[2].replace(/\s+/g, ' ').trim(), line: start, selector: selectors.at(-1) ?? '', path: [...selectors] })
       }
       if (ch === '}') selectors.pop()
       buffer = ''
