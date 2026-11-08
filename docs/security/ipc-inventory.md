@@ -1,6 +1,6 @@
 # IPC 安全清單
 
-由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 112 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
+由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 113 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
 
 | 頻道 | 類型 | 允許的寄件者 | 輸入驗證概況 | Preload API | 對應測試 |
 | --- | --- | --- | --- | --- | --- |
@@ -27,6 +27,7 @@
 | `onboarding-get` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getOnboardingState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `onboarding-update` | `handle` | 受信任寵物或設定面板 main frame | isOnboardingAction；無效輸入回安全預設或錯誤 | updateOnboardingState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-state-get` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | getPanelThemeState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-pet-status-get` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | getPetStatusTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-slot-set` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | setPanelThemeSlot (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-user-image-import` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | importPanelThemeUserImage (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-user-image-clear` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | clearPanelThemeUserImage (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |

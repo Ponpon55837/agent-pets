@@ -31,6 +31,8 @@ export const IPC_CHANNELS = {
   loadPets: 'load-pets',
   panelBlurLock: 'panel-blur-lock',
   panelThemeChanged: 'panel-theme-changed',
+  panelThemePetStatusChanged: 'panel-theme-pet-status-changed',
+  panelThemePetStatusGet: 'panel-theme-pet-status-get',
   panelThemeSlotSet: 'panel-theme-slot-set',
   panelThemeStateGet: 'panel-theme-state-get',
   panelThemeUserImageClear: 'panel-theme-user-image-clear',

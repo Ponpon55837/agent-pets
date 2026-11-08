@@ -86,5 +86,7 @@
   "design.panelTheme.darkOnly": "僅深色模式",
   "design.panelTheme.useLight": "用於淺色模式",
   "design.panelTheme.useDark": "用於深色模式",
-  "design.panelTheme.pluginOff": "開啟此插件後才能使用它的面板主題。"
+  "design.panelTheme.pluginOff": "開啟此插件後才能使用它的面板主題。",
+  "design.panelTheme.previewPillState": "執行中",
+  "design.panelTheme.previewPillAgent": "Claude Code"
 }

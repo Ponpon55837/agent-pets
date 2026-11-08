@@ -39,6 +39,19 @@ export const PANEL_THEME_SIZE_PROPERTIES = [
 export const PANEL_THEME_RADIUS_PROPERTIES = ['--organic-radius-sm', '--organic-radius-md', '--organic-radius-lg'] as const
 export const PANEL_THEME_BACKGROUND_PROPERTY = '--panel-theme-background'
 
+/** Pet status pill properties (set on the pet window's `.desktop-pet` root; read only by `.status-line`). */
+export const PET_STATUS_PROPERTIES = [
+  '--pet-status-background', '--pet-status-border', '--pet-status-text', '--pet-status-text-muted',
+  '--pet-status-quota-fill', '--pet-status-quota-track', '--pet-status-quota-warn', '--pet-status-background-opaque',
+] as const
+export type PetStatusProperty = typeof PET_STATUS_PROPERTIES[number]
+
+/** What main sends to the pet window: the pill colours of each mode's active theme, or null for built-in. */
+export interface PetStatusThemeState {
+  light: Record<PetStatusProperty, string> | null
+  dark: Record<PetStatusProperty, string> | null
+}
+
 export type PanelThemeSharedProperty =
   | typeof PANEL_THEME_FAMILY_PROPERTIES[number]
   | typeof PANEL_THEME_SIZE_PROPERTIES[number]
@@ -117,6 +130,7 @@ export interface PanelThemeUserImageState {
 
 export interface PanelThemeModeState {
   properties: Record<PanelThemeColorProperty, string>
+  petStatus?: Record<PetStatusProperty, string>
   background: PanelThemeBackgroundState
   userImage?: PanelThemeUserImageState
 }

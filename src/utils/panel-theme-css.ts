@@ -8,12 +8,14 @@ import {
   PANEL_THEME_FONT_ALIAS_PATTERN,
   PANEL_THEME_PX_PATTERN,
   PANEL_THEME_RGB_PATTERN,
+  PET_STATUS_PROPERTIES,
   type PanelThemeBackgroundState,
   type PanelThemeCatalogEntry,
   type PanelThemeCssProperty,
   type PanelThemeMode,
   type PanelThemePosition,
   type PanelThemeState,
+  type PetStatusThemeState,
 } from '../types/panel-theme.ts'
 
 // Renderer-side, pure: re-validates every host-built name and value before it
@@ -29,6 +31,7 @@ export interface PanelThemeMediaFlags {
 }
 
 const ALLOWED: ReadonlySet<string> = new Set(PANEL_THEME_CSS_PROPERTIES)
+const PET_STATUS_ALLOWED: ReadonlySet<string> = new Set(PET_STATUS_PROPERTIES)
 const COLOR_PROPERTIES: ReadonlySet<string> = new Set(PANEL_THEME_COLOR_PROPERTIES)
 const FAMILY_PROPERTIES: ReadonlySet<string> = new Set(PANEL_THEME_FAMILY_PROPERTIES)
 
@@ -162,4 +165,16 @@ export function panelThemeSettingsTarget(state: PanelThemeState | null): string 
     if (ref && state.themes.some(theme => theme.ref.pluginId === ref.pluginId)) return ref.pluginId
   }
   return state.themes[0]?.ref.pluginId ?? null
+}
+
+/** Allowlisted names with host-canonical rgb() values only; anything else is dropped. */
+export function petStatusTargetProperties(state: PetStatusThemeState | null, mode: 'light' | 'dark', forcedColors: boolean): Map<string, string> {
+  const properties = new Map<string, string>()
+  const source = forcedColors ? null : state?.[mode]
+  if (!source || typeof source !== 'object') return properties
+  for (const [name, value] of Object.entries(source)) {
+    if (PET_STATUS_ALLOWED.has(name) && typeof value === 'string' && value.length <= 32 && PANEL_THEME_RGB_PATTERN.test(value)) properties.set(name, value)
+  }
+  // All-or-nothing: a partial set would mix theme and built-in colours unchecked.
+  return properties.size === PET_STATUS_PROPERTIES.length ? properties : new Map()
 }

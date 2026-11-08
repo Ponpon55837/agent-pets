@@ -115,6 +115,7 @@ export interface PluginPanelThemeModeDefinition {
   colors: PluginPanelThemeColors
   background: PluginPanelThemeBackground
   userImage?: { allowed: true; fit: PluginPanelThemeFit; overlay: PluginPanelThemeOverlay }
+  petStatus?: Partial<Record<'background' | 'border' | 'text' | 'textMuted' | 'quotaFill' | 'quotaTrack' | 'quotaWarn', string>>
 }
 
 export interface PluginPanelThemeFontFace {

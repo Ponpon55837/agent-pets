@@ -30,7 +30,7 @@ import type {
   PluginSettingScalar,
 } from '../src/types/plugin.ts'
 import type { PluginCatalogPanelItem } from '../src/types/plugin-catalog.ts'
-import type { PanelThemeIpcResult, PanelThemeMode, PanelThemeRef, PanelThemeState, PanelThemeUserImageOptions } from '../src/types/panel-theme.ts'
+import type { PanelThemeIpcResult, PanelThemeMode, PanelThemeRef, PanelThemeState, PanelThemeUserImageOptions, PetStatusThemeState } from '../src/types/panel-theme.ts'
 import type {
   ProjectMcpApplyRequest,
   ProjectMcpPlan,
@@ -103,6 +103,12 @@ const electronAPI: ElectronAPI = {
   importPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserImageImport, ref, mode),
   clearPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserImageClear, ref, mode),
   setPanelThemeUserImageOptions: (ref: PanelThemeRef, mode: PanelThemeMode, options: PanelThemeUserImageOptions): Promise<PanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserImageOptionsSet, ref, mode, options),
+  getPetStatusTheme: (): Promise<PetStatusThemeState> => ipcRenderer.invoke(IPC_CHANNELS.panelThemePetStatusGet),
+  onPetStatusThemeChanged: (callback: (state: PetStatusThemeState) => void) => {
+    const handler = (_event: unknown, state: PetStatusThemeState) => callback(state)
+    ipcRenderer.on(IPC_CHANNELS.panelThemePetStatusChanged, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.panelThemePetStatusChanged, handler)
+  },
   onPanelThemeChanged: (callback: (state: PanelThemeState) => void) => {
     const handler = (_event: unknown, state: PanelThemeState) => callback(state)
     ipcRenderer.on(IPC_CHANNELS.panelThemeChanged, handler)

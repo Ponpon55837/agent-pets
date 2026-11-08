@@ -44,6 +44,7 @@ import type {
   PanelThemeState,
   PanelThemeStoreData,
   PanelThemeUnavailableReason,
+  PetStatusProperty,
 } from '../src/types/panel-theme.ts'
 
 // ── Limits (spec §5.3) ──────────────────────────────────────────────────
@@ -108,6 +109,32 @@ export const PANEL_THEME_COLOR_TOKENS: readonly ColorToken[] = Object.freeze([
   { key: 'warnText', property: '--organic-warn-text', kind: 'builtin', alpha: 'opaque', light: '#7a5200', dark: '#f0c866' },
   { key: 'scrim', property: '--organic-scrim', kind: 'builtin', alpha: 'scrim', light: 'rgba(46,43,37,.42)', dark: 'rgba(0,0,0,.55)' },
 ])
+
+// ── Pet status pill tokens (spec §3.7) ─────────────────────────────────────
+// The one narrow exception to "the pet window is never themed": colours of
+// the status pill under the pet. Bubbles, permission/risk UI, state dots,
+// completion markers and the sprite stay built-in.
+export type PetStatusColorKey = 'background' | 'border' | 'text' | 'textMuted' | 'quotaFill' | 'quotaTrack' | 'quotaWarn'
+
+interface PetStatusToken {
+  key: PetStatusColorKey
+  property: PetStatusProperty
+  required: boolean
+  alpha: readonly [number, number]
+}
+
+export const PET_STATUS_TOKENS: readonly PetStatusToken[] = Object.freeze([
+  { key: 'background', property: '--pet-status-background', required: true, alpha: [0.85, 1] },
+  { key: 'border', property: '--pet-status-border', required: false, alpha: [0.08, 1] },
+  { key: 'text', property: '--pet-status-text', required: true, alpha: [1, 1] },
+  { key: 'textMuted', property: '--pet-status-text-muted', required: false, alpha: [1, 1] },
+  { key: 'quotaFill', property: '--pet-status-quota-fill', required: false, alpha: [1, 1] },
+  { key: 'quotaTrack', property: '--pet-status-quota-track', required: false, alpha: [0.1, 1] },
+  { key: 'quotaWarn', property: '--pet-status-quota-warn', required: false, alpha: [1, 1] },
+])
+const PET_STATUS_KEYS: readonly string[] = PET_STATUS_TOKENS.map(token => token.key)
+/** Built-in low-quota colour (`--organic-quota-warning`), used when quotaWarn is omitted. */
+const BUILTIN_QUOTA_WARNING = '#e3b64f'
 
 const TOKEN_BY_KEY: ReadonlyMap<string, ColorToken> = new Map(PANEL_THEME_COLOR_TOKENS.map(token => [token.key, token]))
 const ALPHA_RANGES: Record<AlphaClass, readonly [number, number]> = {
@@ -268,6 +295,7 @@ export type ResolvedPanelThemeBackground =
 
 export interface ResolvedPanelThemeMode {
   colors: Record<PluginPanelThemeColorKey, PanelThemeRgba>
+  petStatus?: Record<PetStatusColorKey, PanelThemeRgba>
   background: ResolvedPanelThemeBackground
   userImage?: { fit: PluginPanelThemeFit; overlayColor: PanelThemeRgba; defaultDim: number; minDim: number }
 }
@@ -584,7 +612,7 @@ function failContrast(path: string, failure: ContrastFailure): never {
 
 function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contribution: PluginPanelThemeModeDefinition; resolved: ResolvedPanelThemeMode } {
   if (!isRecord(value)) fail(path, 'must be an object')
-  assertKeys(value, ['colors', 'background', 'userImage'], path)
+  assertKeys(value, ['colors', 'background', 'userImage', 'petStatus'], path)
   if (!isRecord(value.colors)) fail(`${path}.colors`, 'is required')
   const declared: Partial<Record<PluginPanelThemeColorKey, PanelThemeRgba>> = {}
   for (const [key, raw] of Object.entries(value.colors)) {
@@ -639,6 +667,14 @@ function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contri
     userImageContribution = { allowed: true, fit, overlay: { color: formatPanelThemeColor(overlay.color), opacity: overlay.opacity } }
   }
 
+  let petStatus: Record<PetStatusColorKey, PanelThemeRgba> | undefined
+  let petStatusContribution: Partial<Record<PetStatusColorKey, string>> | undefined
+  if (value.petStatus !== undefined) {
+    const parsed = parsePetStatus(value.petStatus, colors, `${path}.petStatus`)
+    petStatus = parsed.resolved
+    petStatusContribution = parsed.contribution
+  }
+
   const contributionColors: PluginPanelThemeColors = {}
   for (const [key, color] of Object.entries(declared)) contributionColors[key as PluginPanelThemeColorKey] = formatPanelThemeColor(color)
   return {
@@ -646,9 +682,94 @@ function parseMode(value: unknown, mode: PanelThemeMode, path: string): { contri
       colors: contributionColors,
       background: contributionBackground(background),
       ...(userImageContribution ? { userImage: userImageContribution } : {}),
+      ...(petStatusContribution ? { petStatus: petStatusContribution } : {}),
     },
-    resolved: { colors, background, ...(userImage ? { userImage } : {}) },
+    resolved: { colors, background, ...(userImage ? { userImage } : {}), ...(petStatus ? { petStatus } : {}) },
   }
+}
+
+/**
+ * Derives omitted pill tokens from the required background and text, then
+ * checks contrast against the pill composited over a worst-case black and a
+ * worst-case white desktop pixel (the pill floats over arbitrary content).
+ */
+export function derivePetStatusColors(
+  declared: Partial<Record<PetStatusColorKey, PanelThemeRgba>> & { background: PanelThemeRgba; text: PanelThemeRgba },
+  modeColors: Pick<ColorSet, 'accent'>,
+): Record<PetStatusColorKey, PanelThemeRgba> {
+  const opaqueBackground = withAlpha(declared.background, 1)
+  const warning = parsePanelThemeColor(BUILTIN_QUOTA_WARNING)
+  const quotaTrack = declared.quotaTrack ?? withAlpha(declared.text, 0.18)
+  return {
+    background: declared.background,
+    text: declared.text,
+    textMuted: declared.textMuted ?? mixColor(declared.text, opaqueBackground, 0.25),
+    border: declared.border ?? withAlpha(declared.text, 0.18),
+    quotaTrack,
+    quotaFill: declared.quotaFill ?? withAlpha(modeColors.accent, 1),
+    quotaWarn: declared.quotaWarn ?? deriveQuotaWarn(warning.ok ? warning.color : PANEL_THEME_WHITE, declared, quotaTrack),
+  }
+}
+
+/**
+ * Omitted quotaWarn: the built-in low-quota amber, moved toward the pill text
+ * in 0.10 steps (0.00 … 0.60) until it reaches 3:1 on the pill and on the
+ * quota track, each over both a black and a white desktop; the last step when
+ * none does (the theme is then rejected).
+ */
+function deriveQuotaWarn(amber: PanelThemeRgba, declared: { background: PanelThemeRgba; text: PanelThemeRgba }, track: PanelThemeRgba): PanelThemeRgba {
+  const pill = petStatusBackdrops(declared.background)
+  const backdrops = [...pill, ...pill.map(backdrop => ({ name: backdrop.name, color: compositeColor(track, backdrop.color) }))]
+  let candidate = amber
+  for (let step = 0; step <= 6; step += 1) {
+    candidate = mixColor(amber, declared.text, step / 10)
+    if (backdrops.every(backdrop => contrastRatio(candidate, backdrop.color) >= 3)) return candidate
+  }
+  return candidate
+}
+
+function petStatusBackdrops(background: PanelThemeRgba): Backdrop[] {
+  return [PANEL_THEME_BLACK, PANEL_THEME_WHITE].map((desktop, index) => ({
+    name: `pill over a ${index === 0 ? 'black' : 'white'} desktop`,
+    color: compositeColor(background, desktop),
+  }))
+}
+
+function parsePetStatus(value: unknown, modeColors: ColorSet, path: string) {
+  if (!isRecord(value)) fail(path, 'must be an object')
+  assertKeys(value, PET_STATUS_KEYS, path)
+  const declared: Partial<Record<PetStatusColorKey, PanelThemeRgba>> = {}
+  for (const token of PET_STATUS_TOKENS) {
+    if (value[token.key] === undefined) {
+      if (token.required) fail(`${path}.${token.key}`, 'is required')
+      continue
+    }
+    declared[token.key] = colorAt(value[token.key], `${path}.${token.key}`)
+  }
+  const resolved = derivePetStatusColors(declared as Parameters<typeof derivePetStatusColors>[0], modeColors)
+  for (const token of PET_STATUS_TOKENS) {
+    const [min, max] = token.alpha
+    const alpha = resolved[token.key].a
+    if (alpha < min || alpha > max) fail(`${path}.${token.key}`, min === 1 ? 'must be opaque' : `alpha must be ${min}-${max}`)
+  }
+  for (const backdrop of petStatusBackdrops(resolved.background)) {
+    const track = compositeColor(resolved.quotaTrack, backdrop.color)
+    const pairs: Array<[PetStatusColorKey, PanelThemeRgba, string, number]> = [
+      ['text', backdrop.color, backdrop.name, 4.5],
+      ['textMuted', backdrop.color, backdrop.name, 4.5],
+      ['quotaFill', backdrop.color, backdrop.name, 3],
+      ['quotaFill', track, `quotaTrack on the ${backdrop.name}`, 3],
+      ['quotaWarn', backdrop.color, backdrop.name, 3],
+      ['quotaWarn', track, `quotaTrack on the ${backdrop.name}`, 3],
+    ]
+    for (const [key, background, name, minimum] of pairs) {
+      const ratio = contrastRatio(resolved[key], background)
+      if (!(ratio >= minimum)) fail(`${path}.${key}`, `${ratioText(ratio)}:1 < ${minimum}:1 on ${name}`)
+    }
+  }
+  const contribution: Partial<Record<PetStatusColorKey, string>> = {}
+  for (const [key, color] of Object.entries(declared)) contribution[key as PetStatusColorKey] = formatPanelThemeColor(color)
+  return { resolved, contribution }
 }
 
 function contributionBackground(background: ResolvedPanelThemeBackground): PluginPanelThemeBackground {
@@ -871,6 +992,14 @@ export function panelThemeSharedProperties(theme: ResolvedPanelTheme, alias: (fo
   return properties
 }
 
+export function petStatusProperties(colors: Record<PetStatusColorKey, PanelThemeRgba>): Record<PetStatusProperty, string> {
+  const properties = {} as Record<PetStatusProperty, string>
+  for (const token of PET_STATUS_TOKENS) properties[token.property] = formatPanelThemeColor(colors[token.key])
+  // Opaque copy for reduced transparency / increased contrast fallbacks.
+  properties['--pet-status-background-opaque'] = formatPanelThemeColor(withAlpha(colors.background, 1))
+  return properties
+}
+
 function colorProperties(colors: ColorSet): Record<PanelThemeColorProperty, string> {
   const properties = {} as Record<PanelThemeColorProperty, string>
   for (const token of PANEL_THEME_COLOR_TOKENS) properties[token.property] = formatPanelThemeColor(colors[token.key])
@@ -904,6 +1033,7 @@ function catalogEntry(source: PanelThemeSourcePlugin, theme: ResolvedPanelTheme,
     if (!resolved) continue
     const state: PanelThemeModeState = {
       properties: colorProperties(resolved.colors),
+      ...(resolved.petStatus ? { petStatus: petStatusProperties(resolved.petStatus) } : {}),
       background: backgroundState(resolved.background, src => resolver.packagedUrl('image', source.pluginId, source.version, src)),
     }
     if (resolved.userImage) {

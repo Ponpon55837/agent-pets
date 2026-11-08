@@ -15,7 +15,7 @@ import {
 import { PanelThemeStore, PANEL_THEME_USER_IMAGE_FILE } from '../panel-theme-store.ts'
 import { panelThemePluginImageDirectory, removePluginImages, sweepOrphanUserImages, deleteUserImage } from '../panel-theme-images.ts'
 import type { PluginLocalizedText, PluginManifest } from '../../src/types/plugin.ts'
-import type { PanelThemeMode, PanelThemeState } from '../../src/types/panel-theme.ts'
+import type { PanelThemeMode, PanelThemeState, PetStatusThemeState } from '../../src/types/panel-theme.ts'
 
 // Main-process owner of plugin panel themes: the store, the per-session
 // salt, the token -> asset map served by `agent-pets://panel-theme/<token>`,
@@ -54,6 +54,8 @@ export interface PanelThemeRuntimeOptions {
   readRegularFileWithin(root: string, relativePath: string, maxBytes: number): Promise<Uint8Array | null>
   /** Sends the new state to the panel window only. */
   send(state: PanelThemeState): void
+  /** Sends the pet status pill colours to the pet window only. */
+  sendPetStatus(state: PetStatusThemeState): void
   /** Origin allowed to read fonts cross-origin (the trusted panel renderer). */
   rendererOrigin(): string | null
   salt?: Uint8Array
@@ -75,6 +77,8 @@ export class PanelThemeRuntime {
   private tokens = new Map<string, TokenAsset>()
   private state: PanelThemeState = emptyPanelThemeState()
   private stateHash = ''
+  private petStatus: PetStatusThemeState = { light: null, dark: null }
+  private petStatusHash = JSON.stringify({ light: null, dark: null })
   private installed = new Set<string>()
   private knownManifests = new Set<string>()
 
@@ -86,6 +90,11 @@ export class PanelThemeRuntime {
 
   getState(): PanelThemeState {
     return this.state
+  }
+
+  /** Pill colours of each mode's active theme (null = built-in). */
+  getPetStatus(): PetStatusThemeState {
+    return this.petStatus
   }
 
   getSources(): readonly PanelThemeSourcePlugin[] {
@@ -161,10 +170,26 @@ export class PanelThemeRuntime {
     })
     this.tokens = tokens
     this.state = state
+    this.publishPetStatus(state)
     const hash = JSON.stringify(state)
     if (hash === this.stateHash) return
     this.stateHash = hash
     this.options.send(state)
+  }
+
+  private publishPetStatus(state: PanelThemeState): void {
+    const forMode = (mode: PanelThemeMode) => {
+      const slot = state.slots[mode]
+      if (slot.status !== 'active' || !slot.ref) return null
+      const entry = state.themes.find(theme => theme.ref.pluginId === slot.ref!.pluginId && theme.ref.themeId === slot.ref!.themeId)
+      return entry?.modes[mode]?.petStatus ? { ...entry.modes[mode]!.petStatus! } : null
+    }
+    const next: PetStatusThemeState = { light: forMode('light'), dark: forMode('dark') }
+    const hash = JSON.stringify(next)
+    this.petStatus = next
+    if (hash === this.petStatusHash) return
+    this.petStatusHash = hash
+    this.options.sendPetStatus(next)
   }
 
   /** Plugin removed: drop slots, store entries and its image directory. */

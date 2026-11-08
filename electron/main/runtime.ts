@@ -1045,6 +1045,10 @@ export async function createPluginServices(): Promise<void> {
       if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.panelThemeChanged, state)
     },
     rendererOrigin: panelRendererOrigin,
+    sendPetStatus: state => {
+      const window = mainState.petWindow
+      if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.panelThemePetStatusChanged, state)
+    },
   })
   try { mainState.panelThemeRuntime.sweep() } catch {}
   syncPanelThemes()
@@ -1462,6 +1466,8 @@ export async function createPluginServices(): Promise<void> {
   registerPanelThemeIpc({
     ipcMain,
     assertPluginPanelSender,
+    assertPetSender: event => assertTrustedIpcSender(event, mainState.petWindow),
+    getPetStatus: () => mainState.panelThemeRuntime?.getPetStatus() ?? { light: null, dark: null },
     getStore: () => mainState.panelThemeRuntime?.store ?? null,
     getSources: () => mainState.panelThemeRuntime?.getSources() ?? [],
     getState: () => mainState.panelThemeRuntime?.getState() ?? emptyPanelThemeState(),

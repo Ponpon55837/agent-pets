@@ -14,7 +14,7 @@ import type { AgentSession } from './agent'
 import type { AgentAdapterId } from './agent-adapter'
 import type { LocalServerHealthSnapshot, LocalServerId } from './reliability'
 import type { PresentationIntent, PresentationStatusUpdate } from './presentation'
-import type { PanelThemeIpcResult, PanelThemeMode, PanelThemeRef, PanelThemeState, PanelThemeUserImageOptions } from './panel-theme'
+import type { PanelThemeIpcResult, PanelThemeMode, PanelThemeRef, PanelThemeState, PanelThemeUserImageOptions, PetStatusThemeState } from './panel-theme'
 import type {
   PluginBadgeView,
   PluginBrokerDiagnostic,
@@ -74,6 +74,8 @@ export interface ElectronAPI {
       importPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode) => Promise<PanelThemeIpcResult>
       clearPanelThemeUserImage: (ref: PanelThemeRef, mode: PanelThemeMode) => Promise<PanelThemeIpcResult>
       setPanelThemeUserImageOptions: (ref: PanelThemeRef, mode: PanelThemeMode, options: PanelThemeUserImageOptions) => Promise<PanelThemeIpcResult>
+      getPetStatusTheme: () => Promise<PetStatusThemeState>
+      onPetStatusThemeChanged: (callback: (state: PetStatusThemeState) => void) => () => void
       onPanelThemeChanged: (callback: (state: PanelThemeState) => void) => () => void
       completePluginFeed: (itemId: string) => Promise<boolean>
       openPluginFeedLink: (itemId: string) => Promise<boolean>

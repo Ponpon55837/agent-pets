@@ -86,5 +86,7 @@
   "design.panelTheme.darkOnly": "Dark mode only",
   "design.panelTheme.useLight": "Use in light mode",
   "design.panelTheme.useDark": "Use in dark mode",
-  "design.panelTheme.pluginOff": "Turn this plugin on to use its panel themes."
+  "design.panelTheme.pluginOff": "Turn this plugin on to use its panel themes.",
+  "design.panelTheme.previewPillState": "Running",
+  "design.panelTheme.previewPillAgent": "Claude Code"
 }

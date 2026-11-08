@@ -1,5 +1,5 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
-import type { PanelThemeMode, PanelThemeRef, PanelThemeState, PanelThemeStoredUserImage } from '../../src/types/panel-theme.ts'
+import type { PanelThemeMode, PanelThemeRef, PanelThemeState, PanelThemeStoredUserImage, PetStatusThemeState } from '../../src/types/panel-theme.ts'
 import { isPanelThemeMode } from '../../src/types/panel-theme.ts'
 import type { PanelThemeSourcePlugin } from '../plugin-panel-themes.ts'
 import type { PanelThemeStore } from '../panel-theme-store.ts'
@@ -19,6 +19,9 @@ type PreparedImage = Extract<UserImagePrepared, { ok: true }>
 export interface PanelThemeIpcDependencies {
   ipcMain: Pick<IpcMain, 'handle'>
   assertPluginPanelSender(event: IpcMainInvokeEvent): void
+  /** Pet window main frame only (the pill is the one themed pet surface). */
+  assertPetSender(event: IpcMainInvokeEvent): void
+  getPetStatus(): PetStatusThemeState
   getStore(): PanelThemeStore | null
   /** Plugins that currently contribute themes (installed; `available` = enabled and global switch on). */
   getSources(): readonly PanelThemeSourcePlugin[]
@@ -52,6 +55,9 @@ export function registerPanelThemeIpc(deps: PanelThemeIpcDependencies): void {
   const stateResult = () => ({ ok: true as const, value: deps.getState() })
 
   handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.panelThemeStateGet, deps.assertPluginPanelSender, () => stateResult())
+
+  // No payload: the pet window only reads the resolved pill colours.
+  handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.panelThemePetStatusGet, deps.assertPetSender, () => deps.getPetStatus())
 
   handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.panelThemeSlotSet, deps.assertPluginPanelSender, (_event, mode: unknown, ref: unknown) => {
     const store = deps.getStore()

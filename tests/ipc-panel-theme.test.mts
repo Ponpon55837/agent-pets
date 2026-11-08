@@ -30,6 +30,8 @@ function fixture(options: { available?: boolean; dialog?: string[] | null } = {}
   const deps: PanelThemeIpcDependencies = {
     ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) } } as unknown as PanelThemeIpcDependencies['ipcMain'],
     assertPluginPanelSender: event => { if ((event as unknown) !== 'panel') throw new Error('Unauthorized plugin panel IPC sender') },
+    assertPetSender: event => { if ((event as unknown) !== 'pet') throw new Error('Unauthorized IPC sender') },
+    getPetStatus: () => ({ light: null, dark: null }),
     getStore: () => store,
     getSources: () => sources,
     getState: () => emptyPanelThemeState(),
@@ -68,13 +70,18 @@ test('every panel theme channel rejects senders other than the panel main frame'
       IPC_CHANNELS.panelThemeStateGet, IPC_CHANNELS.panelThemeSlotSet, IPC_CHANNELS.panelThemeUserImageImport,
       IPC_CHANNELS.panelThemeUserImageClear, IPC_CHANNELS.panelThemeUserImageOptionsSet,
     ]
-    assert.deepEqual([...context.handlers.keys()].sort(), [...channels].sort())
+    assert.deepEqual([...context.handlers.keys()].sort(), [...channels, IPC_CHANNELS.panelThemePetStatusGet].sort())
     for (const channel of channels) {
       for (const sender of ['pet', 'plugin-view', 'plugin-host', 'subframe']) {
         assert.throws(() => context.handlers.get(channel)!(sender, 'light', REF), /Unauthorized/)
       }
     }
     assert.deepEqual(context.calls, [])
+    // The pill colours are readable by the pet window only.
+    for (const sender of ['panel', 'plugin-view', 'plugin-host']) {
+      assert.throws(() => context.handlers.get(IPC_CHANNELS.panelThemePetStatusGet)!(sender), /Unauthorized/)
+    }
+    assert.deepEqual(context.handlers.get(IPC_CHANNELS.panelThemePetStatusGet)!('pet'), { light: null, dark: null })
   } finally { context.cleanup() }
 })
 

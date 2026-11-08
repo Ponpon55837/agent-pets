@@ -377,16 +377,17 @@
   /* A solid dark layer under the sheen keeps text legible over any
      wallpaper/video behind the transparent pet window — the glass read
      comes from the blur + highlight line, not from true see-through. */
+  /* --pet-status-*: optional plugin theme colours (pill only; spec §3.7). */
   background:
     linear-gradient(160deg, var(--surface-raised-hover) 0%, transparent 55%),
-    var(--organic-status-surface);
-  border: 1px solid var(--organic-status-border);
+    var(--pet-status-background, var(--organic-status-surface));
+  border: 1px solid var(--pet-status-border, var(--organic-status-border));
   backdrop-filter: var(--blur-bubble);
   -webkit-backdrop-filter: var(--blur-bubble);
   box-shadow:
     var(--organic-status-shadow),
     var(--organic-status-highlight);
-  color: var(--organic-status-text);
+  color: var(--pet-status-text, var(--organic-status-text));
   font-family: var(--organic-font-body);
   text-shadow: var(--text-shadow-panel);
   font-size: var(--font-sm);
@@ -405,15 +406,15 @@
 }
 
 .status-line[data-quota-tier='warning'] {
-  --quota-color: var(--organic-quota-warning);
+  --quota-color: var(--pet-status-quota-warn, var(--organic-quota-warning));
 }
 
 .status-line[data-quota-tier='claude'] {
-  --quota-color: var(--organic-accent);
+  --quota-color: var(--pet-status-quota-fill, var(--organic-accent));
 }
 
 .status-line[data-quota-tier='normal'] {
-  --quota-color: var(--organic-quota-sage);
+  --quota-color: var(--pet-status-quota-fill, var(--organic-quota-sage));
 }
 
 .status-line:hover {
@@ -426,8 +427,20 @@
   outline-offset: var(--focus-ring-offset);
 }
 
+/* Themed pills are checked for contrast without the dark text shadow and with
+   the secondary text at full opacity. Plugin badges keep the built-in look. */
+.desktop-pet[data-pet-status-theme] .status-line {
+  text-shadow: none;
+}
+
+.desktop-pet[data-pet-status-theme] .status-line .line-sep,
+.desktop-pet[data-pet-status-theme] .status-line .line-project {
+  color: var(--pet-status-text-muted);
+  opacity: 1;
+}
+
 .status-line.has-quota {
-  border-color: color-mix(in srgb, var(--quota-color) 25%, var(--border-subtle));
+  border-color: color-mix(in srgb, var(--quota-color) 25%, var(--pet-status-border, var(--border-subtle)));
   box-shadow:
     var(--organic-status-shadow),
     var(--organic-status-highlight),
@@ -679,7 +692,7 @@
   height: 4px;
   overflow: hidden;
   border-radius: 0 0 var(--organic-status-radius) var(--organic-status-radius);
-  background: var(--organic-status-track);
+  background: var(--pet-status-quota-track, var(--organic-status-track));
   pointer-events: none;
 }
 
@@ -841,6 +854,12 @@
     border-color: var(--organic-status-text);
     background: var(--organic-status-surface-fallback);
   }
+
+  .status-line,
+  .status-line.has-quota {
+    border-color: var(--pet-status-text, var(--organic-status-text));
+    background: var(--pet-status-background-opaque, var(--organic-status-surface-fallback));
+  }
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -849,6 +868,10 @@
     background: var(--organic-status-surface-fallback);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+  }
+
+  .status-line {
+    background: var(--pet-status-background-opaque, var(--organic-status-surface-fallback));
   }
 }
 

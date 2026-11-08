@@ -1,6 +1,6 @@
 import { ref } from 'vue'
-import { requestPluginDetail } from './plugin-detail-request.ts'
-import type { SettingsSectionId } from './settingsRegistry.ts'
+import { requestPluginDetail } from '@/utils/plugin-detail-request'
+import type { SettingsSectionId } from '@/utils/settingsRegistry'
 
 // In-panel "go to this settings section" requests. SettingsPage owns the
 // navigation; the nonce makes repeated requests for the same section fire.

@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { t } from '@/i18n'
 import type { PanelThemeCatalogEntry, PanelThemeColorProperty, PanelThemeMode } from '@/types/panel-theme'
-import { isPanelThemePropertyValue, panelThemeTargetProperties } from '@/utils/panel-theme-css'
+import { isPanelThemePropertyValue, panelThemeTargetProperties, petStatusTargetProperties } from '@/utils/panel-theme-css'
 import { validBackdrop, type PanelThemeBackdropView } from '@/composables/usePanelTheme'
 import PanelThemeBackdrop from '@/components/PanelThemeBackdrop.vue'
 
@@ -23,6 +23,9 @@ const style = computed(() => {
   if (props.forcedColors) return result
   if (props.entry) {
     for (const [name, value] of panelThemeTargetProperties(props.entry, props.mode, { forcedColors: false, highContrast: false }).properties) {
+      result[name] = value
+    }
+    for (const [name, value] of petStatusTargetProperties({ light: null, dark: null, [props.mode]: props.entry.modes[props.mode]?.petStatus ?? null }, props.mode, false)) {
       result[name] = value
     }
   } else if (props.builtin) {
@@ -61,6 +64,13 @@ const backdrop = computed<PanelThemeBackdropView | null>(() => {
           <span class="preview-success">{{ t('design.panelTheme.previewSuccess') }}</span>
         </span>
         <span class="preview-button">{{ t('design.panelTheme.previewButton') }}</span>
+      </div>
+      <!-- The pet's status pill (the only themed pet surface). -->
+      <div class="preview-pill">
+        <span class="preview-pill-dot" />
+        <span class="preview-pill-text">{{ t('design.panelTheme.previewPillAgent') }}<span class="preview-pill-sep">·</span>{{ t('design.panelTheme.previewPillState') }}</span>
+        <span class="preview-pill-percent">62%</span>
+        <span class="preview-pill-track"><span class="preview-pill-fill" /></span>
       </div>
     </div>
   </div>
@@ -135,6 +145,63 @@ const backdrop = computed<PanelThemeBackdropView | null>(() => {
 
 .preview-success {
   color: var(--organic-success-text);
+}
+
+.preview-pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px var(--space-2) 5px;
+  border: 1px solid var(--pet-status-border, var(--organic-status-border));
+  border-radius: var(--organic-status-radius);
+  background: var(--pet-status-background, var(--organic-status-surface-fallback));
+  color: var(--pet-status-text, var(--organic-status-text));
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+.preview-pill-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: var(--state-success);
+}
+
+.preview-pill-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preview-pill-sep {
+  margin: 0 2px;
+  color: var(--pet-status-text-muted, var(--organic-status-text));
+}
+
+.preview-pill-percent {
+  flex: none;
+  color: var(--pet-status-quota-fill, var(--organic-quota-sage));
+}
+
+.preview-pill-track {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--pet-status-quota-track, var(--organic-status-track));
+}
+
+.preview-pill-fill {
+  display: block;
+  width: 62%;
+  height: 100%;
+  background: var(--pet-status-quota-fill, var(--organic-quota-sage));
 }
 
 .preview-button {
