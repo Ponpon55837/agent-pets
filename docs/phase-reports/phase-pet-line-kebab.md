@@ -68,11 +68,28 @@
 | 每次 render 重算 | `DesktopPet.vue` | 既有問題：模板對每條狀態列多次呼叫 `pluginBadgeSummary()`（每次過濾並複製徽章）與組字函式。改為一個 computed 依線預先算好文字、aria-label、寬度取捨與徽章，同一隻寵物的徽章只彙整一次；字寬以字串快取，只在字型載入完成時清除。 |
 | 未使用的 `count` | `agentStore.ts`、`DesktopPet.vue` | 移除。 |
 | 測試 | `tests/status-line-fit.test.mts`（新）、`session-attention`、`pet-window-height` | 移除只比對原始碼文字的測試與用正則解析字表的測試；英文狀態詞移到 `src/utils/state-line-words.ts`，改為行為測試。寬度預算測試涵蓋 0.6／0.8／1.0 倍、單／多寵物、Quota＋兩個徽章＋`+N`，並檢查尺寸常數與 CSS 一致。 |
-| 隔離測試佔用 hook 埠 | `scripts/e2e-isolated-electron.mjs`、`electron/main/runtime.ts`、`electron/event-server.ts` | 隔離執行器預設以 `AGENT_PETS_*_PORT` 把三個埠移到 27373–27375（`--hook-port-base` 可改，`--real-hook-ports` 才用預設埠；打包版 `--app-root` 不讀環境變數）。既有問題：整合測試事件固定送往 17373、事件伺服器的日誌固定印 17373，改為使用實際設定的埠。 |
+| 隔離測試佔用 hook 埠 | `scripts/e2e-isolated-electron.mjs`、`electron/main/runtime.ts`、`electron/event-server.ts` | 隔離執行器預設以 `AGENT_PETS_*_PORT` 把三個埠移到 27373–27375（`--hook-port-base` 可改，`--real-hook-ports` 才用預設埠）。執行器一律以 node_modules 的 Electron 啟動（`app.isPackaged` 為 false），所以 `--app-root` 也會讀這組環境變數；只有在這組變數出現之前建置的 `--app-root` 會綁定預設埠，需從啟動日誌的「listening on」確認。既有問題：整合測試事件固定送往 17373、事件伺服器的日誌固定印 17373，改為使用實際設定的埠。 |
 
 **實測**（隔離執行器，埠 27373–27375，已確認未佔用 17373–17375）：單寵物與多寵物 × 0.6／0.8／1.0 倍 × 五種狀態（Needs input、Permission、Thinking、Working、Idle），Codex／Claude 有 Quota、四個插件徽章（兩個顯示加 `+2`）：30 組全部「狀態完整、沒有項目超出狀態列、高度 23.59 px」。例：多寵物 0.6 倍為 `▲ Permission`、`● Needs input`；0.8 倍為 `Permission 40%`；1.0 倍為 `Codex · Permission 40%`。單寵物 `Codex · Idle 40%` 加兩個徽章。整體狀態列在 zh-TW 下顯示 `Offline`，`title` 與 aria-label 都是 `Offline`。
 
 殘留風險：字寬是在 macOS 量測；Windows（Segoe UI）以同一套 canvas 量測運作，但未實機截圖。
+
+## 第二次審查修正
+
+| 項目 | 檔案 | 內容 |
+|---|---|---|
+| 單寵物寬度預算固定 250 px | `src/utils/status-line-fit.ts`、`DesktopPet.vue` | 改用 `store.scaledW`（即 `--pet-w`）：預設至大尺寸的內容寬 226 px，特大 266 px，超大 341 px；特大與超大不再無故拿掉徽章或名稱。 |
+| 徽章寬度模型與 CSS 不符 | `DesktopPet.css`、`status-line-fit.ts` | `.plugin-badge-anchor` 由固定 `flex: 0 1 42px` 改為 `flex: 0 1 auto; max-width: 42px`，徽章寬度隨文字、最寬 42 px，與預算模型相同；放不下的徽章依序被拿掉，不再被擠成省略號。 |
+| 測試未綁定常數 | `tests/status-line-fit.test.mts` | CSS 檢查改由 `STATUS_LINE_GEOMETRY`、`MULTI_PET_LINE_MIN_W`、`STATUS_TEXT_FONTS` 組出，並檢查字型 token 的值；匯出 `statusLineWidth()`，以手算數字驗證；新增特大、超大尺寸。 |
+| 被拿掉的徽章從無障礙樹消失 | `DesktopPet.vue` | 被拿掉的徽章（插件名稱與文字）與「還有 N 個插件徽章」接在 aria-label 後；沒有額度提示框時也接在 `title` 後。 |
+| 字寬快取無上限 | `DesktopPet.vue` | 超過 256 筆整批清除；字型載入完成與寵物主題切換時同時重設字型設定。 |
+| 執行器說明與中文註解 | `scripts/e2e-isolated-electron.mjs`、`electron/main/runtime.ts` | 更正埠的說明（執行器一律以 node_modules 的 Electron 啟動，`--app-root` 也讀環境變數）；新註解改為繁體中文。 |
+| 縮排與 README | `DesktopPet.vue`、`README*.md` | 修正三處 `PetAnimation` 屬性縮排；README 補上「名稱先縮短」的順序、完成標記說明與隔離執行器的埠。 |
+| 淺色寵物上的插件徽章對比（既有） | `DesktopPet.css`、`scripts/check-contrast.mjs` | info 徽章原用 `--state-info`，在淺色寵物底上只有 1.44:1；警告徽章也偏低。改用寵物外觀各自的 `--pet-bubble-info-accent`／`--pet-bubble-warn-accent`（淺色 6.89:1／6.68:1，深色 8.72:1／13.10:1），並加入對比檢查。 |
+
+文件：`README.md`、`README.zh-TW.md`、`docs/dev/e2e-without-keychain.md`（執行器的預設埠與參數）、`docs/plugins/api-reference*.md` 與 `docs/plugins/contribution-points*.md`（窄狀態列的徽章取捨）、`.agents/skills/pet-skill/references/ui-design-system.md`（圖示放在 `icons.ts`、填色圖示用 `FILLED_ICONS`）。
+
+**實測**（隔離執行器，埠 37373–37375；17373–17375 由已安裝的 Agent Pets 使用）：單寵物與多寵物 × 0.6／0.8／1.0／1.2／1.5 倍 × 五種狀態，有額度與四個徽章：50 組全部狀態完整、沒有超出、高度 23.59 px。超大尺寸單寵物顯示 `Claude · Working`、兩個徽章、`+2` 與 `71%`。預設尺寸 Permission 時拿掉 `+N` 與第二個徽章，aria-label 結尾為「deploy：Deploy」「還有 2 個插件徽章」。
 
 ## 建議版號
 
