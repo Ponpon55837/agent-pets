@@ -32,7 +32,7 @@
 <script type="module" src="./panel.js"></script>
 ```
 
-宿主會在你的腳本執行前，把 `--ap-*` 主題 token 寫在頁面的 `<html>` 元素上，並在使用者的面板主題或淺色／深色模式變更時更新；顏色、圓角與字型請用它們（見[面板主題](panel-themes.zh-TW.md#在插件中讀取主題--ap-host-api-theme)）。共用樣式是 App 自己的 `tokens.css`，其中的顏色 token 是固定的深色色盤，請只用它的間距、字級與互動 token。內容繪製前頁面檢視是透明的。請為 token 提供 fallback 以便在瀏覽器預覽，完整清單與玻璃規則見 [UX 指南](ux-guidelines.zh-TW.md)。使用者關閉面板頁或切換離開時，宿主會銷毀該頁；要保留狀態請用 `api.storage`，背景工作交給插件 Worker。
+你的第一個腳本執行前，`--ap-*` 主題 token 就已經設定在頁面的根元素上（`<html>` 建立後也會以 inline 方式寫一份），並在使用者的面板主題或淺色／深色模式變更時更新；顏色、圓角與字型請用它們（見[面板主題](panel-themes.zh-TW.md#在插件中讀取主題--ap-host-api-theme)）。共用樣式是 App 自己的 `tokens.css`。從 1.12 起，它的顏色 token（包括 `--surface-raised`、`--text-primary` 等舊名稱）在有對應 `--ap-*` 時由 `--ap-*` 推導（否則是內建值），所以也會跟著主題變化；顏色請優先用 `--ap-*`，`tokens.css` 用在間距、字級與互動 token。內容繪製前頁面檢視是透明的。請為 token 提供 fallback 以便在瀏覽器預覽，完整清單與玻璃規則見 [UX 指南](ux-guidelines.zh-TW.md)。使用者關閉面板頁或切換離開時，宿主會銷毀該頁；要保留狀態請用 `api.storage`，背景工作交給插件 Worker。
 
 ## 面板 API
 

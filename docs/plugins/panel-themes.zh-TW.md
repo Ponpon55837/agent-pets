@@ -10,7 +10,24 @@
 
 ## 可宣告的欄位
 
-範例見英文版 [panel-themes.md](panel-themes.md)。
+```json
+{
+  "id": "sakura",
+  "displayName": { "zh-TW": "櫻花", "en-US": "Sakura" },
+  "fonts": [{ "id": "nunito", "src": "fonts/nunito-400.woff2", "weight": 400 }],
+  "typography": { "body": ["@nunito", "PingFang TC", "system-ui", "sans-serif"], "scale": 1.0 },
+  "shape": { "radiusSm": 8, "radiusMd": 14, "radiusLg": 24 },
+  "modes": {
+    "light": {
+      "colors": { "bg": "#fbf1f3", "surface": "#fffafb", "surface2": "#f6e6ea", "text": "#2a1d22", "textSecondary": "#5c4750", "textMuted": "#6a5560", "accent": "#b4446a", "accentText": "#8f2f52", "onAccent": "#ffffff", "border": "rgb(42 29 34 / 0.16)" },
+      "background": { "type": "image", "src": "backgrounds/sakura-light.webp", "overlay": { "color": "#fbf1f3", "opacity": 0.9 } },
+      "userImage": { "allowed": true, "overlay": { "color": "#fbf1f3", "opacity": 0.9 } },
+      "petStatus": { "background": "rgb(255 250 251 / 0.92)", "text": "#2a1d22" }
+    },
+    "dark": { "colors": { "…": "…" } }
+  }
+}
+```
 
 | 欄位 | 規則 |
 | --- | --- |
@@ -34,8 +51,8 @@
 
 - 淺色模式的 `bg` 必須夠亮（亮度 ≥ 0.45）且文字較暗；深色模式的 `bg` 必須夠暗（≤ 0.12）且文字較亮。
 - 主要、次要、淡化與強調文字在 `bg`、每個漸層色標與中間點、以及圖片背景（以最黑與最白像素計算）上都要 ≥ 4.5:1，`accent` ≥ 3:1。
-- 每個文字 token 在它可能出現的每個表面上都 ≥ 4.5:1：各級文字、`accentText`、危險／成功／警告／資訊文字，在 `surface`、`surface2`、`bg`，以及疊在最黑與最白桌面上的寵物泡泡（`surface` 0.93）與狀態列（`surface` 0.92）上；`sageDeep` 與 `sageDark` 在 `surface`、`surface2`、`bg` 上；`text` 與 `accentText` 在 `surfaceWarm` 上；`text`、`sageDeep`、`sageDark` 在 `surfaceSage` 上，`text` 與 `sageDark` 在 `surfaceSageSoft` 上。
-- 文字後方的半透明底以合成後的顏色檢查：懸停底 `accentOnHover` 疊在 `surface`（所有文字 token）、`surface2`（`text`、`textSecondary`）、`surfaceWarm`（`text`、`accentText`）與 `surfaceSage`（`text`、`sageDark`）上；狀態晶片（危險／成功／警告文字放在 12% 的同色底上）疊在 `surface`、`surface2`、`bg` 上。
+- 每個文字 token 在它可能出現的每個表面上都 ≥ 4.5:1：各級文字、`accentText`、危險／成功／警告／資訊文字，在 `surface`、`surface2`、`bg`，以及疊在最黑與最白桌面上的寵物泡泡（`surface` 0.93）、狀態列（`surface` 0.92）與寵物視窗的選單和對話框（`surface` 0.98）上；`sageDeep` 與 `sageDark` 在 `surface`、`surface2`、`bg` 上；`text` 與 `accentText` 在 `surfaceWarm` 上；`text`、`sageDeep`、`sageDark` 在 `surfaceSage` 上，`text` 與 `sageDark` 在 `surfaceSageSoft` 上。
+- 文字後方的半透明底以合成後的顏色檢查：懸停底 `accentOnHover` 疊在 `surface`（所有文字 token）、`surface2`（`text`、`textSecondary`）、`surfaceWarm`（`text`、`accentText`）與 `surfaceSage`（`text`、`sageDark`）上；狀態晶片（危險／成功／警告文字放在 12% 的同色底上）疊在 `surface`、`surface2`、`bg` 上；危險按鈕的懸停底（`dangerText` 放在 12% 的同色底上）另外也疊在寵物視窗的對話框上檢查。
 - 焦點環使用 `accentText`：在上述每個表面（狀態晶片除外）上 ≥ 3:1。`textFaint`（只用於裝飾）在 `surface` 與 `bg` 上 ≥ 3:1。`accent` 在 `surface` 上 ≥ 3:1。`onAccent` 在 `accentHover` 與懸停中的按鈕（`accentHover` 往 `text` 混合 12%）上 ≥ 4.5:1、在 `accent` 上 ≥ 3:1。`bg` 在危險／成功／警告填色上 ≥ 4.5:1（徽章文字）。
 - 寵物狀態列上的配額條（`sageDeep`、`accentText`、`warnText`、`dangerText`）在狀態列與配額軌道上 ≥ 3:1。
 - 圖片遮罩不得低於計算出的最小值（且永遠不低於 0.50），提示會列出失敗的配對與最小值。在圖片上沿用內建淺色文字一定無法通過（`textMuted` 在內建 `bg` 上只有 4.96:1），請改用更深的文字色。
@@ -57,15 +74,15 @@
 
 - **你的主題可以當起點。**「起點」列出所有已安裝的插件主題。複製時會帶上你的顏色、漸層、圓角、寵物狀態列顏色與 `userImage` 設定；套件內的字型與背景圖不會被複製（我的主題只用系統字型組合與使用者自己的圖片）。複本屬於使用者，之後插件更新不會改動它。
 - **同一個驗證器。** 我的主題會轉成一筆 `panelThemes` 宣告，存檔與套用前都以上面完全相同的規則檢查。編輯器列出所有不符合的組合（不只第一個），附上實測對比、最低要求與建議值：在 OKLCH 明度上最接近、能讓該顏色通過且不破壞其他組合的值（狀態色會先移回各自的色相區間）。圖片遮罩會顯示並建議 `minOverlay`。
-- **色盤產生器。** 由一個種子色，主機在 OKLCH 的固定明度階層上排出兩個模式，危險／成功／警告／資訊固定在各自的色相區間，再用驗證器自己的建議值修正，所以結果一定通過。由圖片產生時，把使用者的背景圖縮到 ≤ 128 px，在 OKLab 中做 k-means（固定的初始點與迭代次數），以面積最大且有顏色的群當種子。
-- **插槽與讀取 API 不變。** 我的主題與插件主題共用每個模式唯一的插槽；套用它會取代你的主題，`--ap-*`／`api.theme` 回報的是它的顏色，與插件主題完全相同。插件不會知道目前的主題是你的、使用者自己的，還是內建。
+- **色盤產生器。** 由一個種子色，主機在 OKLCH 的固定明度階層上排出兩個模式，危險／成功／警告／資訊固定在各自的色相區間，再以最多四輪驗證器自己的建議值修正。所有測過的種子色都能通過；若某個色盤仍有問題，編輯器會列出問題，修正前無法存檔。由圖片產生時，把使用者的背景圖縮到 ≤ 128 px，在 OKLab 中做 k-means（固定的初始點與迭代次數），以面積最大且有顏色的群當種子。
+- **插槽與讀取 API 不變。** 我的主題與插件主題共用每個模式唯一的插槽；套用它會取代你的主題，`--ap-*`／`api.theme` 回報的是它的顏色，與插件主題完全相同。插件不會知道目前的主題是你的、使用者自己的，還是內建，也不會收到「我的主題」的新增、修改、刪除事件或任何識別值；使用者存檔套用中的我的主題而顏色改變時，你只會收到一般的 `theme.onDidChange`，與切換主題相同。
 - **儲存。** 最多 50 個主題，存在 `userData/panel-themes-user/<id>.json`（一個主題一個檔案，≤ 16 KiB）。匯出／匯入的格式是 `{ "format": "agent-pets-panel-theme", "schemaVersion": 1, "name", "definition" }`，只有顏色與設定，絕不包含圖片或路徑；匯入會嚴格解析（未知的鍵一律拒絕），驗證通過才會存檔。
 
 ## 在插件中讀取主題（`--ap-*`、Host API `theme`）
 
 任何插件都能跟著使用者目前看到的主題變化，不需要權限，也不需要 `panelThemes` 貢獻。數值來自面板目前淺色／深色模式所套用的主題；沒有套用主題、主題插件停用、該模式沒有主題，或 Windows 高對比（`forced-colors`）開啟時，使用內建色盤。
 
-- **面板頁**：宿主在你的腳本執行前，把所有 `--ap-*` 屬性寫在頁面的 `<html>` 元素上，主題或模式變更時即時更新。請寫成 `var(--ap-surface, #292420)` 並自備 fallback，方便在瀏覽器單獨預覽。
+- **面板頁**：你的第一個腳本執行前，所有 `--ap-*` 屬性就已經設定在頁面的根元素上（preload 以同步方式取得目前的快照，經由 CSSOM 寫入，頁面的 CSP 不變；`<html>` 元素建立後也會以 inline 方式寫一份），主題或模式變更時即時更新。請寫成 `var(--ap-surface, #292420)` 並自備 fallback，方便在瀏覽器單獨預覽。
 - **Worker 與面板頁**：`api.theme.get()` 回傳 `{ apiVersion: 1, mode: 'light' | 'dark', tokens }`；`api.theme.onDidChange(callback)` 回傳取消訂閱函式。變更事件會合併（100 ms 內連續變動只送一次，且不會送出與上一份相同的快照），每個回呼拿到各自的凍結複本。
 
 | Token | 用途 | 保證（每個模式分別驗證） |

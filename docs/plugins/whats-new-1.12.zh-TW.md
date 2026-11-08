@@ -17,7 +17,7 @@ Agent Pets 1.12.0 新增一份主題契約，插件可以提供主題，也可�
 
 ## 讀取目前的主題（`--ap-*`、`api.theme`），不需要權限
 
-- 面板頁在腳本執行前，`<html>` 上就有 26 個 `--ap-*` 自訂屬性，使用者的主題或淺色／深色模式變更時即時更新：`--ap-bg`、`--ap-surface`、`--ap-surface-2`、`--ap-text`、`--ap-text-secondary`、`--ap-text-muted`、`--ap-accent`、`--ap-accent-hover`、`--ap-accent-text`、`--ap-on-accent`、`--ap-border`、`--ap-border-soft`、`--ap-focus`、`--ap-danger`、`--ap-success`、`--ap-warn`、`--ap-info`、`--ap-scrim`、`--ap-shadow`、`--ap-highlight`、`--ap-radius-sm`、`--ap-radius-md`、`--ap-radius-lg`、`--ap-font-body`、`--ap-font-heading`、`--ap-font-scale`。
+- 面板頁在第一個腳本執行前，根元素上就有 26 個 `--ap-*` 自訂屬性（由同步取得的快照經 CSSOM 寫入，`<html>` 上也有 inline 的一份），使用者的主題或淺色／深色模式變更時即時更新：`--ap-bg`、`--ap-surface`、`--ap-surface-2`、`--ap-text`、`--ap-text-secondary`、`--ap-text-muted`、`--ap-accent`、`--ap-accent-hover`、`--ap-accent-text`、`--ap-on-accent`、`--ap-border`、`--ap-border-soft`、`--ap-focus`、`--ap-danger`、`--ap-success`、`--ap-warn`、`--ap-info`、`--ap-scrim`、`--ap-shadow`、`--ap-highlight`、`--ap-radius-sm`、`--ap-radius-md`、`--ap-radius-lg`、`--ap-font-body`、`--ap-font-heading`、`--ap-font-scale`。
 - `api.theme.get()` 與 `api.theme.onDidChange(callback)` 在 Worker 與面板頁都能用，不需要權限。變更以 100 ms 合併為一個事件，且不會重複送出與上一份相同的快照。
 - `--ap-focus` 等於 `--ap-accent-text`，也就是 App 自己的焦點環（在每個表面上 ≥ 3:1；強調填色在淺色表面上可能只有約 2.9:1）。
 - `--ap-info` 是主題的 `infoText`；主題沒有設定或沒有套用主題時是內建藍色（淺色 `rgb(46 91 140 / 1)`、深色 `rgb(156 195 240 / 1)`），在 `surface`、`surface-2`、`bg` 上 ≥ 4.5:1。

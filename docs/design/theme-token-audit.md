@@ -40,7 +40,7 @@ Baseline on `feat/panel-themes` after the `--ap-*` read API: **145 raw colours**
 | `--accent-wash/soft/strong/glow`, `--border-accent(-strong)` | accent at 0.08–0.4 | `accent` with fixed alphas (derived) |
 | `--gradient-accent` | `#667eea → #8b9cf7` | `accent` → `accentHover` |
 | `--border-subtle`, `--border-strong` (+ `prefers-contrast` block) | white 0.08 / 0.14 (0.3 / 0.5) | `borderSoft`, `border` |
-| `--state-success`, `--state-error(-soft)`, `--state-warn(-bright)`, `--state-info` | `#50c878`, `#ff6b6b`, `#c8b450`, `#9dd8ff` | `successText`, `dangerText`, `warnText`, *new* `info` (today `accentText`, as `--ap-info`) |
+| `--state-success`, `--state-error`, `--state-warn(-bright)`, `--state-info` (1.12 removed `--state-error-soft`; its users read `--text-danger`) | `#50c878`, `#ff6b6b`, `#c8b450`, `#9dd8ff` | `successText`, `dangerText`, `warnText`, *new* `info` (today `accentText`, as `--ap-info`) |
 | `--focus-ring-color-on-light` | `#1b5fb0` / `#9dd8ff` | `accent` (focus follows accent, §3.4); token currently unused |
 | `--shadow-raised`, `--text-shadow-panel` | white inset 0.06, black 0.55 | elevation tokens |
 
