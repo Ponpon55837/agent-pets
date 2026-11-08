@@ -293,3 +293,19 @@ test('the pet only renders completion markers while the preference is on', () =>
   assert.match(source, /v-if="store\.completionMarkersEnabled && store\.unreadResults\.count > 0"\s+class="edge-peek-result-badge"/)
   assert.doesNotMatch(source, /v-if="store\.unreadResults\.count > 0"/)
 })
+
+test('results are not counted while completion markers are off', async () => {
+  const { noteUnread, UNREAD_RESULTS_MAX } = await import('../src/utils/unread-results.ts')
+  const empty = { count: 0, hasError: false }
+  assert.equal(noteUnread(empty, 'error', false, true), empty)
+  assert.equal(noteUnread(empty, 'success', true, false), empty)
+  assert.deepEqual(noteUnread(empty, 'success', true, true), { count: 1, hasError: false })
+  assert.deepEqual(noteUnread({ count: 1, hasError: false }, 'error', true, true), { count: 2, hasError: true })
+  assert.equal(noteUnread({ count: UNREAD_RESULTS_MAX, hasError: false }, 'success', true, true).count, UNREAD_RESULTS_MAX)
+
+  // Switching markers off (locally or from another window's broadcast) drops what was counted.
+  const store = fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'stores', 'agentStore.ts'), 'utf8')
+  assert.match(store, /function setCompletionMarkersEnabled\(enabled: boolean\) \{\s+completionMarkersEnabled\.value = enabled\s+if \(!enabled\) clearUnreadResults\(\)/)
+  assert.match(store, /completionMarkersEnabled\.value = preferences\.completionMarkersEnabled !== false\s+if \(!completionMarkersEnabled\.value\) clearUnreadResults\(\)/)
+  assert.match(store, /noteUnread\(unreadResults\.value, tone, completionMarkersEnabled\.value, away\)/)
+})

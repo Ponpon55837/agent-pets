@@ -63,6 +63,7 @@ import {
 } from '@/utils/progression-events'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
 import { petWindowHeight } from '@/utils/pet-window-height'
+import { noteUnread } from '@/utils/unread-results'
 import {
   INITIAL_PANEL_ROUTE,
   panelResizeRequest,
@@ -570,11 +571,9 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   function noteUnreadResult(tone: 'success' | 'error') {
-    if (Date.now() - lastPetInteractionAt < UNREAD_AWAY_MS) return
-    unreadResults.value = {
-      count: Math.min(99, unreadResults.value.count + 1),
-      hasError: unreadResults.value.hasError || tone === 'error',
-    }
+    const away = Date.now() - lastPetInteractionAt >= UNREAD_AWAY_MS
+    const next = noteUnread(unreadResults.value, tone, completionMarkersEnabled.value, away)
+    if (next !== unreadResults.value) unreadResults.value = next
   }
 
   // App.vue decides whether this window may actually make sound.
@@ -904,6 +903,7 @@ export const useAgentStore = defineStore('agent', () => {
     fullscreenAutoHideEnabled.value = preferences.fullscreenAutoHideEnabled
     rightClickHideEnabled.value = preferences.rightClickHideEnabled
     completionMarkersEnabled.value = preferences.completionMarkersEnabled !== false
+    if (!completionMarkersEnabled.value) clearUnreadResults()
     sessionJumpEnabled.value = preferences.sessionJumpEnabled !== false
     sessionJumpSwitchAppEnabled.value = preferences.sessionJumpSwitchAppEnabled !== false
     desktopVisibilityCapabilities.value = preferences.visibilityCapabilities
@@ -1010,6 +1010,7 @@ export const useAgentStore = defineStore('agent', () => {
 
   function setCompletionMarkersEnabled(enabled: boolean) {
     completionMarkersEnabled.value = enabled
+    if (!enabled) clearUnreadResults()
     updateDesktopPreferences({ completionMarkersEnabled: enabled })
   }
 

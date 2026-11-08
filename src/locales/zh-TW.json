@@ -78,7 +78,7 @@
   "fullscreenAutoHideHelp": "其他程式全螢幕時，暫時隱藏寵物。若有權限請求在等你，寵物仍會浮現。",
   "fullscreenAutoHideUnavailable": "目前無法偵測其他程式是否全螢幕（原生偵測器沒有載入），所以這個選項無法使用。",
   "completionMarkers": "顯示完成標記",
-  "completionMarkersHelp": "你不在時完成的工作，會在寵物旁顯示「✓ 數量」標記；點一下寵物或標記即可清除。",
+  "completionMarkersHelp": "你不在時完成或失敗的工作，會在寵物旁顯示「✓ 數量」（有失敗時為「⚠ 數量」）標記；點一下寵物或標記即可清除。關閉後兩種標記都不顯示，也不再累計。",
   "rightClickHide": "使用右鍵隱藏寵物",
   "rightClickHideHelp": "在寵物圖像或 Edge Peek handle 上按右鍵即可隱藏；權限請求等控制項與其他互動內容不受影響。",
   "windowModes": "視窗模式",

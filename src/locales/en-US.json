@@ -78,7 +78,7 @@
   "fullscreenAutoHideHelp": "Temporarily hide the pet while another app is fullscreen. It still appears if a permission request is waiting for you.",
   "fullscreenAutoHideUnavailable": "Fullscreen detection is not available right now (the native detector did not load), so this option is disabled.",
   "completionMarkers": "Show completion markers",
-  "completionMarkersHelp": "Work that finished while you were away shows a \"✓ count\" marker next to the pet. Click the pet or the marker to clear it.",
+  "completionMarkersHelp": "Work that finished or failed while you were away shows a \"✓ count\" marker next to the pet (\"⚠ count\" if anything failed). Click the pet or the marker to clear it. When off, neither marker is shown or counted.",
   "rightClickHide": "Right-click to hide the pet",
   "rightClickHideHelp": "Right-click the pet sprite or Edge Peek handle to hide it. Permission controls and other interactive content are exempt.",
   "windowModes": "Window modes",
