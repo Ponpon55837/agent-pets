@@ -24,7 +24,7 @@
   "design.theme.panelEntry": "Panel theme",
   "design.theme.petEntry": "Pet theme",
   "design.panelTheme.title": "Panel theme",
-  "design.panelTheme.help": "Pick a theme for light mode, dark mode or both. Each mode uses one theme at a time; applying one here replaces the current one. Permission and risk prompts always keep the built-in look.",
+  "design.panelTheme.help": "Pick a theme for light mode, dark mode or both. Each mode uses one theme at a time; applying one here replaces the current one. Themes apply to the whole app, including permission and risk prompts; Agent Pets only accepts themes that keep every label readable and danger, success, warning and info colours recognisable.",
   "design.panelTheme.entry": "Panel theme from plugins",
   "design.panelTheme.lightSlot": "Light mode",
   "design.panelTheme.darkSlot": "Dark mode",

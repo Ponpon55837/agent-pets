@@ -142,8 +142,8 @@
           "en-US": "Loud"
         },
         "description": {
-          "zh-TW": "用來確認權限提示維持內建外觀。",
-          "en-US": "Used to confirm permission prompts stay built-in."
+          "zh-TW": "高彩度配色，用來確認權限提示在主機不變量下仍然清楚。",
+          "en-US": "Saturated colours that check permission prompts stay legible under the host invariants."
         },
         "shape": {
           "radiusSm": 0,

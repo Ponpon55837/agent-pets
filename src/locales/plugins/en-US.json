@@ -225,7 +225,7 @@
   "plugins.dashTabFeedEmpty": "This plugin has no recent notifications.",
   "plugins.dashTabScrollPrev": "Scroll tabs left",
   "plugins.dashTabScrollNext": "Scroll tabs right",
-  "plugins.hintPanelThemes": "The plugin provides panel themes (colours, fonts, backgrounds) you can choose in its Panel themes section. Permission and risk prompts always keep the built-in look.",
+  "plugins.hintPanelThemes": "The plugin provides panel themes (colours, fonts, backgrounds) you can choose in its Panel themes section. Themes apply to the whole app, including permission and risk prompts; Agent Pets only accepts themes that keep every label readable and danger, success, warning and info colours recognisable.",
   "plugins.hintPanelThemeFonts": "The themes include font files that the panel loads only while one of these themes is selected.",
   "plugins.presencePanelThemes": "Provides {count} panel themes, chosen in this plugin's Panel themes section",
   "plugins.presencePanelThemesOpen": "Open Panel themes",

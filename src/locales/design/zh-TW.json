@@ -24,7 +24,7 @@
   "design.theme.panelEntry": "面板外觀主題",
   "design.theme.petEntry": "寵物外觀主題",
   "design.panelTheme.title": "面板主題",
-  "design.panelTheme.help": "為淺色、深色或兩種模式選擇主題。每種模式同一時間只使用一個主題，在這裡套用會取代目前的主題。權限與風險提示永遠維持內建外觀。",
+  "design.panelTheme.help": "為淺色、深色或兩種模式選擇主題。每種模式同一時間只使用一個主題，在這裡套用會取代目前的主題。主題會套用到整個 App，包含權限與風險提示；Agent Pets 只接受讓每個標籤都清楚、危險／成功／警告／資訊色仍可辨識的主題。",
   "design.panelTheme.entry": "插件提供的面板主題",
   "design.panelTheme.lightSlot": "淺色模式",
   "design.panelTheme.darkSlot": "深色模式",
