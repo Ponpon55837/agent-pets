@@ -161,9 +161,11 @@ export class UserPanelThemeStore {
     return structuredClone(record)
   }
 
-  update(id: unknown, definition: unknown): UserPanelThemeRecord {
+  /** 儲存定義；有 `name` 時同時改名。兩者在同一次暫存檔 + rename 寫入，不會只套用一半。 */
+  update(id: unknown, definition: unknown, name?: unknown): UserPanelThemeRecord {
     const current = this.require(id)
-    return this.replace({ ...current, definition: this.requireDefinition(definition) })
+    const cleanName = name === undefined ? current.name : this.requireName(name)
+    return this.replace({ ...current, name: cleanName, definition: this.requireDefinition(definition) })
   }
 
   rename(id: unknown, name: unknown): UserPanelThemeRecord {

@@ -108,7 +108,7 @@ const electronAPI: ElectronAPI = {
   validatePanelTheme: (definition: unknown): Promise<PanelThemeValidateIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeValidate, definition),
   listUserPanelThemes: (): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserList),
   createUserPanelTheme: (name: string, definition: UserPanelThemeDefinition): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserCreate, name, definition),
-  updateUserPanelTheme: (id: string, definition: UserPanelThemeDefinition): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserUpdate, id, definition),
+  updateUserPanelTheme: (id: string, definition: UserPanelThemeDefinition, name?: string): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserUpdate, id, definition, ...(name === undefined ? [] : [name])),
   renameUserPanelTheme: (id: string, name: string): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserRename, id, name),
   duplicateUserPanelTheme: (id: string, name: string): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserDuplicate, id, name),
   deleteUserPanelTheme: (id: string): Promise<UserPanelThemeIpcResult> => ipcRenderer.invoke(IPC_CHANNELS.panelThemeUserDelete, id),

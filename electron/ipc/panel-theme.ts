@@ -34,7 +34,7 @@ export interface PanelThemeIpcDependencies {
   isDialogOpen(): boolean
   setDialogOpen(value: boolean): void
   showOpenDialog(window: BrowserWindow, options: DialogOptions): Promise<FilePickerResult>
-  translate(key: 'design.panelTheme.image.dialogTitle'): string
+  translate(key: 'design.panelTheme.image.dialogTitle' | 'design.panelTheme.image.fileFilter'): string
   readUserImage(filePath: string): Promise<{ ok: true; bytes: Uint8Array } | { ok: false; error: UserImageReadError }>
   prepareUserImage(bytes: Uint8Array): UserImagePrepared
   storeUserImage(pluginId: string, prepared: PreparedImage): void
@@ -103,7 +103,7 @@ export function registerPanelThemeIpc(deps: PanelThemeIpcDependencies): void {
     try {
       selection = await deps.showOpenDialog(panelWindow, {
         title: deps.translate('design.panelTheme.image.dialogTitle'),
-        filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+        filters: [{ name: deps.translate('design.panelTheme.image.fileFilter'), extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
         properties: ['openFile'],
       })
     } catch {

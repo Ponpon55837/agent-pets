@@ -28,10 +28,10 @@
 | `onboarding-update` | `handle` | 受信任寵物或設定面板 main frame | isOnboardingAction；無效輸入回安全預設或錯誤 | updateOnboardingState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-validate` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；無效輸入回安全預設或錯誤 | validatePanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-user-list` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；無效輸入回安全預設或錯誤 | listUserPanelThemes (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `panel-theme-user-create` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；無效輸入回安全預設或錯誤 | createUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `panel-theme-user-update` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；isUserPanelThemeId；無效輸入回安全預設或錯誤 | updateUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `panel-theme-user-rename` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；isUserPanelThemeId；無效輸入回安全預設或錯誤 | renameUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `panel-theme-user-duplicate` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；isUserPanelThemeId；無效輸入回安全預設或錯誤 | duplicateUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-user-create` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；isNameArgument；無效輸入回安全預設或錯誤 | createUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-user-update` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；isUserPanelThemeId, isNameArgument；無效輸入回安全預設或錯誤 | updateUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-user-rename` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；isUserPanelThemeId, isNameArgument；無效輸入回安全預設或錯誤 | renameUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-theme-user-duplicate` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；isUserPanelThemeId, isNameArgument；無效輸入回安全預設或錯誤 | duplicateUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-user-delete` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；isUserPanelThemeId, isDialogOpen；無效輸入回安全預設或錯誤 | deleteUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-user-export` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；長度／數量上限；isUserPanelThemeId；無效輸入回安全預設或錯誤 | exportUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-user-import` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；無效輸入回安全預設或錯誤 | importUserPanelTheme (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |

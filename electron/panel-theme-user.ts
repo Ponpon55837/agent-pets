@@ -199,8 +199,15 @@ export function parseUserPanelThemeDefinition(value: unknown): UserThemeParseRes
   return attempt(() => parseDefinitionStrict(value))
 }
 
+/**
+ * 正規化之前的名稱長度上限（UTF-16 單位）。NFKC 與空白收合只會讓合理的名稱變短或稍長，
+ * 先擋下過長的輸入，不讓任意大的字串進到正規化。
+ */
+export const USER_PANEL_THEME_NAME_INPUT_MAX = USER_PANEL_THEME_NAME_MAX * 4
+
 /** 主題名稱：與 manifest 顯示名稱相同的清理（NFKC、去除控制字元與角括號），1–48 字元。 */
 export function parseUserPanelThemeName(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > USER_PANEL_THEME_NAME_INPUT_MAX) return null
   return normalizePanelThemePlainText(value, USER_PANEL_THEME_NAME_MAX)
 }
 

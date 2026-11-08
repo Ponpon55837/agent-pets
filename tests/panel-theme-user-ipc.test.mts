@@ -5,12 +5,12 @@ import * as path from 'node:path'
 import test from 'node:test'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import { PanelThemeRuntime } from '../electron/main/panel-theme-runtime.ts'
-import { registerUserPanelThemeIpc, type UserPanelThemeIpcDependencies } from '../electron/ipc/panel-theme-user.ts'
+import { exportFileName, registerUserPanelThemeIpc, type UserPanelThemeIpcDependencies } from '../electron/ipc/panel-theme-user.ts'
 import { registerPanelThemeIpc, type PanelThemeIpcDependencies } from '../electron/ipc/panel-theme.ts'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { prepareUserImage, storeUserImage, deleteUserImage } from '../electron/panel-theme-images.ts'
 import { readUserPanelThemeImportFile, writeUserPanelThemeExportFile } from '../electron/panel-theme-user-store.ts'
-import { USER_PANEL_THEME_OWNER } from '../src/types/panel-theme-user.ts'
+import { USER_PANEL_THEME_NAME_MAX, USER_PANEL_THEME_OWNER } from '../src/types/panel-theme-user.ts'
 import { builtinDefinition, png } from './support/panel-theme-fixtures.mts'
 
 const USER_CHANNELS = [
@@ -41,6 +41,7 @@ function setup(dialog: { open?: string[]; save?: string } = {}) {
   }
   const window = { isDestroyed: () => false } as unknown as BrowserWindow
   let dialogOpen = false
+  const dialogFilters: string[] = []
   const assertPanel = (event: unknown) => { if (event !== 'panel') throw new Error('Unauthorized plugin panel IPC sender') }
   registerUserPanelThemeIpc({
     ipcMain: ipcMain as unknown as UserPanelThemeIpcDependencies['ipcMain'],
@@ -49,9 +50,13 @@ function setup(dialog: { open?: string[]; save?: string } = {}) {
     getPanelWindow: () => window,
     isDialogOpen: () => dialogOpen,
     setDialogOpen: value => { dialogOpen = value },
-    showOpenDialog: async () => (dialog.open?.length ? { canceled: false, filePaths: [dialog.open.shift()!] } : { canceled: true, filePaths: [] }),
+    showOpenDialog: async (_window, options) => {
+      dialogFilters.push(...options.filters.map(filter => filter.name))
+      return dialog.open?.length ? { canceled: false, filePaths: [dialog.open.shift()!] } : { canceled: true, filePaths: [] }
+    },
     showSaveDialog: async (_window, options) => {
-      assert.match(options.defaultPath, /^[A-Za-z0-9_-]+\.agent-pets-theme\.json$/)
+      dialogFilters.push(...options.filters.map(filter => filter.name))
+      assert.match(options.defaultPath, /^[\p{L}\p{N}\p{M}_-]+\.agent-pets-theme\.json$/u)
       return dialog.save ? { canceled: false, filePath: dialog.save } : { canceled: true }
     },
     translate: key => key,
@@ -71,7 +76,10 @@ function setup(dialog: { open?: string[]; save?: string } = {}) {
     getPanelWindow: () => window,
     isDialogOpen: () => dialogOpen,
     setDialogOpen: value => { dialogOpen = value },
-    showOpenDialog: async () => (dialog.open?.length ? { canceled: false, filePaths: [dialog.open.shift()!] } : { canceled: true, filePaths: [] }),
+    showOpenDialog: async (_window, options) => {
+      dialogFilters.push(...options.filters.map(filter => filter.name))
+      return dialog.open?.length ? { canceled: false, filePaths: [dialog.open.shift()!] } : { canceled: true, filePaths: [] }
+    },
     translate: key => key,
     readUserImage: async filePath => ({ ok: true, bytes: new Uint8Array(fs.readFileSync(filePath)) }),
     prepareUserImage,
@@ -81,7 +89,7 @@ function setup(dialog: { open?: string[]; save?: string } = {}) {
     now: () => Date.parse('2026-11-08T00:00:00.000Z'),
   })
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)!('panel' as unknown as IpcMainInvokeEvent, ...args) as Promise<any> | any
-  return { userData, runtime, sent, handlers, invoke, cleanup: () => fs.rmSync(userData, { recursive: true, force: true }) }
+  return { userData, runtime, sent, handlers, invoke, dialogFilters, cleanup: () => fs.rmSync(userData, { recursive: true, force: true }) }
 }
 
 test('every user theme channel rejects senders other than the panel main frame', async () => {
@@ -224,4 +232,74 @@ test('export writes only name and definition; import is strictly validated and c
     context.cleanup()
     fs.rmSync(scratch, { recursive: true, force: true })
   }
+})
+
+test('names are size-checked before normalisation on every channel that takes one', () => {
+  const context = setup()
+  try {
+    const id = context.invoke(IPC_CHANNELS.panelThemeUserCreate, 'Mine', builtinDefinition()).value.id
+    const huge = 'あ'.repeat(USER_PANEL_THEME_NAME_MAX * 4 + 1)
+    const calls: Array<[string, ...unknown[]]> = [
+      [IPC_CHANNELS.panelThemeUserCreate, huge, builtinDefinition()],
+      [IPC_CHANNELS.panelThemeUserCreate, 42, builtinDefinition()],
+      [IPC_CHANNELS.panelThemeUserRename, id, huge],
+      [IPC_CHANNELS.panelThemeUserRename, id, { name: 'x' }],
+      [IPC_CHANNELS.panelThemeUserDuplicate, id, huge],
+      [IPC_CHANNELS.panelThemeUserUpdate, id, builtinDefinition(), huge],
+      [IPC_CHANNELS.panelThemeUserUpdate, id, builtinDefinition(), 7],
+    ]
+    for (const [channel, ...args] of calls) assert.deepEqual(context.invoke(channel, ...args), { ok: false, error: 'invalid_request' }, channel)
+    // 上限內但清理後仍太長的名稱，由 store 的規則拒絕。
+    assert.equal(context.invoke(IPC_CHANNELS.panelThemeUserRename, id, 'x'.repeat(USER_PANEL_THEME_NAME_MAX + 1)).error, 'invalid_request')
+    assert.deepEqual(context.runtime.userThemes.list().map(theme => theme.name), ['Mine'])
+  } finally { context.cleanup() }
+})
+
+test('update can rename in the same atomic write; a bad name or definition leaves the record unchanged', () => {
+  const context = setup()
+  try {
+    const id = context.invoke(IPC_CHANNELS.panelThemeUserCreate, 'Mine', builtinDefinition()).value.id as string
+    const file = path.join(context.runtime.userThemes.directory, `${id}.json`)
+    const definition = builtinDefinition()
+    definition.shape = { radiusSm: 2, radiusMd: 4, radiusLg: 6 }
+    const saved = context.invoke(IPC_CHANNELS.panelThemeUserUpdate, id, definition, '  Renamed  ')
+    assert.equal(saved.ok, true)
+    assert.deepEqual(saved.value.themes.map((theme: { name: string }) => theme.name), ['Renamed'])
+    const onDisk = JSON.parse(fs.readFileSync(file, 'utf8'))
+    assert.equal(onDisk.name, 'Renamed')
+    assert.equal(onDisk.definition.shape.radiusLg, 6)
+    // 只改定義時名稱不變；三個以上的引數一律拒絕。
+    assert.equal(context.invoke(IPC_CHANNELS.panelThemeUserUpdate, id, builtinDefinition()).value.themes[0].name, 'Renamed')
+    assert.equal(context.invoke(IPC_CHANNELS.panelThemeUserUpdate, id, builtinDefinition(), 'A', 'extra').error, 'invalid_request')
+    const before = fs.readFileSync(file, 'utf8')
+    assert.equal(context.invoke(IPC_CHANNELS.panelThemeUserUpdate, id, definition, '   ').error, 'invalid_request')
+    const invalid = builtinDefinition()
+    invalid.modes.light.colors.text = 'rgb(240 240 240 / 1)'
+    assert.equal(context.invoke(IPC_CHANNELS.panelThemeUserUpdate, id, invalid, 'Other').error, 'invalid_panel_theme')
+    assert.equal(fs.readFileSync(file, 'utf8'), before)
+  } finally { context.cleanup() }
+})
+
+test('export file names keep letters in any script and drop everything unsafe', () => {
+  assert.equal(exportFileName('我的主題'), '我的主題.agent-pets-theme.json')
+  assert.equal(exportFileName('Sakura night'), 'Sakura-night.agent-pets-theme.json')
+  assert.equal(exportFileName('../../etc/passwd'), 'etc-passwd.agent-pets-theme.json')
+  assert.equal(exportFileName('a\\b:c*d?e"f<g>h|i'), 'a-b-c-d-e-f-g-h-i.agent-pets-theme.json')
+  assert.equal(exportFileName('名稱\u202e\u0000\u0007.'), '名稱.agent-pets-theme.json')
+  assert.equal(exportFileName('trailing dots...  '), 'trailing-dots.agent-pets-theme.json')
+  for (const reserved of ['CON', 'nul', 'Com1', 'LPT9', 'aux']) assert.equal(exportFileName(reserved), 'theme.agent-pets-theme.json', reserved)
+  assert.equal(exportFileName('<>'), 'theme.agent-pets-theme.json')
+  const long = exportFileName('𠀀'.repeat(60))
+  assert.equal([...long.replace('.agent-pets-theme.json', '')].length, 40)
+  assert.ok(!long.includes('\ufffd'))
+})
+
+test('dialog filter names come from the locale table', async () => {
+  const context = setup()
+  try {
+    const id = context.invoke(IPC_CHANNELS.panelThemeUserCreate, 'Mine', builtinDefinition()).value.id
+    await context.invoke(IPC_CHANNELS.panelThemeUserExport, id)
+    await context.invoke(IPC_CHANNELS.panelThemeUserImport)
+    assert.deepEqual(context.dialogFilters, ['design.themeEditor.fileFilter', 'design.themeEditor.fileFilter'])
+  } finally { context.cleanup() }
 })
