@@ -34,5 +34,13 @@ node --experimental-strip-types scripts/e2e-real-hook.mts --home <home> [--pet-p
 
 同一個 app 裡，前面遺失的事件會留下停在「思考中」的 session，蓋過後面的畫面。所以比較修正前後時，每次都要換一個新的 app。
 
+冷啟動：先結束隔離 app，再執行
+
+```bash
+node --experimental-strip-types scripts/e2e-real-hook.mts --home <home> --cold-start 150 [--interval 40]
+```
+
+腳本會用 `e2e-isolated-electron.mjs --reuse-root` 以同一個 HOME 重新啟動 app，從啟動那一刻起每 `--interval` ms 對一個新 session 送一個 `Stop`，最後分開列出主程序收到幾個、寵物畫面收到幾個，以及 Electron 建立、載入 main.js、寫入啟動標記、事件埠監聽的時間點。app 啟動時會把部署的 hook 換回送往 17373 的版本，所以冷啟動改用 `~/.desktop-pet-e2e/` 裡不會被覆寫的副本，事件不會送到正式版。埠已被佔用時腳本拒絕執行。
+
 單元測試（`pnpm test:unit`）完全不啟動 Electron。想縮短迭代可用 `pnpm test:unit:watch`，或
 `node --test --experimental-strip-types tests/<file>.test.mts --test-name-pattern "<名稱>"`。

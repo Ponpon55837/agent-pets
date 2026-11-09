@@ -143,7 +143,7 @@ The panel keeps a list of configured projects with status Connected, Partially c
 
 ## Event server
 
-Hooks post status updates to `http://127.0.0.1:17373/v1/events` with the per-install `X-Agent-Pets-Token` header (read from `~/.desktop-pet/event-token`). A hook spends at most 1.5 s getting the event out and 0.25 s waiting for the reply, and stops at once when the pet is not running, so an agent is never held up ([docs/dev/hook-delivery.md](docs/dev/hook-delivery.md)).
+Hooks post status updates to `http://127.0.0.1:17373/v1/events` with the per-install `X-Agent-Pets-Token` header (read from `~/.desktop-pet/event-token`). A hook spends at most 1.5 s getting the event out and 0.25 s waiting for the reply, and stops at once when the pet is not running, so an agent is never held up. While the pet is still starting (it leaves `~/.desktop-pet/event-port-17373.starting` until it is listening), a refused event is retried for up to 5 s instead of being lost ([docs/dev/hook-delivery.md](docs/dev/hook-delivery.md)).
 
 ```json
 { "source": "codex", "sessionId": "sess_abc123", "state": "thinking", "timestamp": 1735689600000 }
@@ -213,7 +213,7 @@ pnpm dev
 | `pnpm build` / `pnpm build:fast` | Type check, Vite build, then electron-builder into `release/` (`build:fast` skips compression) |
 | `pnpm bench`, `pnpm bench:lag` | Performance benchmarks |
 
-Both build commands first close project-owned Agent Pets processes. To check a change in a real Electron app without touching your data, run `pnpm exec vite build` then `node scripts/e2e-isolated-electron.mjs` (temporary home and userData, fake `safeStorage`, so macOS Keychain is never touched; its local ports default to 27373–27375 so an installed copy keeps 17373–17375 — `--hook-port-base` picks another range, `--real-hook-ports` uses the defaults; see [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)).
+Both build commands first close project-owned Agent Pets processes. To check a change in a real Electron app without touching your data, run `pnpm exec vite build` then `node scripts/e2e-isolated-electron.mjs` (temporary home and userData, fake `safeStorage`, so macOS Keychain is never touched; its local ports default to 27373–27375 so an installed copy keeps 17373–17375 — `--hook-port-base` picks another range, `--real-hook-ports` uses the defaults, `--reuse-root` restarts with an earlier run's home for cold-start tests; see [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)).
 
 **Dev port overrides** — unpackaged runs may set `AGENT_PETS_EVENT_PORT`, `AGENT_PETS_PERMISSION_PORT` and `AGENT_PETS_PRESENTATION_PORT` (1024–65535; defaults 17373, 17374, 17375) so they do not fight an installed copy. Packaged builds ignore them.
 

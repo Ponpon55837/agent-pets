@@ -54,9 +54,9 @@ sprite 線第一次用 hook 驅動寵物時（隔離埠 27673），PreToolUse、
 
 ## 殘餘風險
 
-- app 綁定 port 之前送出的事件（冷啟動實測 3/30、6/150）會被拒絕，下一個事件才會讓畫面跟上。
+- app 綁定 port 之前送出的事件（冷啟動實測 3/30、6/150）會被拒絕，下一個事件才會讓畫面跟上。1.12.5 已改為 app 啟動期間短暫重試，見 [phase-hook-hardening.md](phase-hook-hardening.md)。
 - Windows 與 Linux 未實測。程式只用 `node:http` 和 loopback，與平台無關。
-- 權限回覆流程（`permissionPost`）仍用 `fetch`，每次呼叫 1 秒時限，不在這次範圍內。
+- 權限回覆流程（`permissionPost`）仍用 `fetch`，每次呼叫 1 秒時限，不在這次範圍內。1.12.5 已改用相同的 `node:http` helper，見 [phase-hook-hardening.md](phase-hook-hardening.md)。
 
 ## 版本
 

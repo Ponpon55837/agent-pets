@@ -143,7 +143,7 @@ Agent 要求權限時，寵物上會出現液態玻璃氣泡，面板內也會�
 
 ## 事件伺服器
 
-Hook 會附上每次安裝專屬的 `X-Agent-Pets-Token` 標頭（讀自 `~/.desktop-pet/event-token`），把狀態送到 `http://127.0.0.1:17373/v1/events`。每個 hook 最多花 1.5 秒把事件送出、再等 0.25 秒回應；寵物沒開時會立刻結束，不會拖慢 agent（見 [docs/dev/hook-delivery.md](docs/dev/hook-delivery.md)）。
+Hook 會附上每次安裝專屬的 `X-Agent-Pets-Token` 標頭（讀自 `~/.desktop-pet/event-token`），把狀態送到 `http://127.0.0.1:17373/v1/events`。每個 hook 最多花 1.5 秒把事件送出、再等 0.25 秒回應；寵物沒開時會立刻結束，不會拖慢 agent。寵物還在啟動時（開始收事件前會留著 `~/.desktop-pet/event-port-17373.starting`），被拒絕的事件會重試最多 5 秒，不會遺失（見 [docs/dev/hook-delivery.md](docs/dev/hook-delivery.md)）。
 
 ```json
 { "source": "codex", "sessionId": "sess_abc123", "state": "thinking", "timestamp": 1735689600000 }
@@ -213,7 +213,7 @@ pnpm dev
 | `pnpm build` / `pnpm build:fast` | 型別檢查、Vite 建置，再由 electron-builder 輸出到 `release/`（`build:fast` 不壓縮） |
 | `pnpm bench`、`pnpm bench:lag` | 效能基準測試 |
 
-兩個建置指令都會先關閉本專案的 Agent Pets 程序。若想在真實 Electron App 中驗證修改又不動到你的資料，先執行 `pnpm exec vite build`，再執行 `node scripts/e2e-isolated-electron.mjs`（暫時的 home 與 userData、假的 `safeStorage`，所以不會碰到 macOS 鑰匙圈；本機埠預設為 27373–27375，已安裝的版本可保有 17373–17375，`--hook-port-base` 可改用另一組，`--real-hook-ports` 才用預設埠；見 [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)）。
+兩個建置指令都會先關閉本專案的 Agent Pets 程序。若想在真實 Electron App 中驗證修改又不動到你的資料，先執行 `pnpm exec vite build`，再執行 `node scripts/e2e-isolated-electron.mjs`（暫時的 home 與 userData、假的 `safeStorage`，所以不會碰到 macOS 鑰匙圈；本機埠預設為 27373–27375，已安裝的版本可保有 17373–17375，`--hook-port-base` 可改用另一組，`--real-hook-ports` 才用預設埠，`--reuse-root` 沿用上一次的 home 重新啟動，供冷啟動測試使用；見 [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)）。
 
 **開發埠覆寫** — 未打包的執行可設定 `AGENT_PETS_EVENT_PORT`、`AGENT_PETS_PERMISSION_PORT`、`AGENT_PETS_PRESENTATION_PORT`（1024–65535；預設 17373、17374、17375），避免和已安裝的版本搶埠。打包版會忽略這些變數。
 
