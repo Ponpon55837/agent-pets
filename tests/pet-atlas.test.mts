@@ -12,8 +12,11 @@ import {
   PET_MOTION_MAX_FRAME_MS,
   PET_MOTION_MIN_FRAME_MS,
   PET_MOTION_NAMES,
+  PET_DEFAULT_MOTION_TABLE,
   petAtlasGridFromSize,
+  petMotionFitsAtlas,
   resolvePetMotion,
+  resolvePetMotionTable,
 } from '../src/types/pet-atlas.ts'
 import { parsePetBehaviorManifest, parsePetBehaviorManifestDetailed } from '../electron/pet-behavior-manifest.ts'
 import { SPRITE_MAX_HEIGHT, SPRITE_MAX_WIDTH, detectSpriteAtlas } from '../electron/pet-sprite-validation.ts'
@@ -136,4 +139,47 @@ test('a narrow atlas trims built-in motions instead of stepping into missing cel
   const narrow = { columns: 4, rows: 9 }
   assert.equal(resolvePetMotion('failed', undefined, narrow).frameDurations.length, 4)
   assert.equal(resolvePetMotion('waving', undefined, narrow), PET_ATLAS_MOTIONS.waving)
+})
+
+test('the shared motion table is frozen and reused when nothing is overridden', () => {
+  assert.ok(Object.isFrozen(PET_ATLAS_MOTIONS))
+  for (const motion of Object.values(PET_ATLAS_MOTIONS)) {
+    assert.ok(Object.isFrozen(motion) && Object.isFrozen(motion.frameDurations), motion.name)
+  }
+  assert.throws(() => { (PET_ATLAS_MOTIONS.idle.frameDurations as number[])[0] = 1 }, TypeError)
+  // 常見情況不配置新物件：同一個表，呼叫端用 === 就知道不必重排。
+  assert.equal(resolvePetMotionTable(undefined, null), PET_DEFAULT_MOTION_TABLE)
+  assert.equal(resolvePetMotionTable(undefined, V2), PET_DEFAULT_MOTION_TABLE)
+  assert.equal(resolvePetMotionTable({}, V2), PET_DEFAULT_MOTION_TABLE)
+  assert.equal(PET_DEFAULT_MOTION_TABLE.walk, PET_ATLAS_MOTIONS.idle)
+})
+
+test('a motion table resolves every motion once and stays frozen', () => {
+  const table = resolvePetMotionTable({ idle: { row: 9, frames: 4 }, walk: { row: 1 } }, V2)
+  assert.notEqual(table, PET_DEFAULT_MOTION_TABLE)
+  assert.ok(Object.isFrozen(table) && Object.isFrozen(table.idle) && Object.isFrozen(table.idle.frameDurations))
+  assert.deepEqual(Object.keys(table).sort(), [...PET_MOTION_NAMES].sort())
+  assert.equal(table.idle.row, 9)
+  assert.equal(table.idle.frameDurations.length, 4)
+  assert.equal(table.walk.row, 1)
+  // 沒宣告 sleep：回退到（被覆蓋的）idle。
+  assert.equal(table.sleep.row, 9)
+  assert.equal(table.waving, PET_ATLAS_MOTIONS.waving)
+  // 窄圖集即使沒有 manifest 也要另外算，內建動作才不會踩進不存在的格。
+  assert.notEqual(resolvePetMotionTable(undefined, { columns: 4, rows: 9 }), PET_DEFAULT_MOTION_TABLE)
+})
+
+test('the renderer re-checks rows even if a manifest skipped the parser', () => {
+  for (const row of [-1, 1.5, Number.NaN, 11]) {
+    assert.equal(petMotionFitsAtlas({ row }, V2), false, String(row))
+    assert.equal(resolvePetMotion('idle', { idle: { row } }, V2), PET_ATLAS_MOTIONS.idle, String(row))
+  }
+  const inherited = Object.create({ idle: { row: 9 } }) as Record<string, unknown>
+  assert.equal(resolvePetMotion('idle', inherited, V2), PET_ATLAS_MOTIONS.idle)
+  assert.equal(resolvePetMotionTable(inherited, V2), PET_DEFAULT_MOTION_TABLE)
+})
+
+test('the renderer clamps frame timings that bypassed the main-process parser', () => {
+  const resolved = resolvePetMotion('idle', { idle: { row: 1, frameDurations: [1, Number.NaN, 99_999] } }, V2)
+  assert.deepEqual(resolved.frameDurations, [PET_MOTION_MIN_FRAME_MS, 150, PET_MOTION_MAX_FRAME_MS])
 })

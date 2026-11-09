@@ -5,18 +5,20 @@ import type { PetAutonomousBehavior, PetBehaviorManifest } from '@/types/pet'
 import type { PresentationReaction } from '@/types/presentation'
 import Icon from '@/components/ui/Icon.vue'
 import { useAgentStore } from '@/stores/agentStore'
-import { getCachedSprite, getCachedTint, loadPetSprite, setCachedTint } from '@/composables/usePetSpriteCache'
-import { frameDelayMultiplier, isSignificantTransition, motionPlanFor } from '@/utils/pet-motion-plan'
 import {
   PET_ATLAS_MOTIONS,
   PET_CELL_HEIGHT,
   PET_CELL_WIDTH,
   petAtlasGridFromSize,
-  resolvePetMotion,
+  resolvePetMotionTable,
   type PetAtlasGrid,
   type PetMotionDefinition,
   type PetMotionName,
+  type PetMotionTable,
 } from '@/types/pet-atlas'
+import { getCachedSprite, getCachedTint, loadPetSprite, setCachedTint } from '@/composables/usePetSpriteCache'
+import { useReducedMotion } from '@/composables/useReducedMotion'
+import { frameDelayMultiplier, isSignificantTransition, motionPlanFor } from '@/utils/pet-motion-plan'
 
 const props = defineProps<{
   state: AgentState
@@ -25,14 +27,14 @@ const props = defineProps<{
   mood?: number
   autonomousBehavior?: PetAutonomousBehavior
   freeze?: boolean
-  /** Keeps animating but at a few frames per second (mini mode). */
+  /** 仍會播放，但每秒只有幾格（迷你模式）。 */
   lowFps?: boolean
-  /** -1 mirrors the sprite (walking left). */
+  /** -1 會把 sprite 左右鏡射（往左走）。 */
   facing?: -1 | 1
 }>()
 
-// Keep low mood close to the pet's original colors; most of the visible
-// progression comes from the silhouette aura instead of dimming the pet.
+// --- 心情與光暈 ---------------------------------------------------------------
+// 心情低時盡量維持寵物原本的顏色；看得出來的變化主要來自輪廓光暈，而不是把寵物調暗。
 const moodTier = computed<'happy' | 'neutral' | 'low'>(() => {
   if (props.mood === undefined) return 'neutral'
   if (props.mood >= 70) return 'happy'
@@ -49,8 +51,7 @@ const moodEnergyTier = computed<MoodEnergyTier>(() => {
   if (moodValue.value >= 40) return 'charged'
   return 'resting'
 })
-// The glow canvases only exist (and are only redrawn) while the mood makes
-// them visible; at resting mood they are fully transparent anyway.
+// 光暈 canvas 只在心情讓它可見時才存在（也才重畫）；休息狀態下它本來就全透明。
 const auraInnerVisible = computed(() => props.mood !== undefined && moodValue.value > 10)
 const auraOuterVisible = computed(() => props.mood !== undefined && moodValue.value > 60)
 const moodAuraStyle = computed<Record<string, string>>(() => {
@@ -74,7 +75,9 @@ const moodAuraStyle = computed<Record<string, string>>(() => {
   }
 })
 
+// --- 動作表與播放狀態 -----------------------------------------------------------
 const store = useAgentStore()
+const reducedMotion = useReducedMotion()
 const documentVisible = ref(true)
 const isPaused = computed(() => props.freeze === true || !documentVisible.value)
 
@@ -88,24 +91,22 @@ interface MotionPlan {
   repeat: boolean
 }
 
-const petBehaviorManifest = computed<PetBehaviorManifest | undefined>(() => (
-  store.pets.find(pet => pet.id === props.petId)?.behaviorManifest
-))
+const canvasRef = ref<HTMLCanvasElement | null>(null)
+const auraInnerRef = ref<HTMLCanvasElement | null>(null)
+const auraOuterRef = ref<HTMLCanvasElement | null>(null)
+const imgRef = ref<HTMLImageElement | null>(null)
 
-// 圖載入前格線未知，只套用解析器的上下限；applyImage 之後會用實際尺寸重算。
+const currentPet = computed(() => store.pets.find(pet => pet.id === props.petId))
+const petBehaviorManifest = computed<PetBehaviorManifest | undefined>(() => currentPet.value?.behaviorManifest)
+
+// 圖載入前格線未知，只套用解析器的上下限；換圖（imgRef 改變）後會用實際尺寸重算。
 function atlasGrid(): PetAtlasGrid | null {
   const img = imgRef.value
   return img?.naturalWidth ? petAtlasGridFromSize(img.naturalWidth, img.naturalHeight) : null
 }
 
-function resolveMotion(name: PetMotionName): PetMotionDefinition {
-  return resolvePetMotion(name, petBehaviorManifest.value, atlasGrid())
-}
-
-const canvasRef = ref<HTMLCanvasElement | null>(null)
-const auraInnerRef = ref<HTMLCanvasElement | null>(null)
-const auraOuterRef = ref<HTMLCanvasElement | null>(null)
-const imgRef = ref<HTMLImageElement | null>(null)
+// 只在 manifest 或圖改變時解析一次；播放時換動作是 O(1) 查表。
+const motionTable = computed<PetMotionTable>(() => resolvePetMotionTable(petBehaviorManifest.value, atlasGrid()))
 // 光暈色由 sprite 像素算出；算不出來時用色盤的高光色（--organic-highlight），不寫死顏色。
 function paletteHighlight(): string {
   if (typeof document === 'undefined') return 'transparent'
@@ -118,18 +119,21 @@ let currentFrame = 0
 let currentStep = 0
 let completedLoops = 0
 let motionPlan: MotionPlan = { steps: [{ motion: PET_ATLAS_MOTIONS.idle, loops: Number.POSITIVE_INFINITY }], repeat: false }
+/** 目前這份計畫是用哪張動作表建的；換圖後表沒變就不必重排。 */
+let planTable: PetMotionTable | null = null
 let activeMotion: PetMotionDefinition = PET_ATLAS_MOTIONS.idle
+/** 目前動作每一格的實際延遲（已乘上狀態節奏與低幀率倍率），每格只查表。 */
+let frameDelays: readonly number[] = PET_ATLAS_MOTIONS.idle.frameDurations
 const activeMotionName = ref<PetMotionName>('idle')
 const activeMotionRow = ref(0)
 
-// One-shot squash/stretch "reaction" bounce, layered on top of the looping
-// state animation via a CSS class rather than extra spritesheet frames, so
-// it works for every pet regardless of how many rows its sheet has.
+// --- 反應、獎勵與游標注視 ---------------------------------------------------------
+// 一次性的擠壓／伸展彈跳疊在循環動畫上，用 CSS class 而不是額外的 sprite 格，
+// 所以不管圖集有幾列，每隻寵物都能用。
 const isReacting = ref(false)
 const reactionKind = ref<PresentationReaction | null>(null)
 let reactionTimer: ReturnType<typeof setTimeout> | null = null
-// Each presentation reaction has its own motion (CSS class) and a short icon
-// mark that floats up; the mark still shows when motion effects are off.
+// 每種反應有自己的動作（CSS class）和一個往上飄的小圖示；關閉動態效果時圖示仍會顯示。
 const REACTION_MARKS: Record<PresentationReaction, string> = {
   happy: 'sparkle',
   curious: 'question',
@@ -159,8 +163,7 @@ function playReaction(kind?: PresentationReaction) {
   }
 }
 
-// Achievement unlocks use a separate visual hook so a new rule can reward the
-// pet without changing the state animation or granting any product ability.
+// 成就解鎖用獨立的視覺掛勾，新規則可以獎勵寵物，但不會改動狀態動畫或給予任何產品能力。
 const isRewarding = ref(false)
 let rewardTimer: ReturnType<typeof setTimeout> | null = null
 function playReward() {
@@ -182,9 +185,9 @@ function playCursorLook(direction: -1 | 1): void {
 
 defineExpose({ playReaction, playReward, playCursorLook })
 
-// Idle fidgets: a periodic subtle sway (no new sprite frames needed, same
-// CSS-layer trick as the reaction bounce) so a long idle stretch doesn't
-// feel completely static. Only scheduled while state === 'idle'.
+// --- 閒置小動作 -------------------------------------------------------------------
+// 定期輕微搖晃（和反應彈跳一樣是 CSS 層，不需要新的 sprite 格），讓長時間閒置不會完全靜止。
+// 只在 state === 'idle' 時排程。
 const isFidgeting = ref(false)
 let fidgetTimer: ReturnType<typeof setTimeout> | null = null
 let fidgetResetTimer: ReturnType<typeof setTimeout> | null = null
@@ -218,8 +221,8 @@ function stopFidgetTimer() {
   isFidgeting.value = false
 }
 
-// The longer a waiting-permission/waiting-input session sits unanswered,
-// the faster & shakier the pet gets, nudging the user to go respond.
+// --- 等待的急迫程度 ---------------------------------------------------------------
+// 等待權限／輸入越久沒人回應，寵物動得越快、越抖，提醒使用者去回覆。
 const isWaiting = computed(() => props.state === 'waiting-permission' || props.state === 'waiting-input')
 const urgencyTick = ref(Date.now())
 let urgencyTimer: ReturnType<typeof setInterval> | null = null
@@ -245,6 +248,7 @@ const urgencyLevel = computed<0 | 1 | 2>(() => {
   return 0
 })
 
+// --- 動作計畫與逐格計時 -------------------------------------------------------------
 function motionPlanForState(): MotionPlan {
   const planned = motionPlanFor({
     state: props.state,
@@ -252,25 +256,35 @@ function motionPlanForState(): MotionPlan {
     behavior: props.autonomousBehavior,
     petId: props.petId,
   })
+  const table = motionTable.value
+  planTable = table
   return {
-    steps: planned.steps.map(step => ({
-      motion: resolveMotion(step.motion),
-      loops: step.loops,
-    })),
+    steps: planned.steps.map(step => ({ motion: table[step.motion], loops: step.loops })),
     repeat: planned.repeat,
   }
 }
 
-function frameDelay(): number {
+const MIN_FRAME_DELAY_MS = 80
+const LOW_FPS_FACTOR = 3
+// 減少動態效果時比迷你視窗再慢一倍。
+const LOW_FPS_REDUCED_FACTOR = 6
+
+// 節奏只和狀態、急迫程度、是否在生悶氣、低幀率有關，換動作或這些條件改變時才重算；
+// 每一格只讀 frameDelays[currentFrame]，計時器路徑上不配置任何物件。
+function updateFrameDelays(): void {
   const multiplier = frameDelayMultiplier({
     state: props.state,
     urgency: urgencyLevel.value,
-    // After the fall plays out the pet idles slowly instead of freezing.
+    // 摔倒播完後改成慢慢地閒置，而不是停在一格。
     sulking: props.state === 'error' && activeMotion.name === 'idle',
   })
-  // Reduced motion steps even slower than the mini window does.
-  const lowFpsFactor = props.lowFps ? (prefersReducedMotion() ? 6 : 3) : 1
-  return Math.max(80, Math.round(activeMotion.frameDurations[currentFrame] * multiplier * lowFpsFactor))
+  const lowFpsFactor = props.lowFps ? (reducedMotion.value ? LOW_FPS_REDUCED_FACTOR : LOW_FPS_FACTOR) : 1
+  const factor = multiplier * lowFpsFactor
+  frameDelays = activeMotion.frameDurations.map(ms => Math.max(MIN_FRAME_DELAY_MS, Math.round(ms * factor)))
+}
+
+function frameDelay(): number {
+  return frameDelays[currentFrame] ?? MIN_FRAME_DELAY_MS
 }
 
 function selectStep(index: number) {
@@ -280,11 +294,12 @@ function selectStep(index: number) {
   activeMotion = motionPlan.steps[currentStep].motion
   activeMotionName.value = activeMotion.name
   activeMotionRow.value = activeMotion.row
+  updateFrameDelays()
 }
 
-// The backing store is an integer multiple of the sprite cell sized to the real
-// device pixels (scale x display density), so nearest-neighbour upscaling stays
-// even and a Retina screen does not blur the pet.
+// --- 畫布尺寸與像素密度 -------------------------------------------------------------
+// 背景緩衝區是 sprite 格的整數倍，依實際裝置像素（倍率 × 螢幕密度）決定，
+// 讓最近鄰放大保持均勻，Retina 螢幕上也不會糊。
 const devicePixelRatioRef = ref(window.devicePixelRatio || 1)
 const backingK = computed(() => Math.max(1, Math.min(8, Math.round(store.petScale * devicePixelRatioRef.value))))
 const backingW = computed(() => PET_CELL_WIDTH * backingK.value)
@@ -308,6 +323,7 @@ watch(backingK, () => { void nextTick(draw) })
 const canvasW = computed(() => Math.round(PET_CELL_WIDTH * store.petScale))
 const canvasH = computed(() => Math.round(PET_CELL_HEIGHT * store.petScale))
 
+// --- 載入 sprite 與光暈色 ----------------------------------------------------------
 function getSrc(id: string): string {
   const base = import.meta.env.BASE_URL || './'
   return `${base}pets/${id}/spritesheet.webp`
@@ -381,10 +397,11 @@ function applyImage(img: HTMLImageElement, cacheKey: string): void {
   auraTint = getCachedTint(cacheKey) ?? deriveAuraTint(img)
   setCachedTint(cacheKey, auraTint)
   currentFrame = 0
-  draw()
-  // 覆蓋值要等圖載入、知道實際欄列數後才能確認放得下，所以有 manifest 就重算一次。
-  if (petBehaviorManifest.value || props.autonomousBehavior === 'walk' || props.autonomousBehavior === 'sleep') {
+  // 換圖後動作表才知道實際欄列數；表真的變了（或正在走路、睡覺）才重排，否則只重畫。
+  if (motionTable.value !== planTable || props.autonomousBehavior === 'walk' || props.autonomousBehavior === 'sleep') {
     startAnimation()
+  } else {
+    draw()
   }
 }
 
@@ -395,7 +412,7 @@ async function spriteSourceFor(pet: (typeof store.pets)[number] | undefined, tar
 }
 
 async function loadImage() {
-  // A newer request (pet switched while an older one is in flight) wins.
+  // 較新的請求（舊的還在載入時又換了寵物）優先。
   const sequence = ++loadSequence
   const id = props.petId || store.defaultPetId
   const pet = store.pets.find(p => p.id === id)
@@ -406,8 +423,7 @@ async function loadImage() {
 
   const targetId = pet ? id : store.defaultPetId
   const isCustom = Boolean(pet && !pet.builtIn && !pet.pluginSkin)
-  // A custom sheet's URL carries its modification time, so it is the cache
-  // key: re-importing the same id can never show the previous image.
+  // 自訂圖的 URL 帶有修改時間，直接拿來當快取鍵：重新匯入同一個 id 不會顯示舊圖。
   const source = await spriteSourceFor(pet, targetId)
   if (sequence !== loadSequence) return
   const cacheKey = pet?.pluginSkin?.cacheKey ?? (isCustom && source ? source : targetId)
@@ -423,7 +439,7 @@ async function loadImage() {
     return
   }
 
-  // The sheet failed to load: show the default pet instead of an empty canvas.
+  // 圖載入失敗：改顯示預設寵物，而不是空白畫布。
   if (targetId !== store.defaultPetId) {
     const fallbackKey = store.defaultPetId
     const fallback = await loadPetSprite(fallbackKey, getSrc(store.defaultPetId))
@@ -431,45 +447,34 @@ async function loadImage() {
   }
 }
 
+// --- 繪製 ---------------------------------------------------------------------------
+// 每一格都會呼叫：直接畫到固定的三張 canvas，不建陣列或物件。
+function drawCell(canvas: HTMLCanvasElement | null, img: HTMLImageElement, sx: number, sy: number, w: number, h: number, tint: boolean): void {
+  const ctx = canvas?.getContext('2d')
+  if (!ctx) return
+  ctx.clearRect(0, 0, w, h)
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(img, sx, sy, PET_CELL_WIDTH, PET_CELL_HEIGHT, 0, 0, w, h)
+  if (!tint) return
+  ctx.globalCompositeOperation = 'source-in'
+  ctx.fillStyle = auraTint
+  ctx.fillRect(0, 0, w, h)
+  ctx.globalCompositeOperation = 'source-over'
+}
+
 function draw() {
   const img = imgRef.value
   if (!img || !img.complete) return
-
-  const row = activeMotion.row
-  const maxFrames = activeMotion.frameDurations.length
-  const frame = currentFrame % maxFrames
-
-  const targets = [
-    { canvas: canvasRef.value, tint: false },
-    ...(auraInnerVisible.value ? [{ canvas: auraInnerRef.value, tint: true }] : []),
-    ...(auraOuterVisible.value ? [{ canvas: auraOuterRef.value, tint: true }] : []),
-  ]
-  for (const target of targets) {
-    const { canvas, tint } = target
-    if (!canvas) continue
-    const ctx = canvas.getContext('2d')
-    if (!ctx) continue
-
-    ctx.clearRect(0, 0, backingW.value, backingH.value)
-    ctx.imageSmoothingEnabled = false
-    ctx.drawImage(
-      img,
-      frame * PET_CELL_WIDTH, row * PET_CELL_HEIGHT,
-      PET_CELL_WIDTH, PET_CELL_HEIGHT,
-      0, 0,
-      backingW.value, backingH.value
-    )
-    if (tint) {
-      ctx.globalCompositeOperation = 'source-in'
-      ctx.fillStyle = auraTint
-      ctx.fillRect(0, 0, backingW.value, backingH.value)
-      ctx.globalCompositeOperation = 'source-over'
-    }
-  }
+  const sx = (currentFrame % activeMotion.frameDurations.length) * PET_CELL_WIDTH
+  const sy = activeMotion.row * PET_CELL_HEIGHT
+  const w = backingW.value
+  const h = backingH.value
+  drawCell(canvasRef.value, img, sx, sy, w, h, false)
+  if (auraInnerVisible.value) drawCell(auraInnerRef.value, img, sx, sy, w, h, true)
+  if (auraOuterVisible.value) drawCell(auraOuterRef.value, img, sx, sy, w, h, true)
 }
 
-// Brief cross-fade: the last drawn frame is copied to a ghost canvas that
-// fades out over the new state's first frame, so rows no longer hard-cut.
+// 短暫交叉淡出：把上一格複製到殘影 canvas，在新狀態第一格期間淡出，換列時不會硬切。
 const ghostRef = ref<HTMLCanvasElement | null>(null)
 const ghostFading = ref(false)
 let ghostTimer: ReturnType<typeof setTimeout> | null = null
@@ -478,7 +483,7 @@ const GHOST_FADE_MS = 150
 function startGhostFade(): void {
   const source = canvasRef.value
   const ghost = ghostRef.value
-  if (!source || !ghost || isPaused.value || prefersReducedMotion()) return
+  if (!source || !ghost || isPaused.value || reducedMotion.value) return
   const ctx = ghost.getContext('2d')
   if (!ctx) return
   ctx.clearRect(0, 0, backingW.value, backingH.value)
@@ -491,18 +496,13 @@ function startGhostFade(): void {
   })
 }
 
-function prefersReducedMotion(): boolean {
-  return typeof window.matchMedia === 'function'
-    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-}
-
 function clearFrameTimer(): void {
   if (frameTimerId !== null) clearTimeout(frameTimerId)
   frameTimerId = null
 }
 
-// One timer per frame, sized to that frame's delay, rather than a 60fps poll
-// that wakes the main thread just to find out nothing is due yet.
+// --- 播放控制 -----------------------------------------------------------------------
+// 每格一個計時器、長度就是那一格的延遲，而不是 60fps 輪詢、醒來才發現還沒到時間。
 function scheduleNextFrame(): void {
   clearFrameTimer()
   frameTimerId = setTimeout(animationStep, frameDelay())
@@ -558,31 +558,28 @@ function advanceAnimationFrame(): boolean {
     draw()
     return true
   }
-  // Non-repeating plans (notably failure) deliberately hold their final
-  // frame until the store reports the next state.
+  // 不重複的計畫（尤其是失敗）刻意停在最後一格，
+  // 等 store 回報下一個狀態。
   return false
 }
 
-// A glow canvas that just appeared has no pixels until the next frame.
+function reloadPet(): void {
+  currentFrame = 0
+  loadImage()
+  startAnimation()
+}
+
+// --- 監看 ---------------------------------------------------------------------------
+// 剛出現的光暈 canvas 在下一格之前沒有像素。
 watch([auraInnerVisible, auraOuterVisible], () => { void nextTick(draw) })
 
-watch(() => props.petId, () => {
-  currentFrame = 0
-  loadImage()
-  startAnimation()
-})
-
-watch(() => store.pets.find(pet => pet.id === props.petId)?.pluginSkin?.cacheKey, () => {
-  currentFrame = 0
-  loadImage()
-  startAnimation()
-})
-
-watch(() => store.petsLoaded, () => {
-  currentFrame = 0
-  loadImage()
-  startAnimation()
-})
+watch(() => props.petId, reloadPet)
+watch(() => currentPet.value?.pluginSkin?.cacheKey, reloadPet)
+watch(() => store.petsLoaded, reloadPet)
+// 寵物包的覆蓋值在播放中被換掉時重排，不必等下一次狀態改變。
+watch(petBehaviorManifest, () => { if (motionTable.value !== planTable) startAnimation() })
+// 只影響節奏：重算延遲表即可，不重排計畫。
+watch([() => props.lowFps, reducedMotion], updateFrameDelays)
 
 watch(() => props.state, (newState, oldState) => {
   startGhostFade()
@@ -621,6 +618,7 @@ watch(() => props.freeze, (freeze) => {
   else if (isWaiting.value) startUrgencyTimer()
 })
 
+// --- 可見性與生命週期 ---------------------------------------------------------------
 function handleDocumentVisibilityChange(): void {
   documentVisible.value = document.visibilityState === 'visible'
   if (documentVisible.value) resumeAnimation()
@@ -652,17 +650,9 @@ onUnmounted(() => {
   densityQuery?.removeEventListener('change', onDensityChange)
   clearFrameTimer()
   document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
-  if (reactionTimer !== null) {
-    clearTimeout(reactionTimer)
+  for (const timer of [reactionTimer, rewardTimer, cursorLookTimer, reactionMarkTimer, ghostTimer]) {
+    if (timer !== null) clearTimeout(timer)
   }
-  if (rewardTimer !== null) {
-    clearTimeout(rewardTimer)
-  }
-  if (cursorLookTimer !== null) {
-    clearTimeout(cursorLookTimer)
-  }
-  if (reactionMarkTimer !== null) clearTimeout(reactionMarkTimer)
-  if (ghostTimer !== null) clearTimeout(ghostTimer)
   stopFidgetTimer()
   stopUrgencyTimer()
 })

@@ -214,7 +214,7 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
       spritesheetPath: 'spritesheet.webp',
       spriteVersionNumber: atlas.version,
       kind: 'person',
-      // Same atlas contract as zip import: v2 sheets walk on the running-right row.
+      // 和 zip 匯入同一份圖集規格：v2 圖用 running-right 列走路。
       ...(atlas.version === 2 ? { behaviorManifest: { walk: { row: PET_ATLAS_WALK_ROW } } } : {}),
     }
     await deps.writeFileEnsured(deps.path.join(customDir, 'pet.json'), JSON.stringify(petJson, null, 2))

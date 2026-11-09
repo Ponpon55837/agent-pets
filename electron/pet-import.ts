@@ -206,8 +206,7 @@ export function parsePetZip(zipBytes: Uint8Array, options: ParsePetZipOptions): 
     behaviorManifest[name] = definition
   }
   const autoBehaviors: Array<'walk'> = []
-  // v2 kits animate walking from the atlas's running-right row without a
-  // manifest. v1 kits keep the previous behaviour (walk falls back to idle).
+  // v2 素材沒宣告 manifest 也會用 running-right 列走路；v1 維持原本行為（走路回退成閒置）。
   if (atlas.version === 2 && !behaviorManifest.walk) {
     behaviorManifest.walk = { row: PET_ATLAS_WALK_ROW }
     autoBehaviors.push('walk')

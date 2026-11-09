@@ -12,9 +12,8 @@ import {
   petAtlasGridFromSize,
 } from '../src/types/pet-atlas.ts'
 
-// Structural checks for imported spritesheets: the renderer slices a fixed
-// cell grid (src/types/pet-atlas.ts), so a sheet with other dimensions renders
-// as blank or garbled cells without any error. These read only the image header.
+// 匯入 spritesheet 的結構檢查：畫面端依固定格線（src/types/pet-atlas.ts）切圖，
+// 尺寸不對的圖不會報錯，只會畫成空白或錯亂的格子。這裡只讀圖片檔頭。
 
 export type SpriteValidationError = 'E_TYPE' | 'E_SIZE' | 'E_ROWS' | 'E_ORIENTATION'
 
@@ -238,8 +237,7 @@ export function readImageSize(bytes: Uint8Array): ImageSize | null {
   return null
 }
 
-// Upper bounds read from the image header (no decode needed) so a tiny, highly compressed file
-// cannot make the renderer allocate gigabytes.
+// 從檔頭讀到的上限（不必解碼）；數值定義在 pet-atlas.ts，讓一張高度壓縮的小檔無法讓畫面端配置數 GB。
 export const SPRITE_MAX_WIDTH = PET_CELL_WIDTH * PET_ATLAS_MAX_COLUMNS
 export const SPRITE_MAX_HEIGHT = PET_CELL_HEIGHT * PET_ATLAS_MAX_ROWS
 export const SPRITE_MAX_PIXELS = PET_ATLAS_MAX_PIXELS
@@ -265,8 +263,7 @@ export interface SpriteAtlasInfo extends PetImportAtlas {
 }
 
 /**
- * The image is the source of truth: 11+ rows is v2, 9-10 rows is v1. A
- * declared `spriteVersionNumber` that disagrees only produces a warning.
+ * 以圖片為準：11 列以上是 v2，9–10 列是 v1。宣告的 `spriteVersionNumber` 不一致只會產生警告。
  */
 export function detectSpriteAtlas(size: ImageSize, declaredVersion?: unknown): SpriteAtlasInfo {
   const { columns, rows } = petAtlasGridFromSize(size.width, size.height)
