@@ -56,10 +56,11 @@ import PetAnimation from '@/components/PetAnimation.vue'
 - `src/types/capabilities.ts`
 - `src/types/progression.ts`
 - `src/utils/desktop-effects.ts`
-- `src/utils/agent-state-presentation.ts`（狀態呈現 registry；執行期只相對匯入 `src/types/agent.ts`，`@/` 只用在 `import type`，Node 執行時會整段拿掉）
+- `src/utils/agent-state-presentation.ts`（狀態呈現 registry；執行期只相對匯入 `src/types/agent.ts` 與 `src/types/freeze.ts`，`@/` 只用在 `import type`，Node 執行時會整段拿掉）
 - `src/utils/toast-countdown.ts`
 - `src/types/pet-atlas.ts`（sprite 圖集規格；主程序也直接 import）。會被測試執行、又對它做值 import 的 `src/utils/pet-motion-plan.ts`、`src/utils/pet-atlas-preview.ts`、`src/utils/status-line-fit.ts` 也必須用相對路徑；只做 `import type` 的檔案不受影響（型別會被 strip 掉）
-- `src/types/sound.ts`（音效 registry；主程序 `electron/desktop-preferences.ts` 也直接 import，所以檔內沒有任何執行期 import）。對它做值 import 的 `src/utils/sound.ts`（`tests/sound-registry.test.mts` 用假的 AudioContext 動態 import）與 `src/utils/sound-policy.ts` 也必須用相對路徑
+- `src/types/freeze.ts`（registry 共用的 `deepFreeze`；`agent.ts`、`sound.ts`、`agent-state-presentation.ts` 都用相對路徑值 import 它，所以檔內不能有任何 import）
+- `src/types/sound.ts`（音效 registry；主程序 `electron/desktop-preferences.ts` 也直接 import，所以檔內唯一的執行期 import 是相對路徑的 `./freeze.ts`）。對它做值 import 的 `src/utils/sound.ts`（`tests/sound-registry.test.mts` 用假的 AudioContext 動態 import）與 `src/utils/sound-policy.ts` 也必須用相對路徑
 
 這份清單只列跟 registry 相關、最容易改錯的檔案，不是完整閉包。2026-11-10 實算：測試在執行期載入的 src `.ts` 檔有 85 個，其中 24 個自己又值 import 其他 src 檔案（除了上面幾個，還有 `src/types/ipc.ts`、`src/types/plugin*.ts`、`src/utils/panel-theme-*.ts` 等），目前全部都是相對路徑。
 

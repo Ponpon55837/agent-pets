@@ -1,6 +1,6 @@
 # Agent 來源 registry
 
-以 Agent 來源（`AgentSource`）或工具家族（`AgentFamilyKey`）為 key 的資料都寫在 `src/types/agent.ts` 的兩張表裡。兩張表都用 `as const satisfies Record<…>` 檢查，少一格或多一格都會編譯失敗，並以 `freezeRegistry` 凍結。主行程與 renderer 都 import 這個檔案；它在執行期不 import 任何其他模組。
+以 Agent 來源（`AgentSource`）或工具家族（`AgentFamilyKey`）為 key 的資料都寫在 `src/types/agent.ts` 的兩張表裡。兩張表都用 `as const satisfies Record<…>` 檢查，少一格或多一格都會編譯失敗，並以 `deepFreeze`（`src/types/freeze.ts`） 凍結。主行程與 renderer 都 import 這個檔案；它在執行期不 import 任何其他模組。
 
 | 表 | key | 欄位 |
 |---|---|---|

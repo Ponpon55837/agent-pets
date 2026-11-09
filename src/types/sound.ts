@@ -1,10 +1,11 @@
 import type { TranslationKey } from '@/i18n'
 import type { DesktopPreferences } from '@/types/desktop'
+import { deepFreeze } from './freeze.ts'
 
 // --- 音效 registry --------------------------------------------------------------
 // 每個 cue 的音形、跟哪個開關、設定頁怎麼試聽，以及節流、音量、預設值，都只寫在這個檔案。
 // 哪個 Agent 狀態播哪個 cue 不在這裡：那是 AGENT_STATE_PRESENTATION 的 cue 欄位，store 依狀態轉換決定何時播。
-// 主程序（desktop-preferences）、Node 測試、renderer 都會載入這個檔案，所以這裡只放純資料，沒有任何執行期 import。
+// 主程序（desktop-preferences）、Node 測試、renderer 都會載入這個檔案，所以這裡只放純資料；唯一的執行期 import 是同樣沒有相依的 ./freeze.ts。
 
 export type SoundCue = 'waiting-permission' | 'error' | 'success' | 'waiting-input'
 
@@ -32,14 +33,6 @@ export interface SoundCueSpec {
   readonly toggle: { readonly key: SoundCueSwitch; readonly labelKey: TranslationKey } | null
   /** 設定頁試聽按鈕的文字；null 表示不提供試聽。 */
   readonly previewKey: TranslationKey | null
-}
-
-function deepFreeze<T>(value: T): T {
-  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
-    for (const child of Object.values(value)) deepFreeze(child)
-    Object.freeze(value)
-  }
-  return value
 }
 
 // key 的順序就是設定頁開關與試聽按鈕的順序。

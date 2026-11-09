@@ -1,6 +1,7 @@
 import type { PermissionNotice } from './capabilities'
 import type { AgentAdapterId } from './agent-adapter'
 import type { AgentHost } from './host-app'
+import { deepFreeze } from './freeze.ts'
 
 export type AgentSource =
   | 'opencode-cli'
@@ -82,21 +83,7 @@ export interface AgentStatePolicy {
   readonly historyOutcome: AgentStateHistoryOutcome
 }
 
-/**
- * 凍結整張 registry 與每一列裡的巢狀物件：表是全程式共用的單一來源，
- * 任何地方誤改一格都會悄悄影響所有讀者，凍結後在嚴格模式下會直接丟錯。
- */
-export function freezeRegistry<T extends Record<string, object>>(table: T): T {
-  for (const row of Object.values(table)) {
-    for (const value of Object.values(row)) {
-      if (value && typeof value === 'object') Object.freeze(value)
-    }
-    Object.freeze(row)
-  }
-  return Object.freeze(table)
-}
-
-export const AGENT_STATE_POLICY = freezeRegistry({
+export const AGENT_STATE_POLICY = deepFreeze({
   offline: { priority: 0, notification: null, historyOutcome: 'cancelled' },
   idle: { priority: 20, notification: null, historyOutcome: 'keep' },
   thinking: { priority: 70, notification: null, historyOutcome: 'open' },
@@ -148,7 +135,7 @@ export interface AgentFamilyDefinition {
 }
 
 // 列的順序就是狀態列與設定頁的家族順序。
-export const AGENT_FAMILY_REGISTRY = freezeRegistry({
+export const AGENT_FAMILY_REGISTRY = deepFreeze({
   codex: { label: 'Codex', adapterId: 'codex', quotaProvider: true, localUsageSource: 'codex' },
   claude: { label: 'Claude', adapterId: 'claude-code', quotaProvider: true, localUsageSource: 'claude' },
   opencode: { label: 'OpenCode', adapterId: 'opencode', quotaProvider: false, localUsageSource: null },
@@ -161,7 +148,7 @@ export interface AgentSourceDefinition {
   readonly variant: 'cli' | 'desktop'
 }
 
-export const AGENT_SOURCE_REGISTRY = freezeRegistry({
+export const AGENT_SOURCE_REGISTRY = deepFreeze({
   'opencode-cli': { label: 'OpenCode CLI', family: 'opencode', variant: 'cli' },
   'opencode-desktop': { label: 'OpenCode Desktop', family: 'opencode', variant: 'desktop' },
   codex: { label: 'Codex CLI', family: 'codex', variant: 'cli' },
