@@ -58,11 +58,11 @@ import {
   UNREAD_AWAY_MS,
   WAITING_INPUT_DELAY_MS,
   formatElapsedShort,
-  shouldPlaySuccessSound,
   toastDurationFor,
   type ToastTone,
 } from '@/utils/pet-toast'
-import type { SoundCue } from '@/utils/sound'
+import { SOUND_DEFAULTS, type SoundCue } from '@/types/sound'
+import { shouldPlaySuccessSound } from '@/utils/sound-policy'
 import { AGENT_STATE_PRESENTATION } from '@/utils/agent-state-presentation'
 import { SUCCESS_DISPLAY_MS } from '@/utils/pet-motion-plan'
 import { readPetFeedbackDefaults } from '@/utils/pet-defaults'
@@ -401,13 +401,12 @@ export const useAgentStore = defineStore('agent', () => {
   const mood = ref(initialMood)
   const moodVisualsEnabled = ref(localStorage.getItem('agent-pet-mood-visuals') !== '0')
 
-  // Off by default so the app doesn't surprise anyone with sudden audio;
-  // opt-in via the Settings toggle.
+  // 主程序的偏好設定送到之前先用 localStorage 快取；只有 '1' 算開，沒有快取時跟 SOUND_DEFAULTS.soundEnabled 一樣是關。
   const soundEnabled = ref(localStorage.getItem('agent-pet-sound') === '1')
-  const soundVolume = ref(60)
-  const soundOnPermission = ref(true)
-  const soundOnError = ref(true)
-  const soundOnSuccess = ref(true)
+  const soundVolume = ref(SOUND_DEFAULTS.soundVolume)
+  const soundOnPermission = ref(SOUND_DEFAULTS.soundOnPermission)
+  const soundOnError = ref(SOUND_DEFAULTS.soundOnError)
+  const soundOnSuccess = ref(SOUND_DEFAULTS.soundOnSuccess)
 
   // Off by default — showing one pet per active tool family is a bigger
   // visual/layout change than the other additions, so it stays opt-in

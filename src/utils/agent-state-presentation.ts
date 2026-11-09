@@ -1,5 +1,5 @@
 import type { TranslationKey } from '@/i18n'
-import type { SoundCue } from '@/utils/sound'
+import type { SoundCue } from '@/types/sound'
 // 測試會直接用 Node 執行這個檔案，執行期 import 必須是相對路徑（見 agent-pets-conventions §1）。
 import { freezeRegistry, isAgentState, type AgentState } from '../types/agent.ts'
 
