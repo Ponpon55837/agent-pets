@@ -50,7 +50,7 @@
 ## 殘餘風險
 
 - 只在 macOS 驗證；Windows／Linux 未實測。
-- 最早一次用 hook 驅動（還在用 27673 埠、直接呼叫腳本的版本）時，PreToolUse、StopFailure、Stop 三個事件沒有反映在畫面上。之後改用 `scripts/e2e-real-hook.mts` 跑的 40 個事件都沒有重現，原因未確認；hook 的 fetch 有 300 ms 逾時、逾時會靜默放棄，是可能的原因之一。
+- 最早一次用 hook 驅動（還在用 27673 埠、直接呼叫腳本的版本）時，PreToolUse、StopFailure、Stop 三個事件沒有反映在畫面上。已在 1.12.4 查明並修正：hook 的 300 ms 時限在機器忙碌時，會在請求送出前就到期（見 [phase-hook-delivery.md](phase-hook-delivery.md)）。
 - 使用者手動編輯 `custom/<id>/pet.json` 時，主程序只做上下限檢查，實際列數檢查在畫面端。
 
 ## 版本

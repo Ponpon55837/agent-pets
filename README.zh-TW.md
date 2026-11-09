@@ -143,7 +143,7 @@ Agent 要求權限時，寵物上會出現液態玻璃氣泡，面板內也會�
 
 ## 事件伺服器
 
-Hook 會附上每次安裝專屬的 `X-Agent-Pets-Token` 標頭（讀自 `~/.desktop-pet/event-token`），把狀態送到 `http://127.0.0.1:17373/v1/events`。
+Hook 會附上每次安裝專屬的 `X-Agent-Pets-Token` 標頭（讀自 `~/.desktop-pet/event-token`），把狀態送到 `http://127.0.0.1:17373/v1/events`。每個 hook 最多花 1.5 秒把事件送出、再等 0.25 秒回應；寵物沒開時會立刻結束，不會拖慢 agent（見 [docs/dev/hook-delivery.md](docs/dev/hook-delivery.md)）。
 
 ```json
 { "source": "codex", "sessionId": "sess_abc123", "state": "thinking", "timestamp": 1735689600000 }

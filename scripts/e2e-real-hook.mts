@@ -4,7 +4,8 @@
 // 從那份 settings 讀出 hook 指令、以 stdin 送 payload，再經 CDP 讀寵物畫面。可選的寵物包會先經主程序 loadPets 清理。
 // 用法（先 pnpm exec vite build，並用預設隔離埠啟動 node scripts/e2e-isolated-electron.mjs）：
 //   node --experimental-strip-types scripts/e2e-real-hook.mts --home <啟動日誌的 home> [--debug-port 9348]
-//        [--hook-port-base 27373] [--pet-pack]
+//        [--hook-port-base 27373] [--pet-pack] [--rounds 1]
+// --rounds N 把整組 8 個事件重複 N 輪（每輪換新 session），用來大量確認每個事件都畫到寵物上。
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -20,6 +21,8 @@ const home = arg('--home')
 const cdpPort = arg('--debug-port', '9348')
 const portBase = Number(arg('--hook-port-base', '27373'))
 const withPetPack = process.argv.includes('--pet-pack')
+const rounds = Number(arg('--rounds', '1'))
+assert.ok(Number.isInteger(rounds) && rounds >= 1 && rounds <= 500, '--rounds must be an integer between 1 and 500')
 assert.ok(Number.isInteger(portBase) && portBase >= 1024 && portBase <= 65533 && portBase !== 17373, 'use the isolated ports, never 17373')
 const realHome = os.homedir()
 assert.ok(home && fs.existsSync(path.join(home, '.desktop-pet', 'event-token')) && !home.startsWith(realHome + path.sep) && home !== realHome, 'isolated HOME required')
@@ -118,10 +121,9 @@ if (withPetPack) {
   console.log('manifest from main:', loaded)
 }
 
-const sessionId = `hook-e2e-${Date.now().toString(36)}`
-const base = { session_id: sessionId, cwd: '/tmp/hook-e2e' }
 // [hook 事件, payload, 預期 session 狀態, 內建寵物畫的列, 寵物包畫的列]
-const steps: Array<[string, Record<string, unknown>, string, string, string]> = [
+type Step = [string, Record<string, unknown>, string, string, string]
+const stepsFor = (base: Record<string, unknown>): Step[] => [
   ['SessionStart', base, 'idle', 'idle@0', 'idle@9'],
   ['UserPromptSubmit', { ...base, prompt: 'x' }, 'thinking', 'review@8', 'review@10'],
   ['PreToolUse', { ...base, tool_name: 'Bash', tool_input: { command: 'ls' } }, 'tool-running', 'running@7', 'running@7'],
@@ -131,14 +133,22 @@ const steps: Array<[string, Record<string, unknown>, string, string, string]> = 
   ['Stop', base, 'success', 'jumping@4', 'jumping@4'],
   ['SessionEnd', base, 'offline', 'idle@0', 'idle@9'],
 ]
+const runTag = Date.now().toString(36)
 let failures = 0
-for (const [eventName, payload, expectedState, builtinDraw, packDraw] of steps) {
-  const status = runHook(eventName, payload)
-  const seen = await cdp(PEEK(sessionId)) as { session: string | null; draw: string }
-  const expectedDraw = withPetPack ? packDraw : builtinDraw
-  const ok = status === 0 && seen.session === expectedState && seen.draw === expectedDraw
-  if (!ok) failures += 1
-  console.log(ok ? 'ok  ' : 'FAIL', eventName.padEnd(17), `exit=${status}`, JSON.stringify(seen), ok ? '' : `expected ${expectedState} ${expectedDraw}`)
+let total = 0
+for (let round = 0; round < rounds; round += 1) {
+  const sessionId = `hook-e2e-${runTag}-${round}`
+  for (const [eventName, payload, expectedState, builtinDraw, packDraw] of stepsFor({ session_id: sessionId, cwd: '/tmp/hook-e2e' })) {
+    const status = runHook(eventName, payload)
+    const seen = await cdp(PEEK(sessionId)) as { session: string | null; draw: string }
+    const expectedDraw = withPetPack ? packDraw : builtinDraw
+    const ok = status === 0 && seen.session === expectedState && seen.draw === expectedDraw
+    total += 1
+    if (!ok) failures += 1
+    if (!ok || rounds === 1) {
+      console.log(ok ? 'ok  ' : 'FAIL', `r${round}`, eventName.padEnd(17), `exit=${status}`, JSON.stringify(seen), ok ? '' : `expected ${expectedState} ${expectedDraw}`)
+    }
+  }
 }
-console.log(failures === 0 ? `all ${steps.length} hook events rendered as expected` : `${failures} of ${steps.length} hook events did not match`)
+console.log(failures === 0 ? `all ${total} hook events rendered as expected` : `${failures} of ${total} hook events did not match`)
 process.exitCode = failures === 0 ? 0 : 1

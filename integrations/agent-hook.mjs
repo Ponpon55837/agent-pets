@@ -2,6 +2,7 @@
 
 import { createHash, randomBytes } from 'crypto'
 import fs from 'fs'
+import http from 'http'
 import os from 'os'
 import path from 'path'
 
@@ -16,6 +17,11 @@ const POLL_INTERVAL_MS = 450
 const MIN_WAIT_SECONDS = 15
 const MAX_WAIT_SECONDS = 120
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
+// 狀態事件的時限。請求一旦交給作業系統，app 晚點才讀也收得到（即使這個程序已結束），
+// 所以長時限只涵蓋把事件送出去（機器很忙時可能要將近 1 秒），送出後只短暫等 204 就離開。
+// 數值的量測依據見 docs/dev/hook-delivery.md。
+const STATUS_SEND_DEADLINE_MS = 1500
+const STATUS_ANSWER_GRACE_MS = 250
 // Fixed text: the reason Claude sees must never echo request content back.
 const DENY_MESSAGE = 'Denied in Agent Pets. (已在 Agent Pets 拒絕)'
 
@@ -295,6 +301,48 @@ async function resolveClaudePermissions(eventName, payload) {
   await permissionPost(token, 'resolved-session', { source, instanceId: ids.instanceId }, 1000)
 }
 
+/**
+ * 用 node:http 而不是 fetch：fetch 第一次呼叫的初始化在忙碌的機器上就可能吃掉好幾百毫秒。
+ * 不會 reject；寵物沒開時連線立刻被拒，其他情況也都在送出時限內結束。
+ */
+function postStatus(eventToken, event) {
+  const body = JSON.stringify(event)
+  return new Promise((resolve) => {
+    let timer = null
+    let settled = false
+    const request = http.request(PET_URL, {
+      method: 'POST',
+      agent: false,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(body),
+        'x-agent-pets-token': eventToken,
+      },
+    }, (response) => {
+      // 回應中途斷線時立刻結束，不必等完寬限時間。
+      response.on('error', done)
+      response.once('end', done)
+      response.resume()
+    })
+    function done() {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      request.destroy()
+      resolve()
+    }
+    // 用 on 而不是 once：銷毀還沒回應的請求可能再發出一次 error。
+    request.on('error', done)
+    request.once('finish', () => {
+      if (settled) return
+      clearTimeout(timer)
+      timer = setTimeout(done, STATUS_ANSWER_GRACE_MS)
+    })
+    timer = setTimeout(done, STATUS_SEND_DEADLINE_MS)
+    request.end(body)
+  })
+}
+
 const RESOLVING_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'UserPromptSubmit', 'SessionEnd'])
 
 async function main() {
@@ -357,19 +405,7 @@ async function main() {
       ? (pending ? pollPermissionDecision(pending, waitSeconds) : null)
       : resolveClaudePermissions(eventName, payload)
 
-  try {
-    await fetch(PET_URL, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-agent-pets-token': eventToken,
-      },
-      body: JSON.stringify(event),
-      signal: AbortSignal.timeout(300),
-    })
-  } catch {
-    // Desktop pet not running, ignore
-  }
+  await postStatus(eventToken, event)
   if (permissionWork) await permissionWork
 }
 

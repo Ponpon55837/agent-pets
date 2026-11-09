@@ -143,7 +143,7 @@ The panel keeps a list of configured projects with status Connected, Partially c
 
 ## Event server
 
-Hooks post status updates to `http://127.0.0.1:17373/v1/events` with the per-install `X-Agent-Pets-Token` header (read from `~/.desktop-pet/event-token`).
+Hooks post status updates to `http://127.0.0.1:17373/v1/events` with the per-install `X-Agent-Pets-Token` header (read from `~/.desktop-pet/event-token`). A hook spends at most 1.5 s getting the event out and 0.25 s waiting for the reply, and stops at once when the pet is not running, so an agent is never held up ([docs/dev/hook-delivery.md](docs/dev/hook-delivery.md)).
 
 ```json
 { "source": "codex", "sessionId": "sess_abc123", "state": "thinking", "timestamp": 1735689600000 }
