@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   AGENT_FAMILY_KEYS,
+  AGENT_STATES,
   AGENT_FAMILY_REGISTRY,
   AGENT_SOURCE_REGISTRY,
   ALL_SOURCES,
@@ -166,4 +168,25 @@ test('the registries and every derived table are frozen', () => {
   assert.throws(() => { (AGENT_SOURCE_REGISTRY.claude as { family: string }).family = 'codex' }, TypeError)
   assert.throws(() => { (AGENT_FAMILY_REGISTRY.claude as { quotaProvider: boolean }).quotaProvider = false }, TypeError)
   assert.throws(() => { (FAMILY_SOURCES.claude as string[]).push('codex') }, TypeError)
+})
+
+// hook 是獨立部署的腳本，不能 import registry，所以只能從原始碼讀出它手寫的來源清單比對。
+test('the hook script only sends sources the registry knows', () => {
+  const hook = readFileSync(new URL('../integrations/agent-hook.mjs', import.meta.url), 'utf8')
+  const match = hook.match(/^const validSources = \[([^\]]*)\]/m)
+  assert.ok(match, 'validSources literal not found in agent-hook.mjs')
+  const sources = [...match[1].matchAll(/'([^']+)'/g)].map(m => m[1])
+  assert.ok(sources.length > 0)
+  for (const source of sources) assert.ok(isAgentSource(source), source)
+})
+
+test('the event normalizer accepts every registry state plus the legacy waiting state', () => {
+  const base = { source: 'claude', sessionId: 's1', timestamp: 1 }
+  for (const state of AGENT_STATES) {
+    const result = normalizeAgentStatusEvent({ ...base, state }, 2)
+    assert.equal(result.ok, true, state)
+  }
+  const legacy = normalizeAgentStatusEvent({ ...base, state: 'waiting' }, 2)
+  assert.ok(legacy.ok && legacy.event.state === 'waiting-permission')
+  assert.deepEqual(normalizeAgentStatusEvent({ ...base, state: 'constructor' }, 2), { ok: false, error: 'invalid state' })
 })

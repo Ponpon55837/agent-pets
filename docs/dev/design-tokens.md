@@ -32,7 +32,7 @@
 
 - `transition` 寫死時長會失敗（`literal-transition`）；寫死 `cubic-bezier()` 會失敗（`literal-easing`）。`ease-in-out`、`linear` 這類關鍵字可以直接寫。
 - keyframe 動畫：同一種語意在兩處以上重複的時長才收成 `--duration-*`；寵物 sprite 反應等只出現一次的裝飾動畫保留字面值，列為 `raw-motion`。
-- 要和程式計時器同步的時長由程式提供：權限倒數條的 width transition 用 `PERMISSION_CLOCK_INTERVAL_MS`（`src/components/permission/usePermissionClock.ts`）。寵物反應標記（`PetAnimation.vue` 的 1400 ms）與設定區塊閃爍（`SettingsPage.vue` 的 1400 ms）目前仍是 CSS 與 TS 各寫一份。
+- 要和程式計時器同步的時長由程式提供：權限倒數條的 width transition 用 `PERMISSION_CLOCK_INTERVAL_MS`（`src/components/permission/usePermissionClock.ts`）。寵物反應標記（`PetAnimation.vue` 的 `REACTION_MARK_MS`）與設定區塊閃爍（`SettingsPage.vue` 的 `SECTION_FLASH_MS`）由元件以行內樣式設定 `--pet-mark-duration`、`--settings-flash-duration`，CSS 只讀這兩個變數，不另寫時長。
 
 ### 減少動態
 

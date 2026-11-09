@@ -176,7 +176,7 @@
   z-index: calc(var(--z-base) + 4);
   color: var(--state-warn-bright);
   pointer-events: none;
-  animation: pet-mark-float 1.4s ease-out forwards;
+  animation: pet-mark-float var(--pet-mark-duration) ease-out forwards;
 }
 
 @keyframes pet-mark-float {
@@ -268,7 +268,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .pet-reaction-mark {
-    animation: pet-mark-fade 1.4s ease-out forwards;
+    animation: pet-mark-fade var(--pet-mark-duration) ease-out forwards;
   }
 
   /* No shake, bounce, sway or glow: the sprite row itself carries the state. */

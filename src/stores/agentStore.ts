@@ -334,7 +334,9 @@ export const useAgentStore = defineStore('agent', () => {
     familyPetIds.value = parseFamilyPetIds(json)
   }
 
+  // 寫入路徑跟讀取（parseFamilyPetIds）用同一個白名單：不是家族 registry 裡的 key 一律忽略。
   function setFamilyPet(familyKey: string, petId: string | null) {
+    if (!isAgentFamilyKey(familyKey)) return
     const next = { ...familyPetIds.value }
     if (petId) {
       next[familyKey] = petId
@@ -348,7 +350,7 @@ export const useAgentStore = defineStore('agent', () => {
   // Falls back to the global default if the family has no override, or its
   // override points at a pet that's since been removed/hidden.
   function getPetForFamily(familyKey: string): string {
-    const override = familyPetIds.value[familyKey]
+    const override = Object.hasOwn(familyPetIds.value, familyKey) ? familyPetIds.value[familyKey] : undefined
     if (override && visiblePets.value.some(p => p.id === override)) {
       return override
     }

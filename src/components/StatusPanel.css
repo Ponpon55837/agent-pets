@@ -943,7 +943,7 @@
 }
 
 .status-panel :deep(.settings-section.flash) {
-  animation: settings-section-flash 1.4s ease-out;
+  animation: settings-section-flash var(--settings-flash-duration) ease-out;
 }
 
 @keyframes settings-section-flash {

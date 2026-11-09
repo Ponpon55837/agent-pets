@@ -123,7 +123,13 @@ function main() {
   const wanted = LIPO_ARCH[arch]
   const candidates = listMachOCandidates(app)
   for (const relative of candidates) {
-    const archs = parseLipoArchs(execFileSync('lipo', ['-archs', join(app, relative)], { encoding: 'utf8' }))
+    let archs
+    try {
+      archs = parseLipoArchs(execFileSync('lipo', ['-archs', join(app, relative)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }))
+    } catch (error) {
+      problems.push(`${relative}: lipo failed (${String(error.stderr || error.message).trim()})`)
+      continue
+    }
     if (!archs.includes(wanted)) problems.push(`${relative}: ${archs.join(' ') || 'no architecture'}, expected ${wanted}`)
   }
   console.log(`checked ${candidates.length} Mach-O files for ${wanted}`)
