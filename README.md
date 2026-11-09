@@ -213,7 +213,7 @@ pnpm dev
 | `pnpm build` / `pnpm build:fast` | Type check, Vite build, then electron-builder into `release/` (`build:fast` skips compression) |
 | `pnpm bench`, `pnpm bench:lag` | Performance benchmarks |
 
-Both build commands first close project-owned Agent Pets processes. To check a change in a real Electron app without touching your data, run `pnpm exec vite build` then `node scripts/e2e-isolated-electron.mjs` (temporary home and userData, fake `safeStorage`, so macOS Keychain is never touched; its local ports default to 27373–27375 so an installed copy keeps 17373–17375 — `--hook-port-base` picks another range, `--real-hook-ports` uses the defaults; see [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)).
+Both build commands first close project-owned Agent Pets processes. To check a change in a real Electron app without touching your data, run `pnpm exec vite build` then `node scripts/e2e-isolated-electron.mjs` (temporary home and userData, fake `safeStorage`, so macOS Keychain is never touched; its local ports default to 27373–27375 so an installed copy keeps 17373–17375 — `--hook-port-base` picks another range, `--real-hook-ports` uses the defaults, `--reuse-root` restarts with an earlier run's home for cold-start tests; see [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)).
 
 **Dev port overrides** — unpackaged runs may set `AGENT_PETS_EVENT_PORT`, `AGENT_PETS_PERMISSION_PORT` and `AGENT_PETS_PRESENTATION_PORT` (1024–65535; defaults 17373, 17374, 17375) so they do not fight an installed copy. Packaged builds ignore them.
 
