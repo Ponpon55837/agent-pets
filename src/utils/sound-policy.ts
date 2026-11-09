@@ -1,29 +1,21 @@
-import type { SoundCue } from '@/utils/sound'
+// 測試會直接用 Node 執行這個檔案，執行期 import 必須是相對路徑（見 agent-pets-conventions §1）。
+import { SOUND_CUE_REGISTRY, SOUND_POLICY, type SoundCue, type SoundCueSwitch } from '../types/sound.ts'
 
-export interface SoundGate {
-  soundEnabled: boolean
-  dndEnabled: boolean
-  soundOnPermission: boolean
-  soundOnError: boolean
-  soundOnSuccess: boolean
+export interface SoundGate extends Readonly<Record<SoundCueSwitch, boolean>> {
+  readonly soundEnabled: boolean
+  readonly dndEnabled: boolean
   /** 寵物視窗確實在螢幕上（沒有被全螢幕或收進系統匣）。 */
-  petVisible: boolean
+  readonly petVisible: boolean
 }
 
-type CueSwitch = 'soundOnPermission' | 'soundOnError' | 'soundOnSuccess'
-
-// 每個 cue 各自的開關；null 表示只跟總開關（waiting-input 沒有獨立開關）。
-// 用 Record 讓新增 cue 時一定要決定它跟哪個開關。
-const CUE_SWITCHES: Record<SoundCue, CueSwitch | null> = {
-  'waiting-permission': 'soundOnPermission',
-  error: 'soundOnError',
-  success: 'soundOnSuccess',
-  'waiting-input': null,
-}
-
-/** 這個音效能不能播：總開關、勿擾、各音效開關與可見性都要通過。 */
+/** 這個音效能不能播：總開關、勿擾、可見性與 registry 指定的 cue 開關都要通過。 */
 export function shouldPlayCue(cue: SoundCue, gate: SoundGate): boolean {
   if (!gate.soundEnabled || gate.dndEnabled || !gate.petVisible) return false
-  const cueSwitch = CUE_SWITCHES[cue]
-  return cueSwitch ? gate[cueSwitch] : true
+  const toggle = SOUND_CUE_REGISTRY[cue].toggle
+  return toggle ? gate[toggle.key] : true
+}
+
+/** 完成的任務值不值得出聲；不知道耗時（undefined 或非有限值）時照樣播。 */
+export function shouldPlaySuccessSound(elapsedMs: number | undefined): boolean {
+  return elapsedMs === undefined || !Number.isFinite(elapsedMs) || elapsedMs >= SOUND_POLICY.successMinElapsedMs
 }

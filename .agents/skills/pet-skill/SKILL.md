@@ -26,6 +26,7 @@ Work in Traditional Chinese for user-facing plans, phase reports, and handoffs. 
 - Keep MCP presentation-only: status, reaction, and speech. Do not add command, file, permission, XP, or achievement mutation tools.
 - Keep mood short-term and XP long-term. Use idempotent ledgers for durable rewards.
 - Extract focused services from `electron/main.ts` incrementally; do not combine a feature with a broad rewrite.
+- Keep per-state data in the agent-state registries and per-cue sound data in `src/types/sound.ts`; do not add a parallel switch or table (see [project-map.md](references/project-map.md)).
 - Treat Traditional Chinese UI copy as a cross-phase acceptance requirement; do not add a new user-visible surface without its Traditional Chinese wording or an explicitly recorded localization gap.
 - Reuse `src/i18n.ts` for renderer and Electron-native user-visible copy; keep canonical status, agent, MCP, and token terms stable when they are part of an external contract.
 

@@ -219,6 +219,8 @@ pnpm dev
 
 **Agent 狀態** — 依狀態而定的資料都集中在兩張以 `satisfies Record<AgentState, …>` 檢查的表：`src/types/agent.ts` 的 `AGENT_STATE_POLICY`（優先度、桌面通知、歷史結局，主行程共用）與 `src/utils/agent-state-presentation.ts` 的 `AGENT_STATE_PRESENTATION`（標籤、顏色、螢幕閱讀器文字、狀態列用字、迷你徽章、音效）。新增狀態時兩張表沒填齊，型別檢查就會失敗。唯一的例外是每個狀態對應的寵物動作：它要看前一個狀態與時間，所以留在 `src/utils/pet-motion-plan.ts` 用邏輯判斷。
 
+**音效** — 哪個狀態播哪個 cue，由 `AGENT_STATE_PRESENTATION` 的 `cue` 欄位決定。其餘跟音效有關的資料都在 `src/types/sound.ts`，以 `satisfies Record<SoundCue, …>` 檢查並深層凍結。表裡有每個 cue 的音形（頻率、時間、增益、波形）、對應的開關和試聽按鈕，也有共用的包絡、同一個 cue 3 秒內只播一次的節流、任務至少跑 15 秒完成時才出聲的門檻、0–100 的音量範圍，以及主行程也會用到的持久化預設值。`src/utils/sound.ts` 只負責排程 Web Audio 節點；`src/utils/sound-policy.ts` 只判斷能不能播，條件是音效開著、沒開勿擾、寵物看得到，而且這個 cue 自己的開關也開著。`tests/sound-registry.test.mts` 會比對每個狀態排程出去的聲音，確認跟改成 registry 之前完全相同；見 [docs/dev/sound-registry.md](docs/dev/sound-registry.md)。
+
 在原始碼目錄執行 `node integrations/install.mjs` 可用與精靈相同的保護機制安裝 hook（`--claude-code` 只處理 Claude Code，`--uninstall` 則移除）。
 
 **CI** — `ci.yml` 在 pull request 與 `main` 推送涉及文件以外的變更時執行：型別檢查、`pnpm lint`、`pnpm test:coverage`、`vite build`、bundle 大小、插件面板 bundle 與對比度檢查、設計 token 報告，以及不阻擋合併的相依套件稽核。`ci-platforms.yml` 每週與手動觸發時，在 macOS 與 Windows 上執行型別檢查與單元測試。
