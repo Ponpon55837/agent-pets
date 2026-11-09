@@ -1,7 +1,8 @@
 import type { TranslationKey } from '@/i18n'
-import type { SoundCue } from '@/utils/sound'
+import type { SoundCue } from '@/types/sound'
 // 測試會直接用 Node 執行這個檔案，執行期 import 必須是相對路徑（見 agent-pets-conventions §1）。
-import { freezeRegistry, isAgentState, type AgentState } from '../types/agent.ts'
+import { isAgentState, type AgentState } from '../types/agent.ts'
+import { deepFreeze } from '../types/freeze.ts'
 
 // --- 狀態 registry（renderer 畫面呈現） ------------------------------------------
 // 每個 AgentState 在畫面上的樣子只寫在這一張表；satisfies 讓新增狀態時漏填任何一格都編譯失敗。
@@ -31,7 +32,7 @@ export interface AgentStatePresentation {
   readonly cue: SoundCue | null
 }
 
-export const AGENT_STATE_PRESENTATION = freezeRegistry({
+export const AGENT_STATE_PRESENTATION = deepFreeze({
   offline: {
     label: 'Offline', shortLabel: 'Offline', color: 'var(--state-offline)',
     ariaKey: 'pet.stateOffline', lineWord: 'Offline',

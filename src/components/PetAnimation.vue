@@ -144,6 +144,9 @@ const REACTION_MARKS: Record<PresentationReaction, string> = {
 const REACTION_DURATION_MS: Record<PresentationReaction, number> = {
   happy: 560, curious: 760, thinking: 900, surprised: 420, encouraging: 700,
 }
+// 反應標記的 CSS 動畫長度由這個常數經 --pet-mark-duration 帶進去，計時器與動畫只有一個來源。
+const REACTION_MARK_MS = 1400
+const reactionMarkStyle = { '--pet-mark-duration': `${REACTION_MARK_MS}ms` }
 const reactionMark = ref<{ id: number; icon: string } | null>(null)
 let reactionMarkTimer: ReturnType<typeof setTimeout> | null = null
 let reactionMarkId = 0
@@ -159,7 +162,7 @@ function playReaction(kind?: PresentationReaction) {
   if (kind) {
     reactionMark.value = { id: ++reactionMarkId, icon: REACTION_MARKS[kind] }
     if (reactionMarkTimer) clearTimeout(reactionMarkTimer)
-    reactionMarkTimer = setTimeout(() => { reactionMark.value = null }, 1400)
+    reactionMarkTimer = setTimeout(() => { reactionMark.value = null }, REACTION_MARK_MS)
   }
 }
 
@@ -732,6 +735,7 @@ onUnmounted(() => {
         v-if="reactionMark"
         :key="reactionMark.id"
         class="pet-reaction-mark"
+        :style="reactionMarkStyle"
         aria-hidden="true"
       >
         <Icon :name="reactionMark.icon" :size="16" />

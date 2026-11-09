@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { locale, t } from '@/i18n'
-import { SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
+import { FAMILY_SOURCES, familyOfSource, isAgentFamilyKey, QUOTA_FAMILY_KEYS, SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
 import type { PluginEventSourceState, PluginEventSourceStatusView } from '@/types/plugin'
 import { useQuotaFormat } from '@/composables/useQuotaFormat'
 import SessionRow from '@/components/status-panel/SessionRow.vue'
@@ -41,7 +41,7 @@ const counts = computed(() => countByBucket(activeSessionList.value))
 const labels = computed(() => projectLabels(store.sessionList.map(session => session.project)))
 const groups = computed(() => groupSessions(store.sessionList, {
   filter: filter.value,
-  sources: sourceFamily.value === 'all' ? null : SOURCE_FAMILIES.find(family => family.key === sourceFamily.value)?.sources ?? null,
+  sources: isAgentFamilyKey(sourceFamily.value) ? FAMILY_SOURCES[sourceFamily.value] : null,
   sort: sort.value,
 }))
 const visibleGroups = computed(() => ([
@@ -55,11 +55,11 @@ const filterOptions = computed(() => [
   { value: 'running', label: t('panel.filterRunning'), badge: counts.value.running },
 ])
 const activeToolFamilyCount = computed(() => new Set(
-  activeSessionList.value.map(session => SOURCE_FAMILIES.find(family => family.sources.includes(session.source))?.key ?? session.source),
+  activeSessionList.value.map(session => familyOfSource(session.source) ?? session.source),
 ).size)
 const noMatches = computed(() => visibleGroups.value.length === 0 && activeSessionList.value.length > 0)
 const quotaStripFamilies = computed(() => (
-  (['codex', 'claude'] as const).flatMap((id) => {
+  QUOTA_FAMILY_KEYS.flatMap((id) => {
     const quota = store.quotaByFamily[id]
     if (!quota) return []
     // 標籤來自提供者的 payload，新增提供者時這裡不必改。

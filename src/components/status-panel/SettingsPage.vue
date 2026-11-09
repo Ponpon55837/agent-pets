@@ -41,6 +41,9 @@ const searchField = ref<InstanceType<typeof TextField> | null>(null)
 const searching = computed(() => query.value.trim().length > 0)
 const results = computed(() => searchSettings(query.value, key => t(key)))
 const scroller = ref<HTMLElement | null>(null)
+// 區塊閃爍的 CSS 動畫長度由這個常數經 --settings-flash-duration 帶進去，計時器與動畫只有一個來源。
+const SECTION_FLASH_MS = 1400
+const sectionFlashStyle = { '--settings-flash-duration': `${SECTION_FLASH_MS}ms` }
 const flashSection = ref<SettingsSectionId | null>(null)
 const moreAbove = ref(false)
 const moreBelow = ref(false)
@@ -71,7 +74,7 @@ function scrollToSection(section: SettingsSectionId): void {
   el.scrollIntoView({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' })
   if (flashTimer) clearTimeout(flashTimer)
   flashSection.value = section
-  flashTimer = setTimeout(() => { flashSection.value = null }, reduceMotion ? 0 : 1400)
+  flashTimer = setTimeout(() => { flashSection.value = null }, reduceMotion ? 0 : SECTION_FLASH_MS)
 }
 
 async function openResult(section: SettingsSectionId): Promise<void> {
@@ -183,6 +186,7 @@ defineExpose({ scrollToSection })
         <p class="sr-only" role="status" aria-live="polite">{{ t('panel.searchCount', { count: results.length }) }}</p>
         <ul v-if="results.length > 0" class="settings-result-list">
           <li v-for="hit in results" :key="hit.entry.id">
+            <!-- raw-control: 搜尋結果整列，內含標題、說明與所在分組，不是動作按鈕 -->
             <button type="button" class="settings-result" @click="openHit(hit.entry)">
               <span class="settings-result-copy">
                 <span class="settings-result-label">{{ hit.label }}</span>
@@ -212,6 +216,7 @@ defineExpose({ scrollToSection })
           :key="section"
           class="settings-section"
           :class="{ flash: flashSection === section }"
+          :style="flashSection === section ? sectionFlashStyle : undefined"
           :data-settings-section="section"
         >
           <component :is="sectionComponents[section]" v-bind="sectionProps(section)" />

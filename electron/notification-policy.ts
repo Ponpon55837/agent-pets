@@ -1,6 +1,6 @@
 import type { AgentStatusEvent } from './event-server'
 import { t, type TranslationKey } from '../src/i18n.ts'
-import { AGENT_STATE_POLICY, isAgentState, type NotifiableAgentState } from '../src/types/agent.ts'
+import { AGENT_FAMILY_REGISTRY, AGENT_SOURCE_REGISTRY, AGENT_STATE_POLICY, isAgentSource, isAgentState, type NotifiableAgentState } from '../src/types/agent.ts'
 
 export type NotificationKind = NotifiableAgentState | 'achievement' | 'summary'
 
@@ -14,13 +14,9 @@ export interface NotificationCandidate {
   session?: { source: string; sessionId: string }
 }
 
-const SOURCE_NAMES: Record<string, string> = {
-  'opencode-cli': 'OpenCode',
-  'opencode-desktop': 'OpenCode',
-  codex: 'Codex',
-  'codex-desktop': 'Codex',
-  claude: 'Claude',
-  'claude-desktop': 'Claude',
+// 通知標題用家族名稱（CLI 與 Desktop 同名）；來源不在 registry 裡時退回通用字。
+function sourceName(source: unknown): string {
+  return isAgentSource(source) ? AGENT_FAMILY_REGISTRY[AGENT_SOURCE_REGISTRY[source].family].label : 'Agent'
 }
 
 // 哪些狀態要通知、是不是結束類由 AGENT_STATE_POLICY 決定；這裡只補主程序才有的標題文案。
@@ -56,7 +52,7 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
   if (event.originalEvent === 'AgentPetsIntegrationTest') return null
   if (!isNotifiableState(event.state)) return null
 
-  const source = SOURCE_NAMES[event.source] ?? 'Agent'
+  const source = sourceName(event.source)
   const project = displayText(event.project)
   const body = project || t('agentTask')
   const keyBase = `${event.source}:${event.sessionId}`

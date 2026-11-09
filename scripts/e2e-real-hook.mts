@@ -6,9 +6,14 @@
 //   node --experimental-strip-types scripts/e2e-real-hook.mts --home <啟動日誌的 home> [--debug-port 9348]
 //        [--hook-port-base 27373] [--pet-pack] [--rounds 1]
 // --rounds N 把整組 8 個事件重複 N 輪（每輪換新 session），用來大量確認每個事件都畫到寵物上。
+// 冷啟動模式（先結束隔離 app，HOME 要是跑過一次這支腳本的）：
+//   node --experimental-strip-types scripts/e2e-real-hook.mts --home <home> --cold-start 150 [--interval 40]
+// 以 --reuse-root 重新啟動隔離 app，從啟動那一刻起每 --interval ms 對一個新 session 送一個 Stop，
+// 最後檢查每個 session 是否都出現在寵物的 store，並列出 hook 耗時。
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -22,12 +27,17 @@ const cdpPort = arg('--debug-port', '9348')
 const portBase = Number(arg('--hook-port-base', '27373'))
 const withPetPack = process.argv.includes('--pet-pack')
 const rounds = Number(arg('--rounds', '1'))
+const coldStart = Number(arg('--cold-start', '0'))
+const coldInterval = Number(arg('--interval', '40'))
+assert.ok(Number.isInteger(coldStart) && coldStart >= 0 && coldStart <= 1000, '--cold-start must be an integer between 0 and 1000')
+assert.ok(Number.isInteger(coldInterval) && coldInterval >= 5 && coldInterval <= 1000, '--interval must be an integer between 5 and 1000')
 assert.ok(Number.isInteger(rounds) && rounds >= 1 && rounds <= 500, '--rounds must be an integer between 1 and 500')
 assert.ok(Number.isInteger(portBase) && portBase >= 1024 && portBase <= 65533 && portBase !== 17373, 'use the isolated ports, never 17373')
 const realHome = os.homedir()
 assert.ok(home && fs.existsSync(path.join(home, '.desktop-pet', 'event-token')) && !home.startsWith(realHome + path.sep) && home !== realHome, 'isolated HOME required')
 
 const { configureSetupEnvironment } = await import(path.join(repoRoot, 'electron/setup-environment.ts'))
+const { hookStartupMarkerName } = await import(path.join(repoRoot, 'electron/main/hook-startup-marker.ts'))
 const setup = await import(path.join(repoRoot, 'electron/setup.ts'))
 configureSetupEnvironment({
   homeDir: () => home,
@@ -91,6 +101,120 @@ const PEEK = (sessionId: string) => `(async () => {
   const s = Object.values(store.sessions).find(x => x.sessionId === ${JSON.stringify(sessionId)})
   return { session: s?.state ?? null, current: store.currentState, pet: store.activePetId, draw: c.dataset.animationAction + '@' + c.dataset.animationRow }
 })()`
+
+function portOpen(port: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const socket = net.connect(port, '127.0.0.1')
+    socket.once('connect', () => { socket.destroy(); resolve(true) })
+    socket.once('error', () => resolve(false))
+  })
+}
+
+const percentile = (sorted: number[], p: number) => sorted.length === 0 ? 0 : sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]
+
+async function runColdStart(): Promise<void> {
+  assert.ok(!(await portOpen(portBase)), `port ${portBase} is in use; stop the isolated app first`)
+  // app 啟動時會把部署的 hook 換回寫死 17373 的版本；冷啟動要用一份不會被覆寫的副本，
+  // 否則重啟途中的事件會送到正式版的埠。指令和參數照 settings，只把腳本路徑換成這份副本。
+  const coldHook = path.join(home!, '.desktop-pet-e2e', 'agent-hook.mjs')
+  fs.mkdirSync(path.dirname(coldHook), { recursive: true })
+  fs.writeFileSync(coldHook, patched)
+  const entry = settings.hooks.Stop?.[0]?.hooks?.[0]
+  assert.ok(entry?.type === 'command', 'no command hook for Stop')
+  const swap = (value: string) => value.split(hookPath).join(coldHook)
+  const command = swap(entry.command)
+  const args = (entry.args ?? []).map((value: string) => swap(value))
+  assert.ok([command, ...args].some(value => value.includes(coldHook)), 'hook path not found in the Stop command')
+
+  const launcher = spawn(process.execPath, [path.join(repoRoot, 'scripts/e2e-isolated-electron.mjs'),
+    '--reuse-root', path.dirname(home!), '--hook-port-base', String(portBase), '--debug-port', cdpPort!, '--inspect-port', String(Number(cdpPort) + 1)], {
+    cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  const startedAt = performance.now()
+  // 各階段時間點（相對於啟動器開始）：Electron 程序建立、隔離 bootstrap 跑完（接著載入 main.js）、
+  // 啟動標記出現、事件埠開始監聽。啟動器自己產生測試用插件的時間也算在裡面，正式版沒有這段。
+  const marks: Record<string, number | null> = { electronSpawned: null, mainLoading: null, markerWritten: null, listening: null }
+  const markerPath = path.join(home!, '.desktop-pet', hookStartupMarkerName(portBase))
+  fs.rmSync(markerPath, { force: true })
+  const markerPoll = setInterval(() => {
+    if (marks.markerWritten === null && fs.existsSync(markerPath)) marks.markerWritten = performance.now() - startedAt
+  }, 5)
+  let log = ''
+  const seen = (key: string, text: string) => { if (marks[key] === null && log.includes(text)) marks[key] = performance.now() - startedAt }
+  for (const stream of [launcher.stdout, launcher.stderr]) {
+    stream.on('data', chunk => {
+      log += chunk
+      seen('electronSpawned', '"pid":')
+      seen('mainLoading', 'AGENT_PETS_E2E_READY')
+      seen('listening', `listening on http://127.0.0.1:${portBase}/v1/events`)
+    })
+  }
+  const launcherExited = new Promise(resolve => launcher.once('exit', resolve))
+  try {
+    await measureColdStart(startedAt, marks, markerPoll, command, args)
+  } finally {
+    clearInterval(markerPoll)
+    launcher.kill('SIGTERM')
+    await launcherExited
+  }
+}
+
+async function measureColdStart(startedAt: number, marks: Record<string, number | null>, markerPoll: ReturnType<typeof setInterval>, command: string, args: string[]): Promise<void> {
+  const listeningAtMs = () => marks.listening
+
+  const sessionTag = `cold-${Date.now().toString(36)}`
+  const results: Array<{ sentAt: number; ms: number; code: number | null }> = []
+  const runs: Promise<void>[] = []
+  for (let i = 0; i < coldStart; i += 1) {
+    const due = startedAt + i * coldInterval
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, due - performance.now())))
+    runs.push(new Promise(resolve => {
+      const sentAt = performance.now() - startedAt
+      const child = spawn(command, args, { env: { PATH: process.env.PATH ?? '', HOME: home }, stdio: ['pipe', 'ignore', 'ignore'] })
+      child.once('exit', code => { results[i] = { sentAt, ms: performance.now() - startedAt - sentAt, code }; resolve() })
+      child.stdin.end(JSON.stringify({ hook_event_name: 'Stop', session_id: `${sessionTag}-${i}`, cwd: '/tmp/hook-e2e' }))
+    }))
+  }
+  await Promise.all(runs)
+  for (let waited = 0; listeningAtMs() === null && waited < 30_000; waited += 100) await new Promise(resolve => setTimeout(resolve, 100))
+  clearInterval(markerPoll)
+  const listeningAt = listeningAtMs()
+  assert.ok(listeningAt !== null, 'the isolated app never listened on the event port')
+  await new Promise(resolve => setTimeout(resolve, 1500))
+  // main 是主程序的 session 鏡像（app 收到幾個），store 是寵物畫面（renderer 收到幾個），分開算才知道掉在哪一層。
+  const { main, store: states } = await cdp(`(async () => {
+    const tag = ${JSON.stringify(sessionTag)}
+    const store = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('agent')
+    const seen = {}
+    for (const s of Object.values(store.sessions)) if (String(s.sessionId).startsWith(tag)) seen[s.sessionId] = s.state
+    const main = (await window.electronAPI.getSessionSnapshot()).filter(s => String(s.sessionId).startsWith(tag)).map(s => s.sessionId)
+    return { main, store: seen }
+  })()`) as { main: string[]; store: Record<string, string> }
+
+  // 每個 session 只送一個 Stop，所以 session 出現就代表送達；success 顯示 4 秒後會自己轉成 idle（SUCCESS_DISPLAY_MS）。
+  const delivered = (state: string | undefined) => state === 'success' || state === 'idle'
+  const lost = results.map((result, i) => ({ i, ...result })).filter(({ i }) => !delivered(states[`${sessionTag}-${i}`]))
+  const before = results.filter(result => result.sentAt < listeningAt).map(result => result.ms).sort((a, b) => a - b)
+  const after = results.filter(result => result.sentAt >= listeningAt).map(result => result.ms).sort((a, b) => a - b)
+  const describe = (list: number[]) => `n=${list.length} p50=${Math.round(percentile(list, 0.5))} p95=${Math.round(percentile(list, 0.95))} max=${Math.round(list.at(-1) ?? 0)} ms`
+  console.log(JSON.stringify({
+    phasesMs: Object.fromEntries(Object.entries(marks).map(([key, value]) => [key, value === null ? null : Math.round(value)])),
+    total: coldStart,
+    receivedByApp: main.length,
+    delivered: coldStart - lost.length,
+    lostSentAtMs: lost.map(({ sentAt }) => Math.round(sentAt)),
+    nonZeroExit: results.filter(result => result.code !== 0).length,
+  }))
+  console.log(`hook duration, sent before the port opened: ${describe(before)}`)
+  console.log(`hook duration, sent after the port opened:  ${describe(after)}`)
+  console.log(lost.length === 0 ? `all ${coldStart} cold-start events arrived` : `${lost.length} of ${coldStart} cold-start events were lost`)
+  process.exitCode = lost.length === 0 ? 0 : 1
+}
+
+if (coldStart > 0) {
+  await runColdStart()
+  process.exit()
+}
 
 // 寵物包：刻意混入不合法的值，驗證主程序清理與畫面端回退。
 if (withPetPack) {

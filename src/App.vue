@@ -4,7 +4,8 @@ import { useAgentStore } from '@/stores/agentStore'
 import DesktopPet from '@/components/DesktopPet.vue'
 import GrowthCelebration from '@/components/growth/GrowthCelebration.vue'
 import ToastHost from '@/components/ui/ToastHost.vue'
-import { playCue, setSoundVolume, type SoundCue } from '@/utils/sound'
+import type { SoundCue } from '@/types/sound'
+import { playCue, setSoundVolume } from '@/utils/sound'
 import { shouldPlayCue } from '@/utils/sound-policy'
 import type { DesktopPreferences } from '@/types/desktop'
 import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
@@ -268,12 +269,7 @@ function handleStorage(e: StorageEvent) {
       void store.setProgressionPet(e.newValue as string)
     })
   } else if (e.key === 'agent-pet-family-map') {
-    try {
-      const parsed = e.newValue ? JSON.parse(e.newValue) : {}
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        store.familyPetIds = parsed
-      }
-    } catch {}
+    store.syncFamilyPetIds(e.newValue)
   } else if (e.key === 'agent-pet-sound') {
     store.soundEnabled = e.newValue === '1'
   } else if (e.key === 'agent-pet-multi') {
