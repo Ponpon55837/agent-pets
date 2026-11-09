@@ -2,7 +2,8 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import type { SanitizedPetBehaviorManifest } from '../pet-behavior-manifest'
 import { t as translate } from '../../src/i18n.ts'
 import { PET_IMPORT_TOKEN_PATTERN, parsePetZip, type PetImportStaging } from '../pet-import.ts'
-import { SPRITE_ATLAS_WALK_ROW, detectSpriteAtlas, validateSpriteSheet } from '../pet-sprite-validation.ts'
+import { PET_ATLAS_WALK_ROW } from '../../src/types/pet-atlas.ts'
+import { detectSpriteAtlas, validateSpriteSheet } from '../pet-sprite-validation.ts'
 import { IPC_CHANNELS } from './channels.ts'
 
 type OpenDialogResult = { canceled: boolean; filePaths: string[] }
@@ -214,7 +215,7 @@ export function registerPetAssetIpc(deps: PetAssetIpcDependencies): void {
       spriteVersionNumber: atlas.version,
       kind: 'person',
       // Same atlas contract as zip import: v2 sheets walk on the running-right row.
-      ...(atlas.version === 2 ? { behaviorManifest: { walk: { row: SPRITE_ATLAS_WALK_ROW } } } : {}),
+      ...(atlas.version === 2 ? { behaviorManifest: { walk: { row: PET_ATLAS_WALK_ROW } } } : {}),
     }
     await deps.writeFileEnsured(deps.path.join(customDir, 'pet.json'), JSON.stringify(petJson, null, 2))
     return `agent-pets://custom/${encodeURIComponent(safeId)}/spritesheet.webp`

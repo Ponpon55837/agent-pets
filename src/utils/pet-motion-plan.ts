@@ -1,10 +1,12 @@
 import type { AgentState } from '@/types/agent'
 import type { PetAutonomousBehavior } from '@/types/pet'
+// tests/pet-motion-plan.test.mts 用 Node 直接執行，值 import 必須是相對路徑。
+import { PET_ATLAS_MOTIONS, type PetMotionName } from '../types/pet-atlas.ts'
 
 // Pure state -> animation mapping, kept out of the component so the timing
 // rules can be unit-tested.
 
-export type PlannedMotion = 'idle' | 'waving' | 'jumping' | 'failed' | 'waiting' | 'running' | 'review' | 'walk' | 'sleep'
+export type PlannedMotion = PetMotionName
 
 export interface PlannedStep {
   motion: PlannedMotion
@@ -19,9 +21,11 @@ export interface PlannedMotionPlan {
 /** How long a finished session shows as "success" before returning to idle. */
 export const SUCCESS_DISPLAY_MS = 4_000
 
-// Approximate length of one loop of each celebration row (sum of frame durations).
-const JUMP_LOOP_MS = 700
-const WAVE_LOOP_MS = 700
+// One loop of each celebration row with the built-in cadence; a pet pack that
+// overrides the timing only shifts the wave count slightly.
+const loopMs = (frames: readonly number[]) => frames.reduce((sum, ms) => sum + ms, 0)
+const JUMP_LOOP_MS = loopMs(PET_ATLAS_MOTIONS.jumping.frameDurations)
+const WAVE_LOOP_MS = loopMs(PET_ATLAS_MOTIONS.waving.frameDurations)
 
 export const SUCCESS_JUMP_LOOPS = 2
 export const SUCCESS_WAVE_LOOPS = Math.max(

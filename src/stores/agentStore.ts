@@ -25,6 +25,7 @@ import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement
 import { ACHIEVEMENT_DEFINITIONS } from '@/types/achievement'
 import type { PetWindowMode, PetWindowModeState } from '@/types/pet-window'
 import { normalizePetWindowModeState } from '@/types/pet-window'
+import { PET_CELL_WIDTH } from '@/types/pet-atlas'
 import type { PetBehaviorManifest, PluginSkinPetSource } from '@/types/pet'
 import type { PluginFeedItem } from '@/types/plugin'
 import type { ProjectPetView } from '@/types/project-pet'
@@ -1618,7 +1619,8 @@ export const useAgentStore = defineStore('agent', () => {
   // of collapsing them all into a single highest-priority pet.
   const isMultiPet = computed(() => multiPetEnabled.value && familyLines.value.length > 1)
 
-  const MULTI_PET_CELL_W = 204 // sprite cell (192) + a small gap
+  // 每隻寵物一格 sprite 寬，加上 .multi-pet-row 的間距（倍率 1 時 8px）與一點餘裕。
+  const MULTI_PET_CELL_W = PET_CELL_WIDTH + 12
   // The quota tooltip (DesktopPet.vue) shrinks to its content but is capped
   // at 244px regardless of pet size, same reasoning as
   // QUOTA_TOOLTIP_HEADROOM_H below — the pet window must stay at least that

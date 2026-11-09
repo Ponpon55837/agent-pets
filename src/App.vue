@@ -11,6 +11,7 @@ import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement
 import { setLocale as applyLocale } from '@/i18n'
 import { EDGE_HOVER_EXPAND_MS } from '@/utils/pet-edge'
 import { HIT_DILATE_PX, decidePassthrough, hasOpaquePixel } from '@/utils/pet-hit-test'
+import { PET_CELL_WIDTH } from '@/types/pet-atlas'
 
 // Panel-only surfaces load on demand so the pet window, which shares this
 // bundle, starts without them.
@@ -329,6 +330,8 @@ onMounted(() => {
   store.setCueSink(playCueIfAllowed)
   document.documentElement.style.setProperty('--pet-scale', String(store.petScale))
   document.documentElement.style.setProperty('--pet-w', store.scaledW + 'px')
+  // CSS 裡的 sprite 格寬也從 types/pet-atlas.ts 來，不另外寫死。
+  document.documentElement.style.setProperty('--pet-cell-w', `${PET_CELL_WIDTH}px`)
 
   const electronAPI = (window as any).electronAPI
   if (electronAPI?.onAgentStatusEvent) {

@@ -7,6 +7,16 @@ import Icon from '@/components/ui/Icon.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { getCachedSprite, getCachedTint, loadPetSprite, setCachedTint } from '@/composables/usePetSpriteCache'
 import { frameDelayMultiplier, isSignificantTransition, motionPlanFor } from '@/utils/pet-motion-plan'
+import {
+  PET_ATLAS_MOTIONS,
+  PET_CELL_HEIGHT,
+  PET_CELL_WIDTH,
+  petAtlasGridFromSize,
+  resolvePetMotion,
+  type PetAtlasGrid,
+  type PetMotionDefinition,
+  type PetMotionName,
+} from '@/types/pet-atlas'
 
 const props = defineProps<{
   state: AgentState
@@ -68,19 +78,8 @@ const store = useAgentStore()
 const documentVisible = ref(true)
 const isPaused = computed(() => props.freeze === true || !documentVisible.value)
 
-const CELL_W = 192
-const CELL_H = 208
-
-type MotionName = 'idle' | 'waving' | 'jumping' | 'failed' | 'waiting' | 'running' | 'review' | 'walk' | 'sleep'
-
-interface MotionDefinition {
-  name: MotionName
-  row: number
-  frameDurations: readonly number[]
-}
-
 interface MotionStep {
-  motion: MotionDefinition
+  motion: PetMotionDefinition
   loops: number
 }
 
@@ -89,40 +88,18 @@ interface MotionPlan {
   repeat: boolean
 }
 
-// Keep these aligned with the v2 pet atlas contract. Apart from making each
-// action read at its intended cadence, the per-row frame counts prevent short
-// actions such as waving and jumping from stepping into transparent cells.
-const motions: Record<MotionName, MotionDefinition> = {
-  idle: { name: 'idle', row: 0, frameDurations: [280, 110, 110, 140, 140, 320] },
-  waving: { name: 'waving', row: 3, frameDurations: [140, 140, 140, 280] },
-  jumping: { name: 'jumping', row: 4, frameDurations: [140, 140, 140, 140, 280] },
-  failed: { name: 'failed', row: 5, frameDurations: [140, 140, 140, 140, 140, 140, 140, 240] },
-  waiting: { name: 'waiting', row: 6, frameDurations: [150, 150, 150, 150, 150, 260] },
-  running: { name: 'running', row: 7, frameDurations: [120, 120, 120, 120, 120, 220] },
-  review: { name: 'review', row: 8, frameDurations: [150, 150, 150, 150, 150, 280] },
-  // 這些 row 會由選用的 manifest 覆蓋；未宣告行為的自訂寵物安全回退至 Idle。
-  walk: { name: 'walk', row: 0, frameDurations: [180, 180, 180, 180, 220] },
-  sleep: { name: 'sleep', row: 0, frameDurations: [420, 420, 520, 620] },
-}
-
 const petBehaviorManifest = computed<PetBehaviorManifest | undefined>(() => (
   store.pets.find(pet => pet.id === props.petId)?.behaviorManifest
 ))
 
-function behaviorMotion(name: 'walk' | 'sleep'): MotionDefinition {
-  const definition = petBehaviorManifest.value?.[name]
-  if (!definition) return motions.idle
-  const imageFrames = imgRef.value?.naturalWidth
-    ? Math.floor(imgRef.value.naturalWidth / CELL_W)
-    : 6
-  const frameCount = Math.max(1, Math.min(16, definition.frames ?? imageFrames))
-  const frameDurations = definition.frameDurations?.slice(0, frameCount)
-    ?? Array.from({ length: frameCount }, (_, index) => index === frameCount - 1 ? 260 : 150)
-  return {
-    name,
-    row: definition.row,
-    frameDurations,
-  }
+// 圖載入前格線未知，只套用解析器的上下限；applyImage 之後會用實際尺寸重算。
+function atlasGrid(): PetAtlasGrid | null {
+  const img = imgRef.value
+  return img?.naturalWidth ? petAtlasGridFromSize(img.naturalWidth, img.naturalHeight) : null
+}
+
+function resolveMotion(name: PetMotionName): PetMotionDefinition {
+  return resolvePetMotion(name, petBehaviorManifest.value, atlasGrid())
 }
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -140,9 +117,9 @@ let animationFinished = false
 let currentFrame = 0
 let currentStep = 0
 let completedLoops = 0
-let motionPlan: MotionPlan = { steps: [{ motion: motions.idle, loops: Number.POSITIVE_INFINITY }], repeat: false }
-let activeMotion = motions.idle
-const activeMotionName = ref<MotionName>('idle')
+let motionPlan: MotionPlan = { steps: [{ motion: PET_ATLAS_MOTIONS.idle, loops: Number.POSITIVE_INFINITY }], repeat: false }
+let activeMotion: PetMotionDefinition = PET_ATLAS_MOTIONS.idle
+const activeMotionName = ref<PetMotionName>('idle')
 const activeMotionRow = ref(0)
 
 // One-shot squash/stretch "reaction" bounce, layered on top of the looping
@@ -277,9 +254,7 @@ function motionPlanForState(): MotionPlan {
   })
   return {
     steps: planned.steps.map(step => ({
-      motion: step.motion === 'walk' || step.motion === 'sleep'
-        ? behaviorMotion(step.motion)
-        : motions[step.motion],
+      motion: resolveMotion(step.motion),
       loops: step.loops,
     })),
     repeat: planned.repeat,
@@ -312,8 +287,8 @@ function selectStep(index: number) {
 // even and a Retina screen does not blur the pet.
 const devicePixelRatioRef = ref(window.devicePixelRatio || 1)
 const backingK = computed(() => Math.max(1, Math.min(8, Math.round(store.petScale * devicePixelRatioRef.value))))
-const backingW = computed(() => CELL_W * backingK.value)
-const backingH = computed(() => CELL_H * backingK.value)
+const backingW = computed(() => PET_CELL_WIDTH * backingK.value)
+const backingH = computed(() => PET_CELL_HEIGHT * backingK.value)
 let densityQuery: MediaQueryList | null = null
 
 function watchDensity(): void {
@@ -330,8 +305,8 @@ function onDensityChange(): void {
 
 watch(backingK, () => { void nextTick(draw) })
 
-const canvasW = computed(() => Math.round(CELL_W * store.petScale))
-const canvasH = computed(() => Math.round(CELL_H * store.petScale))
+const canvasW = computed(() => Math.round(PET_CELL_WIDTH * store.petScale))
+const canvasH = computed(() => Math.round(PET_CELL_HEIGHT * store.petScale))
 
 function getSrc(id: string): string {
   const base = import.meta.env.BASE_URL || './'
@@ -388,12 +363,12 @@ function deriveAuraTintFromPixels(pixels: Uint8ClampedArray): string {
 function deriveAuraTint(img: HTMLImageElement): string {
   try {
     const sample = document.createElement('canvas')
-    sample.width = CELL_W
-    sample.height = CELL_H
+    sample.width = PET_CELL_WIDTH
+    sample.height = PET_CELL_HEIGHT
     const ctx = sample.getContext('2d', { willReadFrequently: true })
     if (!ctx) return auraTint
-    ctx.drawImage(img, 0, 0, CELL_W, CELL_H, 0, 0, CELL_W, CELL_H)
-    return deriveAuraTintFromPixels(ctx.getImageData(0, 0, CELL_W, CELL_H).data)
+    ctx.drawImage(img, 0, 0, PET_CELL_WIDTH, PET_CELL_HEIGHT, 0, 0, PET_CELL_WIDTH, PET_CELL_HEIGHT)
+    return deriveAuraTintFromPixels(ctx.getImageData(0, 0, PET_CELL_WIDTH, PET_CELL_HEIGHT).data)
   } catch {
     return auraTint
   }
@@ -407,7 +382,8 @@ function applyImage(img: HTMLImageElement, cacheKey: string): void {
   setCachedTint(cacheKey, auraTint)
   currentFrame = 0
   draw()
-  if (props.autonomousBehavior === 'walk' || props.autonomousBehavior === 'sleep') {
+  // 覆蓋值要等圖載入、知道實際欄列數後才能確認放得下，所以有 manifest 就重算一次。
+  if (petBehaviorManifest.value || props.autonomousBehavior === 'walk' || props.autonomousBehavior === 'sleep') {
     startAnimation()
   }
 }
@@ -478,8 +454,8 @@ function draw() {
     ctx.imageSmoothingEnabled = false
     ctx.drawImage(
       img,
-      frame * CELL_W, row * CELL_H,
-      CELL_W, CELL_H,
+      frame * PET_CELL_WIDTH, row * PET_CELL_HEIGHT,
+      PET_CELL_WIDTH, PET_CELL_HEIGHT,
       0, 0,
       backingW.value, backingH.value
     )

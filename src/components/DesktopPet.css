@@ -348,8 +348,8 @@
   /* Keep the same status-pill treatment as single-pet mode, but constrain
      each pill to its own sprite column instead of the full pet window. */
   /* 小尺寸時保留 112px 的下限（仍在 0.6 倍、約 115px 的寵物欄內），讓「點 + 最長的狀態詞」放得下。 */
-  width: max(calc(192px * var(--pet-scale, 1) - 12px), 112px);
-  max-width: max(calc(192px * var(--pet-scale, 1) - 12px), 112px);
+  width: max(calc(var(--pet-cell-w) * var(--pet-scale, 1) - 12px), 112px);
+  max-width: max(calc(var(--pet-cell-w) * var(--pet-scale, 1) - 12px), 112px);
   margin-top: -8px;
 }
 

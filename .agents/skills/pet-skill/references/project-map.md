@@ -41,6 +41,7 @@
 - External navigation, popups, permission requests, and untrusted IPC senders are rejected.
 - Event server limits body size, text length, rate, sources, and states, and requires a local token.
 - Imported pet archives and raster files have size, count, path, and signature constraints. Pet zips go through `electron/zip-inspect.ts` (one parser for pre-scan and extraction, CRC-checked) and `electron/pet-import.ts` (private staging, preview token, expected-state commit, atomic rename install, crash recovery that never deletes an unverified backup); image headers are capped and EXIF rotation rejected in `electron/pet-sprite-validation.ts`.
+- The sprite atlas contract (cell size, rows, motion table, `behaviorManifest` bounds) is `src/types/pet-atlas.ts`; main-process validation and the renderer both import it. `behaviorManifest` from `pet.json` or a plugin skin is untrusted: `electron/pet-behavior-manifest.ts` bounds it, import and plugin-skin loading drop entries that do not fit the real atlas, and `resolvePetMotion` re-checks against the loaded image.
 - electron-builder fuses disable run-as-node, Node options, CLI inspection, and extra file privileges.
 
 ## Current product behavior

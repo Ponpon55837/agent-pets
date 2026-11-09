@@ -68,9 +68,9 @@ Under **Settings → Pets**, use **+ Import asset** (`.webp`, `.png` or `.jpg` s
 
 Sprite requirements (checked on import):
 
-- Frame cell **192 × 208 px**; the image width and height must be multiples of that, and the sheet needs **at least 9 rows** (rows 0–8).
-- Rows used: 0 Idle / Offline, 5 Error, 6 Waiting Permission / Waiting Input, 7 Thinking / Tool Running, 8 Success.
-- A `pet.json` may declare an optional `behaviorManifest` for Shimeji, for example `{"behaviorManifest":{"walk":{"row":1},"sleep":{"row":5}}}` (row 0–10, up to 16 frames, frame durations 60–3000 ms). Missing definitions fall back to Idle.
+- Frame cell **192 × 208 px**; the image width and height must be multiples of that, and the sheet needs **at least 9 rows** (rows 0–8). The grid, rows and default timings live in one place, [`src/types/pet-atlas.ts`](src/types/pet-atlas.ts), shared by import validation and the renderer.
+- Default rows: 0 idle (Idle / Offline), 3 waving, 4 jumping (Success), 5 failed (Error), 6 waiting (Waiting Permission / Input), 7 running and 8 review (Thinking / Tool Running).
+- A `pet.json` (or a plugin skin) may declare a `behaviorManifest` that overrides any motion — `idle`, `waving`, `jumping`, `failed`, `waiting`, `running`, `review` — and adds the Shimeji motions `walk` and `sleep`, for example `{"behaviorManifest":{"idle":{"row":9,"frames":4},"walk":{"row":1},"sleep":{"row":5}}}`. Each entry is `row` (0–63), optional `frames` (1–16) and optional `frameDurations` (1–16 values, clamped to 60–3000 ms). An entry that is malformed, points past the sheet's rows, or has more frames than columns is dropped and that motion uses the built-in one; undeclared `walk`/`sleep` fall back to idle.
 
 ## Control panel
 

@@ -57,6 +57,7 @@ import PetAnimation from '@/components/PetAnimation.vue'
 - `src/types/progression.ts`
 - `src/utils/desktop-effects.ts`
 - `src/utils/toast-countdown.ts`
+- `src/types/pet-atlas.ts`（sprite 圖集規格；主程序也直接 import）。會被測試執行、又對它做值 import 的 `src/utils/pet-motion-plan.ts`、`src/utils/pet-atlas-preview.ts`、`src/utils/status-line-fit.ts` 也必須用相對路徑；只做 `import type` 的檔案不受影響（型別會被 strip 掉）
 
 這份清單是目前测試檔案 import 的完整遞移閉包（這 9 個檔案彼此之間也不再 import 其他 src 檔案）。之後如果有新檔案被某個 `tests/*.test.mts` 直接 import，要先檢查它跟它遞移 import 的所有 src 檔案是否也在這份清單裡；不在的話一樣要維持相對路徑，否則要另外幫 Node 測試執行環境接上 `@/` 的 resolver（例如自訂 loader），目前專案沒有做這件事。
 

@@ -30,6 +30,7 @@ import PermissionBubble from '@/components/permission/PermissionBubble.vue'
 import { usePetTheme } from '@/composables/usePetTheme'
 import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
 import { formatDateParts } from '@/utils/intl-format'
+import { PET_CELL_HEIGHT } from '@/types/pet-atlas'
 
 const store = useAgentStore()
 const clickAreaRef = ref<HTMLElement | null>(null)
@@ -277,7 +278,7 @@ function onPetKeydown(e: KeyboardEvent): void {
 
 // Mini mode shrinks the sprite to fit the fixed small window, whatever the pet size.
 const MINI_FIT_PX = 88
-const miniScale = computed(() => Math.min(0.42, MINI_FIT_PX / (208 * store.petScale)))
+const miniScale = computed(() => Math.min(0.42, MINI_FIT_PX / (PET_CELL_HEIGHT * store.petScale)))
 const miniStatus = computed(() => {
   const state = store.currentState
   switch (state) {

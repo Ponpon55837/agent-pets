@@ -68,9 +68,9 @@
 
 精靈圖規格（匯入時檢查）：
 
-- 單格 **192 × 208 px**；圖片寬高必須是該尺寸的整數倍，且**至少 9 列**（第 0–8 列）。
-- 使用的列：0 閒置／離線、5 錯誤、6 等待權限／等待輸入、7 思考／執行工具、8 成功。
-- `pet.json` 可選擇性宣告 `behaviorManifest` 供 Shimeji 使用，例如 `{"behaviorManifest":{"walk":{"row":1},"sleep":{"row":5}}}`（列 0–10、最多 16 格、每格 60–3000 毫秒）。未宣告的行為會回到閒置。
+- 單格 **192 × 208 px**；圖片寬高必須是該尺寸的整數倍，且**至少 9 列**（第 0–8 列）。格子尺寸、列號與預設節奏只定義在 [`src/types/pet-atlas.ts`](src/types/pet-atlas.ts)，匯入驗證與畫面端共用。
+- 預設列：0 idle（閒置／離線）、3 waving、4 jumping（成功）、5 failed（錯誤）、6 waiting（等待權限／等待輸入）、7 running 與 8 review（思考／執行工具）。
+- `pet.json`（或插件外觀）可宣告 `behaviorManifest` 覆蓋任何動作——`idle`、`waving`、`jumping`、`failed`、`waiting`、`running`、`review`——並加上 Shimeji 用的 `walk` 與 `sleep`，例如 `{"behaviorManifest":{"idle":{"row":9,"frames":4},"walk":{"row":1},"sleep":{"row":5}}}`。每一項是 `row`（0–63）、可選的 `frames`（1–16）與 `frameDurations`（1–16 個值，夾在 60–3000 毫秒）。格式不合法、列號超過圖的列數或格數超過欄數的項目會被丟掉，該動作改用內建值；沒宣告的 `walk`／`sleep` 會回到閒置。
 
 ## 控制面板
 
