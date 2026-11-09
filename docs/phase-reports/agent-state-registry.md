@@ -73,6 +73,20 @@
   - `pet-motion-plan` 的 waiting（sprite 線負責）
 - `event-normalizer` 的 `VALID_STATES` 含有外部別名 `waiting`，屬於 hook 契約，沒有動。
 
+## 與 sprite 圖集線的合併檢查
+
+拿 sprite 線的 `claude/pet-atlas-contract-603e87`（`31501b6`）和這條線試合併，結果如下：
+
+- **文字衝突**：只有 `package.json` 版本號，取 1.12.3。
+- **兩邊都改到的檔案**：project-map、conventions SKILL.md、兩份 README、`DesktopPet.vue`／`.css`、`agentStore.ts`，都能自動合併。
+- **程式層面**：沒有互相影響。
+  - 迷你徽章查表和 `miniScale`（`PET_CELL_HEIGHT`）是兩個互不相依的 computed。
+  - 徽章的 pulse 動畫由 `tokens.css` 全域的 reduced-motion 規則處理，跟 sprite 線 JS 端的 `useReducedMotion` 無關。
+  - `SOURCE_LABEL_RANK` 和 `MULTI_PET_CELL_W` 是不同的常數。
+- **文件層面的矛盾，已在本線修正**：
+  - 本線原本寫「依狀態而定的資料都集中在兩張表」，但 sprite 線保留的 `pet-motion-plan.ts` 狀態 → 動作 switch 也是依狀態而定。README 兩版、project-map、SKILL §4 D 已補上這個例外。
+  - SKILL §1 例外清單的說明原本寫「這 9 個檔案彼此之間不再 import 其他 src 檔案」，兩邊各加一條後已不成立，改成規則說明，順便修正「测試」錯字。
+
 ## 版本建議
 
 Patch：內部重構，沒有改外部契約、持久化結構或安全邊界。等使用者確認後再改版本號。

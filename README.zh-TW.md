@@ -217,7 +217,7 @@ pnpm dev
 
 **開發埠覆寫** — 未打包的執行可設定 `AGENT_PETS_EVENT_PORT`、`AGENT_PETS_PERMISSION_PORT`、`AGENT_PETS_PRESENTATION_PORT`（1024–65535；預設 17373、17374、17375），避免和已安裝的版本搶埠。打包版會忽略這些變數。
 
-**Agent 狀態** — 依狀態而定的資料都集中在兩張以 `satisfies Record<AgentState, …>` 檢查的表：`src/types/agent.ts` 的 `AGENT_STATE_POLICY`（優先度、桌面通知、歷史結局，主行程共用）與 `src/utils/agent-state-presentation.ts` 的 `AGENT_STATE_PRESENTATION`（標籤、顏色、螢幕閱讀器文字、狀態列用字、迷你徽章、音效）。新增狀態時兩張表沒填齊，型別檢查就會失敗。
+**Agent 狀態** — 依狀態而定的資料都集中在兩張以 `satisfies Record<AgentState, …>` 檢查的表：`src/types/agent.ts` 的 `AGENT_STATE_POLICY`（優先度、桌面通知、歷史結局，主行程共用）與 `src/utils/agent-state-presentation.ts` 的 `AGENT_STATE_PRESENTATION`（標籤、顏色、螢幕閱讀器文字、狀態列用字、迷你徽章、音效）。新增狀態時兩張表沒填齊，型別檢查就會失敗。唯一的例外是每個狀態對應的寵物動作：它要看前一個狀態與時間，所以留在 `src/utils/pet-motion-plan.ts` 用邏輯判斷。
 
 在原始碼目錄執行 `node integrations/install.mjs` 可用與精靈相同的保護機制安裝 hook（`--claude-code` 只處理 Claude Code，`--uninstall` 則移除）。
 
