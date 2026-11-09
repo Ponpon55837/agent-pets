@@ -209,7 +209,7 @@ pnpm dev
 | `pnpm check:bundle-size` | Fails if a renderer chunk exceeds 250 KB (run after `vite build`) |
 | `pnpm check:bundle` | Verifies the plugin panel tokens bundle |
 | `pnpm check:contrast` | Design token contrast check (fails on violation) |
-| `pnpm check:design` / `check:design:strict` | Reports hard-coded colors and sizes; `--strict` fails on them |
+| `pnpm check:design` / `check:design:strict` | Reports hard-coded colors, sizes, spacing, transition durations and easings; `--strict` fails on them ([docs/dev/design-tokens.md](docs/dev/design-tokens.md)) |
 | `pnpm build` / `pnpm build:fast` | Type check, Vite build, then electron-builder into `release/` (`build:fast` skips compression) |
 | `pnpm bench`, `pnpm bench:lag` | Performance benchmarks |
 

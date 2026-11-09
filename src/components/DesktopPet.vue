@@ -1025,6 +1025,7 @@ watch(() => store.levelUpEvent, (event) => {
           <img v-if="store.pluginFeedItem.iconUrl" class="plugin-feed-icon" :src="store.pluginFeedItem.iconUrl" alt="" />
           <div class="plugin-feed-copy">
             <span class="plugin-feed-source">{{ store.pluginFeedItem.pluginName[locale] }}</span>
+            <!-- raw-control: 整則插件訊息（標題＋內文）都是連結；Button 是單行置中的動作按鈕，沒有多行內容的版型 -->
             <button
               v-if="store.pluginFeedItem.link"
               type="button"

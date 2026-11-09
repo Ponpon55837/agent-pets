@@ -183,6 +183,7 @@ defineExpose({ scrollToSection })
         <p class="sr-only" role="status" aria-live="polite">{{ t('panel.searchCount', { count: results.length }) }}</p>
         <ul v-if="results.length > 0" class="settings-result-list">
           <li v-for="hit in results" :key="hit.entry.id">
+            <!-- raw-control: 搜尋結果整列，內含標題、說明與所在分組，不是動作按鈕 -->
             <button type="button" class="settings-result" @click="openHit(hit.entry)">
               <span class="settings-result-copy">
                 <span class="settings-result-label">{{ hit.label }}</span>

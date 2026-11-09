@@ -209,7 +209,7 @@ pnpm dev
 | `pnpm check:bundle-size` | 任一 renderer chunk 超過 250 KB 即失敗（需先 `vite build`） |
 | `pnpm check:bundle` | 驗證插件面板 tokens 的 bundle |
 | `pnpm check:contrast` | 設計 token 對比度檢查（違規即失敗） |
-| `pnpm check:design` / `check:design:strict` | 回報寫死的顏色與尺寸；`--strict` 會直接失敗 |
+| `pnpm check:design` / `check:design:strict` | 回報寫死的顏色、尺寸、間距、transition 時長與 easing；`--strict` 會直接失敗（見 [docs/dev/design-tokens.md](docs/dev/design-tokens.md)） |
 | `pnpm build` / `pnpm build:fast` | 型別檢查、Vite 建置，再由 electron-builder 輸出到 `release/`（`build:fast` 不壓縮） |
 | `pnpm bench`、`pnpm bench:lag` | 效能基準測試 |
 

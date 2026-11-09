@@ -12,6 +12,7 @@ import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import Icon from '@/components/ui/Icon.vue'
 import ProgressTrack from '@/components/ui/ProgressTrack.vue'
+import Spinner from '@/components/ui/Spinner.vue'
 import GrowthEmptyState from '@/components/growth/GrowthEmptyState.vue'
 import UsageBlockSummary from '@/components/growth/UsageBlockSummary.vue'
 
@@ -236,7 +237,7 @@ onBeforeUnmount(() => {
       <div class="usage-footer">
         <span>{{ t('growth.autoRefreshNote') }}</span>
         <Button variant="secondary" size="sm" :disabled="store.quotaLoading" @click="refresh">
-          <span v-if="store.quotaLoading" class="usage-spinner" aria-hidden="true" />
+          <Spinner v-if="store.quotaLoading" class="usage-spinner" :size="12" />
           {{ store.quotaLoading ? t('refreshing') : t('growth.refreshNow') }}
         </Button>
       </div>
@@ -305,30 +306,12 @@ onBeforeUnmount(() => {
 }
 
 .usage-spinner {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
   margin-right: var(--space-2);
-  border: 2px solid var(--border-strong);
-  border-top-color: var(--accent-bright);
-  border-radius: var(--radius-pill);
-  animation: usage-spin 0.9s linear infinite;
 }
 
 .usage-live {
   min-height: 1em;
   color: var(--text-muted);
   font-size: var(--font-xs);
-}
-
-@keyframes usage-spin {
-  to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .usage-spinner {
-    animation: none;
-    border-top-color: var(--border-strong);
-  }
 }
 </style>

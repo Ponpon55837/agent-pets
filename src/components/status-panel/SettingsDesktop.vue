@@ -135,6 +135,7 @@ function preview(cue: SoundCue): void {
     <ToggleRow :model-value="store.soundEnabled" :label="t('sound')" :help="t('soundHelp')" @update:model-value="store.setSoundEnabled($event)" />
     <label class="permission-sound-volume">
       <span>{{ t('permission.soundVolume') }}</span>
+      <!-- raw-control: 音量滑桿；ui/ 沒有 slider 元件，全專案只有這一處 -->
       <input
         type="range"
         :min="SOUND_VOLUME.min"
