@@ -2,7 +2,8 @@
 import { computed, ref } from 'vue'
 import { locale, t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
-import { SOURCE_FAMILIES, SOURCE_LABELS, STATE_LABELS } from '@/types/agent'
+import { SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
+import { AGENT_STATE_PRESENTATION } from '@/utils/agent-state-presentation'
 import type { PluginEventSourceState, PluginEventSourceStatusView } from '@/types/plugin'
 import { useQuotaFormat } from '@/composables/useQuotaFormat'
 import {
@@ -76,9 +77,9 @@ function sessionDetail(session: (typeof store.sessionList)[number]): string {
     if (store.permissionRequest?.sessionId === session.sessionId) return t('permissionInlineHint')
     return t('returnToTerminal')
   }
-  if (session.toolName) return `${STATE_LABELS[session.state]} · ${session.toolName}`
-  if (session.state === 'success') return `${STATE_LABELS[session.state]} · ${formatTime(session.lastSeenAt)}`
-  return STATE_LABELS[session.state]
+  if (session.toolName) return `${AGENT_STATE_PRESENTATION[session.state].label} · ${session.toolName}`
+  if (session.state === 'success') return `${AGENT_STATE_PRESENTATION[session.state].label} · ${formatTime(session.lastSeenAt)}`
+  return AGENT_STATE_PRESENTATION[session.state].label
 }
 
 function pluginEventSourceStateLabel(state: PluginEventSourceState): string {

@@ -2,7 +2,7 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { t, type TranslationKey } from '@/i18n'
 import { useHistoryFormat } from '@/composables/useHistoryFormat'
-import { STATE_LABELS } from '@/types/agent'
+import { isAgentState } from '@/types/agent'
 import {
   HISTORY_SESSION_TIMELINE_MAX,
   type HistorySessionDetail,
@@ -10,6 +10,7 @@ import {
   type HistorySessionOutcome,
 } from '@/types/history'
 import { agentDisplayName } from '@/utils/agent-label'
+import { AGENT_STATE_PRESENTATION } from '@/utils/agent-state-presentation'
 import { formatDateTime, formatTimeFull } from '@/utils/intl-format'
 import { stateAriaLabel } from '@/utils/state-aria'
 import Dialog from '@/components/ui/Dialog.vue'
@@ -143,7 +144,7 @@ function unknownOr(tracked: boolean, value: string): string {
             <time class="detail-time" :datetime="new Date(entry.occurredAt).toISOString()">{{ formatTimeFull(entry.occurredAt) }}</time>
             <span class="detail-marker" aria-hidden="true" />
             <span class="detail-state">
-              <span class="detail-state-label">{{ STATE_LABELS[entry.state] ?? entry.state }}</span>
+              <span class="detail-state-label">{{ isAgentState(entry.state) ? AGENT_STATE_PRESENTATION[entry.state].label : entry.state }}</span>
               <code v-if="entry.toolName" class="detail-tool" :title="entry.toolName">{{ entry.toolName }}</code>
             </span>
             <span class="detail-span">{{ entry.spanMs === null ? '' : t('growth.sessionTimelineFor', { duration: duration(entry.spanMs) }) }}</span>

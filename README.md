@@ -217,6 +217,8 @@ Both build commands first close project-owned Agent Pets processes. To check a c
 
 **Dev port overrides** — unpackaged runs may set `AGENT_PETS_EVENT_PORT`, `AGENT_PETS_PERMISSION_PORT` and `AGENT_PETS_PRESENTATION_PORT` (1024–65535; defaults 17373, 17374, 17375) so they do not fight an installed copy. Packaged builds ignore them.
 
+**Agent states** — everything keyed by an agent state lives in two tables checked with `satisfies Record<AgentState, …>`: `AGENT_STATE_POLICY` in `src/types/agent.ts` (priority, desktop notification, history outcome; shared with the main process) and `AGENT_STATE_PRESENTATION` in `src/utils/agent-state-presentation.ts` (labels, colour, screen-reader text, status-line word, mini badge, sound cue). Adding a state fails the type check until both are filled in.
+
 `node integrations/install.mjs` installs the hooks from a checkout with the same safeguards as the wizard (`--claude-code` limits it to Claude Code, `--uninstall` removes them).
 
 **CI** — `ci.yml` runs on pull requests and `main` pushes that change more than docs: type check, `pnpm lint`, `pnpm test:coverage`, `vite build`, bundle-size, plugin-panel-bundle and contrast checks, a design-token report and a non-blocking dependency audit. `ci-platforms.yml` runs the type check and unit tests on macOS and Windows weekly and on demand.

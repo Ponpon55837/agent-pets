@@ -1,43 +1,42 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import {
-  STATE_COLORS,
-  STATE_LABELS,
-  STATE_LABELS_SHORT,
-  STATE_PRIORITY,
-} from '../src/types/agent.ts'
-import { STATE_LINE_WORDS } from '../src/utils/state-line-words.ts'
+import { AGENT_STATE_POLICY, AGENT_STATES, isAgentState, STATE_PRIORITY } from '../src/types/agent.ts'
+import { AGENT_STATE_PRESENTATION, statePresentation } from '../src/utils/agent-state-presentation.ts'
 import { shouldPlayCue, type SoundGate } from '../src/utils/sound-policy.ts'
 import { classifyNotification } from '../electron/notification-policy.ts'
 import { nextFinalState } from '../electron/history-sessions.ts'
 
-// 特性測試：鎖住重構成 registry 前的每一個「狀態 → 值」輸出，任何一格變了都算外部契約改變。
+// 特性測試：數值是重構成 registry 前各處散落常數與 switch 的實際輸出，任何一格變了都算外部契約改變。
 
 const STATES = [
   'offline', 'idle', 'thinking', 'tool-running',
   'waiting-permission', 'waiting-input', 'success', 'error',
 ] as const
 
+function column<K extends keyof (typeof AGENT_STATE_PRESENTATION)['idle']>(field: K) {
+  return Object.fromEntries(AGENT_STATES.map(state => [state, AGENT_STATE_PRESENTATION[state][field]]))
+}
+
 test('priority, labels, colors and status-line words stay exactly as before', () => {
   assert.deepEqual(STATE_PRIORITY, {
     'waiting-permission': 100, error: 90, 'waiting-input': 85, 'tool-running': 80,
     thinking: 70, success: 60, idle: 20, offline: 0,
   })
-  assert.deepEqual(STATE_LABELS, {
+  assert.deepEqual(column('label'), {
     offline: 'Offline', idle: 'Idle', thinking: 'Thinking', 'tool-running': 'Running Tool',
     'waiting-permission': 'Waiting Permission', 'waiting-input': 'Waiting Input', success: 'Success', error: 'Error',
   })
-  assert.deepEqual(STATE_LABELS_SHORT, {
+  assert.deepEqual(column('shortLabel'), {
     offline: 'Offline', idle: 'Idle', thinking: 'Thinking', 'tool-running': 'Running',
     'waiting-permission': 'Permission', 'waiting-input': 'Waiting', success: 'Success', error: 'Error',
   })
-  assert.deepEqual(STATE_COLORS, {
+  assert.deepEqual(column('color'), {
     offline: 'var(--state-offline)', idle: 'var(--state-idle)',
     thinking: 'var(--state-active)', 'tool-running': 'var(--state-active)',
     'waiting-permission': 'var(--state-warn)', 'waiting-input': 'var(--state-warn)',
     success: 'var(--state-success)', error: 'var(--state-error)',
   })
-  assert.deepEqual(STATE_LINE_WORDS, {
+  assert.deepEqual(column('lineWord'), {
     offline: 'Offline', idle: 'Idle', thinking: 'Thinking', 'tool-running': 'Working',
     'waiting-permission': 'Permission', 'waiting-input': 'Needs input', success: 'Done', error: 'Failed',
   })
@@ -112,6 +111,41 @@ test('sound cues keep their per-cue switches and master gates', () => {
   }
 })
 
-test('the characterization covers every AgentState', () => {
-  assert.deepEqual(Object.keys(STATE_PRIORITY).sort(), [...STATES].sort())
+test('aria keys, mini badges and sound cues match the switches they replaced', () => {
+  assert.deepEqual(column('ariaKey'), {
+    offline: 'pet.stateOffline', idle: 'pet.stateIdle', thinking: 'pet.stateThinking',
+    'tool-running': 'pet.stateWorking', 'waiting-permission': 'pet.statePermission',
+    'waiting-input': 'pet.stateWaitingInput', success: 'pet.stateSuccess', error: 'pet.stateError',
+  })
+  assert.deepEqual(column('mini'), {
+    offline: { icon: null, labelKey: 'pet.miniIdle' },
+    idle: { icon: null, labelKey: 'pet.miniIdle' },
+    thinking: { icon: null, labelKey: 'pet.miniWorking' },
+    'tool-running': { icon: null, labelKey: 'pet.miniWorking' },
+    'waiting-permission': { icon: 'lock', labelKey: 'pet.miniPermission' },
+    'waiting-input': { icon: 'bell', labelKey: 'pet.miniWaiting' },
+    success: { icon: 'check', labelKey: 'pet.miniSuccess' },
+    error: { icon: 'warning', labelKey: 'pet.miniError' },
+  })
+  assert.deepEqual(column('cue'), {
+    offline: null, idle: null, thinking: null, 'tool-running': null,
+    'waiting-permission': 'waiting-permission', 'waiting-input': 'waiting-input', success: 'success', error: 'error',
+  })
+  // 不認得的狀態（含原型鏈上的名稱）一律當 idle 呈現，跟原本各處的 default 分支相同。
+  for (const state of ['bogus', 'constructor', 'toString', '__proto__']) {
+    assert.equal(statePresentation(state), AGENT_STATE_PRESENTATION.idle, state)
+    assert.equal(isAgentState(state), false, state)
+  }
+})
+
+test('both registries cover every AgentState and nothing else', () => {
+  const states = [...STATES].sort()
+  assert.deepEqual([...AGENT_STATES].sort(), states)
+  assert.deepEqual(Object.keys(AGENT_STATE_POLICY).sort(), states)
+  assert.deepEqual(Object.keys(AGENT_STATE_PRESENTATION).sort(), states)
+  assert.deepEqual(Object.keys(STATE_PRIORITY).sort(), states)
+  for (const state of STATES) assert.equal(isAgentState(state), true, state)
+  for (const entry of Object.values(AGENT_STATE_PRESENTATION)) {
+    assert.match(entry.color, /^var\(--state-[a-z]+\)$/)
+  }
 })

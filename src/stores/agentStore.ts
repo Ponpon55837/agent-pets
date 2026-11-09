@@ -7,7 +7,7 @@ import type {
   AgentState,
   AgentStatusEvent,
 } from '@/types/agent'
-import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
+import { isAgentState, STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
 import type { DesktopPreferences, DesktopPreferencesPatch, LaunchAtStartupStatus } from '@/types/desktop'
 import type { DesktopVisibilityCapabilities } from '@/types/desktop-visibility'
 import type { AppLocale } from '@/types/locale'
@@ -49,6 +49,7 @@ import {
   type ToastTone,
 } from '@/utils/pet-toast'
 import type { SoundCue } from '@/utils/sound'
+import { AGENT_STATE_PRESENTATION } from '@/utils/agent-state-presentation'
 import { SUCCESS_DISPLAY_MS } from '@/utils/pet-motion-plan'
 import { readPetFeedbackDefaults } from '@/utils/pet-defaults'
 import { SESSION_REMOVE_MS, sessionLifecycleAction } from '@/utils/session-lifecycle'
@@ -597,7 +598,7 @@ export const useAgentStore = defineStore('agent', () => {
       const session = sessionsByKey.get(key)
       if (!session || session.state !== 'waiting-input') return
       showToast(session.source, session.project, 'waiting')
-      cueSink?.('waiting-input')
+      cueSink?.(AGENT_STATE_PRESENTATION['waiting-input'].cue)
     }, WAITING_INPUT_DELAY_MS))
   }
 
@@ -1358,7 +1359,7 @@ export const useAgentStore = defineStore('agent', () => {
   // caller (App.vue) can decide whether/where to actually play it — this
   // store instance is shared by both the pet and panel windows, and audio
   // must only come from one of them or it plays twice.
-  function handleEvent(event: AgentStatusEvent): 'success' | 'error' | 'waiting-permission' | null {
+  function handleEvent(event: AgentStatusEvent): SoundCue | null {
     const key = getSessionKey(event.source, event.sessionId)
     const existing = sessionIndex.get(key)
     const prevState = existing?.state
@@ -1425,7 +1426,7 @@ export const useAgentStore = defineStore('agent', () => {
       if (event.state === 'success' && !shouldPlaySuccessSound(
         taskStartedAt === undefined ? undefined : Date.now() - taskStartedAt,
       )) return null
-      return event.state
+      return AGENT_STATE_PRESENTATION[event.state].cue
     }
 
     if (event.state !== 'waiting-permission' && dismissedPermissionNotices.value.has(key)) {
@@ -1435,7 +1436,7 @@ export const useAgentStore = defineStore('agent', () => {
     }
 
     if (event.state === 'waiting-permission' && prevState !== 'waiting-permission') {
-      return 'waiting-permission'
+      return AGENT_STATE_PRESENTATION['waiting-permission'].cue
     }
 
     return null
@@ -1472,7 +1473,7 @@ export const useAgentStore = defineStore('agent', () => {
       if (!raw || typeof raw !== 'object') continue
       const entry = raw as Partial<AgentSession>
       if (typeof entry.source !== 'string' || typeof entry.sessionId !== 'string') continue
-      if (typeof entry.state !== 'string' || !(entry.state in STATE_PRIORITY)) continue
+      if (!isAgentState(entry.state)) continue
       if (typeof entry.lastSeenAt !== 'number' || !Number.isFinite(entry.lastSeenAt)) continue
       if (now - entry.lastSeenAt > SESSION_REMOVE_MS) continue
       const key = getSessionKey(entry.source as AgentSource, entry.sessionId)

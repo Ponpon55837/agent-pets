@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { locale, t } from '@/i18n'
-import { SOURCE_LABELS, STATE_COLORS, STATE_LABELS, STATE_LABELS_SHORT, type AgentSession } from '@/types/agent'
+import { SOURCE_LABELS, type AgentSession } from '@/types/agent'
+import { AGENT_STATE_PRESENTATION } from '@/utils/agent-state-presentation'
 import SessionElapsed from '@/components/status-panel/SessionElapsed.vue'
 import Button from '@/components/ui/Button.vue'
 import { formatTimeFull } from '@/utils/intl-format'
@@ -62,7 +63,7 @@ async function jump(action: SessionJumpAction): Promise<void> {
       <span
         class="session-status-dot"
         :class="{ live }"
-        :style="{ '--status-color': STATE_COLORS[session.state] }"
+        :style="{ '--status-color': AGENT_STATE_PRESENTATION[session.state].color }"
         aria-hidden="true"
       />
       <span class="session-info">
@@ -73,9 +74,9 @@ async function jump(action: SessionJumpAction): Promise<void> {
         <span
           class="state-chip"
           :class="[`state-${session.state}`, { live }]"
-          :style="{ '--status-color': STATE_COLORS[session.state] }"
-          :title="STATE_LABELS[session.state]"
-        >{{ STATE_LABELS_SHORT[session.state] }}</span>
+          :style="{ '--status-color': AGENT_STATE_PRESENTATION[session.state].color }"
+          :title="AGENT_STATE_PRESENTATION[session.state].label"
+        >{{ AGENT_STATE_PRESENTATION[session.state].shortLabel }}</span>
         <SessionElapsed v-if="live" :since="session.lastSeenAt" />
         <span v-else class="session-time">{{ lastSeen }}</span>
       </span>

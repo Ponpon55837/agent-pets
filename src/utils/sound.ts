@@ -42,6 +42,39 @@ export type SoundCue = 'success' | 'error' | 'waiting-permission' | 'waiting-inp
 const CUE_THROTTLE_MS = 3_000
 const lastPlayed = new Map<SoundCue, number>()
 
+interface Tone {
+  freq: number
+  startAt: number
+  duration: number
+  gain: number
+  type?: OscillatorType
+}
+
+// 每個 cue 的音形只寫在這張表；新增 cue 時漏了音形會編譯失敗。
+const CUE_TONES: Record<SoundCue, readonly Tone[]> = {
+  success: [
+    { freq: 660, startAt: 0, duration: 0.09, gain: 0.12 },
+    { freq: 880, startAt: 0.09, duration: 0.13, gain: 0.12 },
+  ],
+  // Two falling notes read as "oh no" rather than a single harsh buzz.
+  error: [
+    { freq: 330, startAt: 0, duration: 0.12, gain: 0.1, type: 'triangle' },
+    { freq: 220, startAt: 0.13, duration: 0.2, gain: 0.1, type: 'triangle' },
+  ],
+  // A soft rising pair: the agent is asking, not alarming.
+  'waiting-input': [
+    { freq: 440, startAt: 0, duration: 0.08, gain: 0.08 },
+    { freq: 587, startAt: 0.1, duration: 0.12, gain: 0.08 },
+  ],
+  // Rising-falling three-note figure, clearly different from the
+  // two-note rising success cue.
+  'waiting-permission': [
+    { freq: 988, startAt: 0, duration: 0.09, gain: 0.1, type: 'triangle' },
+    { freq: 740, startAt: 0.12, duration: 0.09, gain: 0.1, type: 'triangle' },
+    { freq: 988, startAt: 0.24, duration: 0.14, gain: 0.1, type: 'triangle' },
+  ],
+}
+
 export function playCue(cue: SoundCue, options: { preview?: boolean } = {}) {
   const audio = getContext()
   if (!audio || masterVolume <= 0) return
@@ -50,27 +83,5 @@ export function playCue(cue: SoundCue, options: { preview?: boolean } = {}) {
   lastPlayed.set(cue, nowMs)
   if (audio.state === 'suspended') audio.resume()
 
-  switch (cue) {
-    case 'success':
-      beep(660, 0, 0.09, 0.12)
-      beep(880, 0.09, 0.13, 0.12)
-      break
-    case 'error':
-      // Two falling notes read as "oh no" rather than a single harsh buzz.
-      beep(330, 0, 0.12, 0.1, 'triangle')
-      beep(220, 0.13, 0.2, 0.1, 'triangle')
-      break
-    case 'waiting-input':
-      // A soft rising pair: the agent is asking, not alarming.
-      beep(440, 0, 0.08, 0.08)
-      beep(587, 0.1, 0.12, 0.08)
-      break
-    case 'waiting-permission':
-      // Rising-falling three-note figure, clearly different from the
-      // two-note rising success cue.
-      beep(988, 0, 0.09, 0.1, 'triangle')
-      beep(740, 0.12, 0.09, 0.1, 'triangle')
-      beep(988, 0.24, 0.14, 0.1, 'triangle')
-      break
-  }
+  for (const tone of CUE_TONES[cue]) beep(tone.freq, tone.startAt, tone.duration, tone.gain, tone.type)
 }

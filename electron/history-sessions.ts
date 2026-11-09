@@ -1,4 +1,4 @@
-import type { AgentState } from '../src/types/agent.ts'
+import { AGENT_STATE_POLICY, isAgentState, type AgentState } from '../src/types/agent.ts'
 import {
   HISTORY_SESSION_OUTCOMES,
   HISTORY_SESSION_PAGE_DEFAULT,
@@ -80,20 +80,9 @@ export function nextFinalState(
   previous: StoredSessionFinalState | null,
   state: AgentState,
 ): StoredSessionFinalState {
-  switch (state) {
-    case 'success':
-    case 'error':
-      return state
-    case 'offline':
-      return 'cancelled'
-    case 'thinking':
-    case 'tool-running':
-    case 'waiting-permission':
-    case 'waiting-input':
-      return 'open'
-    default:
-      return previous ?? 'open'
-  }
+  // 對應值在 AGENT_STATE_POLICY.historyOutcome；不認得的狀態跟 idle 一樣沿用上一輪結果。
+  const outcome = isAgentState(state) ? AGENT_STATE_POLICY[state].historyOutcome : 'keep'
+  return outcome === 'keep' ? previous ?? 'open' : outcome
 }
 
 function finiteTimestamp(value: unknown, max: number): number | undefined {

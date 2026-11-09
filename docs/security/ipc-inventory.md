@@ -16,7 +16,7 @@
 | `power-save-state` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getPowerSaveState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-summary` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | getHistorySummary (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-usage-blocks` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getUsageBlocks (invoke) | `tests/ipc-history.test.mts` |
-| `history-sessions` | `handle` | 設定面板 main frame | normalizeSessionQuery；無效輸入回安全預設或錯誤 | listHistorySessions (invoke) | `tests/history-sessions.test.mts` |
+| `history-sessions` | `handle` | 設定面板 main frame | normalizeSessionQuery；無效輸入回安全預設或錯誤 | listHistorySessions (invoke) | `tests/agent-state-registry.test.mts`<br>`tests/history-sessions.test.mts` |
 | `history-session-detail` | `handle` | 設定面板 main frame | isHistorySessionId；無效輸入回安全預設或錯誤 | getHistorySessionDetail (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-clear` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | clearHistory (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-export` | `handle` | 設定面板 main frame | 型別；isProjectId；無效輸入回安全預設或錯誤 | exportHistory (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |

@@ -28,6 +28,7 @@
 - Window mode geometry: `electron/pet-window-mode.ts`; shared mode snapshot types: `src/types/pet-window.ts`.
 - Agent Adapter SDK: `electron/agent-adapter.ts` owns the runtime registry and canonical ingress selection; `electron/agent-adapter-operations.ts` wraps existing platform installers/detection; shared capability/status contracts live in `src/types/agent-adapter.ts`.
 - Canonical current event types: `src/types/agent.ts`.
+- Per-state data lives in two exhaustive registries (`satisfies Record<AgentState, …>`): `AGENT_STATE_POLICY` in `src/types/agent.ts` (priority, desktop notification, history outcome; shared with the main process) and `AGENT_STATE_PRESENTATION` in `src/utils/agent-state-presentation.ts` (labels, colour, aria key, status-line word, mini badge, sound cue; renderer only). A new state goes into both; `tests/agent-state-registry.test.mts` checks coverage. Validate untrusted state strings with `isAgentState`, never `in`.
 - Plugin Host: `electron/plugin-manifest.ts` validates the public contract; `electron/plugin-registry.ts` safely plans and installs bounded archives; `electron/plugin-broker.ts` validates Worker RPC; focused controllers in `electron/plugin-{feed,command,badge,tray,skin,preferences,net,secrets,settings,schedule,panel-view}.ts` own individual capabilities. `electron/plugin-protocol.ts` and plugin preloads constrain resource access and renderer APIs; public contracts and examples live in `docs/plugins/`.
 
 ## Existing security controls to preserve
