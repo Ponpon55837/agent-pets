@@ -31,6 +31,7 @@ import { usePetTheme } from '@/composables/usePetTheme'
 import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
 import { formatDateParts } from '@/utils/intl-format'
 import { PET_CELL_HEIGHT } from '@/types/pet-atlas'
+import { useReducedMotion } from '@/composables/useReducedMotion'
 
 const store = useAgentStore()
 const clickAreaRef = ref<HTMLElement | null>(null)
@@ -60,11 +61,11 @@ const shimejiBehavior = ref<PetAutonomousBehavior>('idle')
 const shimejiFacing = ref<-1 | 1>(1)
 const pointerOverPet = ref(false)
 const shimejiScheduler = new ShimejiScheduler()
-const shimejiReducedMotion = ref(false)
+// shimejiGate 已經監看這個值，系統設定改變時會自動重排 Shimeji。
+const shimejiReducedMotion = useReducedMotion()
 const shimejiPowerSave = ref(false)
 let shimejiTimer: ReturnType<typeof setTimeout> | null = null
 let shimejiIdleSince = Date.now()
-let shimejiMediaQuery: MediaQueryList | null = null
 let cleanupShimejiPowerSave: (() => void) | null = null
 interface ShimejiBattery {
   charging: boolean
@@ -193,11 +194,6 @@ function onShimejiVisibilityChange(): void {
 }
 
 async function initializeShimejiEnvironment(): Promise<void> {
-  shimejiMediaQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)') ?? null
-  if (shimejiMediaQuery) {
-    shimejiReducedMotion.value = shimejiMediaQuery.matches
-    shimejiMediaQuery.addEventListener?.('change', restartShimeji)
-  }
   document.addEventListener('visibilitychange', onShimejiVisibilityChange)
 
   if (window.electronAPI?.getPowerSaveState) {
@@ -227,12 +223,10 @@ async function initializeShimejiEnvironment(): Promise<void> {
 function disposeShimejiEnvironment(): void {
   stopShimejiTimer()
   document.removeEventListener('visibilitychange', onShimejiVisibilityChange)
-  shimejiMediaQuery?.removeEventListener?.('change', restartShimeji)
   cleanupShimejiPowerSave?.()
   cleanupShimejiPowerSave = null
   shimejiBattery?.removeEventListener('chargingchange', updateShimejiPowerSave)
   shimejiBattery?.removeEventListener('levelchange', updateShimejiPowerSave)
-  shimejiMediaQuery = null
   shimejiBattery = null
 }
 

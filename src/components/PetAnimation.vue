@@ -578,8 +578,12 @@ watch(() => currentPet.value?.pluginSkin?.cacheKey, reloadPet)
 watch(() => store.petsLoaded, reloadPet)
 // 寵物包的覆蓋值在播放中被換掉時重排，不必等下一次狀態改變。
 watch(petBehaviorManifest, () => { if (motionTable.value !== planTable) startAnimation() })
-// 只影響節奏：重算延遲表即可，不重排計畫。
-watch([() => props.lowFps, reducedMotion], updateFrameDelays)
+// 只影響節奏：重算延遲表、不重排計畫；已排好的那一格改用新延遲，
+// 否則從慢速切回正常時要等完舊的長延遲（最多數秒）才會變快。
+watch([() => props.lowFps, reducedMotion], () => {
+  updateFrameDelays()
+  if (frameTimerId !== null) scheduleNextFrame()
+})
 
 watch(() => props.state, (newState, oldState) => {
   startGhostFade()

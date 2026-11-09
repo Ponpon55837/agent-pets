@@ -2,6 +2,7 @@
 import { openPanelThemeSettings, settingsSectionRequest } from '@/utils/settings-navigation'
 import { panelThemeSettingsTarget } from '@/utils/panel-theme-css'
 import { panelThemeState } from '@/composables/usePanelTheme'
+import { useReducedMotion } from '@/composables/useReducedMotion'
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { t } from '@/i18n'
 import { useAgentStore } from '@/stores/agentStore'
@@ -22,6 +23,7 @@ import {
 const props = defineProps<{ requestedPluginId: string; requestedPluginNonce?: number }>()
 const group = defineModel<SettingsGroupId>('group', { required: true })
 const store = useAgentStore()
+const reducedMotion = useReducedMotion()
 
 const sectionComponents: Record<SettingsSectionId, ReturnType<typeof defineAsyncComponent>> = {
   language: defineAsyncComponent(() => import('@/components/status-panel/SettingsLanguage.vue')),
@@ -65,7 +67,7 @@ function updateScrollHints(): void {
 function scrollToSection(section: SettingsSectionId): void {
   const el = scroller.value?.querySelector<HTMLElement>(`[data-settings-section="${section}"]`)
   if (!el) return
-  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  const reduceMotion = reducedMotion.value
   el.scrollIntoView({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' })
   if (flashTimer) clearTimeout(flashTimer)
   flashSection.value = section

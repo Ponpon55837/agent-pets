@@ -4,6 +4,7 @@ import { readonly, ref, type Ref } from 'vue'
 // 每次都呼叫 window.matchMedia() 會在熱路徑上反覆配置新物件。
 let query: MediaQueryList | null = null
 const reduced = ref(false)
+const sharedReduced = readonly(reduced)
 
 function ensureQuery(): void {
   if (query || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
@@ -15,5 +16,5 @@ function ensureQuery(): void {
 /** 系統「減少動態效果」設定；會隨系統設定即時更新。 */
 export function useReducedMotion(): Readonly<Ref<boolean>> {
   ensureQuery()
-  return readonly(reduced)
+  return sharedReduced
 }
