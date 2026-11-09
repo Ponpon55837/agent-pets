@@ -72,6 +72,19 @@ Additional primitives (all backward compatible; existing props above are unchang
 
 New tokens for primitives: `--hit-min` (32px minimum hit area), `--z-*` scale (the only z-index values components may use), `--leading-tight/normal/relaxed`, `--ease-standard`.
 
+A raw `<button>`, `<select>` or `<input>` outside `ui/` is allowed only when no primitive fits (a whole clickable list row, a native `type=color` picker, a range slider, a text link inside the permission bubble). Put `<!-- raw-control: <reason> -->` on the line above it; `check:design` counts unexplained ones as `rawControls`.
+
+## Spacing and motion tokens
+
+Token tables and what each `check:design` field means: [docs/dev/design-tokens.md](../../../../docs/dev/design-tokens.md).
+
+
+- Spacing: `--space-1`…`--space-5` (4/8/12/16/24px) plus the half steps `--space-0-5` (2px), `--space-1-5` (6px), `--space-2-5` (10px) for dense label stacks and pill padding. A margin/padding/gap px that equals any `--space-*` value must use the token (`literal-spacing`). Off-scale optical nudges (1px, 3px, 5px, 7px …) and negative margins stay literal; `check:design --verbose` lists them as `raw-spacing`. Values inside `calc()`/`max()` (the pet window's `--pet-scale` formulas) are not checked.
+- Motion: every `transition` uses `--transition-fast/base/slow` (`literal-transition` fails otherwise). Keyframe durations that repeat with one meaning are tokens — `--duration-spin` (loading spinner turn) and `--duration-attention` (pet-window attention pulse); one-off decorative animations (sprite reactions) keep their literal and show up as `raw-motion`. Curves are `--ease-standard` and `--ease-overshoot`; a literal `cubic-bezier()` fails (`literal-easing`). Keyword easings (`ease-in-out`, `linear`) are fine.
+- A duration that must match a script timer comes from the script: the permission countdown sets its width transition from `PERMISSION_CLOCK_INTERVAL_MS` (`usePermissionClock.ts`).
+- Reduced motion: `tokens.css` zeroes every `--transition-*` and `--duration-*` under `prefers-reduced-motion` and stops all other animations with one universal rule (`tests/design-motion-tokens.test.mts` checks both). Script-driven motion reads `useReducedMotion()`.
+- None of the half steps or `--duration-*`/`--ease-overshoot` are part of the plugin token table; plugin pages can see them in the shared `tokens.css` but must not rely on them.
+
 Session state labels (`label` / `shortLabel` in `AGENT_STATE_PRESENTATION`, `src/utils/agent-state-presentation.ts`) and `SOURCE_LABELS` (Codex CLI, OpenCode Desktop, …) are deliberately **not** localized — they're the agent's technical run states and product/vendor names, not prose, and stay English in every locale. This was tried the other way (routed through `t()`) and reverted: translating "Thinking"/"Idle" read as inconsistent next to the untranslated tool vocabulary the rest of the panel already uses. Don't route these through `t()` again; add new state copy to `AGENT_STATE_PRESENTATION` and source copy to `SOURCE_LABELS` in `types/agent.ts`.
 
 ## Cross-platform is the constraint, not an afterthought

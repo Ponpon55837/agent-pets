@@ -51,6 +51,7 @@ async function jump(action: SessionJumpAction): Promise<void> {
 
 <template>
   <div class="session-item" :class="{ expanded }">
+    <!-- raw-control: 展開／收合整列（aria-expanded），內含狀態點與多欄文字，不是動作按鈕 -->
     <button
       type="button"
       class="session-row"

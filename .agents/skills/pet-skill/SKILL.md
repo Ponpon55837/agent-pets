@@ -55,7 +55,7 @@ Work in Traditional Chinese for user-facing plans, phase reports, and handoffs. 
 - Prefer the regular, legible treatment. Use a clear treatment only over visually rich content with a tested dimming layer.
 - Provide opaque/high-contrast and reduced-motion fallbacks. Verify light and dark wallpapers and focus states.
 - Preserve the pet and existing visual personality; do not restyle unrelated surfaces in a feature phase.
-- Use the token layer (`src/styles/tokens.css`) and the shared primitives (`src/components/ui/`) documented in [ui-design-system.md](references/ui-design-system.md) instead of hand-rolling a new button, card, toggle, dropdown, progress bar, confirmation dialog, or icon. This app ships for both Windows and macOS; a plain-text glyph icon or a `window.confirm()` dialog is a cross-platform bug, not a style choice.
+- Use the token layer (`src/styles/tokens.css`: colour, type, spacing including the `--space-0-5/1-5/2-5` half steps, `--transition-*`/`--duration-*`/`--ease-*` motion) and the shared primitives (`src/components/ui/`) documented in [ui-design-system.md](references/ui-design-system.md) instead of hand-rolling a new button, card, toggle, dropdown, progress bar, confirmation dialog, or icon. This app ships for both Windows and macOS; a plain-text glyph icon or a `window.confirm()` dialog is a cross-platform bug, not a style choice.
 
 ## Package and version
 

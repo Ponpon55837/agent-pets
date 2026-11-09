@@ -136,7 +136,7 @@
 .pet-canvas.pet-react-happy { animation: pet-react-happy 0.56s ease-out; }
 .pet-canvas.pet-react-curious { animation: pet-react-curious 0.76s ease-in-out; }
 .pet-canvas.pet-react-thinking { animation: pet-react-thinking 0.9s ease-in-out; }
-.pet-canvas.pet-react-surprised { animation: pet-react-surprised 0.42s cubic-bezier(0.2, 1.4, 0.4, 1); }
+.pet-canvas.pet-react-surprised { animation: pet-react-surprised 0.42s var(--ease-overshoot); }
 .pet-canvas.pet-react-encouraging { animation: pet-react-encouraging 0.7s ease-in-out; }
 
 @keyframes pet-react-happy {
