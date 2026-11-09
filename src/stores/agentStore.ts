@@ -7,7 +7,7 @@ import type {
   AgentState,
   AgentStatusEvent,
 } from '@/types/agent'
-import { STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
+import { isAgentState, STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
 import type { DesktopPreferences, DesktopPreferencesPatch, LaunchAtStartupStatus } from '@/types/desktop'
 import type { DesktopVisibilityCapabilities } from '@/types/desktop-visibility'
 import type { AppLocale } from '@/types/locale'
@@ -50,6 +50,7 @@ import {
   type ToastTone,
 } from '@/utils/pet-toast'
 import type { SoundCue } from '@/utils/sound'
+import { AGENT_STATE_PRESENTATION } from '@/utils/agent-state-presentation'
 import { SUCCESS_DISPLAY_MS } from '@/utils/pet-motion-plan'
 import { readPetFeedbackDefaults } from '@/utils/pet-defaults'
 import { SESSION_REMOVE_MS, sessionLifecycleAction } from '@/utils/session-lifecycle'
@@ -88,6 +89,13 @@ export interface PetEntry {
 }
 
 const MAX_SESSION_COUNT = 200
+// 面板清單排序的最後一層：來源名稱的 localeCompare 順序在載入時算成名次，
+// 每次比較只做整數相減，不必在每次事件重排時反覆做語系比對（順序與 localeCompare 相同）。
+const SOURCE_LABEL_RANK = Object.freeze(Object.fromEntries(
+  (Object.keys(SOURCE_LABELS) as AgentSource[])
+    .sort((a, b) => SOURCE_LABELS[a].localeCompare(SOURCE_LABELS[b]))
+    .map((source, rank) => [source, rank]),
+) as Record<AgentSource, number>)
 const ACHIEVEMENT_DEFINITION_BY_ID = new Map(ACHIEVEMENT_DEFINITIONS.map(entry => [entry.id, entry]))
 // Kept at/below the main process' quota cache TTL so a poll that arrives on
 // schedule actually reaches the usage API instead of being answered from a
@@ -243,7 +251,7 @@ export const useAgentStore = defineStore('agent', () => {
     if (priorityDelta !== 0) return priorityDelta
     const recencyDelta = b.lastSeenAt - a.lastSeenAt
     if (recencyDelta !== 0) return recencyDelta
-    return SOURCE_LABELS[a.source].localeCompare(SOURCE_LABELS[b.source])
+    return SOURCE_LABEL_RANK[a.source] - SOURCE_LABEL_RANK[b.source]
   }))
   // Preserve the store's existing object-shaped view for any internal caller
   // that still needs keyed access; the Map remains the source of truth.
@@ -598,7 +606,7 @@ export const useAgentStore = defineStore('agent', () => {
       const session = sessionsByKey.get(key)
       if (!session || session.state !== 'waiting-input') return
       showToast(session.source, session.project, 'waiting')
-      cueSink?.('waiting-input')
+      cueSink?.(AGENT_STATE_PRESENTATION['waiting-input'].cue)
     }, WAITING_INPUT_DELAY_MS))
   }
 
@@ -1355,11 +1363,9 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
-  // Returns which (if any) sound cue this event is worth playing, so the
-  // caller (App.vue) can decide whether/where to actually play it — this
-  // store instance is shared by both the pet and panel windows, and audio
-  // must only come from one of them or it plays twice.
-  function handleEvent(event: AgentStatusEvent): 'success' | 'error' | 'waiting-permission' | null {
+  // 回傳這個事件值得播的音效（或 null），由呼叫端 App.vue 決定要不要播、在哪裡播：
+  // 寵物與面板兩個視窗都跑同一份 store，音效只能由其中一個發出，否則會播兩次。
+  function handleEvent(event: AgentStatusEvent): SoundCue | null {
     const key = getSessionKey(event.source, event.sessionId)
     const existing = sessionIndex.get(key)
     const prevState = existing?.state
@@ -1426,7 +1432,7 @@ export const useAgentStore = defineStore('agent', () => {
       if (event.state === 'success' && !shouldPlaySuccessSound(
         taskStartedAt === undefined ? undefined : Date.now() - taskStartedAt,
       )) return null
-      return event.state
+      return AGENT_STATE_PRESENTATION[event.state].cue
     }
 
     if (event.state !== 'waiting-permission' && dismissedPermissionNotices.value.has(key)) {
@@ -1436,7 +1442,7 @@ export const useAgentStore = defineStore('agent', () => {
     }
 
     if (event.state === 'waiting-permission' && prevState !== 'waiting-permission') {
-      return 'waiting-permission'
+      return AGENT_STATE_PRESENTATION['waiting-permission'].cue
     }
 
     return null
@@ -1473,7 +1479,7 @@ export const useAgentStore = defineStore('agent', () => {
       if (!raw || typeof raw !== 'object') continue
       const entry = raw as Partial<AgentSession>
       if (typeof entry.source !== 'string' || typeof entry.sessionId !== 'string') continue
-      if (typeof entry.state !== 'string' || !(entry.state in STATE_PRIORITY)) continue
+      if (!isAgentState(entry.state)) continue
       if (typeof entry.lastSeenAt !== 'number' || !Number.isFinite(entry.lastSeenAt)) continue
       if (now - entry.lastSeenAt > SESSION_REMOVE_MS) continue
       const key = getSessionKey(entry.source as AgentSource, entry.sessionId)

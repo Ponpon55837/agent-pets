@@ -4,9 +4,9 @@
    in place of a literal is a no-op visually.
 
    Rule: component <style> blocks must not contain bare hex or rgba() values.
-   State colours that JS needs (STATE_COLORS in types/agent.ts) are the one
-   documented exception — they are mirrored here as --state-* so CSS can use
-   the same palette. */
+   State colours that JS needs (AGENT_STATE_PRESENTATION in
+   utils/agent-state-presentation.ts) only name the --state-* variables below,
+   so CSS and JS share the same palette. */
 
 :root {
   /* 顏色一律來自下方的主題色盤（--builtin-organic-* → --organic-*）與其語意層
@@ -266,7 +266,7 @@
      一律搭配供應商名稱文字，所以不承載狀態語意，主題可以隨色盤調整。 */
   --accent-claude: var(--organic-sage);
   --gradient-claude: var(--organic-sage);
-  /* 代理狀態（狀態點、迷你環、工作階段列；STATE_COLORS 讀這些名稱）：
+  /* 代理狀態（狀態點、迷你環、工作階段列；AGENT_STATE_PRESENTATION 的 color 讀這些名稱）：
      成功/錯誤/等待取自受色相限制的狀態色，思考/工具＝強調文字色（強調填色在淺色膠囊上不到 3:1），
      閒置/離線＝弱化文字。
      主題無法直接設定 --state-*，只能透過受驗證的色盤，所以語意不會被改掉；
