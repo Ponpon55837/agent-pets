@@ -145,6 +145,16 @@ test('both registries cover every AgentState and nothing else', () => {
   assert.deepEqual(Object.keys(AGENT_STATE_PRESENTATION).sort(), states)
   assert.deepEqual(Object.keys(STATE_PRIORITY).sort(), states)
   for (const state of STATES) assert.equal(isAgentState(state), true, state)
+  // 表是全程式共用的單一來源：整張表、每一列與列裡的巢狀物件都凍結，誤改會直接丟錯。
+  for (const table of [AGENT_STATE_POLICY, AGENT_STATE_PRESENTATION, STATE_PRIORITY, AGENT_STATES]) {
+    assert.equal(Object.isFrozen(table), true)
+  }
+  for (const row of [...Object.values(AGENT_STATE_POLICY), ...Object.values(AGENT_STATE_PRESENTATION)]) {
+    assert.equal(Object.isFrozen(row), true)
+    for (const value of Object.values(row)) if (value && typeof value === 'object') assert.equal(Object.isFrozen(value), true)
+  }
+  assert.throws(() => { (AGENT_STATE_POLICY.error as { priority: number }).priority = 0 }, TypeError)
+  assert.throws(() => { (AGENT_STATE_PRESENTATION.error.mini as { icon: string }).icon = 'x' }, TypeError)
   for (const entry of Object.values(AGENT_STATE_PRESENTATION)) {
     assert.match(entry.color, /^var\(--state-[a-z]+\)$/)
   }

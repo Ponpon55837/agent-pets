@@ -88,6 +88,13 @@ export interface PetEntry {
 }
 
 const MAX_SESSION_COUNT = 200
+// 面板清單排序的最後一層：來源名稱的 localeCompare 順序在載入時算成名次，
+// 每次比較只做整數相減，不必在每次事件重排時反覆做語系比對（順序與 localeCompare 相同）。
+const SOURCE_LABEL_RANK = Object.freeze(Object.fromEntries(
+  (Object.keys(SOURCE_LABELS) as AgentSource[])
+    .sort((a, b) => SOURCE_LABELS[a].localeCompare(SOURCE_LABELS[b]))
+    .map((source, rank) => [source, rank]),
+) as Record<AgentSource, number>)
 const ACHIEVEMENT_DEFINITION_BY_ID = new Map(ACHIEVEMENT_DEFINITIONS.map(entry => [entry.id, entry]))
 // Kept at/below the main process' quota cache TTL so a poll that arrives on
 // schedule actually reaches the usage API instead of being answered from a
@@ -243,7 +250,7 @@ export const useAgentStore = defineStore('agent', () => {
     if (priorityDelta !== 0) return priorityDelta
     const recencyDelta = b.lastSeenAt - a.lastSeenAt
     if (recencyDelta !== 0) return recencyDelta
-    return SOURCE_LABELS[a.source].localeCompare(SOURCE_LABELS[b.source])
+    return SOURCE_LABEL_RANK[a.source] - SOURCE_LABEL_RANK[b.source]
   }))
   // Preserve the store's existing object-shaped view for any internal caller
   // that still needs keyed access; the Map remains the source of truth.
@@ -1355,10 +1362,8 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
-  // Returns which (if any) sound cue this event is worth playing, so the
-  // caller (App.vue) can decide whether/where to actually play it — this
-  // store instance is shared by both the pet and panel windows, and audio
-  // must only come from one of them or it plays twice.
+  // 回傳這個事件值得播的音效（或 null），由呼叫端 App.vue 決定要不要播、在哪裡播：
+  // 寵物與面板兩個視窗都跑同一份 store，音效只能由其中一個發出，否則會播兩次。
   function handleEvent(event: AgentStatusEvent): SoundCue | null {
     const key = getSessionKey(event.source, event.sessionId)
     const existing = sessionIndex.get(key)

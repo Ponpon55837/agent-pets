@@ -1,11 +1,12 @@
 import type { TranslationKey } from '@/i18n'
-import type { AgentState } from '@/types/agent'
 import type { SoundCue } from '@/utils/sound'
+// 測試會直接用 Node 執行這個檔案，執行期 import 必須是相對路徑（見 agent-pets-conventions §1）。
+import { freezeRegistry, isAgentState, type AgentState } from '../types/agent.ts'
 
 // --- 狀態 registry（renderer 畫面呈現） ------------------------------------------
 // 每個 AgentState 在畫面上的樣子只寫在這一張表；satisfies 讓新增狀態時漏填任何一格都編譯失敗。
 // 主程序也要用的策略（優先序、通知、歷史結局）在 src/types/agent.ts 的 AGENT_STATE_POLICY。
-// 這個檔案會被 tests/*.test.mts 直接執行：只能有 type import，不能在執行期依賴 i18n 或 Vue。
+// 不能在執行期依賴 i18n 或 Vue：表裡只放翻譯 key，由呼叫端翻譯。
 
 export interface AgentStatePresentation {
   /**
@@ -30,7 +31,7 @@ export interface AgentStatePresentation {
   readonly cue: SoundCue | null
 }
 
-export const AGENT_STATE_PRESENTATION = {
+export const AGENT_STATE_PRESENTATION = freezeRegistry({
   offline: {
     label: 'Offline', shortLabel: 'Offline', color: 'var(--state-offline)',
     ariaKey: 'pet.stateOffline', lineWord: 'Offline',
@@ -71,16 +72,14 @@ export const AGENT_STATE_PRESENTATION = {
     ariaKey: 'pet.stateError', lineWord: 'Failed',
     mini: { icon: 'warning', labelKey: 'pet.miniError' }, cue: 'error',
   },
-} as const satisfies Record<AgentState, AgentStatePresentation>
+} as const satisfies Record<AgentState, AgentStatePresentation>)
 
 /**
  * 不認得的狀態字串（舊歷史資料、原型鏈上的名稱）一律當 idle 呈現；
  * 需要區分「不認得」的地方改用 isAgentState。
  */
 export function statePresentation(state: string): AgentStatePresentation {
-  return Object.hasOwn(AGENT_STATE_PRESENTATION, state)
-    ? AGENT_STATE_PRESENTATION[state as AgentState]
-    : AGENT_STATE_PRESENTATION.idle
+  return isAgentState(state) ? AGENT_STATE_PRESENTATION[state] : AGENT_STATE_PRESENTATION.idle
 }
 
 export function stateLineLabel(state: string): string {

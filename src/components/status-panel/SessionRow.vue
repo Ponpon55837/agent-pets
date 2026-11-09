@@ -1,18 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useAgentStore } from '@/stores/agentStore'
 import { locale, t } from '@/i18n'
 import { SOURCE_LABELS, type AgentSession } from '@/types/agent'
-import { AGENT_STATE_PRESENTATION } from '@/utils/agent-state-presentation'
-import SessionElapsed from '@/components/status-panel/SessionElapsed.vue'
-import Button from '@/components/ui/Button.vue'
-import { formatTimeFull } from '@/utils/intl-format'
-import { useAgentStore } from '@/stores/agentStore'
 import { hostAppLabel } from '@/types/host-app'
 import type { SessionJumpAction, SessionJumpError } from '@/types/session-jump'
+import SessionElapsed from '@/components/status-panel/SessionElapsed.vue'
+import Button from '@/components/ui/Button.vue'
+import { AGENT_STATE_PRESENTATION } from '@/utils/agent-state-presentation'
+import { formatTimeFull } from '@/utils/intl-format'
 
-// One active session. The whole row is a disclosure button (keyboard focusable,
-// aria-expanded) that reveals the full path, tool and timing; nothing
-// interactive is nested inside it.
+// 一個進行中的 session。整列是一個展開按鈕（可用鍵盤聚焦、帶 aria-expanded），
+// 展開後顯示完整路徑、工具與時間；列裡不能再巢狀任何可互動元素。
 const props = defineProps<{ session: AgentSession; projectLabel: string; detail: string; live: boolean }>()
 
 const expanded = ref(false)
@@ -20,8 +19,8 @@ const detailsId = computed(() => `session-details-${props.session.key.replace(/[
 const lastSeen = computed(() => formatTimeFull(props.session.lastSeenAt, locale.value))
 const title = computed(() => `${SOURCE_LABELS[props.session.source]}${props.projectLabel ? ` · ${props.projectLabel}` : ''}`)
 
-// Jump-back actions live in the expanded details so the row itself stays one disclosure button.
-// The renderer only names the session; main resolves its path and app.
+// 跳回動作放在展開後的詳情裡，讓整列維持單一個展開按鈕。
+// renderer 只指名是哪個 session，路徑與 App 由主程序解析。
 const store = useAgentStore()
 const switchApp = computed(() => (store.canSwitchToSessionApp(props.session) ? hostAppLabel(props.session.host?.app) : null))
 const folderActions = computed(() => store.sessionJumpEnabled && Boolean(props.session.project))

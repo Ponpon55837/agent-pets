@@ -23,7 +23,7 @@
 - 先寫特性測試並 commit（`2617c68`）：在舊程式碼上鎖住每個狀態的優先序、標籤、顏色、狀態列用字、通知候選、歷史結局和音效開關，5/5 通過。重構後同一組數值依然成立。新增的測試會檢查兩張表剛好涵蓋 8 個狀態，不認得的字串（`constructor`、`toString`、`__proto__`）不會被當成狀態。
 - `pnpm exec vue-tsc --noEmit`、`pnpm run lint`、`pnpm run check:design`、`check:design:strict`：全部通過。design 報告和 base commit 完全相同（`unused:1, rawControls:15, rawColors:0`）。
 - `pnpm run test:unit`：1216 pass / 0 fail / 1 skipped。
-- 用 `node scripts/e2e-isolated-electron.mjs --hook-port-base 28473` 實測，`fakeSafeStorage: true`，沒有存取鑰匙圈。每個狀態都以帶 token 的 HTTP 事件送進去，再用 CDP 讀寵物視窗：
+- 用 `node scripts/e2e-isolated-electron.mjs --hook-port-base 28473` 實測兩次（重構後一次，review 修正後再一次），`fakeSafeStorage: true`，沒有存取鑰匙圈。每個狀態都以帶 token 的 HTTP 事件送進去，再用 CDP 讀寵物視窗：
   - 狀態列用字和點的顏色，8 個狀態都正確，例如 `Working`／`var(--state-active)`、`Needs input`／`var(--state-warn)`。
   - 家族 aria-label 和寵物 aria-label 是已翻譯的說法。
   - 迷你模式透過真實 IPC `setPetWindowMode('mini')` 進入：標籤、外環色、圖示或圓點和原本的 switch 一致。
@@ -31,9 +31,35 @@
 
 ## 安全與效能
 
-- 沒有新增 IPC、檔案 I/O 或網路，主程序也沒有匯入 renderer 模組。
-- 修掉一個小漏洞：store 原本用 `in STATE_PRIORITY` 檢查快照，`'constructor'` 會被當成合法狀態還原，現在改用 `hasOwn`。
-- 熱路徑：通知分類和歷史分類從 switch 改成一次 `hasOwn` 加查表，`STATE_PRIORITY` 在模組載入時建一次，成本可忽略。
+逐檔審查 diff 的結果：
+
+- 主程序只相對匯入純資料模組（`src/types/agent.ts`、`src/i18n.ts`），沒有匯入 `agent-state-presentation` 或 Vue。
+- 沒有新增 IPC、檔案 I/O 或網路。
+- hook 和事件的狀態字串、`event-normalizer` 的別名、英文標籤、通知 kind 都沒變。
+- 修掉一個小漏洞：store 原本用 `in STATE_PRIORITY` 檢查快照，`'constructor'` 會被當成合法狀態還原。`isAgentState` 現在改用模組載入時建好的 `Set`。
+- 兩張表、`STATE_PRIORITY`、`AGENT_STATES` 都用 `freezeRegistry` 連同巢狀物件凍結，測試確認誤改會丟 `TypeError`。
+
+順手修的既有問題：
+
+- touched 範圍內的英文註解改成繁中，包括 `agent.ts`、`history-sessions.ts` 全檔。
+- 三個面板元件的 import 改成 stores → types → composables → components → utils 的順序。
+- `HistorySessionDetail` 自己的 `TERMINAL_STATES` 和 `HISTORY_TERMINAL_STATES` 重複，改成共用後者。
+- `statePresentation` 改用 `isAgentState`，不再另寫一份檢查。
+
+熱路徑量測（Node 26，50 萬次平均）：
+
+| 項目 | 舊版 | 新版 |
+|---|---|---|
+| `classifyNotification` | 約 1030 ns | 約 970 ns |
+| `nextFinalState` | 19 ns | 27 ns |
+| 狀態檢查 | 43 ns（`in`） | 26 ns（`Set`） |
+
+- `nextFinalState` 改成模組載入時建好的 `Map`，一次 O(1) 查找。第一版用 `hasOwn` 加查表是 80 ns，這一版把它降下來；剩下的差距在量測雜訊範圍內。
+- 挑最高優先 session（`mostUrgentSession`、`summarizeFamilies`）原本就是單次掃描 O(n)，不排序；淘汰則用索引堆積。這兩處都不需要改。
+- 面板的 `sessionList` 是顯示用的完整排序（n 上限 200），只在面板視窗有人讀時才計算。同分時最後一層原本每次比較都呼叫 `localeCompare`，現在改成載入時算好的來源名次，排序結果經驗證完全相同。量測結果：
+  - 一般資料，n=200：157 → 142 µs
+  - 最壞情況（全部同分）：120 → 102 µs
+- 沒有把 `sessionList` 改成增量維護的有序結構：n 有上限，最壞約 0.1 ms，複雜度不划算。
 
 ## 殘留風險
 

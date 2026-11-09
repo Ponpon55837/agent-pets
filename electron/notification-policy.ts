@@ -10,10 +10,7 @@ export interface NotificationCandidate {
   title: string
   body: string
   terminal: boolean
-  /**
-   * Only for waiting-permission / waiting-input: the one session that is waiting for the user, so a
-   * click on that notification may switch to its app. Completions and errors never switch apps.
-   */
+  /** 只有非結束類（等待權限／等待輸入）才有：正在等使用者的那個 session，點通知時可切到它的 App。 */
   session?: { source: string; sessionId: string }
 }
 
@@ -40,8 +37,7 @@ function isNotifiableState(state: unknown): state is NotifiableAgentState {
 }
 
 function notificationTitle(event: AgentStatusEvent, kind: NotifiableAgentState, source: string): string {
-  // Codex / Claude cannot be answered from Agent Pets; say so in the title so
-  // clicking the notification is not mistaken for a way to approve here.
+  // Codex／Claude 的權限無法在 Agent Pets 裡回覆，標題要講明，免得使用者以為點通知就能核准。
   if (kind === 'waiting-permission' && event.permissionNotice?.responseMode === 'external_only') {
     return t('permission.notifyExternal', { source })
   }
@@ -73,7 +69,6 @@ export function classifyNotification(event: AgentStatusEvent): NotificationCandi
     title: notificationTitle(event, kind, source),
     body,
     terminal,
-    // Only a session waiting for the user may be jumped to; completions and errors never switch apps.
     ...(terminal ? {} : { session: { source: event.source, sessionId: event.sessionId } }),
   }
 }

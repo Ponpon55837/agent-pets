@@ -56,7 +56,7 @@ import PetAnimation from '@/components/PetAnimation.vue'
 - `src/types/capabilities.ts`
 - `src/types/progression.ts`
 - `src/utils/desktop-effects.ts`
-- `src/utils/agent-state-presentation.ts`（狀態呈現 registry；只有 `import type`，Node 執行時會整段拿掉，所以那幾行 `@/` 不影響測試；不能加任何執行期 import）
+- `src/utils/agent-state-presentation.ts`（狀態呈現 registry；執行期只相對匯入 `src/types/agent.ts`，`@/` 只用在 `import type`，Node 執行時會整段拿掉）
 - `src/utils/toast-countdown.ts`
 
 這份清單是目前测試檔案 import 的完整遞移閉包（這 9 個檔案彼此之間也不再 import 其他 src 檔案）。之後如果有新檔案被某個 `tests/*.test.mts` 直接 import，要先檢查它跟它遞移 import 的所有 src 檔案是否也在這份清單裡；不在的話一樣要維持相對路徑，否則要另外幫 Node 測試執行環境接上 `@/` 的 resolver（例如自訂 loader），目前專案沒有做這件事。

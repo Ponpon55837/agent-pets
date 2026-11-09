@@ -6,7 +6,7 @@ export interface SoundGate {
   soundOnPermission: boolean
   soundOnError: boolean
   soundOnSuccess: boolean
-  /** The pet window is actually on screen (not hidden by fullscreen / tray). */
+  /** 寵物視窗確實在螢幕上（沒有被全螢幕或收進系統匣）。 */
   petVisible: boolean
 }
 
@@ -21,7 +21,7 @@ const CUE_SWITCHES: Record<SoundCue, CueSwitch | null> = {
   'waiting-input': null,
 }
 
-/** Whether a cue may be heard: master switch, DND, per-cue switch and visibility. */
+/** 這個音效能不能播：總開關、勿擾、各音效開關與可見性都要通過。 */
 export function shouldPlayCue(cue: SoundCue, gate: SoundGate): boolean {
   if (!gate.soundEnabled || gate.dndEnabled || !gate.petVisible) return false
   const cueSwitch = CUE_SWITCHES[cue]

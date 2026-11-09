@@ -1,5 +1,4 @@
-// Short synthesized cues via Web Audio — no audio asset files to ship or
-// license, and the sounds stay tiny and instant.
+// 用 Web Audio 即時合成短音效：不必附帶或授權音檔，聲音也夠小、沒有載入延遲。
 let ctx: AudioContext | null = null
 
 function getContext(): AudioContext | null {
@@ -14,7 +13,7 @@ function getContext(): AudioContext | null {
 
 let masterVolume = 0.6
 
-/** 0-100 from the desktop preference. */
+/** 桌面偏好設定的 0–100。 */
 export function setSoundVolume(percent: number): void {
   masterVolume = Math.min(1, Math.max(0, percent / 100))
 }
@@ -38,7 +37,7 @@ function beep(freq: number, startAt: number, duration: number, baseGain: number,
 
 export type SoundCue = 'success' | 'error' | 'waiting-permission' | 'waiting-input'
 
-// Several requests arriving together must not stack into a burst of beeps.
+// 多個請求同時到達時，不能疊成一連串嗶聲。
 const CUE_THROTTLE_MS = 3_000
 const lastPlayed = new Map<SoundCue, number>()
 
@@ -56,18 +55,17 @@ const CUE_TONES: Record<SoundCue, readonly Tone[]> = {
     { freq: 660, startAt: 0, duration: 0.09, gain: 0.12 },
     { freq: 880, startAt: 0.09, duration: 0.13, gain: 0.12 },
   ],
-  // Two falling notes read as "oh no" rather than a single harsh buzz.
+  // 兩個下降音聽起來像「糟糕」，比單一刺耳的嗡聲溫和。
   error: [
     { freq: 330, startAt: 0, duration: 0.12, gain: 0.1, type: 'triangle' },
     { freq: 220, startAt: 0.13, duration: 0.2, gain: 0.1, type: 'triangle' },
   ],
-  // A soft rising pair: the agent is asking, not alarming.
+  // 輕柔的上升兩音：agent 是在詢問，不是警報。
   'waiting-input': [
     { freq: 440, startAt: 0, duration: 0.08, gain: 0.08 },
     { freq: 587, startAt: 0.1, duration: 0.12, gain: 0.08 },
   ],
-  // Rising-falling three-note figure, clearly different from the
-  // two-note rising success cue.
+  // 上升再下降的三音，和兩音上升的成功音效明顯不同。
   'waiting-permission': [
     { freq: 988, startAt: 0, duration: 0.09, gain: 0.1, type: 'triangle' },
     { freq: 740, startAt: 0.12, duration: 0.09, gain: 0.1, type: 'triangle' },
