@@ -31,9 +31,9 @@ export interface AgentStatusEvent {
   source: AgentSource
   sessionId: string
   project?: string
-  /** Main-process canonical project fingerprint; never a raw path. */
+  /** 主程序算出的標準專案指紋；絕不是原始路徑。 */
   projectId?: string
-  /** Main-process routing result; absent means preserve legacy selected-pet behavior. */
+  /** 主程序的路由結果；沒有時沿用舊版「用目前選擇的寵物」行為。 */
   routedPetId?: string
   state: AgentState
   originalEvent?: string
@@ -43,7 +43,7 @@ export interface AgentStatusEvent {
   toolName?: string
   tokenUsage?: AgentTokenUsage
   permissionNotice?: PermissionNotice
-  /** Terminal / IDE / desktop app the session runs in (allowlisted id only). */
+  /** session 執行所在的終端機／IDE／桌面 App（只允許白名單 id）。 */
   host?: AgentHost
 }
 
@@ -56,65 +56,74 @@ export interface AgentSession {
   routedPetId?: string
   state: AgentState
   lastSeenAt: number
-  /** When this session was first seen; a stable tie-break for "who needs you" ordering. */
+  /** 第一次看到這個 session 的時間；「誰在找你」排序時穩定的同分判斷。 */
   firstSeenAt?: number
   toolName?: string
   permissionNotice?: PermissionNotice
   host?: AgentHost
 }
 
-export const STATE_PRIORITY: Record<AgentState, number> = {
-  'waiting-permission': 100,
-  error: 90,
-  'waiting-input': 85,
-  'tool-running': 80,
-  thinking: 70,
-  success: 60,
-  idle: 20,
-  offline: 0,
+// --- 狀態 registry（主程序與 renderer 共用的策略） --------------------------------
+// 每個 AgentState 的策略只寫在這一張表；satisfies 讓新增狀態時漏填任何一格都編譯失敗。
+// 畫面呈現（標籤、顏色、aria、迷你徽章、音效）在 src/utils/agent-state-presentation.ts，
+// 這裡只放主程序也要用的純資料，不能匯入 Vue 或 i18n runtime。
+
+/** sessions.final_state 的目標值；keep 代表沿用上一輪的結果（idle 不改變結局）。 */
+export type AgentStateHistoryOutcome = 'success' | 'error' | 'cancelled' | 'open' | 'keep'
+
+export interface AgentStatePolicy {
+  /** 多個 session 同時存在時，誰代表寵物的整體狀態；數字越大越優先。 */
+  readonly priority: number
+  /**
+   * 桌面通知；null 表示不通知。terminal 是結束類通知：會彙整成一則，點了也不切換 App；
+   * 非 terminal 是在等使用者，通知會帶上 session 讓點擊能跳回去。
+   */
+  readonly notification: { readonly terminal: boolean } | null
+  readonly historyOutcome: AgentStateHistoryOutcome
 }
 
-// Deliberately not localized, like SOURCE_LABELS below: these are the agent's
-// technical run states (idle/thinking/waiting-permission/...), not prose —
-// translating them read as inconsistent next to the English tool/session
-// vocabulary the rest of the panel already uses, so they stay English in
-// every locale.
-export const STATE_LABELS: Record<AgentState, string> = {
-  offline: 'Offline',
-  idle: 'Idle',
-  thinking: 'Thinking',
-  'tool-running': 'Running Tool',
-  'waiting-permission': 'Waiting Permission',
-  'waiting-input': 'Waiting Input',
-  success: 'Success',
-  error: 'Error',
+/**
+ * 凍結整張 registry 與每一列裡的巢狀物件：表是全程式共用的單一來源，
+ * 任何地方誤改一格都會悄悄影響所有讀者，凍結後在嚴格模式下會直接丟錯。
+ */
+export function freezeRegistry<T extends Record<string, object>>(table: T): T {
+  for (const row of Object.values(table)) {
+    for (const value of Object.values(row)) {
+      if (value && typeof value === 'object') Object.freeze(value)
+    }
+    Object.freeze(row)
+  }
+  return Object.freeze(table)
 }
 
-// Compact form for the pet's floating status line, where every character
-// counts — the full STATE_LABELS stay for the roomy session-list panel.
-export const STATE_LABELS_SHORT: Record<AgentState, string> = {
-  offline: 'Offline',
-  idle: 'Idle',
-  thinking: 'Thinking',
-  'tool-running': 'Running',
-  'waiting-permission': 'Permission',
-  'waiting-input': 'Waiting',
-  success: 'Success',
-  error: 'Error',
+export const AGENT_STATE_POLICY = freezeRegistry({
+  offline: { priority: 0, notification: null, historyOutcome: 'cancelled' },
+  idle: { priority: 20, notification: null, historyOutcome: 'keep' },
+  thinking: { priority: 70, notification: null, historyOutcome: 'open' },
+  'tool-running': { priority: 80, notification: null, historyOutcome: 'open' },
+  'waiting-permission': { priority: 100, notification: { terminal: false }, historyOutcome: 'open' },
+  'waiting-input': { priority: 85, notification: { terminal: false }, historyOutcome: 'open' },
+  success: { priority: 60, notification: { terminal: true }, historyOutcome: 'success' },
+  error: { priority: 90, notification: { terminal: true }, historyOutcome: 'error' },
+} as const satisfies Record<AgentState, AgentStatePolicy>)
+
+export const AGENT_STATES: readonly AgentState[] = Object.freeze(Object.keys(AGENT_STATE_POLICY) as AgentState[])
+
+// 用 Set 而不是 `in`：'constructor' 之類原型鏈上的名稱不會被當成狀態；每個事件都會查，建一次重複用。
+const AGENT_STATE_SET: ReadonlySet<string> = new Set(AGENT_STATES)
+
+export function isAgentState(value: unknown): value is AgentState {
+  return typeof value === 'string' && AGENT_STATE_SET.has(value)
 }
 
-// 狀態色是 tokens.css 語意層的 CSS 變數（不寫死顏色）：跟著色盤與主題走，
-// 成功/錯誤/等待的色相由驗證器限制（spec R12），而且狀態一律搭配文字標籤。
-export const STATE_COLORS: Record<AgentState, string> = {
-  offline: 'var(--state-offline)',
-  idle: 'var(--state-idle)',
-  thinking: 'var(--state-active)',
-  'tool-running': 'var(--state-active)',
-  'waiting-permission': 'var(--state-warn)',
-  'waiting-input': 'var(--state-warn)',
-  success: 'var(--state-success)',
-  error: 'var(--state-error)',
-}
+/** 會發桌面通知的狀態，由上表推導，主程序的通知標題表用它強制窮盡。 */
+export type NotifiableAgentState = {
+  [K in AgentState]: (typeof AGENT_STATE_POLICY)[K]['notification'] extends null ? never : K
+}[AgentState]
+
+export const STATE_PRIORITY: Readonly<Record<AgentState, number>> = Object.freeze(Object.fromEntries(
+  AGENT_STATES.map(state => [state, AGENT_STATE_POLICY[state].priority]),
+) as Record<AgentState, number>)
 
 export const SOURCE_LABELS: Record<AgentSource, string> = {
   'opencode-cli': 'OpenCode CLI',
@@ -125,7 +134,7 @@ export const SOURCE_LABELS: Record<AgentSource, string> = {
   'claude-desktop': 'Claude Desktop',
 }
 
-// Groups CLI + Desktop variants of the same tool onto a single status line.
+// 同一個工具的 CLI 與 Desktop 版本合併成狀態列上的同一行。
 export const SOURCE_FAMILIES: { key: string; label: string; sources: AgentSource[] }[] = [
   { key: 'codex', label: 'Codex', sources: ['codex', 'codex-desktop'] },
   { key: 'claude', label: 'Claude', sources: ['claude', 'claude-desktop'] },

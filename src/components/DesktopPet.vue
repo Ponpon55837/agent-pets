@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
-import { STATE_COLORS, type AgentState } from '@/types/agent'
+import type { AgentState } from '@/types/agent'
 import { locale, t, type TranslationKey } from '@/i18n'
 import type { AchievementUnlock } from '@/types/achievement'
 import type { PluginBadgeView } from '@/types/plugin'
@@ -16,7 +16,7 @@ import {
 import { quotaWindowLabel, roundQuotaPercent } from '@/utils/format'
 import { selectBubble } from '@/utils/feed-arbiter'
 import { stateAriaLabel } from '@/utils/state-aria'
-import { stateLineLabel } from '@/utils/state-line-words'
+import { AGENT_STATE_PRESENTATION, stateLineLabel } from '@/utils/agent-state-presentation'
 import { summarizePluginBadgesForPet } from '@/utils/plugin-badges'
 import PetAnimation from '@/components/PetAnimation.vue'
 import { useKeyedRefs, usePetBubbleAnchor } from '@/composables/usePetBubbleAnchor'
@@ -30,6 +30,8 @@ import PermissionBubble from '@/components/permission/PermissionBubble.vue'
 import { usePetTheme } from '@/composables/usePetTheme'
 import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubble.vue'
 import { formatDateParts } from '@/utils/intl-format'
+import { PET_CELL_HEIGHT } from '@/types/pet-atlas'
+import { useReducedMotion } from '@/composables/useReducedMotion'
 
 const store = useAgentStore()
 const clickAreaRef = ref<HTMLElement | null>(null)
@@ -59,11 +61,11 @@ const shimejiBehavior = ref<PetAutonomousBehavior>('idle')
 const shimejiFacing = ref<-1 | 1>(1)
 const pointerOverPet = ref(false)
 const shimejiScheduler = new ShimejiScheduler()
-const shimejiReducedMotion = ref(false)
+// shimejiGate 已經監看這個值，系統設定改變時會自動重排 Shimeji。
+const shimejiReducedMotion = useReducedMotion()
 const shimejiPowerSave = ref(false)
 let shimejiTimer: ReturnType<typeof setTimeout> | null = null
 let shimejiIdleSince = Date.now()
-let shimejiMediaQuery: MediaQueryList | null = null
 let cleanupShimejiPowerSave: (() => void) | null = null
 interface ShimejiBattery {
   charging: boolean
@@ -192,11 +194,6 @@ function onShimejiVisibilityChange(): void {
 }
 
 async function initializeShimejiEnvironment(): Promise<void> {
-  shimejiMediaQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)') ?? null
-  if (shimejiMediaQuery) {
-    shimejiReducedMotion.value = shimejiMediaQuery.matches
-    shimejiMediaQuery.addEventListener?.('change', restartShimeji)
-  }
   document.addEventListener('visibilitychange', onShimejiVisibilityChange)
 
   if (window.electronAPI?.getPowerSaveState) {
@@ -226,12 +223,10 @@ async function initializeShimejiEnvironment(): Promise<void> {
 function disposeShimejiEnvironment(): void {
   stopShimejiTimer()
   document.removeEventListener('visibilitychange', onShimejiVisibilityChange)
-  shimejiMediaQuery?.removeEventListener?.('change', restartShimeji)
   cleanupShimejiPowerSave?.()
   cleanupShimejiPowerSave = null
   shimejiBattery?.removeEventListener('chargingchange', updateShimejiPowerSave)
   shimejiBattery?.removeEventListener('levelchange', updateShimejiPowerSave)
-  shimejiMediaQuery = null
   shimejiBattery = null
 }
 
@@ -277,18 +272,10 @@ function onPetKeydown(e: KeyboardEvent): void {
 
 // Mini mode shrinks the sprite to fit the fixed small window, whatever the pet size.
 const MINI_FIT_PX = 88
-const miniScale = computed(() => Math.min(0.42, MINI_FIT_PX / (208 * store.petScale)))
+const miniScale = computed(() => Math.min(0.42, MINI_FIT_PX / (PET_CELL_HEIGHT * store.petScale)))
 const miniStatus = computed(() => {
-  const state = store.currentState
-  switch (state) {
-    case 'error': return { icon: 'warning', label: t('pet.miniError') }
-    case 'waiting-permission': return { icon: 'lock', label: t('pet.miniPermission') }
-    case 'waiting-input': return { icon: 'bell', label: t('pet.miniWaiting') }
-    case 'success': return { icon: 'check', label: t('pet.miniSuccess') }
-    case 'thinking':
-    case 'tool-running': return { icon: null, label: t('pet.miniWorking') }
-    default: return { icon: null, label: t('pet.miniIdle') }
-  }
+  const { icon, labelKey } = AGENT_STATE_PRESENTATION[store.currentState].mini
+  return { icon, label: t(labelKey) }
 })
 
 const bubbleSelection = computed(() => {
@@ -1094,7 +1081,7 @@ watch(() => store.levelUpEvent, (event) => {
         role="status"
         :aria-label="miniStatus.label"
         :title="miniStatus.label"
-        :style="{ '--mini-ring': STATE_COLORS[store.currentState] }"
+        :style="{ '--mini-ring': AGENT_STATE_PRESENTATION[store.currentState].color }"
       >
         <span class="mini-status-badge" :class="{ pulse: store.currentState !== 'idle' && store.currentState !== 'offline' }">
           <Icon v-if="miniStatus.icon" :name="miniStatus.icon" :size="11" />
@@ -1146,7 +1133,7 @@ watch(() => store.levelUpEvent, (event) => {
               :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
               data-pet-hit-target="solid"
             >
-              <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
+              <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: AGENT_STATE_PRESENTATION[line.state].color, color: AGENT_STATE_PRESENTATION[line.state].color }" />
               <span v-if="lineView(line.key).fit.showLabel" class="line-text">
                 <span class="line-label">{{ line.label }}</span>
                 <span class="line-sep">·</span>
@@ -1228,7 +1215,7 @@ watch(() => store.levelUpEvent, (event) => {
             :tabindex="store.quotaByFamily[line.key] ? 0 : undefined"
             data-pet-hit-target="solid"
           >
-            <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: STATE_COLORS[line.state], color: STATE_COLORS[line.state] }" />
+            <span class="line-dot" :class="`dot-${line.state}`" :style="{ background: AGENT_STATE_PRESENTATION[line.state].color, color: AGENT_STATE_PRESENTATION[line.state].color }" />
             <span v-if="line.label && lineView(line.key).fit.showLabel" class="line-text">
               <span class="line-label">{{ line.label }}</span>
               <span class="line-sep">·</span>

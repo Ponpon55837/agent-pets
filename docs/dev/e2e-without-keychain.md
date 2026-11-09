@@ -20,5 +20,19 @@
 
    只接受 1024–65535 的整數。安裝好的 hook 腳本仍然送到預設埠，所以要驗證真實 hook 時請關閉正式版。
 
+## 經過真實 hook 的 e2e
+
+`scripts/e2e-real-hook.mts` 在隔離 app 的 HOME 執行真正的安裝程式，產生隔離的 Claude Code settings 和 `agent-hook.mjs`；唯一的改動是把部署腳本裡的兩個網址換成隔離埠。接著照 Claude Code 的方式，從那份 settings 讀出 hook 指令、用 stdin 送 payload，最後檢查 store 狀態與寵物畫的列。它不會寫入你的 `~/.claude`，也不會啟動 `claude` CLI；指定 17373 會直接拒絕執行。
+
+```bash
+pnpm exec vite build
+node scripts/e2e-isolated-electron.mjs   # 記下啟動日誌 READY 那行的 home
+node --experimental-strip-types scripts/e2e-real-hook.mts --home <home> [--pet-pack] [--rounds N]
+```
+
+加上 `--pet-pack` 會先放一個刻意混入不合法值的寵物包，驗證主程序的 `behaviorManifest` 清理與畫面端回退。`--rounds N` 會把整組 8 個事件重複 N 輪，每輪用新的 session，只印出不符合預期的事件和總結。任何一個事件不符合預期，腳本就以非 0 結束。
+
+同一個 app 裡，前面遺失的事件會留下停在「思考中」的 session，蓋過後面的畫面。所以比較修正前後時，每次都要換一個新的 app。
+
 單元測試（`pnpm test:unit`）完全不啟動 Electron。想縮短迭代可用 `pnpm test:unit:watch`，或
 `node --test --experimental-strip-types tests/<file>.test.mts --test-name-pattern "<名稱>"`。

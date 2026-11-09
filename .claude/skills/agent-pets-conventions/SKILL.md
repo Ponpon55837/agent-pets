@@ -27,18 +27,18 @@ description: Use for agent-pets project coding conventions and refactor planning
 ## 1. Import 路徑規則
 
 ### 現況（2026-08-14 更新）
-`tsconfig.json` 與 `vite.config.mts` 都已設定 `@/* → ./src/*`。此規則已在本輪重構中全面套用：`src/**` 內除了下方「重要例外」列出的 9 個測試會直接執行的檔案，其餘所有相對路徑（含同層 `./xxx`）都已改成 `@/`。
+`tsconfig.json` 與 `vite.config.mts` 都已設定 `@/* → ./src/*`。此規則已在本輪重構中全面套用：`src/**` 內除了下方「重要例外」列出的測試會直接執行的檔案，其餘所有相對路徑（含同層 `./xxx`）都已改成 `@/`。
 
 ### 規則
 ```typescript
 // ❌ 不要
 import { useAgentStore } from '../stores/agentStore'
-import { STATE_LABELS_SHORT } from '../types/agent'
+import { SOURCE_LABELS } from '../types/agent'
 import PetAnimation from './PetAnimation.vue'
 
 // ✅ 要
 import { useAgentStore } from '@/stores/agentStore'
-import { STATE_LABELS_SHORT } from '@/types/agent'
+import { SOURCE_LABELS } from '@/types/agent'
 import PetAnimation from '@/components/PetAnimation.vue'
 ```
 
@@ -56,9 +56,11 @@ import PetAnimation from '@/components/PetAnimation.vue'
 - `src/types/capabilities.ts`
 - `src/types/progression.ts`
 - `src/utils/desktop-effects.ts`
+- `src/utils/agent-state-presentation.ts`（狀態呈現 registry；執行期只相對匯入 `src/types/agent.ts`，`@/` 只用在 `import type`，Node 執行時會整段拿掉）
 - `src/utils/toast-countdown.ts`
+- `src/types/pet-atlas.ts`（sprite 圖集規格；主程序也直接 import）。會被測試執行、又對它做值 import 的 `src/utils/pet-motion-plan.ts`、`src/utils/pet-atlas-preview.ts`、`src/utils/status-line-fit.ts` 也必須用相對路徑；只做 `import type` 的檔案不受影響（型別會被 strip 掉）
 
-這份清單是目前测試檔案 import 的完整遞移閉包（這 9 個檔案彼此之間也不再 import 其他 src 檔案）。之後如果有新檔案被某個 `tests/*.test.mts` 直接 import，要先檢查它跟它遞移 import 的所有 src 檔案是否也在這份清單裡；不在的話一樣要維持相對路徑，否則要另外幫 Node 測試執行環境接上 `@/` 的 resolver（例如自訂 loader），目前專案沒有做這件事。
+這份清單是目前測試檔案 import 的完整遞移閉包；清單內的檔案只能在執行期互相相對 import（例如 `agent-state-presentation.ts` → `agent.ts`），不能再值 import 清單外的 src 檔案。之後如果有新檔案被某個 `tests/*.test.mts` 直接 import，要先檢查它跟它遞移 import 的所有 src 檔案是否也在這份清單裡；不在的話一樣要維持相對路徑，否則要另外幫 Node 測試執行環境接上 `@/` 的 resolver（例如自訂 loader），目前專案沒有做這件事。
 
 ### Import 排序（沿用一般慣例）
 ```typescript
@@ -181,6 +183,9 @@ const ADAPTER_HANDLERS: Record<AgentAdapterId, () => void> = {
 }
 ADAPTER_HANDLERS[adapterId]?.()
 ```
+
+**D. 每個 `AgentState` 都要有的資料 → 寫進狀態 registry，不要另開 switch 或 Record**
+`AGENT_STATE_POLICY`（`src/types/agent.ts`，主程序也用：優先序、通知、歷史結局）與 `AGENT_STATE_PRESENTATION`（`src/utils/agent-state-presentation.ts`，renderer 專用：標籤、顏色、aria、狀態列文字、迷你徽章、音效 cue）都用 `as const satisfies Record<AgentState, …>`，新增狀態時漏一格就編譯失敗。帶轉換或 urgency 條件的邏輯（例如「進入 waiting-permission 時才播音」）留在原處，只從表裡取值。狀態 → 寵物動作（`src/utils/pet-motion-plan.ts`）就是這種例外：它要看前一個狀態、隨機與時間，所以維持 switch；新增狀態時這裡也要補一個 case。
 
 ### 何時**不要**改
 - 條件涉及**不同變數**、非離散值判斷（範圍、正則、多個條件 AND/OR）→ 維持 `if`，硬套 `switch` 反而更難讀。

@@ -68,9 +68,9 @@
 
 精靈圖規格（匯入時檢查）：
 
-- 單格 **192 × 208 px**；圖片寬高必須是該尺寸的整數倍，且**至少 9 列**（第 0–8 列）。
-- 使用的列：0 閒置／離線、5 錯誤、6 等待權限／等待輸入、7 思考／執行工具、8 成功。
-- `pet.json` 可選擇性宣告 `behaviorManifest` 供 Shimeji 使用，例如 `{"behaviorManifest":{"walk":{"row":1},"sleep":{"row":5}}}`（列 0–10、最多 16 格、每格 60–3000 毫秒）。未宣告的行為會回到閒置。
+- 單格 **192 × 208 px**；圖片寬高必須是該尺寸的整數倍，且**至少 9 列**（第 0–8 列）。格子尺寸、列號與預設節奏只定義在 [`src/types/pet-atlas.ts`](src/types/pet-atlas.ts)，匯入驗證與畫面端共用。
+- 預設列：0 idle（閒置／離線）、3 waving、4 jumping（成功）、5 failed（錯誤）、6 waiting（等待權限／等待輸入）、7 running 與 8 review（思考／執行工具）。
+- `pet.json`（或插件外觀）可宣告 `behaviorManifest` 覆蓋任何動作——`idle`、`waving`、`jumping`、`failed`、`waiting`、`running`、`review`——並加上 Shimeji 用的 `walk` 與 `sleep`，例如 `{"behaviorManifest":{"idle":{"row":9,"frames":4},"walk":{"row":1},"sleep":{"row":5}}}`。每一項是 `row`（0–63）、可選的 `frames`（1–16）與 `frameDurations`（1–16 個值，夾在 60–3000 毫秒）。格式不合法、列號超過圖的列數或格數超過欄數的項目會被丟掉，該動作改用內建值；沒宣告的 `walk`／`sleep` 會回到閒置。
 
 ## 控制面板
 
@@ -143,7 +143,7 @@ Agent 要求權限時，寵物上會出現液態玻璃氣泡，面板內也會�
 
 ## 事件伺服器
 
-Hook 會附上每次安裝專屬的 `X-Agent-Pets-Token` 標頭（讀自 `~/.desktop-pet/event-token`），把狀態送到 `http://127.0.0.1:17373/v1/events`。
+Hook 會附上每次安裝專屬的 `X-Agent-Pets-Token` 標頭（讀自 `~/.desktop-pet/event-token`），把狀態送到 `http://127.0.0.1:17373/v1/events`。每個 hook 最多花 1.5 秒把事件送出、再等 0.25 秒回應；寵物沒開時會立刻結束，不會拖慢 agent（見 [docs/dev/hook-delivery.md](docs/dev/hook-delivery.md)）。
 
 ```json
 { "source": "codex", "sessionId": "sess_abc123", "state": "thinking", "timestamp": 1735689600000 }
@@ -216,6 +216,8 @@ pnpm dev
 兩個建置指令都會先關閉本專案的 Agent Pets 程序。若想在真實 Electron App 中驗證修改又不動到你的資料，先執行 `pnpm exec vite build`，再執行 `node scripts/e2e-isolated-electron.mjs`（暫時的 home 與 userData、假的 `safeStorage`，所以不會碰到 macOS 鑰匙圈；本機埠預設為 27373–27375，已安裝的版本可保有 17373–17375，`--hook-port-base` 可改用另一組，`--real-hook-ports` 才用預設埠；見 [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)）。
 
 **開發埠覆寫** — 未打包的執行可設定 `AGENT_PETS_EVENT_PORT`、`AGENT_PETS_PERMISSION_PORT`、`AGENT_PETS_PRESENTATION_PORT`（1024–65535；預設 17373、17374、17375），避免和已安裝的版本搶埠。打包版會忽略這些變數。
+
+**Agent 狀態** — 依狀態而定的資料都集中在兩張以 `satisfies Record<AgentState, …>` 檢查的表：`src/types/agent.ts` 的 `AGENT_STATE_POLICY`（優先度、桌面通知、歷史結局，主行程共用）與 `src/utils/agent-state-presentation.ts` 的 `AGENT_STATE_PRESENTATION`（標籤、顏色、螢幕閱讀器文字、狀態列用字、迷你徽章、音效）。新增狀態時兩張表沒填齊，型別檢查就會失敗。唯一的例外是每個狀態對應的寵物動作：它要看前一個狀態與時間，所以留在 `src/utils/pet-motion-plan.ts` 用邏輯判斷。
 
 在原始碼目錄執行 `node integrations/install.mjs` 可用與精靈相同的保護機制安裝 hook（`--claude-code` 只處理 Claude Code，`--uninstall` 則移除）。
 

@@ -68,9 +68,9 @@ Under **Settings → Pets**, use **+ Import asset** (`.webp`, `.png` or `.jpg` s
 
 Sprite requirements (checked on import):
 
-- Frame cell **192 × 208 px**; the image width and height must be multiples of that, and the sheet needs **at least 9 rows** (rows 0–8).
-- Rows used: 0 Idle / Offline, 5 Error, 6 Waiting Permission / Waiting Input, 7 Thinking / Tool Running, 8 Success.
-- A `pet.json` may declare an optional `behaviorManifest` for Shimeji, for example `{"behaviorManifest":{"walk":{"row":1},"sleep":{"row":5}}}` (row 0–10, up to 16 frames, frame durations 60–3000 ms). Missing definitions fall back to Idle.
+- Frame cell **192 × 208 px**; the image width and height must be multiples of that, and the sheet needs **at least 9 rows** (rows 0–8). The grid, rows and default timings live in one place, [`src/types/pet-atlas.ts`](src/types/pet-atlas.ts), shared by import validation and the renderer.
+- Default rows: 0 idle (Idle / Offline), 3 waving, 4 jumping (Success), 5 failed (Error), 6 waiting (Waiting Permission / Input), 7 running and 8 review (Thinking / Tool Running).
+- A `pet.json` (or a plugin skin) may declare a `behaviorManifest` that overrides any motion — `idle`, `waving`, `jumping`, `failed`, `waiting`, `running`, `review` — and adds the Shimeji motions `walk` and `sleep`, for example `{"behaviorManifest":{"idle":{"row":9,"frames":4},"walk":{"row":1},"sleep":{"row":5}}}`. Each entry is `row` (0–63), optional `frames` (1–16) and optional `frameDurations` (1–16 values, clamped to 60–3000 ms). An entry that is malformed, points past the sheet's rows, or has more frames than columns is dropped and that motion uses the built-in one; undeclared `walk`/`sleep` fall back to idle.
 
 ## Control panel
 
@@ -143,7 +143,7 @@ The panel keeps a list of configured projects with status Connected, Partially c
 
 ## Event server
 
-Hooks post status updates to `http://127.0.0.1:17373/v1/events` with the per-install `X-Agent-Pets-Token` header (read from `~/.desktop-pet/event-token`).
+Hooks post status updates to `http://127.0.0.1:17373/v1/events` with the per-install `X-Agent-Pets-Token` header (read from `~/.desktop-pet/event-token`). A hook spends at most 1.5 s getting the event out and 0.25 s waiting for the reply, and stops at once when the pet is not running, so an agent is never held up ([docs/dev/hook-delivery.md](docs/dev/hook-delivery.md)).
 
 ```json
 { "source": "codex", "sessionId": "sess_abc123", "state": "thinking", "timestamp": 1735689600000 }
@@ -216,6 +216,8 @@ pnpm dev
 Both build commands first close project-owned Agent Pets processes. To check a change in a real Electron app without touching your data, run `pnpm exec vite build` then `node scripts/e2e-isolated-electron.mjs` (temporary home and userData, fake `safeStorage`, so macOS Keychain is never touched; its local ports default to 27373–27375 so an installed copy keeps 17373–17375 — `--hook-port-base` picks another range, `--real-hook-ports` uses the defaults; see [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)).
 
 **Dev port overrides** — unpackaged runs may set `AGENT_PETS_EVENT_PORT`, `AGENT_PETS_PERMISSION_PORT` and `AGENT_PETS_PRESENTATION_PORT` (1024–65535; defaults 17373, 17374, 17375) so they do not fight an installed copy. Packaged builds ignore them.
+
+**Agent states** — everything keyed by an agent state lives in two tables checked with `satisfies Record<AgentState, …>`: `AGENT_STATE_POLICY` in `src/types/agent.ts` (priority, desktop notification, history outcome; shared with the main process) and `AGENT_STATE_PRESENTATION` in `src/utils/agent-state-presentation.ts` (labels, colour, screen-reader text, status-line word, mini badge, sound cue). Adding a state fails the type check until both are filled in. The one exception is the sprite motion for each state: it depends on the previous state and on timing, so it stays as logic in `src/utils/pet-motion-plan.ts`.
 
 `node integrations/install.mjs` installs the hooks from a checkout with the same safeguards as the wizard (`--claude-code` limits it to Claude Code, `--uninstall` removes them).
 
