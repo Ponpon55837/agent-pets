@@ -87,6 +87,8 @@
   - 本線原本寫「依狀態而定的資料都集中在兩張表」，但 sprite 線保留的 `pet-motion-plan.ts` 狀態 → 動作 switch 也是依狀態而定。README 兩版、project-map、SKILL §4 D 已補上這個例外。
   - SKILL §1 例外清單的說明原本寫「這 9 個檔案彼此之間不再 import 其他 src 檔案」，兩邊各加一條後已不成立，改成規則說明，順便修正「测試」錯字。
 
-## 版本建議
+## 版本
 
-Patch：內部重構，沒有改外部契約、持久化結構或安全邊界。等使用者確認後再改版本號。
+Patch：內部重構，沒有改外部契約、持久化結構或安全邊界。使用者確認後升到 1.12.3（`chore: release 1.12.3`）。
+
+最後和 sprite 線（1.12.2）、hook 線（1.12.4，見 [phase-hook-delivery.md](phase-hook-delivery.md)）一起整合進 `main`，以 1.12.4 發版；整合時 `package.json` 取 1.12.4。
