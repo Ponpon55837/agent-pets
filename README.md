@@ -13,7 +13,9 @@ Download the latest build from the [Releases](https://github.com/Ponpon55837/age
 - **macOS** — `AgentPets-<version>-arm64.dmg` (Apple Silicon) or `AgentPets-<version>-x64.dmg` (Intel). Open it and drag the app to Applications.
 - **Windows** — `AgentPets-<version>.exe`, a portable app that needs no installer.
 
-Builds are not code-signed, so the OS warns the first time:
+Each release also has `SHA256SUMS.txt`; run `shasum -a 256 -c SHA256SUMS.txt --ignore-missing` in the download folder to check the files.
+
+Builds have no developer certificate and are not notarized (the macOS app is only ad-hoc signed so its bundle is sealed), so the OS warns the first time:
 
 - **macOS (Gatekeeper)** — right-click the app in Applications, choose **Open**, then confirm. Or use **System Settings → Privacy & Security → Open Anyway**. As a last resort: `xattr -dr com.apple.quarantine "/Applications/Agent Pets.app"`.
 - **Windows (SmartScreen)** — choose **More info → Run anyway**.
@@ -229,7 +231,7 @@ Both build commands first close project-owned Agent Pets processes. To check a c
 
 ## Versioning and release
 
-Bump `version` in `package.json` (patch by default; minor for a persistent-schema, public-contract or security-boundary change). When that commit lands on `main` and no `v<version>` tag exists, `.github/workflows/release.yml` runs the type check and unit tests, builds the macOS arm64 and x64 `.dmg` files and the Windows portable `.exe`, then creates the tag and a GitHub Release with generated notes. It can also be re-run from the Actions tab and skips versions that are already tagged. Builds are unsigned. If electron-builder fails to download Electron or its tools from GitHub releases, the job retries twice through `scripts/release-asset-mirror.mjs`, a 127.0.0.1-only proxy that fetches the same release assets through the GitHub API; checksums are still verified by electron-builder.
+Bump `version` in `package.json` (patch by default; minor for a persistent-schema, public-contract or security-boundary change). When that commit lands on `main` and no `v<version>` tag exists, `.github/workflows/release.yml` runs the type check and unit tests, builds the macOS arm64 and x64 `.dmg` files and the Windows portable `.exe`, then creates the tag and a GitHub Release with generated notes. It can also be re-run from the Actions tab and skips versions that are already tagged. Each macOS job builds on a runner of its own architecture (Intel for x64) so native modules match, and electron-builder ad-hoc signs the whole bundle after it writes the fuses (`mac.identity: "-"`; no certificate, no notarization). `scripts/check-mac-bundle.mjs` then mounts the dmg and fails the release unless `codesign --verify --deep --strict` passes, the fuses equal `build.electronFuses`, and every Mach-O and `*.node` file is the target architecture. The release job uploads `SHA256SUMS.txt` with the installers. If electron-builder fails to download Electron or its tools from GitHub releases, the job retries twice through `scripts/release-asset-mirror.mjs`, a 127.0.0.1-only proxy that fetches the same release assets through the GitHub API; checksums are still verified by electron-builder.
 
 ## License
 

@@ -13,7 +13,9 @@
 - **macOS** — `AgentPets-<version>-arm64.dmg`（Apple Silicon）或 `AgentPets-<version>-x64.dmg`（Intel）。開啟後把 App 拖進「應用程式」。
 - **Windows** — `AgentPets-<version>.exe`，免安裝的可攜版。
 
-目前的版本沒有程式碼簽章，第一次開啟時系統會跳出警告：
+每個 Release 都附 `SHA256SUMS.txt`；在下載資料夾執行 `shasum -a 256 -c SHA256SUMS.txt --ignore-missing` 即可比對檔案。
+
+目前的版本沒有開發者憑證，也沒有公證（macOS 版只有 ad-hoc 簽章，用來密封 bundle），第一次開啟時系統會跳出警告：
 
 - **macOS（Gatekeeper）** — 在「應用程式」中對 App 按右鍵，選擇**打開**並確認；或到**系統設定 → 隱私權與安全性**按**強制打開**。最後手段：`xattr -dr com.apple.quarantine "/Applications/Agent Pets.app"`。
 - **Windows（SmartScreen）** — 選擇**其他資訊 → 仍要執行**。
@@ -229,7 +231,7 @@ pnpm dev
 
 ## 版本與發佈
 
-在 `package.json` 提高 `version`（預設升 patch；永久資料結構、公開契約或安全邊界的變更才升 minor）。該 commit 進入 `main` 且尚無 `v<version>` tag 時，`.github/workflows/release.yml` 會執行型別檢查與單元測試，建置 macOS arm64 與 x64 的 `.dmg` 及 Windows 可攜版 `.exe`，再建立 tag 與附自動產生說明的 GitHub Release。也可從 Actions 頁面重新執行，已有 tag 的版本會被略過。目前版本沒有簽章。electron-builder 從 GitHub releases 下載 Electron 或工具失敗時，會改經 `scripts/release-asset-mirror.mjs` 再試兩次：它只聽 127.0.0.1，經 GitHub API 下載同一個 release 檔案，checksum 仍由 electron-builder 驗證。
+在 `package.json` 提高 `version`（預設升 patch；永久資料結構、公開契約或安全邊界的變更才升 minor）。該 commit 進入 `main` 且尚無 `v<version>` tag 時，`.github/workflows/release.yml` 會執行型別檢查與單元測試，建置 macOS arm64 與 x64 的 `.dmg` 及 Windows 可攜版 `.exe`，再建立 tag 與附自動產生說明的 GitHub Release。也可從 Actions 頁面重新執行，已有 tag 的版本會被略過。兩個 macOS job 各在同架構的 runner 上建置（x64 用 Intel），原生模組才會是對的架構；electron-builder 在寫入 fuses 之後對整個 bundle 做 ad-hoc 簽章（`mac.identity: "-"`，沒有憑證、沒有公證）。接著 `scripts/check-mac-bundle.mjs` 掛載 dmg 檢查：`codesign --verify --deep --strict` 要通過、fuses 要等於 `build.electronFuses`、每個 Mach-O 與 `*.node` 都要是目標架構，任何一項不符就讓發版失敗。release job 會把 `SHA256SUMS.txt` 跟安裝檔一起上傳。electron-builder 從 GitHub releases 下載 Electron 或工具失敗時，會改經 `scripts/release-asset-mirror.mjs` 再試兩次：它只聽 127.0.0.1，經 GitHub API 下載同一個 release 檔案，checksum 仍由 electron-builder 驗證。
 
 ## 授權
 
