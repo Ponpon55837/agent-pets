@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-import { createHash, randomBytes } from 'crypto'
-import fs from 'fs'
-import http from 'http'
-import os from 'os'
-import path from 'path'
+import { createHash, randomBytes } from 'node:crypto'
+import fs from 'node:fs'
+import http from 'node:http'
+import os from 'node:os'
+import path from 'node:path'
 
 const PET_URL = 'http://127.0.0.1:17373/v1/events'
 const PERMISSION_URL = 'http://127.0.0.1:17374/v1/permission'
