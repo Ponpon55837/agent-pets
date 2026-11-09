@@ -7,7 +7,20 @@ import type {
   AgentState,
   AgentStatusEvent,
 } from '@/types/agent'
-import { isAgentState, STATE_PRIORITY, SOURCE_FAMILIES, SOURCE_LABELS } from '@/types/agent'
+import {
+  AGENT_FAMILY_REGISTRY,
+  ALL_SOURCES,
+  FAMILY_SOURCES,
+  familyOfSource,
+  isAgentFamilyKey,
+  isAgentState,
+  isDesktopSource,
+  isQuotaCapableSource,
+  isQuotaFamilyKey,
+  SOURCE_LABELS,
+  STATE_PRIORITY,
+  type AgentFamilyKey,
+} from '@/types/agent'
 import type { DesktopPreferences, DesktopPreferencesPatch, LaunchAtStartupStatus } from '@/types/desktop'
 import type { DesktopVisibilityCapabilities } from '@/types/desktop-visibility'
 import type { AppLocale } from '@/types/locale'
@@ -92,7 +105,7 @@ const MAX_SESSION_COUNT = 200
 // 面板清單排序的最後一層：來源名稱的 localeCompare 順序在載入時算成名次，
 // 每次比較只做整數相減，不必在每次事件重排時反覆做語系比對（順序與 localeCompare 相同）。
 const SOURCE_LABEL_RANK = Object.freeze(Object.fromEntries(
-  (Object.keys(SOURCE_LABELS) as AgentSource[])
+  [...ALL_SOURCES]
     .sort((a, b) => SOURCE_LABELS[a].localeCompare(SOURCE_LABELS[b]))
     .map((source, rank) => [source, rank]),
 ) as Record<AgentSource, number>)
@@ -144,7 +157,7 @@ function normalizeQuotaUsage(value: unknown): QuotaUsage | null {
   for (const candidate of raw.providers.slice(0, 2)) {
     if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue
     const provider = candidate as Record<string, unknown>
-    if ((provider.id !== 'codex' && provider.id !== 'claude') || seen.has(provider.id)) continue
+    if (!isQuotaFamilyKey(provider.id) || seen.has(provider.id)) continue
     if (typeof provider.name !== 'string' || !Array.isArray(provider.windows)) continue
     const windows: QuotaUsage['providers'][number]['windows'] = []
     for (const candidateWindow of provider.windows.slice(0, MAX_QUOTA_WINDOWS)) {
@@ -216,15 +229,6 @@ function normalizeProgressionSnapshot(value: unknown): ProgressionSnapshot | nul
     ...(lastActiveLocalDate ? { lastActiveLocalDate } : {}),
     updatedAt: raw.updatedAt as number,
   }
-}
-
-// Only Codex and Claude expose a subscription quota, so only their sessions
-// are worth polling — or refreshing after — for the usage meter.
-function isQuotaCapableSource(source: AgentSource): boolean {
-  return source === 'codex'
-    || source === 'codex-desktop'
-    || source === 'claude'
-    || source === 'claude-desktop'
 }
 
 function sanitizeHost(value: unknown): AgentHost | undefined {
@@ -308,21 +312,27 @@ export const useAgentStore = defineStore('agent', () => {
 
   // Per-family skin overrides (e.g. Codex looks like the cat, Claude looks
   // like the monkey king) — a family with no entry here just falls back to
-  // the global `selectedPet`. Keyed by SOURCE_FAMILIES[].key.
-  function loadFamilyPetIds(): Record<string, string> {
+  // the global `selectedPet`. Keyed by AgentFamilyKey（localStorage 的既有格式，key 不能改名）.
+  // 啟動時與其他視窗改了 localStorage 時都走這裡：只收家族 registry 裡的 key 與字串值，
+  // 寫回時不會把手改或舊版留下的雜項帶下去，另一個視窗也不能塞進非字串的值。
+  function parseFamilyPetIds(json: string | null): Record<string, string> {
     try {
-      const raw = JSON.parse(localStorage.getItem('agent-pet-family-map') || '{}')
+      const raw = JSON.parse(json || '{}')
       if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
         const out: Record<string, string> = {}
         for (const [k, v] of Object.entries(raw)) {
-          if (typeof v === 'string') out[k] = v
+          if (isAgentFamilyKey(k) && typeof v === 'string') out[k] = v
         }
         return out
       }
     } catch {}
     return {}
   }
-  const familyPetIds = ref<Record<string, string>>(loadFamilyPetIds())
+  const familyPetIds = ref<Record<string, string>>(parseFamilyPetIds(localStorage.getItem('agent-pet-family-map')))
+
+  function syncFamilyPetIds(json: string | null): void {
+    familyPetIds.value = parseFamilyPetIds(json)
+  }
 
   function setFamilyPet(familyKey: string, petId: string | null) {
     const next = { ...familyPetIds.value }
@@ -1542,7 +1552,7 @@ export const useAgentStore = defineStore('agent', () => {
   const quotaByFamily = computed<Record<string, { label: string; remainingPercent: number; resetsAt?: string }>>(() => {
     const result: Record<string, { label: string; remainingPercent: number; resetsAt?: string }> = {}
     for (const provider of quotaUsage.value?.providers ?? []) {
-      if (provider.error || (provider.id !== 'codex' && provider.id !== 'claude')) continue
+      if (provider.error || !isQuotaFamilyKey(provider.id)) continue
       // Prefer the short session window. Some Codex accounts currently only
       // receive a weekly window, so fall back instead of hiding the meter.
       const quotaWindow = provider.windows.find(
@@ -1598,15 +1608,14 @@ export const useAgentStore = defineStore('agent', () => {
   })
 
   // One line per tool family (CLI + Desktop combined), only shown while that
-  // family has an active session — up to SOURCE_FAMILIES.length lines total.
+  // family has an active session — up to one line per AGENT_FAMILY_REGISTRY row.
   // `variants` records which of CLI/Desktop are actually active so the line
   // can still say which one, even though they share a row.
   const familyLines = computed(() => summarizeFamilies(sessionsByKey.values()).map((family) => {
     const top = family.top
-    const sources = SOURCE_FAMILIES.find(candidate => candidate.key === family.key)?.sources ?? []
-    const variants = sources
+    const variants = FAMILY_SOURCES[family.key]
       .filter((source) => family.sources.has(source))
-      .map((source) => (source.includes('desktop') ? 'Desktop' : 'CLI'))
+      .map((source) => (isDesktopSource(source) ? 'Desktop' : 'CLI'))
     return {
       key: family.key,
       label: family.label,
@@ -1663,10 +1672,9 @@ export const useAgentStore = defineStore('agent', () => {
 
   // Reverse-lookup from the currently-controlling source into its tool
   // family for multi-pet skin selection.
-  const currentFamilyKey = computed<string | null>(() => {
+  const currentFamilyKey = computed<AgentFamilyKey | null>(() => {
     const source = currentSource.value
-    if (!source) return null
-    return SOURCE_FAMILIES.find(f => f.sources.includes(source))?.key ?? null
+    return source ? familyOfSource(source) : null
   })
 
   const activePetId = computed(() => {
@@ -1700,14 +1708,16 @@ export const useAgentStore = defineStore('agent', () => {
       ))
       // Only the (few) waiting sessions are sorted, not the whole list.
       .sort(compareAttention)
-      .map(session => ({
-        key: session.key,
-        source: SOURCE_FAMILIES.find(family => family.sources.includes(session.source))?.label
-          ?? SOURCE_LABELS[session.source] ?? session.source,
-        project: session.project ?? '',
-        desktop: session.source.endsWith('-desktop'),
-        sessionKey: session.key,
-      }))
+      .map((session) => {
+        const family = familyOfSource(session.source)
+        return {
+          key: session.key,
+          source: family ? AGENT_FAMILY_REGISTRY[family].label : session.source,
+          project: session.project ?? '',
+          desktop: isDesktopSource(session.source),
+          sessionKey: session.key,
+        }
+      })
   ))
 
   const permissionNotice = computed(() => {
@@ -1747,9 +1757,7 @@ export const useAgentStore = defineStore('agent', () => {
     const activePets = lines.slice(0, 16).map(line => ({
       petId: line.petId,
       name: pets.value.find(pet => pet.id === line.petId)?.displayName ?? line.petId,
-      agentFamily: line.key === 'codex' ? 'codex' as const
-        : line.key === 'claude' ? 'claude-code' as const
-          : line.key === 'opencode' ? 'opencode' as const : null,
+      agentFamily: isAgentFamilyKey(line.key) ? AGENT_FAMILY_REGISTRY[line.key].adapterId : null,
       mood: moodLabel(mood.value),
       level: progression.value?.level ?? 1,
       visibleState: line.state,
@@ -2288,6 +2296,7 @@ export const useAgentStore = defineStore('agent', () => {
     setAmbientEnabled,
     setActivityBubbleEnabled,
     setFamilyPet,
+    syncFamilyPetIds,
     getPetForFamily,
     resetMood,
     setMoodVisualsEnabled,

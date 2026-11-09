@@ -1,4 +1,10 @@
-import { AGENT_STATE_POLICY, AGENT_STATES, type AgentState, type AgentStateHistoryOutcome } from '../src/types/agent.ts'
+import {
+  AGENT_STATE_POLICY,
+  AGENT_STATES,
+  LOCAL_USAGE_SOURCE_BY_ADAPTER,
+  type AgentState,
+  type AgentStateHistoryOutcome,
+} from '../src/types/agent.ts'
 import {
   HISTORY_SESSION_OUTCOMES,
   HISTORY_SESSION_PAGE_DEFAULT,
@@ -39,16 +45,13 @@ const OUTCOMES = new Set<string>(HISTORY_SESSION_OUTCOMES)
 
 /**
  * 本機紀錄的用量列在 events.session_id 存 `digest(adapter:agent:rawSessionId)`，其中 agent 是
- * 紀錄讀取器的 id 而不是 hook 來源。這張表把 hook adapter 對到讀取器 id，讓 hook session
- * 不必保留原始 session id 也能對上本機紀錄的 token。
+ * 紀錄讀取器記帳用的來源，而不是 hook 實際的來源。對照表來自 AGENT_FAMILY_REGISTRY.localUsageSource，
+ * 讓 hook session 不必保留原始 session id 也能對上本機紀錄的 token。
  */
-const LOCAL_USAGE_AGENT_BY_ADAPTER: Readonly<Record<string, string>> = {
-  'claude-code': 'claude',
-  codex: 'codex',
-}
-
 export function localUsageKeySource(adapterId: string, rawSessionId: string): string | null {
-  const agent = LOCAL_USAGE_AGENT_BY_ADAPTER[adapterId]
+  const agent = Object.hasOwn(LOCAL_USAGE_SOURCE_BY_ADAPTER, adapterId)
+    ? LOCAL_USAGE_SOURCE_BY_ADAPTER[adapterId as keyof typeof LOCAL_USAGE_SOURCE_BY_ADAPTER]
+    : undefined
   return agent ? `${adapterId}:${agent}:${rawSessionId}` : null
 }
 

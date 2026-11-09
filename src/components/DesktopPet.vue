@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
-import type { AgentState } from '@/types/agent'
+import { isQuotaFamilyKey, type AgentState, type QuotaFamilyKey } from '@/types/agent'
 import { locale, t, type TranslationKey } from '@/i18n'
 import type { AchievementUnlock } from '@/types/achievement'
 import type { PluginBadgeView } from '@/types/plugin'
@@ -417,12 +417,18 @@ const sayTargetStyle = usePetBubbleAnchor(
 // Quota 顏色由 CSS 依 data-quota-tier 選 token（DesktopPet.css），插件主題可透過 --pet-status-* 重新上色一般與低額度填色（危急 < 20% 維持內建），也讓 token 檢查看得到用處。
 type QuotaTier = 'low' | 'warning' | 'claude' | 'normal'
 
+// 額度充足時的顏色：Claude 用品牌 accent，其他家族用 sage。新增有額度的家族時這張表少一格就編譯失敗。
+const QUOTA_FAMILY_TIER = Object.freeze({
+  codex: 'normal',
+  claude: 'claude',
+} as const satisfies Record<QuotaFamilyKey, QuotaTier>)
+
 function quotaTier(familyKey: string): QuotaTier | undefined {
   const quota = store.quotaByFamily[familyKey]
-  if (!quota) return undefined
+  if (!quota || !isQuotaFamilyKey(familyKey)) return undefined
   if (quota.remainingPercent < 20) return 'low'
   if (quota.remainingPercent < 50) return 'warning'
-  return familyKey === 'claude' ? 'claude' : 'normal'
+  return QUOTA_FAMILY_TIER[familyKey]
 }
 
 usePetTheme()
