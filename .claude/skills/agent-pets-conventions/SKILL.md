@@ -187,6 +187,9 @@ ADAPTER_HANDLERS[adapterId]?.()
 **D. 每個 `AgentState` 都要有的資料 → 寫進狀態 registry，不要另開 switch 或 Record**
 `AGENT_STATE_POLICY`（`src/types/agent.ts`，主程序也用：優先序、通知、歷史結局）與 `AGENT_STATE_PRESENTATION`（`src/utils/agent-state-presentation.ts`，renderer 專用：標籤、顏色、aria、狀態列文字、迷你徽章、音效 cue）都用 `as const satisfies Record<AgentState, …>`，新增狀態時漏一格就編譯失敗。帶轉換或 urgency 條件的邏輯（例如「進入 waiting-permission 時才播音」）留在原處，只從表裡取值。狀態 → 寵物動作（`src/utils/pet-motion-plan.ts`）就是這種例外：它要看前一個狀態、隨機與時間，所以維持 switch；新增狀態時這裡也要補一個 case。
 
+**E. 每個 `AgentSource`／工具家族都要有的資料 → 寫進來源 registry，不要再寫 `source === 'claude' || …` 或手寫來源清單**
+`AGENT_SOURCE_REGISTRY`（名稱、家族、CLI／Desktop）與 `AGENT_FAMILY_REGISTRY`（家族名稱、adapterId、quota、本機 token 紀錄）都在 `src/types/agent.ts`，主程序與 renderer 共用。`SOURCE_LABELS`、`SOURCE_FAMILIES`、`FAMILY_SOURCES`、各種白名單都由這兩張表推導。來源 → 家族直接查 `AGENT_SOURCE_REGISTRY[source].family` 或 `familyOfSource()`，是 O(1)，不要再用 `SOURCE_FAMILIES.find(f => f.sources.includes(s))`。不可信的字串先過 `isAgentSource`／`isAgentFamilyKey`／`isQuotaFamilyKey` 再查表。表裡的字串都是持久化或插件契約的值，不能改名。hook 檔案（`integrations/*`、`electron/setup.ts`、`electron/hook-config.ts`）保留自己的字串。清單見 `docs/dev/agent-sources.md`。
+
 ### 何時**不要**改
 - 條件涉及**不同變數**、非離散值判斷（範圍、正則、多個條件 AND/OR）→ 維持 `if`，硬套 `switch` 反而更難讀。
 - 只有 2 層的 `if/else` → 不必強改，重構成本大於收益。

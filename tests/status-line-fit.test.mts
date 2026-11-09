@@ -183,8 +183,11 @@ test('quota colours are chosen in CSS by data-quota-tier, not built as strings i
     const themed = { warning: '--pet-status-quota-warn', claude: '--pet-status-quota-fill', normal: '--pet-status-quota-fill' }[tier]
     const value = themed ? `var\\(${themed}, var\\(${token}\\)\\)` : `var\\(${token}\\)`
     assert.match(css, new RegExp(`\\.status-line\\[data-quota-tier='${tier}'\\] \\{\\n  --quota-color: ${value};`), tier)
-    assert.match(vue, new RegExp(`return [^\\n]*'${tier}'`), `quotaTier returns ${tier}`)
+    // low／warning 依門檻回傳；額度充足時依家族查 QUOTA_FAMILY_TIER（Claude 用品牌 accent）。
+    const returned = new RegExp(`return [^\\n]*'${tier}'`).test(vue) || new RegExp(`^  \\w+: '${tier}',$`, 'm').test(vue)
+    assert.ok(returned, `quotaTier returns ${tier}`)
   }
+  assert.match(vue, /const QUOTA_FAMILY_TIER = Object\.freeze\(\{\n  codex: 'normal',\n  claude: 'claude',\n\} as const satisfies Record<QuotaFamilyKey, QuotaTier>\)/)
   assert.equal(vue.match(/:data-quota-tier="quotaTier\(line\.key\)"/g)?.length, 2)
   assert.doesNotMatch(vue.split('<template>')[0], /'var\(--/)
 })

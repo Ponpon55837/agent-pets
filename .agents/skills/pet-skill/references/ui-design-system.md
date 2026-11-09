@@ -72,7 +72,7 @@ Additional primitives (all backward compatible; existing props above are unchang
 
 New tokens for primitives: `--hit-min` (32px minimum hit area), `--z-*` scale (the only z-index values components may use), `--leading-tight/normal/relaxed`, `--ease-standard`.
 
-Session state labels (`label` / `shortLabel` in `AGENT_STATE_PRESENTATION`, `src/utils/agent-state-presentation.ts`) and `SOURCE_LABELS` (Codex CLI, OpenCode Desktop, …) are deliberately **not** localized — they're the agent's technical run states and product/vendor names, not prose, and stay English in every locale. This was tried the other way (routed through `t()`) and reverted: translating "Thinking"/"Idle" read as inconsistent next to the untranslated tool vocabulary the rest of the panel already uses. Don't route these through `t()` again; add new state copy to `AGENT_STATE_PRESENTATION` and source copy to `SOURCE_LABELS` in `types/agent.ts`.
+Session state labels (`label` / `shortLabel` in `AGENT_STATE_PRESENTATION`, `src/utils/agent-state-presentation.ts`) and `SOURCE_LABELS` (Codex CLI, OpenCode Desktop, …) are deliberately **not** localized — they're the agent's technical run states and product/vendor names, not prose, and stay English in every locale. This was tried the other way (routed through `t()`) and reverted: translating "Thinking"/"Idle" read as inconsistent next to the untranslated tool vocabulary the rest of the panel already uses. Don't route these through `t()` again; add new state copy to `AGENT_STATE_PRESENTATION` and source copy to the `label` of `AGENT_SOURCE_REGISTRY` in `types/agent.ts` (`SOURCE_LABELS` is derived from it).
 
 ## Cross-platform is the constraint, not an afterthought
 

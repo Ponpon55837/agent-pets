@@ -219,6 +219,8 @@ pnpm dev
 
 **Agent 狀態** — 依狀態而定的資料都集中在兩張以 `satisfies Record<AgentState, …>` 檢查的表：`src/types/agent.ts` 的 `AGENT_STATE_POLICY`（優先度、桌面通知、歷史結局，主行程共用）與 `src/utils/agent-state-presentation.ts` 的 `AGENT_STATE_PRESENTATION`（標籤、顏色、螢幕閱讀器文字、狀態列用字、迷你徽章、音效）。新增狀態時兩張表沒填齊，型別檢查就會失敗。唯一的例外是每個狀態對應的寵物動作：它要看前一個狀態與時間，所以留在 `src/utils/pet-motion-plan.ts` 用邏輯判斷。
 
+**Agent 來源** — 6 個事件來源（`claude`、`codex-desktop` 等）與 3 個工具家族（Codex、Claude、OpenCode）只在 `src/types/agent.ts` 列一次：`AGENT_SOURCE_REGISTRY`（名稱、家族、CLI 或 Desktop）與 `AGENT_FAMILY_REGISTRY`（家族名稱、adapter id、有沒有訂閱額度、本機 token 紀錄）。來源名稱、狀態列的家族順序、每家族的寵物、quota 條、通知上的名稱、adapter 的來源清單，以及主行程的白名單（事件來源、權限來源、插件不能用的名稱）都由這兩張表推導。hook 腳本與安裝程式（`integrations/`、`electron/setup.ts`、`electron/hook-config.ts`）仍各自寫著來源字串。新增來源前先看 [docs/dev/agent-sources.md](docs/dev/agent-sources.md)。
+
 在原始碼目錄執行 `node integrations/install.mjs` 可用與精靈相同的保護機制安裝 hook（`--claude-code` 只處理 Claude Code，`--uninstall` 則移除）。
 
 **CI** — `ci.yml` 在 pull request 與 `main` 推送涉及文件以外的變更時執行：型別檢查、`pnpm lint`、`pnpm test:coverage`、`vite build`、bundle 大小、插件面板 bundle 與對比度檢查、設計 token 報告，以及不阻擋合併的相依套件稽核。`ci-platforms.yml` 每週與手動觸發時，在 macOS 與 Windows 上執行型別檢查與單元測試。
