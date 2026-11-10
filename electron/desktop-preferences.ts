@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { renameSyncWithRetry } from './fs-rename.ts'
+import { pidTimestampTemporaryPath, writeFileAtomicSync } from './atomic-file-write.ts'
 import { dndHasExpired, normalizeDndUntil } from './dnd-schedule.ts'
 import type { DesktopPreferences, DesktopPreferencesPatch, LaunchAtStartupStatus } from '../src/types/desktop'
 import { DEFAULT_LOCALE, isAppLocale } from '../src/types/locale.ts'
@@ -27,27 +27,12 @@ export function readBoundedJson(filePath: string, maxBytes = 64 * 1024): unknown
 }
 
 export function writeJsonAtomic(filePath: string, value: unknown): void {
-  const directory = path.dirname(filePath)
-  fs.mkdirSync(directory, { recursive: true })
-  const temporaryPath = path.join(
-    directory,
-    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`,
-  )
-
-  try {
-    fs.writeFileSync(temporaryPath, JSON.stringify(value, null, 2), {
-      encoding: 'utf8',
-      mode: 0o600,
-      flag: 'wx',
-    })
-    renameSyncWithRetry(temporaryPath, filePath)
-    if (process.platform !== 'win32') {
-      try { fs.chmodSync(filePath, 0o600) } catch {}
-    }
-  } catch (error) {
-    try { fs.rmSync(temporaryPath, { force: true }) } catch {}
-    throw error
-  }
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
+  writeFileAtomicSync(filePath, JSON.stringify(value, null, 2), {
+    temporaryPath: pidTimestampTemporaryPath(filePath),
+    mode: 0o600,
+    enforceMode: true,
+  })
 }
 
 type StoredDesktopPreferences = Omit<DesktopPreferences, 'launchAtStartupSupported' | 'launchAtStartupStatus' | 'visibilityCapabilities'>

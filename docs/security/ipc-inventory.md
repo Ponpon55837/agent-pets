@@ -97,7 +97,7 @@
 | `progression-set-pet` | `handle` | 受信任寵物或設定面板 main frame | isProgressionPetId；無效輸入回安全預設或錯誤 | setProgressionPet (invoke) | `tests/agent-store-characterization.test.mts` |
 | `progression-insights` | `handle` | 受信任寵物或設定面板 main frame | 型別；isProgressionPetId；無效輸入回安全預設或錯誤 | getProgressionInsights (invoke) | `tests/progression.test.mts` |
 | `achievements-init` | `handle` | 受信任寵物或設定面板 main frame | isProgressionPetId；無效輸入回安全預設或錯誤 | initializeAchievements (invoke) | `tests/agent-store-characterization.test.mts` |
-| `project-mcp-setup` | `handle` | 設定面板 main frame | 長度／數量上限；isDialogOpen；無效輸入回安全預設或錯誤 | setupProjectMcp (invoke) | `tests/project-mcp-registry.test.mts`<br>`tests/project-mcp-setup.test.mts` |
+| `project-mcp-setup` | `handle` | 設定面板 main frame | 長度／數量上限；isDialogOpen；無效輸入回安全預設或錯誤 | setupProjectMcp (invoke) | `tests/atomic-write-call-sites.test.mts`<br>`tests/project-mcp-registry.test.mts`<br>`tests/project-mcp-setup.test.mts` |
 | `project-mcp-apply` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | applyProjectMcp (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `project-mcp-list` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | listProjectMcp (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `project-mcp-remove` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | removeProjectMcp (invoke) | `tests/ipc-project-mcp.test.mts`<br>`tests/project-mcp-registry.test.mts`<br>`tests/project-mcp-setup.test.mts` |

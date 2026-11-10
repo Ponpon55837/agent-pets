@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { renameSyncWithRetry } from './fs-rename.ts'
+import { pidTimestampTemporaryPath, writeFileAtomicSync } from './atomic-file-write.ts'
 
 // Shared, Electron-free helpers for touching configuration files that belong to
 // the user (~/.claude/settings.json, ~/.codex/hooks.json, ...). The rules:
@@ -58,21 +58,7 @@ export function writeTextAtomic(filePath: string, content: string, options: { mo
     try { mode = fs.statSync(target).mode & 0o777 } catch { /* new file */ }
   }
 
-  const temporaryPath = path.join(directory, `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`)
-  try {
-    fs.writeFileSync(temporaryPath, content, {
-      encoding: 'utf8',
-      flag: 'wx',
-      ...(mode !== undefined ? { mode } : {}),
-    })
-    renameSyncWithRetry(temporaryPath, target)
-    if (mode !== undefined && process.platform !== 'win32') {
-      try { fs.chmodSync(target, mode) } catch { /* best effort */ }
-    }
-  } catch (error) {
-    try { fs.rmSync(temporaryPath, { force: true }) } catch { /* ignore */ }
-    throw error
-  }
+  writeFileAtomicSync(target, content, { temporaryPath: pidTimestampTemporaryPath(target), mode, enforceMode: true })
 }
 
 function backupTimestamp(): string {

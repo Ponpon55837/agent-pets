@@ -209,21 +209,21 @@
 
 整合分支：`claude/shared-sources-refactor`。每階段在獨立 worktree 的子 session 中進行，完成後由總控審核並合併回整合分支；全部完成後一次升 minor 版並開 PR。
 
-| 階段 | 項目 | 工作記錄 |
-|---|---|---|
-| 1 | 第 10 項：Agent 設定目錄修正（含 login shell 查詢，見 [計畫](../design/Agent-Config-Dir-Fix-Plan.zh-TW.md)） | `docs/phase-reports/refactor-01-agent-config-dirs.md` |
-| 2 | 第 1 項：寵物視窗尺寸契約；第 13 項：ID 格式與 `clamp` | `refactor-02-pet-window-size.md` |
-| 3 | 第 2 項：Plugin 權限清單產生器 | `refactor-03-plugin-permission-units.md` |
-| 4 | 第 3 項：圖片格式辨識 | `refactor-04-raster-signature.md` |
-| 5 | 第 8 項：本機通訊契約；第 11 項：Agent 顯示名稱 | `refactor-05-local-wire-contract.md` |
-| 6 | 第 9 項：Loopback HTTP server 骨架 | `refactor-06-loopback-server.md` |
-| 7 | 第 14 項：時間格式；第 15 項：本地化型別 | `refactor-07-intl-locale.md` |
-| 8 | 第 12 項：localStorage key registry | `refactor-08-storage-keys.md` |
-| 9 | 第 5 項：agentStore 按領域拆分 | `refactor-09-agent-store.md` |
-| 10 | 第 4 項：Plugin 面板控制器拆分 | `refactor-10-plugin-panel-controller.md` |
-| 11 | 第 6 項：main runtime 拆分；userData 路徑表 | `refactor-11-main-runtime.md` |
-| 12 | 第 7 項：原子寫檔底層機制 | `refactor-12-atomic-write.md` |
-| 收尾 | 升 minor 版、PR、auto-fix、auto-merge | — |
+| 階段 | 項目 | 工作記錄 | 完成 commit |
+|---|---|---|---|
+| 1 | 第 10 項：Agent 設定目錄修正（含 login shell 查詢，見 [計畫](../design/Agent-Config-Dir-Fix-Plan.zh-TW.md)） | `docs/phase-reports/refactor-01-agent-config-dirs.md` | `35f6cb9` |
+| 2 | 第 1 項：寵物視窗尺寸契約；第 13 項：ID 格式與 `clamp` | `refactor-02-pet-window-size.md` | `647960e` |
+| 3 | 第 2 項：Plugin 權限清單產生器 | `refactor-03-plugin-permission-units.md` | `1926b08` |
+| 4 | 第 3 項：圖片格式辨識 | `refactor-04-raster-signature.md` | `bde2f70` |
+| 5 | 第 8 項：本機通訊契約；第 11 項：Agent 顯示名稱 | `refactor-05-local-wire-contract.md` | `b3a6f25` |
+| 6 | 第 9 項：Loopback HTTP server 骨架 | `refactor-06-loopback-server.md` | `f55d2a2` |
+| 7 | 第 14 項：時間格式；第 15 項：本地化型別 | `refactor-07-intl-locale.md` | `940a00b` |
+| 8 | 第 12 項：localStorage key registry | `refactor-08-storage-keys.md` | `5fdffe6` |
+| 9 | 第 5 項：agentStore 按領域拆分 | `refactor-09-agent-store.md` | `d5f5b47` |
+| 10 | 第 4 項：Plugin 面板控制器拆分 | `refactor-10-plugin-panel-controller.md` | `26b0b4e` |
+| 11 | 第 6 項：main runtime 拆分；userData 路徑表 | `refactor-11-main-runtime.md` | `7a30439` |
+| 12 | 第 7 項：原子寫檔底層機制 | `refactor-12-atomic-write.md` | 本 commit |
+| 收尾 | 升 minor 版、PR、auto-fix、auto-merge | — | — |
 
 測試暫存目錄 helper 與 UI 計時字面值（低優先觀察）在相關階段順手處理，不單獨成階段。
 
@@ -235,3 +235,4 @@
 - 上述項目是抽取機會，不代表已確認存在使用者可見的缺陷，也不承諾效能提升。
 - 本次僅新增分析文件，沒有修改產品程式、版本、Git tag 或 release。
 - 未執行單元測試、建置、Electron 實機驗證或正式安全驗收。
+- 後續已依 3.1 節排程完成全部 12 個階段的實作（各階段的完成 commit 見排程表）；每個階段的範圍、驗證證據、安全審查與殘餘風險記錄在 `docs/phase-reports/refactor-01-agent-config-dirs.md` 至 `docs/phase-reports/refactor-12-atomic-write.md`。

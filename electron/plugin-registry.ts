@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { writeFileAtomicSync } from './atomic-file-write.ts'
 import { renameSyncWithRetry } from './fs-rename.ts'
 import { zipSync } from 'fflate'
 import { guardArchive } from './archive-guard.ts'
@@ -119,14 +120,8 @@ function assertSafeExistingDirectory(directory: string): void {
 function atomicWriteJson(filePath: string, value: unknown): void {
   const directory = path.dirname(filePath)
   ensureDirectory(directory)
-  const temporary = path.join(directory, `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`)
-  try {
-    fs.writeFileSync(temporary, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    renameSyncWithRetry(temporary, filePath)
-  } catch (error) {
-    try { fs.rmSync(temporary, { force: true }) } catch {}
-    throw error
-  }
+  const temporaryPath = path.join(directory, `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`)
+  writeFileAtomicSync(filePath, JSON.stringify(value, null, 2), { temporaryPath, mode: 0o600 })
 }
 
 function readRegistry(filePath: string): Record<string, PluginRegistryEntry> {

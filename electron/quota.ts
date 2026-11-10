@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { renameSyncWithRetry } from './fs-rename.ts'
+import { writeFileAtomicSync } from './atomic-file-write.ts'
 import { currentAgentConfigDirs } from './agent-config-dirs.ts'
 import { promisify } from 'node:util'
 import { translateBackendError } from '../src/i18n.ts'
@@ -239,28 +239,11 @@ async function requestJson(
 }
 
 function atomicWriteJson(filePath: string, value: Record<string, unknown>): void {
-  const directory = path.dirname(filePath)
-  const tempPath = path.join(
-    directory,
+  const temporaryPath = path.join(
+    path.dirname(filePath),
     `.${path.basename(filePath)}.agent-pets-${process.pid}-${tempSequence++}.tmp`,
   )
-  const data = `${JSON.stringify(value, null, 2)}\n`
-  let wroteTemp = false
-  try {
-    const descriptor = fs.openSync(tempPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY, 0o600)
-    wroteTemp = true
-    try {
-      fs.writeFileSync(descriptor, data, 'utf8')
-      fs.fsyncSync(descriptor)
-    } finally {
-      fs.closeSync(descriptor)
-    }
-    renameSyncWithRetry(tempPath, filePath)
-  } finally {
-    if (wroteTemp && fs.existsSync(tempPath)) {
-      try { fs.unlinkSync(tempPath) } catch {}
-    }
-  }
+  writeFileAtomicSync(filePath, `${JSON.stringify(value, null, 2)}\n`, { temporaryPath, mode: 0o600, fsync: true })
 }
 
 function codexAuthPath(): string {
