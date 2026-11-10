@@ -287,7 +287,8 @@ test('completion markers default on, persist, and only accept booleans', (t) => 
 })
 
 test('the pet only renders completion markers while the preference is on', () => {
-  const source = fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'components', 'DesktopPet.vue'), 'utf8')
+  const read = (...parts: string[]) => fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'components', ...parts), 'utf8')
+  const source = [read('DesktopPet.vue'), read('desktop-pet', 'PetEdgePeekHandle.vue')].join('\n')
   assert.match(source, /<span v-if="store\.completionMarkersEnabled && store\.unreadResults\.count > 0" class="mini-status-count">/)
   assert.match(source, /v-if="store\.completionMarkersEnabled && store\.unreadResults\.count > 0"\s+class="unread-badge"/)
   assert.match(source, /v-if="store\.completionMarkersEnabled && store\.unreadResults\.count > 0"\s+class="edge-peek-result-badge"/)
@@ -304,8 +305,10 @@ test('results are not counted while completion markers are off', async () => {
   assert.equal(noteUnread({ count: UNREAD_RESULTS_MAX, hasError: false }, 'success', true, true).count, UNREAD_RESULTS_MAX)
 
   // Switching markers off (locally or from another window's broadcast) drops what was counted.
-  const store = fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'stores', 'agentStore.ts'), 'utf8')
-  assert.match(store, /function setCompletionMarkersEnabled\(enabled: boolean\) \{\s+completionMarkersEnabled\.value = enabled\s+if \(!enabled\) clearUnreadResults\(\)/)
-  assert.match(store, /completionMarkersEnabled\.value = preferences\.completionMarkersEnabled !== false\s+if \(!completionMarkersEnabled\.value\) clearUnreadResults\(\)/)
-  assert.match(store, /noteUnread\(unreadResults\.value, tone, completionMarkersEnabled\.value, away\)/)
+  const storeDir = path.join(import.meta.dirname, '..', 'src', 'stores', 'agent')
+  const store = fs.readFileSync(path.join(storeDir, 'desktop-preferences.ts'), 'utf8')
+  const unread = fs.readFileSync(path.join(storeDir, 'unread-alerts.ts'), 'utf8')
+  assert.match(store, /function setCompletionMarkersEnabled\(enabled: boolean\) \{\s+completionMarkersEnabled\.value = enabled\s+if \(!enabled\) deps\.clearUnreadResults\(\)/)
+  assert.match(store, /completionMarkersEnabled\.value = preferences\.completionMarkersEnabled !== false\s+if \(!completionMarkersEnabled\.value\) deps\.clearUnreadResults\(\)/)
+  assert.match(unread, /noteUnread\(unreadResults\.value, tone, deps\.completionMarkersEnabled\(\), away\)/)
 })

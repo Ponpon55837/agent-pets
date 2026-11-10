@@ -6,6 +6,8 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf
 const stripComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, '')
 const files = [
   '../src/components/DesktopPet.css',
+  '../src/components/desktop-pet/PetStatusLine.css',
+  '../src/components/desktop-pet/PetEdgePeekHandle.css',
   '../src/components/DesktopPetBubbles.css',
   '../src/components/PetAnimation.css',
 ]
@@ -39,7 +41,7 @@ test('no pet text is smaller than the 11px token floor', () => {
 })
 
 test('the quota tooltip does not nest a backdrop-filter inside the glass status line', () => {
-  const css = stripComments(read('../src/components/DesktopPet.css'))
+  const css = stripComments(read('../src/components/desktop-pet/PetStatusLine.css'))
   const tooltip = css.slice(css.indexOf('.quota-tooltip {'), css.indexOf('.quota-tooltip-row {'))
   assert.doesNotMatch(tooltip, /backdrop-filter/)
 })
@@ -58,6 +60,6 @@ test('the pet permission bubble never grows past the reserved headroom, so the s
 })
 
 test('state dots stay visible under forced colors (the shape still carries the state)', () => {
-  assert.match(readFileSync('src/components/DesktopPet.css', 'utf8'), /@media \(forced-colors: active\) \{\n {2}\.line-dot \{\n {4}background: CanvasText !important;/)
+  assert.match(readFileSync('src/components/desktop-pet/PetStatusLine.css', 'utf8'), /@media \(forced-colors: active\) \{\n {2}\.line-dot \{\n {4}background: CanvasText !important;/)
   assert.match(readFileSync('src/components/StatusPanel.css', 'utf8'), /@media \(forced-colors: active\) \{\n {2}\.status-panel :deep\(\.session-status-dot\) \{\n {4}background: CanvasText;/)
 })

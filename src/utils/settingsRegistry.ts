@@ -31,8 +31,16 @@ export function isSettingsGroupId(value: unknown): value is SettingsGroupId {
   return SETTINGS_GROUPS.some(group => group.id === value)
 }
 
+// 模組載入時建一次索引，搜尋結果逐列查分組時不必再掃描 SETTINGS_GROUPS。
+export const SETTINGS_GROUP_BY_ID: ReadonlyMap<SettingsGroupId, SettingsGroupDefinition> = new Map(
+  SETTINGS_GROUPS.map(group => [group.id, group]),
+)
+const GROUP_BY_SECTION: ReadonlyMap<SettingsSectionId, SettingsGroupId> = new Map(
+  SETTINGS_GROUPS.flatMap(group => group.sections.map(section => [section, group.id] as const)),
+)
+
 export function groupOfSection(section: SettingsSectionId): SettingsGroupId {
-  return SETTINGS_GROUPS.find(group => group.sections.includes(section))?.id ?? DEFAULT_SETTINGS_GROUP
+  return GROUP_BY_SECTION.get(section) ?? DEFAULT_SETTINGS_GROUP
 }
 
 export interface SettingsEntry {

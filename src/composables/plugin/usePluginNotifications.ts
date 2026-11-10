@@ -6,7 +6,7 @@
 // - 監聽與清理：掛載時訂閱 onPluginNotificationsChanged；卸載時取消訂閱，並先提交尚未提交的清除
 //   （清掉復原計時器，不留下計時器）。
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { locale, t } from '@/i18n'
+import { locale, t, tPlural } from '@/i18n'
 import type { PluginNotificationRecord, PluginPanelPlugin } from '@/types/plugin'
 import { formatDateTime } from '@/utils/intl-format'
 import { createCoalescedRefresh, type PluginPanelFeedback } from '@/composables/plugin/panel-deps'
@@ -86,7 +86,7 @@ export function usePluginNotifications(deps: PluginNotificationsDeps) {
     pendingClear = { ids, pluginId, timer: setTimeout(() => void commitPendingClear(), CLEAR_UNDO_MS) }
     notify({
       tone: 'success',
-      text: t('plugins.notificationsCleared', { count: ids.size }),
+      text: tPlural('plugins.notificationsCleared', ids.size),
       durationMs: CLEAR_UNDO_MS,
       action: {
         label: t('plugins.undo'),

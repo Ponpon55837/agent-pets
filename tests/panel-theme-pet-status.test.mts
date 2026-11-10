@@ -84,7 +84,8 @@ test('pet renderer accepts each canonical set whole, and suspends under forced c
 
 test('the pet window receives exactly the palette properties its CSS reaches', () => {
   // 從寵物視窗用到的 token 出發，沿著 tokens.css 的 var() 找出最終依賴的可套主題屬性。
-  const files = ['src/components/DesktopPet.vue', 'src/components/DesktopPet.css', 'src/components/DesktopPetBubbles.css', 'src/components/PetAnimation.vue',
+  const files = ['src/components/DesktopPet.vue', 'src/components/DesktopPet.css', 'src/components/desktop-pet/PetStatusLine.vue', 'src/components/desktop-pet/PetStatusLine.css',
+    'src/components/desktop-pet/PetBubbleStack.vue', 'src/components/desktop-pet/PetEdgePeekHandle.vue', 'src/components/desktop-pet/PetEdgePeekHandle.css', 'src/components/DesktopPetBubbles.css', 'src/components/PetAnimation.vue',
     'src/components/PetAnimation.css', 'src/components/permission/PermissionBubble.vue', 'src/components/permission/PermissionCountdown.vue',
     'src/components/permission/PermissionDetails.vue', 'src/components/permission/PermissionNoticeBubble.vue', 'src/components/permission/PermissionRiskBadge.vue',
     'src/components/ui/Button.vue', 'src/components/ui/Icon.vue', 'src/utils/agent-state-presentation.ts', 'src/styles/base.css']
@@ -112,7 +113,7 @@ test('the pet window receives exactly the palette properties its CSS reaches', (
 })
 
 test('only the status pill reads --pet-status-*; bubbles, permission UI, dots and badges follow the palette', () => {
-  const css = readFileSync('src/components/DesktopPet.css', 'utf8')
+  const css = ['src/components/DesktopPet.css', 'src/components/desktop-pet/PetStatusLine.css', 'src/components/desktop-pet/PetEdgePeekHandle.css'].map(file => readFileSync(file, 'utf8')).join('\n')
   const rules = [...css.matchAll(/([^{}]+)\{([^{}]*--pet-status-[^{}]*)\}/g)]
   assert.ok(rules.length > 0)
   for (const [, selector] of rules) {
@@ -125,5 +126,5 @@ test('only the status pill reads --pet-status-*; bubbles, permission UI, dots an
   const pet = readFileSync('src/components/DesktopPet.vue', 'utf8')
   assert.match(pet, /usePetTheme\(\)/)
   assert.doesNotMatch(pet, /usePanelTheme\b/)
-  assert.match(readFileSync('src/components/DesktopPet.css', 'utf8'), /\.status-line\[data-quota-tier='low'\] \{\n  --quota-color: var\(--organic-quota-error\);/)
+  assert.match(readFileSync('src/components/desktop-pet/PetStatusLine.css', 'utf8'), /\.status-line\[data-quota-tier='low'\] \{\n  --quota-color: var\(--organic-quota-error\);/)
 })

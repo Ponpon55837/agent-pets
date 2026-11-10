@@ -80,7 +80,7 @@ test('main and renderer read the pet window size from the shared module only', (
   assert.doesNotMatch(create, /\b(?:250|260|232|190|1_600)\b/)
   assert.doesNotMatch(runtime, /PET_WINDOW_TOP_HEADROOM/)
   assert.doesNotMatch(readFileSync('electron/ipc/window-controls.ts', 'utf8'), /clamp\(raw(?:Width|Height), 80, 1_600\)/)
-  const store = readFileSync('src/stores/agentStore.ts', 'utf8')
+  const store = ['src/stores/agentStore.ts', 'src/stores/agent/session-views.ts'].map(path => readFileSync(path, 'utf8')).join('\n')
   assert.doesNotMatch(store, /PET_BASE_W|QUOTA_TOOLTIP_MIN_W|MULTI_PET_CELL_W/)
   assert.match(store, /petWindowWidth\(familyLines\.value\.length, isMultiPet\.value, petScale\.value\)/)
 })

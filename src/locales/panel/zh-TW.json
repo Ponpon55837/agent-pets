@@ -7,7 +7,7 @@
   "panel.searchPlaceholder": "搜尋設定…",
   "panel.searchClear": "清除搜尋",
   "panel.searchResults": "設定搜尋結果",
-  "panel.searchCount": "共 {count} 個結果",
+  "panel.searchCount.other": "共 {count} 個結果",
   "panel.searchNoResults": "找不到與「{query}」相符的設定。",
   "panel.notificationsCard": "通知與勿擾",
   "panel.stateOn": "開啟",
