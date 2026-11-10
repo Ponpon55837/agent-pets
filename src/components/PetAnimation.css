@@ -65,8 +65,9 @@
   pointer-events: none;
 }
 
+/* 只出現一次的裝飾動畫保留字面時長；--transition-* 自帶 easing，放進 animation 簡寫會讓整條宣告失效。 */
 .pet-ghost-canvas.fading {
-  animation: pet-ghost-fade var(--transition-fast) ease-out forwards;
+  animation: pet-ghost-fade 150ms ease-out forwards;
 }
 
 @keyframes pet-ghost-fade {

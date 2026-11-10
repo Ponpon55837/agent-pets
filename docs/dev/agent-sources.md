@@ -41,6 +41,27 @@
    - 連線用的 port、`~/.desktop-pet` 與 token 檔名、header、`/v1/...` 路徑不用另外改：它們只寫在 `src/types/local-wire.ts`，`setup.ts` 的 OpenCode plugin 模板以插值取用，hook 與 presentation MCP 腳本的字面值由 `tests/local-wire-contract.test.mts` 比對。
 5. 更新 `tests/agent-source-registry.test.mts` 裡固定的值。
 
+## hook 與 plugin 的手動同步字面值
+
+`integrations/*.mjs` 與 `setup.ts` 裡的 OpenCode plugin 模板安裝後在 app 之外執行，不能 import TS，所以下列值是手寫的，各由一個測試比對原始碼文字（不在 vm 裡執行：`agent-hook.mjs` 一載入就會 `main()` 並結束程序）。新增或改名時，測試失敗就是同步提醒。
+
+| 字面值 | 來源 | 守護測試 |
+|---|---|---|
+| `validSources` | `AGENT_SOURCE_REGISTRY`（Codex＋Claude 家族） | `agent-source-registry.test.mts` |
+| 預設來源 `codex`、`claude-desktop` 對應、plugin 的 `SOURCE` | `AGENT_SOURCE_REGISTRY`、`FAMILY_SOURCES` | `hook-literal-contract.test.mts` |
+| `mapClaudeEvent`／`mapCodexEvent`／plugin `setState` 回傳的狀態 | `AGENT_STATES`（並要求每個狀態都有路徑送出） | `hook-literal-contract.test.mts` |
+| `case` 事件名稱 | `setup.ts` 的 `CLAUDE_CODE_HOOK_EVENTS`／`CODEX_HOOK_EVENTS`（已安裝必須有 `case`，有 `case` 必須已安裝） | `hook-literal-contract.test.mts` |
+| `RESOLVING_EVENTS` | 必須是已對應且已安裝的 Claude 事件 | `hook-literal-contract.test.mts` |
+| `MIN_WAIT_SECONDS`／`MAX_WAIT_SECONDS` | `src/types/permission.ts` | `hook-literal-contract.test.mts` |
+| `claude-permission-respond` 內容的 `enabled`／`waitSeconds` | `setup.ts` 的 `syncClaudePermissionRespondOptIn` | `hook-literal-contract.test.mts` |
+| host 提示的 `termProgram`／`entrypoint`／`bundleId` 格式與送出的 key | `electron/host-app.ts`（plugin 與 hook 兩份互相比對） | `hook-literal-contract.test.mts` |
+| `presentation-mcp.mjs` 的 reaction、ttl、訊息長度、`petId` 格式 | `PRESENTATION_REACTIONS`、`PRESENTATION_*_TTL_MS`、`PRESENTATION_MAX_MESSAGE_LENGTH`、`isValidPetId` | `hook-literal-contract.test.mts` |
+| `agent-hook.cmd` 的檔名與 `__NODE_EXECUTABLE__` | `DEPLOY_FILES.hookScript`、`setup.ts` 的替換 | `hook-literal-contract.test.mts` |
+| `PET_URL`、`PERMISSION_URL`、`DEPLOY_DIR`、token 檔名、header、權限 route、啟動標記檔名 | `src/types/local-wire.ts`、`hookStartupMarkerName` | `local-wire-contract.test.mts` |
+| `IDENTIFIER_PATTERN` | `OPAQUE_ID_128_PATTERN` | `id-patterns.test.mts` |
+
+沒有 TS 對照的值（`DENY_MESSAGE`、輪詢與重試間隔、`STARTUP_MARKER_MAX_AGE_MS`）由行為測試固定（`claude-permission-hook`、`agent-hook-delivery`）。
+
 ## 刻意沒有併進來的對照
 
 這些只是剛好跟來源同名，其實是另一份契約：

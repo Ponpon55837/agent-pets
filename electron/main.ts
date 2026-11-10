@@ -1,3 +1,5 @@
+// 必須是第一個 import：ES 模組依 import 順序執行，啟動標記要在其他大型模組載入前寫好（見 docs/dev/hook-delivery.md）。
+import { hookStartupMarker } from './main/early-hook-startup-marker'
 
 import { app, BrowserWindow, screen, ipcMain, dialog, session, protocol, powerMonitor, Notification, shell, Menu } from 'electron'
 
@@ -111,7 +113,6 @@ import { acquireSingleInstanceLock, relaunchApp } from './relaunch'
 import { disposeMainTimers } from './main/dispose-timers'
 import { flushMainLog, logMain, teeConsoleToLog } from './diagnostics/main-log'
 import { acquireRunMarker } from './diagnostics/session-marker'
-import { writeHookStartupMarker } from './main/hook-startup-marker'
 import type { LocalServerListenStatus } from './local-server-listen'
 import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
 import { MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, clearEdgeDwell, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, isClaudePermissionRespondEnabled, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isTrustedIpcSender, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, growth, historyRuntime, localPorts, petWindowModes, pluginCatalogRuntime, pluginRuntime, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode, requestPanelMinimum, resetPanelSize } from './main/runtime'
@@ -223,8 +224,6 @@ configureSetupEnvironment({
 })
 
 const runMarker = acquireRunMarker(appUserDataPaths().logs)
-// 越早寫越好：從這裡到事件埠開始監聽之間送出的 hook 事件，會在連線被拒時短暫重試而不是遺失。
-const hookStartupMarker = writeHookStartupMarker(hookScriptDeployPath(), localPorts().event)
 const crashGuard = installCrashGuard({
   log: (level, message, detail) => {
     if (level === 'error') console.error(message, ...(detail === undefined ? [] : [detail]))
@@ -283,6 +282,8 @@ const singleInstanceLock: Promise<boolean> = acquireSingleInstanceLock(
     hookStartupMarker.clear()
     app.quit()
   } else {
+    // 拿到鎖就只剩本程序：接手 --relaunch 時舊實例（可能還活著）留下或沒寫的標記。
+    hookStartupMarker.claim()
     app.on('second-instance', () => {
       showPetWindow()
     })

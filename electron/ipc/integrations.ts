@@ -19,8 +19,8 @@ export interface IntegrationIpcDependencies {
   getPanelWindow(): BrowserWindow | null
   sendIntegrationTestEvent(source: IntegrationTestSource, sessionId: string, state: 'thinking' | 'offline'): Promise<void>
   waitForIntegrationTestReceipt(sessionId: string): Promise<void>
-  installIntegration(target?: IntegrationTarget): void
-  uninstallIntegration(target?: IntegrationTarget | 'all'): void
+  installIntegration(target?: IntegrationTarget): unknown
+  uninstallIntegration(target?: IntegrationTarget | 'all'): unknown
   isIntegrationTarget(value: unknown): value is IntegrationTarget
   /** 等 agent 設定目錄解析完成（login shell 查詢）才改寫設定檔，避免先寫到預設位置。 */
   agentConfigReady?(): Promise<void>
@@ -56,7 +56,7 @@ export function registerIntegrationIpc(deps: IntegrationIpcDependencies): void {
     }
     try {
       await deps.agentConfigReady?.()
-      deps.installIntegration(target as IntegrationTarget | undefined)
+      await deps.installIntegration(target as IntegrationTarget | undefined)
       return { ok: true }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
@@ -71,7 +71,7 @@ export function registerIntegrationIpc(deps: IntegrationIpcDependencies): void {
     }
     try {
       await deps.agentConfigReady?.()
-      deps.uninstallIntegration(target as IntegrationTarget | 'all' | undefined)
+      await deps.uninstallIntegration(target as IntegrationTarget | 'all' | undefined)
       return { ok: true }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }

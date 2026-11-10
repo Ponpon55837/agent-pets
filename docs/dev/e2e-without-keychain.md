@@ -30,7 +30,7 @@ node scripts/e2e-isolated-electron.mjs   # 記下啟動日誌 READY 那行的 ho
 node --experimental-strip-types scripts/e2e-real-hook.mts --home <home> [--pet-pack] [--rounds N]
 ```
 
-加上 `--pet-pack` 會先放一個刻意混入不合法值的寵物包，驗證主程序的 `behaviorManifest` 清理與畫面端回退。`--rounds N` 會把整組 8 個事件重複 N 輪，每輪用新的 session，只印出不符合預期的事件和總結。任何一個事件不符合預期，腳本就以非 0 結束。
+加上 `--pet-pack` 會先放一個刻意混入不合法值的寵物包，驗證主程序的 `behaviorManifest` 清理與畫面端回退。`--rounds N` 會把整組 14 個事件（含 `PreCompact`／`PostCompact` 與帶 `notification_type` 的 `Notification`）重複 N 輪，每輪用新的 session，只印出不符合預期的事件和總結。任何一個事件不符合預期，腳本就以非 0 結束。
 
 同一個 app 裡，前面遺失的事件會留下停在「思考中」的 session，蓋過後面的畫面。所以比較修正前後時，每次都要換一個新的 app。
 
