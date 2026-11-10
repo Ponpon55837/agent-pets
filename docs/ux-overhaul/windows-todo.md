@@ -20,8 +20,9 @@ UX 翻修（PR #25）和之後的 PR 5（跨平台實測與打包）中，需要
 
 - [ ] **PM-13 全螢幕偵測**：目前只看前景視窗，補上多螢幕與無邊框全螢幕遊戲／影片的判斷，並在偵測失敗時顯示原因。
 - [ ] **PM-10 系統匣圖示**：Windows 數字徽章與高 DPI 圖示素材。
-- [ ] **簽章**：Windows 程式碼簽章，消除 SmartScreen 警告。
+- [ ] **簽章**（已實作、待實機驗證）：`release.yml` 在設定 `WINDOWS_CERTIFICATE_P12`／`WINDOWS_CERTIFICATE_PASSWORD` 後，以 Authenticode 簽可攜版與安裝版兩個 `.exe`，並用 `Get-AuthenticodeSignature` 確認為 Valid（見 [release-signing.md](../dev/release-signing.md)）。待設定憑證後確認 SmartScreen 警告消失；EV／雲端簽章尚不支援。
+- [ ] **NSIS 安裝版**（已實作、待實機驗證）：`AgentPets-Setup-<version>.exe`（per-user、不需系統管理員）。待確認安裝、捷徑、解除安裝保留資料、開機啟動指向安裝目錄的 `.exe`、重新啟動與單一實例、hook 部署的 `resources/integrations` 與 `node.exe` 解析。
 - [ ] **回到工作階段：切換到 App**：macOS 以 `open -b`（LaunchServices）把終端機／IDE 帶到最前面；Windows 目前隱藏這個動作。需要找出不需額外權限、不會被前景鎖定（`SetForegroundWindow` 限制）擋下的方式，並驗證 Windows Terminal（`WT_SESSION`）與 VS Code 的辨識。「顯示專案資料夾」（`shell.showItemInFolder`；拒絕 UNC 與 `name.{CLSID}` 路徑）與「複製專案路徑」也需在 Windows 實機確認。
-- [ ] **CI**：在 Windows runner 跑 Electron 冒煙測試（目前 `ci-platforms.yml` 每週只跑型別檢查與單元測試）。
+- [ ] **CI**（已實作、待實機驗證）：`ci-platforms.yml` 的 Windows runner 執行 `pnpm test:smoke`（隔離啟動、送事件、確認狀態、正常結束）；尚未在 Windows runner 實際跑過。
 
 驗證完成後，請把對應項目打勾，並更新該問題的工作記錄狀態。

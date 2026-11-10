@@ -10,6 +10,24 @@ import { dirname, join, relative, resolve } from 'node:path'
 const IMPORT_PATTERN =
   /(?:^|\n)\s*(?:import|export)\s+(type\s+)?(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g
 
+// 每個檔案的直接值相依只解析一次；上百個測試檔共用同一批 src 檔，不必每個測試重讀重掃。
+const importCache = new Map()
+function runtimeImports(file) {
+  let targets = importCache.get(file)
+  if (targets) return targets
+  targets = []
+  if (/\.(?:ts|mts|mjs)$/.test(file)) {
+    for (const match of readFileSync(file, 'utf8').matchAll(IMPORT_PATTERN)) {
+      const specifier = match[2] ?? match[3]
+      if (match[1] || !specifier.startsWith('.')) continue
+      const target = resolve(dirname(file), specifier)
+      if (existsSync(target)) targets.push(target)
+    }
+  }
+  importCache.set(file, targets)
+  return targets
+}
+
 /** 單一測試檔在執行期會載入的所有檔案（絕對路徑）。 */
 function runtimeFiles(entry) {
   const seen = new Set()
@@ -18,13 +36,7 @@ function runtimeFiles(entry) {
     const file = stack.pop()
     if (seen.has(file)) continue
     seen.add(file)
-    if (!/\.(?:ts|mts|mjs)$/.test(file)) continue
-    for (const match of readFileSync(file, 'utf8').matchAll(IMPORT_PATTERN)) {
-      const specifier = match[2] ?? match[3]
-      if (match[1] || !specifier.startsWith('.')) continue
-      const target = resolve(dirname(file), specifier)
-      if (existsSync(target)) stack.push(target)
-    }
+    stack.push(...runtimeImports(file))
   }
   return seen
 }

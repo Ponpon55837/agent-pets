@@ -11,11 +11,12 @@
 到 [Releases](https://github.com/Ponpon55837/agent-pets/releases) 頁面下載最新版本。
 
 - **macOS** — `AgentPets-<version>-arm64.dmg`（Apple Silicon）或 `AgentPets-<version>-x64.dmg`（Intel）。開啟後把 App 拖進「應用程式」。
-- **Windows** — `AgentPets-<version>.exe`，免安裝的可攜版。
+- **Windows** — `AgentPets-Setup-<version>.exe` 安裝版（安裝在使用者自己的資料夾，不需要系統管理員權限；解除安裝時保留設定與資料），或 `AgentPets-<version>.exe` 免安裝的可攜版。
+- **Linux（未驗證）** — `AgentPets-<version>-x86_64.AppImage` 或 `AgentPets-<version>-amd64.deb`。這兩個檔案由 CI 產出，但還沒在 Linux 實機測試過，目前不算支援的平台。Linux 上沒有開機時啟動與點擊穿透；沒有系統鑰匙圈（gnome-keyring／KWallet）時，插件的機密設定無法儲存；桌面環境沒有系統匣時，App 仍可執行但沒有系統匣選單。
 
 每個 Release 都附 `SHA256SUMS.txt`；在下載資料夾執行 `shasum -a 256 -c SHA256SUMS.txt --ignore-missing` 即可比對檔案。
 
-目前的版本沒有開發者憑證，也沒有公證（macOS 版只有 ad-hoc 簽章，用來密封 bundle），第一次開啟時系統會跳出警告：
+目前發佈的版本沒有開發者憑證，也沒有公證（macOS 版只有 ad-hoc 簽章，用來密封 bundle），第一次開啟時系統會跳出警告（發版流程已支援正式簽章，維護者設定憑證後會自動啟用，見 [docs/dev/release-signing.md](docs/dev/release-signing.md)）：
 
 - **macOS（Gatekeeper）** — 在「應用程式」中對 App 按右鍵，選擇**打開**並確認；或到**系統設定 → 隱私權與安全性**按**強制打開**。最後手段：`xattr -dr com.apple.quarantine "/Applications/Agent Pets.app"`。
 - **Windows（SmartScreen）** — 選擇**其他資訊 → 仍要執行**。
@@ -189,7 +190,7 @@ Hook 會附上每次安裝專屬的 `X-Agent-Pets-Token` 標頭（讀自 `~/.des
 | Claude Code 看不到專案 MCP | 在 `/mcp` 核准 `agent-pets`。Codex 需要先信任該專案。 |
 | 寵物凍結或空白 | 使用系統匣（進階）的**重新載入寵物**，或設定 → 進階的**重新啟動寵物**。 |
 | macOS：**開機時啟動**一直顯示需核准 | 到「系統設定 → 一般 → 登入項目」核准 Agent Pets（設定頁有按鈕可直接開啟）。請先把 App 移到「應用程式」資料夾；從磁碟映像或下載資料夾執行時無法註冊登入項目。 |
-| Windows：按**重新啟動**後程式關閉卻沒有再開 | 免安裝版已修正，會重新啟動原本的 `.exe`，而不是暫時解壓縮的資料夾。若仍失敗，請手動再開啟 `.exe`。 |
+| Windows：按**重新啟動**後程式關閉卻沒有再開 | 免安裝版已修正，會重新啟動原本的 `.exe`，而不是暫時解壓縮的資料夾；安裝版重新啟動安裝目錄中的 `.exe`。若仍失敗，請手動再開啟 `.exe`。 |
 | 回報問題 | 匯出診斷並附上檔案。 |
 
 ## 開發
@@ -208,6 +209,7 @@ pnpm dev
 | `pnpm dev` / `pnpm dev:safe` | Vite + Electron 開發模式；Windows GPU 程序當機時，`dev:safe` 改用軟體算圖 |
 | `pnpm test:unit` / `pnpm test:unit:watch` | `tests/` 內的 Node 內建測試（不會啟動 Electron） |
 | `pnpm test:coverage` | 單元測試，並對主行程模組設定 85% 行覆蓋率下限 |
+| `pnpm test:smoke` | 先 `pnpm exec vite build`：啟動隔離的 Electron App、送一筆事件、確認狀態並結束（本機請加 `--offscreen`） |
 | `pnpm lint` | ESLint（Vue／TypeScript、`@/` import 規則、`electron/` 的未處理 Promise）與主行程全域錯誤處理守門 |
 | `pnpm exec vue-tsc --noEmit` | 型別檢查 |
 | `pnpm check:bundle-size` | 任一 renderer chunk 超過 250 KB 即失敗（需先 `vite build`） |
@@ -229,11 +231,11 @@ pnpm dev
 
 在原始碼目錄執行 `node integrations/install.mjs` 可用與精靈相同的保護機制安裝 hook（`--claude-code` 只處理 Claude Code，`--uninstall` 則移除）。
 
-**CI** — `ci.yml` 在 pull request 與 `main` 推送涉及文件以外的變更時執行：型別檢查、`pnpm lint`、`pnpm test:coverage`、`vite build`、bundle 大小、插件面板 bundle 與對比度檢查、設計 token 報告，以及不阻擋合併的相依套件稽核。`ci-platforms.yml` 每週與手動觸發時，在 macOS 與 Windows 上執行型別檢查與單元測試。
+**CI** — `ci.yml` 在 pull request 與 `main` 推送涉及文件以外的變更時執行：型別檢查、`pnpm lint`、`pnpm test:coverage`、`vite build`、bundle 大小、插件面板 bundle 與對比度檢查、設計 token 報告、Electron 冒煙測試（`pnpm test:smoke`：在隔離的 HOME 與假的 `safeStorage` 下啟動 App、送一筆事件、確認寵物狀態、正常結束；Linux 透過 xvfb 執行，見 [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)），以及正式依賴的漏洞稽核（有 high 以上漏洞就失敗；連不上公告來源只警告）。workflow 的 action 都固定到 commit SHA。`ci-platforms.yml` 每週、手動觸發，以及改到它自己或冒煙腳本的 PR，會在 macOS 與 Windows 上執行型別檢查、單元測試與冒煙測試。
 
 ## 版本與發佈
 
-在 `package.json` 提高 `version`（預設升 patch；永久資料結構、公開契約或安全邊界的變更才升 minor）。該 commit 進入 `main` 且尚無 `v<version>` tag 時，`.github/workflows/release.yml` 會執行型別檢查與單元測試，建置 macOS arm64 與 x64 的 `.dmg` 及 Windows 可攜版 `.exe`，再建立 tag 與附自動產生說明的 GitHub Release。也可從 Actions 頁面重新執行，已有 tag 的版本會被略過。兩個 macOS job 各在同架構的 runner 上建置（x64 用 Intel），原生模組才會是對的架構；electron-builder 在寫入 fuses 之後對整個 bundle 做 ad-hoc 簽章（`mac.identity: "-"`，沒有憑證、沒有公證）。接著 `scripts/check-mac-bundle.mjs` 掛載 dmg 檢查：`codesign --verify --deep --strict` 要通過、fuses 要等於 `build.electronFuses`、每個 Mach-O 與 `*.node` 都要是目標架構，任何一項不符就讓發版失敗。release job 會把 `SHA256SUMS.txt` 跟安裝檔一起上傳。electron-builder 從 GitHub releases 下載 Electron 或工具失敗時，會改經 `scripts/release-asset-mirror.mjs` 再試兩次：它只聽 127.0.0.1，經 GitHub API 下載同一個 release 檔案，checksum 仍由 electron-builder 驗證。
+在 `package.json` 提高 `version`（預設升 patch；永久資料結構、公開契約或安全邊界的變更才升 minor）。該 commit 進入 `main` 且尚無 `v<version>` tag 時，`.github/workflows/release.yml` 會執行型別檢查與單元測試，建置 macOS arm64 與 x64 的 `.dmg`、Windows 安裝版與可攜版 `.exe`，以及 Linux 的 `.AppImage` 與 `.deb`，再建立 tag 與附自動產生說明的 GitHub Release。也可從 Actions 頁面重新執行，已有 tag 的版本會被略過。兩個 macOS job 各在同架構的 runner 上建置（x64 用 Intel），原生模組才會是對的架構；沒有設定簽章 secrets 時，electron-builder 在寫入 fuses 之後對整個 bundle 做 ad-hoc 簽章（`mac.identity: "-"`，沒有憑證、沒有公證），Windows 不簽章；設定了 Developer ID、App Store Connect API key 或 Windows 憑證的 secrets，下一次發版就自動改用正式簽章、公證與 staple（secret 名稱與取得方式見 [docs/dev/release-signing.md](docs/dev/release-signing.md)）。接著 `scripts/check-mac-bundle.mjs` 掛載 dmg 檢查：`codesign --verify --deep --strict` 要通過、fuses 要等於 `build.electronFuses`、每個 Mach-O 與 `*.node` 都要是目標架構；正式簽章時另外檢查 Developer ID、hardened runtime、`spctl` 與公證票據，Windows 簽章時檢查兩個 `.exe` 的 Authenticode 狀態。任何一項不符就讓發版失敗。release job 會把 `SHA256SUMS.txt` 跟安裝檔一起上傳。electron-builder 從 GitHub releases 下載 Electron 或工具失敗時，會改經 `scripts/release-asset-mirror.mjs` 再試兩次：它只聽 127.0.0.1，經 GitHub API 下載同一個 release 檔案，checksum 仍由 electron-builder 驗證。
 
 ## 授權
 
