@@ -8,6 +8,7 @@
 import { computed, ref, shallowRef } from 'vue'
 import { t, translateBackendError } from '@/i18n'
 import { isQuotaFamilyKey } from '@/types/agent'
+import { forecastQuota, recordQuotaSample, type QuotaForecast, type QuotaSeries } from '@/utils/quota-forecast'
 
 // Kept at/below the main process' quota cache TTL so a poll that arrives on
 // schedule actually reaches the usage API instead of being answered from a
@@ -123,9 +124,46 @@ export function useQuota() {
     return result
   })
 
+  // 近期用量樣本（每個「服務商:視窗」各一條，有界）。只存在 renderer 記憶體，不另開 IPC；
+  // 面板關閉期間不會有新樣本，重開後需要重新累積才會顯示預測。
+  const quotaSeries = new Map<string, QuotaSeries>()
+
+  function recordSamples(usage: QuotaUsage): void {
+    const live = new Set<string>()
+    for (const provider of usage.providers) {
+      for (const window of provider.windows) {
+        const key = `${provider.id}:${window.id}`
+        live.add(key)
+        // 出錯或沿用舊讀數時沒有新資料；重複記同一筆只會讓斜率偏向舊值。
+        if (provider.error || provider.stale) continue
+        let series = quotaSeries.get(key)
+        if (!series) {
+          series = { resetsAtMs: null, samples: [] }
+          quotaSeries.set(key, series)
+        }
+        recordQuotaSample(
+          series,
+          { atMs: Date.parse(provider.fetchedAt ?? usage.updatedAt), usedPercent: window.usedPercent },
+          window.resetsAt ? Date.parse(window.resetsAt) : null,
+        )
+      }
+    }
+    for (const key of quotaSeries.keys()) if (!live.has(key)) quotaSeries.delete(key)
+  }
+
+  // 依 quotaUsage 讀 resetsAt，所以在 computed 內呼叫時會跟著額度更新重算。
+  function quotaForecast(providerId: string, windowId: string, nowMs: number): QuotaForecast {
+    const provider = quotaUsage.value?.providers.find(candidate => candidate.id === providerId)
+    const window = provider?.windows.find(candidate => candidate.id === windowId)
+    const series = quotaSeries.get(`${providerId}:${windowId}`)
+    if (!provider || !window || !series || provider.error) return { kind: 'insufficient' }
+    return forecastQuota(series.samples, window.resetsAt ? Date.parse(window.resetsAt) : null, nowMs)
+  }
+
   function setQuotaUsage(usage: unknown): boolean {
     const normalized = normalizeQuotaUsage(usage)
     if (!normalized) return false
+    recordSamples(normalized)
     quotaUsage.value = normalized
     quotaError.value = ''
     return true
@@ -164,6 +202,7 @@ export function useQuota() {
     quotaCheckedAt,
     quotaByFamily,
     quotaStaleSignal,
+    quotaForecast,
     setQuotaUsage,
     refreshQuota,
   }

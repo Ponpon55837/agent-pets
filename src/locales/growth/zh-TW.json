@@ -195,5 +195,11 @@
   "growth.sessionTimelinePartial": "時間軸從升級後才開始記錄，較早的狀態沒有保存。",
   "growth.sessionTimelineFor": "持續 {duration}",
   "growth.sessionDetailError": "無法載入這個工作階段。",
-  "growth.sessionsLoadMoreFailed": "無法載入更多工作階段。"
+  "growth.sessionsLoadMoreFailed": "無法載入更多工作階段。",
+  "growth.forecastSoon": "照目前速度不到 1 分鐘後用完",
+  "growth.forecastMinutes": "照目前速度約 {minutes} 分鐘後用完",
+  "growth.forecastHours": "照目前速度約 {hours} 小時 {minutes} 分後用完",
+  "growth.forecastDays": "照目前速度約 {days} 天 {hours} 小時後用完",
+  "growth.forecastSafe": "照目前速度，重置前不會用完",
+  "growth.forecastIdle": "近期沒有消耗，預計不會用完"
 }

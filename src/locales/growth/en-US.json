@@ -199,5 +199,11 @@
   "growth.sessionTimelinePartial": "The timeline starts at the upgrade; earlier states were not kept.",
   "growth.sessionTimelineFor": "for {duration}",
   "growth.sessionDetailError": "Couldn't load this session.",
-  "growth.sessionsLoadMoreFailed": "Couldn't load more sessions."
+  "growth.sessionsLoadMoreFailed": "Couldn't load more sessions.",
+  "growth.forecastSoon": "At the current pace, runs out in under a minute",
+  "growth.forecastMinutes": "At the current pace, runs out in about {minutes} min",
+  "growth.forecastHours": "At the current pace, runs out in about {hours} h {minutes} min",
+  "growth.forecastDays": "At the current pace, runs out in about {days} d {hours} h",
+  "growth.forecastSafe": "Should not run out before reset at the current pace",
+  "growth.forecastIdle": "No recent usage; not projected to run out"
 }
