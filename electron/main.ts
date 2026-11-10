@@ -106,6 +106,7 @@ import { t as translate } from '../src/i18n'
 
 
 import { mainState } from './main/state'
+import { appUserDataPaths } from './main/app-user-data'
 import { createShutdownCoordinator } from './main/shutdown'
 import { acquireSingleInstanceLock, relaunchApp } from './relaunch'
 import { disposeMainTimers } from './main/dispose-timers'
@@ -114,7 +115,7 @@ import { acquireRunMarker } from './diagnostics/session-marker'
 import { writeHookStartupMarker } from './main/hook-startup-marker'
 import type { LocalServerListenStatus } from './local-server-listen'
 import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
-import { setPluginPanelWindowBounds, MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, broadcastProgressionIfChanged, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, isClaudePermissionRespondEnabled, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, cancelHistoryStoreRetry, localPorts, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode, requestPanelMinimum, resetPanelSize } from './main/runtime'
+import { setPluginPanelWindowBounds, MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, broadcastProgressionIfChanged, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, isClaudePermissionRespondEnabled, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, historyRuntime, localPorts, petWindowModes, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode, requestPanelMinimum, resetPanelSize } from './main/runtime'
 
 
 
@@ -222,7 +223,7 @@ configureSetupEnvironment({
   agentConfigEnvReady: () => agentConfigEnvironment.ready(),
 })
 
-const runMarker = acquireRunMarker(join(app.getPath('userData'), 'logs'))
+const runMarker = acquireRunMarker(appUserDataPaths().logs)
 // 越早寫越好：從這裡到事件埠開始監聽之間送出的 hook 事件，會在連線被拒時短暫重試而不是遺失。
 const hookStartupMarker = writeHookStartupMarker(hookScriptDeployPath(), localPorts().event)
 const crashGuard = installCrashGuard({
@@ -373,7 +374,7 @@ async function bootstrapApp(): Promise<void> {
   await startupStep('adapters', () => {
     mainState.agentAdapterRegistry = createAgentAdapterRegistry(createAgentAdapterOperations({ claudePermissionRespondEnabled: isClaudePermissionRespondEnabled }))
     mainState.projectMcpRegistry = new ProjectMcpRegistryStore(
-      join(app.getPath('userData'), 'project-mcp-registry.json'),
+      appUserDataPaths().projectMcpRegistry,
     )
   })
   await startupStep('project-routing', createProjectRoutingServices)
@@ -676,7 +677,7 @@ async function bootstrapApp(): Promise<void> {
     refreshLocalUsage,
     currentHistorySummary,
     broadcastHistoryUpdated,
-    onHistoryCleared: () => pruneCorruptCopies(join(app.getPath('userData'), 'history.sqlite'), 0),
+    onHistoryCleared: () => pruneCorruptCopies(appUserDataPaths().history, 0),
     documentsPath: () => app.getPath('documents'),
     joinPath: join,
     showSaveDialog: (window, options) => window
@@ -720,7 +721,7 @@ async function bootstrapApp(): Promise<void> {
     logError: (message, error) => console.error(message, error),
   })
 
-  const onboardingStore = new OnboardingStore(join(app.getPath('userData'), 'onboarding.json'))
+  const onboardingStore = new OnboardingStore(appUserDataPaths().onboarding)
   registerOnboardingIpc({
     ipcMain,
     assertTrustedIpcSender: event => assertTrustedIpcSender(event),
@@ -862,7 +863,7 @@ function teardownMainServices(): void {
   mainState.panelBlurHideHandle = null
   mainState.windowsFullscreenAutoHiddenPet = false
   mainState.windowsFullscreenAutoHiddenPanel = false
-  cancelHistoryStoreRetry()
+  historyRuntime.dispose()
   if (mainState.pluginCatalogAutoCheckTimer) clearInterval(mainState.pluginCatalogAutoCheckTimer)
   mainState.pluginCatalogAutoCheckTimer = null
   if (mainState.localUsageScanTimer) clearInterval(mainState.localUsageScanTimer)
@@ -881,6 +882,7 @@ function teardownMainServices(): void {
   mainState.historyStore = null
   mainState.projectRoutingStore?.close()
   mainState.projectRoutingStore = null
+  petWindowModes.dispose()
   disposeMainTimers(mainState)
 }
 
