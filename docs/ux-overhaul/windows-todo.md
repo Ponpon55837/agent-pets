@@ -15,6 +15,9 @@ UX 翻修（PR #25）和之後的 PR 5（跨平台實測與打包）中，需要
 - [ ] **Claude Code 權限回覆**：開啟「從寵物回覆 Claude Code 權限」後，`node.exe` 直接執行的 `PermissionRequest` hook 能把允許／拒絕寫回 Claude Code；`%USERPROFILE%\.desktop-pet\claude-permission-respond` 的建立與移除正常；舊安裝啟動後補上 `PermissionRequest`（`timeout` 135）與 `PostToolUseFailure` 條目並留下備份。
 - [ ] **PM-10 系統匣**：注意力標記、勿擾與「（需核准）」等狀態在 Windows 系統匣上正確顯示。
 - [ ] **設計**：深色與淺色主題、寵物淺色氣泡、`⋮` 選單在 Windows 字型（微軟正黑體／Segoe UI）下沒有跑版或文字截斷。
+- [ ] **應用程式更新檢查**：設定 → 進階的「立即檢查」能連到 `api.github.com`（公司 Proxy／防火牆下失敗時只顯示「檢查失敗」）；「查看版本」用預設瀏覽器開啟 GitHub release 頁；自動檢查發現新版時的通知在 Windows 通知中心顯示一次。
+- [ ] **資料庫整理與成長重設**：可攜版與安裝版的 `%APPDATA%\Agent Pets\` 下三個資料庫 VACUUM 成功、顯示的前後大小正確；防毒即時掃描鎖住 `-wal` 檔時回「失敗」而不是卡住；重設成長資料後寵物視窗與面板同時歸零。
+- [ ] **設定頁「切換到 App」開關**：在 Windows 顯示並可關閉；關閉後工作階段列與通知點擊都不再切換。
 
 ## 待實作（Windows 專屬）
 
