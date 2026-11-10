@@ -103,9 +103,20 @@ export function fillTemplate(template: string, params: TranslationParams = {}): 
 // language needs) in the catalog; en-US picks by Intl.PluralRules, zh-TW only
 // needs `.other`. Falls back to `.other`, then to the bare key. `{count}` is
 // filled automatically.
+// 一個語系一份 PluralRules；建構成本高，而複數文案常出現在列表裡。
+const pluralRules = new Map<AppLocale, Intl.PluralRules>()
+function pluralCategory(loc: AppLocale, count: number): Intl.LDMLPluralRule {
+  let rules = pluralRules.get(loc)
+  if (!rules) {
+    rules = new Intl.PluralRules(loc)
+    pluralRules.set(loc, rules)
+  }
+  return rules.select(count)
+}
+
 export function tPlural(key: string, count: number, params: TranslationParams = {}): string {
   const loc = locale.value
-  const category = new Intl.PluralRules(loc).select(count)
+  const category = pluralCategory(loc, count)
   const table: Record<string, string> = loc === 'en-US' ? englishMessages : messages
   const template = table[`${key}.${category}`] ?? table[`${key}.other`] ?? table[key]
   if (template === undefined) return key

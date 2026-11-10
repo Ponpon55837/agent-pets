@@ -34,6 +34,7 @@ import type {
   PluginPanelThemeOverlay,
   PluginPanelThemePosition,
 } from '../src/types/plugin.ts'
+import type { AppLocale } from '../src/types/locale.ts'
 import type {
   PanelThemeBackgroundState,
   PanelThemeCatalogEntry,
@@ -227,9 +228,13 @@ export function normalizePanelThemePlainText(value: unknown, maxLength: number):
   return text.length > 0 && text.length <= maxLength ? text : null
 }
 
+// 這個模組要能被目錄驗證器 vendor，只能 import 同層模組的值，所以不取 SUPPORTED_LOCALES；
+// `satisfies Record<AppLocale, true>` 讓新增語系時這裡一定跟著改。
+const LOCALIZED_KEYS: readonly string[] = Object.keys({ 'zh-TW': true, 'en-US': true } satisfies Record<AppLocale, true>)
+
 function parseLocalized(value: unknown, maxLength: number, path: string): PluginLocalizedText {
   if (!isRecord(value)) fail(path, 'must be { "zh-TW", "en-US" }')
-  assertKeys(value, ['zh-TW', 'en-US'], path)
+  assertKeys(value, LOCALIZED_KEYS, path)
   const zhTW = normalizePanelThemePlainText(value['zh-TW'], maxLength)
   const enUS = normalizePanelThemePlainText(value['en-US'], maxLength)
   if (!zhTW || !enUS) fail(path, `each locale needs 1-${maxLength} characters`)

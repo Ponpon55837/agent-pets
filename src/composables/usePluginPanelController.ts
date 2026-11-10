@@ -22,6 +22,7 @@ import type {
   PluginPanelViewClosedEvent,
   PluginResourceLimits,
   PluginInstancePreferences,
+  PluginLocalizedText,
   PluginPreferences,
   PluginSettingScalar,
 } from '@/types/plugin'
@@ -596,7 +597,7 @@ function commandOf(plugin: PluginPanelPlugin, commandId: string) {
   return plugin.manifest?.contributes.commands?.find(command => command.id === commandId) ?? { title: { 'zh-TW': commandId, 'en-US': commandId } }
 }
 
-function commandTitle(command: { title: { 'zh-TW': string; 'en-US': string } }): string {
+function commandTitle(command: { title: PluginLocalizedText }): string {
   return command.title[locale.value]
 }
 
@@ -618,7 +619,7 @@ async function invokePluginCommand(commandId: string): Promise<void> {
   }
 }
 
-function settingTitle(title: string | { 'zh-TW': string; 'en-US': string } | undefined, fallback: string): string {
+function settingTitle(title: string | PluginLocalizedText | undefined, fallback: string): string {
   if (typeof title === 'string') return title
   return title?.[locale.value] ?? fallback
 }
