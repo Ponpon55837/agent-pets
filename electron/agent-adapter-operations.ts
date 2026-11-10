@@ -3,7 +3,9 @@ import type { AgentAdapterId, AdapterInstallTarget, InstallReport } from '../src
 import { reportFromWrites } from './install-outcome.ts'
 import { projectAdapterCapabilities, type AgentAdapterOperations, type AdapterInspection } from './agent-adapter.ts'
 import { configuredHookExecutable, isCodexHooksFeatureEnabled } from './hook-config.ts'
+import { agentConfigEnvReady } from './agent-config-dirs.ts'
 import {
+  agentConfigDirStatus,
   agentPresence,
   claudeCodeSettingsPath,
   codexConfigPath,
@@ -92,6 +94,7 @@ function inspectOpenCode(): AdapterInspection {
       check('permission-channel', 'pass', 'Permission replies use a dedicated local broker channel.'),
       agentPresenceCheck(agentPresence().opencode),
     ],
+    configDir: agentConfigDirStatus('opencode'),
   }
 }
 
@@ -117,6 +120,7 @@ function inspectCodex(): AdapterInspection {
       ...(node ? [node] : []),
       agentPresenceCheck(agentPresence().codex),
     ],
+    configDir: agentConfigDirStatus('codex'),
   }
 }
 
@@ -140,6 +144,7 @@ function inspectClaudeCode(): AdapterInspection {
       ...(node ? [node] : []),
       agentPresenceCheck(agentPresence().claude),
     ],
+    configDir: agentConfigDirStatus('claude'),
   }
 }
 
@@ -169,6 +174,7 @@ export function createAgentAdapterOperations(options: AgentAdapterOperationsOpti
           }
       }
     },
+    ready: agentConfigEnvReady,
     async prepare(target: AdapterInstallTarget): Promise<void> {
       // Codex and Claude Code write a Node command into their hooks; OpenCode's plugin does not.
       if (target !== 'opencode') await prepareNodeForInstall()

@@ -3,6 +3,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { renameSyncWithRetry } from './fs-rename.ts'
+import { currentAgentConfigDirs } from './agent-config-dirs.ts'
 import { promisify } from 'node:util'
 import { translateBackendError } from '../src/i18n.ts'
 import type { QuotaFamilyKey } from '../src/types/agent.ts'
@@ -263,8 +264,7 @@ function atomicWriteJson(filePath: string, value: Record<string, unknown>): void
 }
 
 function codexAuthPath(): string {
-  const configuredHome = nonEmptyString(process.env.CODEX_HOME)
-  return path.join(configuredHome || path.join(os.homedir(), '.codex'), 'auth.json')
+  return path.join(currentAgentConfigDirs().codex.path, 'auth.json')
 }
 
 function loadCodexCredential(): {
@@ -477,7 +477,7 @@ async function loadClaudeCredential(): Promise<ClaudeCredential> {
     if (raw) return parseClaudeCredential(raw, 'keychain')
   }
 
-  const filePath = path.join(os.homedir(), '.claude', '.credentials.json')
+  const filePath = path.join(currentAgentConfigDirs().claude.path, '.credentials.json')
   try {
     return parseClaudeCredential(fs.readFileSync(filePath, 'utf8'), 'file')
   } catch {
@@ -553,6 +553,8 @@ function claudeBinaryCandidates(): string[] {
     // where the Claude Code installers put the command.
     path.join(home, '.local', 'bin'),
     path.join(home, '.claude', 'local'),
+    // 安裝位置與設定目錄不一定相同：舊版 local 安裝在 ~/.claude/local，搬了 CLAUDE_CONFIG_DIR 後可能在新目錄。
+    path.join(currentAgentConfigDirs().claude.path, 'local'),
     ...(process.platform === 'win32'
       ? []
       : ['/opt/homebrew/bin', '/usr/local/bin', path.join(home, '.npm-global', 'bin'), path.join(home, '.bun', 'bin')]),
@@ -578,6 +580,9 @@ function claudeCliEnv(): NodeJS.ProcessEnv {
   for (const [key, value] of Object.entries(process.env)) {
     if (!CLAUDE_CLI_BLOCKED_ENV.has(key)) env[key] = value
   }
+  // login shell 查到的 CLAUDE_CONFIG_DIR 不在 process.env 裡；明確帶上，CLI 才會讀我們讀的那份登入。
+  const claudeDir = currentAgentConfigDirs().claude
+  if (claudeDir.source === 'env') env.CLAUDE_CONFIG_DIR = claudeDir.path
   return { ...env, DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1', DISABLE_AUTOUPDATER: '1' }
 }
 

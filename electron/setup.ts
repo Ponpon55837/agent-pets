@@ -7,6 +7,13 @@ import { createNodeResolver, NodeNotFoundError, NodeUnsupportedError, type NodeI
 import type { PetEdge, PetWindowMode } from '../src/types/pet-window'
 import { readConfigText, writeConfigSafely, writeTextAtomic, type ConfigWriteResult } from './safe-config-write.ts'
 import {
+  currentAgentConfigDirs,
+  writableAgentConfigDir,
+  type AgentConfigDirKind,
+  type ResolvedConfigDir,
+} from './agent-config-dirs.ts'
+import type { AdapterConfigDirStatus } from '../src/types/agent-adapter.ts'
+import {
   CLAUDE_PERMISSION_HOOK_TIMEOUT_SECONDS,
   clampClaudePermissionWaitSeconds,
 } from '../src/types/permission.ts'
@@ -69,8 +76,13 @@ function requireNodeBin(): string {
 // .js files there, not .mjs. Both confirmed live: a console.error marker
 // injected into the pre-existing superpowers.js fired; the same marker in
 // our desktop-pet.mjs never did, until renamed to .js.
+// The folder follows XDG_CONFIG_HOME (also on Windows); see agent-config-dirs.ts.
+function openCodeCliPluginPathIn(configDir: string): string {
+  return path.join(configDir, 'plugin', 'desktop-pet.js')
+}
+
 function openCodeCliPluginPath(): string {
-  return path.join(homeDir(), '.config', 'opencode', 'plugin', 'desktop-pet.js')
+  return openCodeCliPluginPathIn(currentAgentConfigDirs().opencode.path)
 }
 
 // --- OpenCode Desktop plugin ---
@@ -82,16 +94,24 @@ function openCodeDesktopPluginPath(): string {
 }
 
 // --- Codex hooks.json ---
-// Codex CLI and Codex Desktop currently share ~/.codex, but Desktop does not
+// Codex CLI and Codex Desktop currently share CODEX_HOME (~/.codex), but Desktop does not
 // expose a separate integration API. Installing this file therefore only
 // guarantees CLI support; Desktop support depends on whether that build runs
 // the same hook pipeline.
+function codexHooksPathIn(codexHome: string): string {
+  return path.join(codexHome, 'hooks.json')
+}
+
+function codexConfigPathIn(codexHome: string): string {
+  return path.join(codexHome, 'config.toml')
+}
+
 function codexHooksPath(): string {
-  return path.join(homeDir(), '.codex', 'hooks.json')
+  return codexHooksPathIn(currentAgentConfigDirs().codex.path)
 }
 
 function codexConfigPath(): string {
-  return path.join(homeDir(), '.codex', 'config.toml')
+  return codexConfigPathIn(currentAgentConfigDirs().codex.path)
 }
 
 // --- Claude Desktop config ---
@@ -102,9 +122,26 @@ function claudeDesktopConfigPath(): string {
   return path.join(setupEnvironment().appData(), 'Claude', 'claude_desktop_config.json')
 }
 
-// --- Claude Code settings.json (shared by CLI & Desktop) ---
+// --- Claude Code settings.json (shared by CLI & Desktop; follows CLAUDE_CONFIG_DIR) ---
+function claudeCodeSettingsPathIn(configDir: string): string {
+  return path.join(configDir, 'settings.json')
+}
+
 function claudeCodeSettingsPath(): string {
-  return path.join(homeDir(), '.claude', 'settings.json')
+  return claudeCodeSettingsPathIn(currentAgentConfigDirs().claude.path)
+}
+
+/**
+ * Every location an install may have used: the resolved folder first, then the default one when
+ * a variable moved it (the user may have set the variable after installing).
+ */
+function configDirLocations(dir: ResolvedConfigDir): [resolved: string, ...stale: string[]] {
+  return samePath(dir.path, dir.defaultPath) ? [dir.path] : [dir.path, dir.defaultPath]
+}
+
+function samePath(left: string, right: string): boolean {
+  const normalize = (value: string) => (IS_WIN ? path.resolve(value).toLowerCase() : path.resolve(value))
+  return normalize(left) === normalize(right)
 }
 
 // --- Pet window position (persisted across restarts) ---
@@ -691,17 +728,19 @@ export { DesktopPetPlugin };
 }
 
 function installOpenCode(): ConfigWriteResult[] {
+  // Checked before anything is written, so an unusable XDG_CONFIG_HOME leaves no half install.
+  const cliPlugin = openCodeCliPluginPathIn(writableAgentConfigDir(currentAgentConfigDirs().opencode))
   ensureEventToken()
   ensurePermissionToken()
   return [
     writeManaged(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop')),
-    writeManaged(openCodeCliPluginPath(), openCodePluginContent('opencode-cli')),
+    writeManaged(cliPlugin, openCodePluginContent('opencode-cli')),
   ]
 }
 
 function uninstallOpenCode(): void {
   removeFile(openCodeDesktopPluginPath())
-  removeFile(openCodeCliPluginPath())
+  for (const dir of configDirLocations(currentAgentConfigDirs().opencode)) removeFile(openCodeCliPluginPathIn(dir))
 }
 
 // --- Codex hooks ---
@@ -736,14 +775,15 @@ function codexHooksJson(): any {
 }
 
 function installCodex(): ConfigWriteResult[] {
+  const codexHome = writableAgentConfigDir(currentAgentConfigDirs().codex)
   const results: ConfigWriteResult[] = installHookScript()
 
   // Throws ConfigRefusedError (and writes nothing) if hooks.json exists but is not valid JSON.
   const newHooks = codexHooksJson()
   const { hooks, ...defaults } = newHooks
-  results.push(mergeAgentPetsHooksFile(codexHooksPath(), hooks, defaults))
+  results.push(mergeAgentPetsHooksFile(codexHooksPathIn(codexHome), hooks, defaults))
 
-  results.push(enableCodexHooksFeature(codexConfigPath()))
+  results.push(enableCodexHooksFeature(codexConfigPathIn(codexHome)))
   return results
 }
 
@@ -752,8 +792,9 @@ const CODEX_HOOKS_OWNED_TOP_LEVEL = { description: 'Agent Pets lifecycle hooks f
 // The hook script (and Windows wrapper) is shared by Codex, Claude Code and Claude Desktop.
 // Remove it only when no remaining config still points at it.
 function isHookScriptReferenced(): boolean {
-  if (fileHasAgentPetsHooks(codexHooksPath())) return true
-  if (fileHasAgentPetsHooks(claudeCodeSettingsPath())) return true
+  const dirs = currentAgentConfigDirs()
+  if (configDirLocations(dirs.codex).some(dir => fileHasAgentPetsHooks(codexHooksPathIn(dir)))) return true
+  if (configDirLocations(dirs.claude).some(dir => fileHasAgentPetsHooks(claudeCodeSettingsPathIn(dir)))) return true
   try {
     const desktop = readConfigText(claudeDesktopConfigPath())
     if (desktop && JSON.parse(desktop)?.agent === hookScriptPath()) return true
@@ -768,9 +809,13 @@ function releaseSharedHookScript(): void {
 }
 
 function uninstallCodex(): void {
+  const [codexHome, ...staleHomes] = configDirLocations(currentAgentConfigDirs().codex)
   // Throws ConfigRefusedError for an unparseable file, leaving it untouched.
-  removeAgentPetsHooksFile(codexHooksPath(), CODEX_HOOKS_OWNED_TOP_LEVEL)
-  const configFile = codexConfigPath()
+  removeAgentPetsHooksFile(codexHooksPathIn(codexHome), CODEX_HOOKS_OWNED_TOP_LEVEL)
+  // The old location keeps its config.toml: the marker cannot tell which folder we enabled
+  // `hooks = true` in, and a leftover feature flag without our hooks changes nothing.
+  for (const stale of staleHomes) removeAgentPetsHooksFile(codexHooksPathIn(stale), CODEX_HOOKS_OWNED_TOP_LEVEL)
+  const configFile = codexConfigPathIn(codexHome)
   if (fileExists(configFile) && fileExists(codexFeatureMarkerPath())) {
     const existing = readConfigText(configFile) ?? ''
     const next = disableCodexHooksFeatureText(existing)
@@ -833,9 +878,10 @@ function claudeCodeHooksJson(): any {
 }
 
 function installClaudeCode(): ConfigWriteResult[] {
+  const configDir = writableAgentConfigDir(currentAgentConfigDirs().claude)
   const scripts = installHookScript()
   // Throws ConfigRefusedError (and writes nothing) if settings.json is not valid JSON.
-  return [...scripts, mergeAgentPetsHooksFile(claudeCodeSettingsPath(), claudeCodeHooksJson().hooks)]
+  return [...scripts, mergeAgentPetsHooksFile(claudeCodeSettingsPathIn(configDir), claudeCodeHooksJson().hooks)]
 }
 
 // Events added after the first Claude Code release; older installs are upgraded on startup.
@@ -873,10 +919,12 @@ function upgradeClaudeCodeHooksOnce(appVersion: string): ConfigWriteResult | nul
 }
 
 function uninstallClaudeCode(): void {
-  const settingsFile = claudeCodeSettingsPath()
-  if (!fileExists(settingsFile)) return
+  const settingsFiles = configDirLocations(currentAgentConfigDirs().claude)
+    .map(claudeCodeSettingsPathIn)
+    .filter(fileExists)
+  if (settingsFiles.length === 0) return
   // Throws ConfigRefusedError for an unparseable settings.json, leaving it untouched.
-  removeAgentPetsHooksFile(settingsFile)
+  for (const settingsFile of settingsFiles) removeAgentPetsHooksFile(settingsFile)
   releaseSharedHookScript()
 }
 
@@ -923,7 +971,7 @@ function repairWindowsInstalledHooks(): void {
   if (codexChanged || claudeChanged) installHookScript()
 }
 
-function refreshInstalledIntegrationScripts(appVersion?: string): string {
+function refreshInstalledIntegrationScripts(appVersion?: string, options: { deferAgentConfig?: boolean } = {}): string {
   const token = ensureEventToken()
   ensurePermissionToken()
   ensurePresentationToken()
@@ -940,6 +988,21 @@ function refreshInstalledIntegrationScripts(appVersion?: string): string {
     if (fileExists(openCodeDesktopPluginPath())) {
       writeFileEnsured(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop'))
     }
+  } catch (error) {
+    console.error('Installed integration refresh skipped', error)
+  }
+  if (!options.deferAgentConfig) refreshAgentConfigIntegrations(appVersion)
+  return token
+}
+
+/**
+ * The startup refresh of files inside the agents' own config folders. Those folders can come from
+ * a login-shell lookup, so the app runs this after agentConfigEnvReady() instead of writing to the
+ * default location first. Only the resolved location is touched: leftovers in the default one are
+ * reported by agentConfigDirStatus() and never rewritten unasked.
+ */
+function refreshAgentConfigIntegrations(appVersion?: string): void {
+  try {
     if (fileExists(openCodeCliPluginPath())) {
       writeFileEnsured(openCodeCliPluginPath(), openCodePluginContent('opencode-cli'))
     }
@@ -952,7 +1015,6 @@ function refreshInstalledIntegrationScripts(appVersion?: string): string {
   } catch (error) {
     console.error('Claude Code hook upgrade skipped', error)
   }
-  return token
 }
 
 // --- Health helpers used by the adapter diagnostics ---
@@ -975,10 +1037,33 @@ function openCodePluginIsCurrent(kind: 'cli' | 'desktop'): boolean {
 
 /** Whether each agent's own config directory exists (the tool has been used on this machine). */
 function agentPresence(): { codex: boolean, claude: boolean, opencode: boolean } {
+  const dirs = currentAgentConfigDirs()
   return {
-    codex: fs.existsSync(path.join(homeDir(), '.codex')),
-    claude: fs.existsSync(path.join(homeDir(), '.claude')),
-    opencode: fs.existsSync(path.dirname(openCodeCliPluginPath())) || fs.existsSync(path.dirname(openCodeDesktopPluginPath())),
+    codex: fs.existsSync(dirs.codex.path),
+    claude: fs.existsSync(dirs.claude.path),
+    opencode: fs.existsSync(path.dirname(openCodeCliPluginPathIn(dirs.opencode.path))) || fs.existsSync(path.dirname(openCodeDesktopPluginPath())),
+  }
+}
+
+// The file in a config folder that shows an Agent Pets install was made there.
+const AGENT_PETS_INSTALL_FILE = {
+  claude: { in: claudeCodeSettingsPathIn, installed: fileHasAgentPetsHooks },
+  codex: { in: codexHooksPathIn, installed: fileHasAgentPetsHooks },
+  opencode: { in: openCodeCliPluginPathIn, installed: fileExists },
+} as const satisfies Record<AgentConfigDirKind, { in(dir: string): string, installed(file: string): boolean }>
+
+/** Where the agent's config folder is, why, and whether the default folder still holds our files. */
+function agentConfigDirStatus(kind: AgentConfigDirKind): AdapterConfigDirStatus {
+  const dir = currentAgentConfigDirs()[kind]
+  const [, staleDir] = configDirLocations(dir)
+  const { in: fileIn, installed } = AGENT_PETS_INSTALL_FILE[kind]
+  const staleFile = staleDir === undefined ? undefined : fileIn(staleDir)
+  return {
+    variable: dir.variable,
+    path: dir.path,
+    source: dir.source,
+    ...(dir.ignored ? { ignored: dir.ignored } : {}),
+    ...(staleFile !== undefined && installed(staleFile) ? { staleLocation: staleFile } : {}),
   }
 }
 
@@ -1048,6 +1133,7 @@ export {
   hookScriptIsCurrent,
   openCodePluginIsCurrent,
   agentPresence,
+  agentConfigDirStatus,
   IS_WIN,
   IS_MAC,
   homeDir,
@@ -1082,6 +1168,7 @@ export {
   uninstallIntegration,
   repairWindowsInstalledHooks,
   refreshInstalledIntegrationScripts,
+  refreshAgentConfigIntegrations,
   readWindowState,
   writeWindowState,
   openCodePluginContent,

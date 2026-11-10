@@ -111,6 +111,7 @@ import { EMPTY_ATTENTION } from '../attention-tracker'
 import { attachHotkeyInfo, PermissionHotkeys } from '../permission-hotkeys'
 import { PANEL_GAP, PANEL_WIDTH, PANEL_BLUR_HIDE_DELAY_MS, clampPanelSize, clampRectToWorkArea, computePanelPlacement, effectivePanelSize, panelMaxSize, panelMinSize, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
 import { isRecord } from '../value-guards.ts'
+import { currentAgentConfigDirs } from '../agent-config-dirs.ts'
 
 let permissionHotkeys: PermissionHotkeys | null = null
 
@@ -2952,6 +2953,10 @@ export function createHistoryServices(): void {
     const retentionDays = mainState.historyStore.getRetentionDays()
     mainState.localUsageReader = new LocalUsageReader({
       homeDir: app.getPath('home'),
+      configDirs: () => {
+        const { claude, codex } = currentAgentConfigDirs()
+        return { claude: claude.path, codex: codex.path }
+      },
       history: mainState.historyStore,
       projectRouting: mainState.projectRoutingStore,
       onRecordsImported: records => syncLocalTokenAchievements(records, retentionDays),

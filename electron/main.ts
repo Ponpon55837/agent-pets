@@ -69,7 +69,7 @@ import { locale, t } from '../src/i18n'
 import { createPluginSkinPetId } from '../src/utils/pet-id.ts'
 
 import { clampWindowBounds } from './pet-window-mode'
-import { hookScriptDeployPath, installIntegration, uninstallIntegration, refreshInstalledIntegrationScripts, ensurePermissionToken, ensurePresentationToken, ensurePresentationMcpScript, presentationMcpScriptPath, resolveNodeBin } from './setup'
+import { hookScriptDeployPath, installIntegration, uninstallIntegration, refreshInstalledIntegrationScripts, refreshAgentConfigIntegrations, ensurePermissionToken, ensurePresentationToken, ensurePresentationMcpScript, presentationMcpScriptPath, resolveNodeBin } from './setup'
 import { parsePetBehaviorManifest } from './pet-behavior-manifest'
 import { shouldDisableDevHardwareAcceleration } from './dev-runtime'
 import { ensureDirectoryWithin, writeFileWithin } from './ipc/pet-assets-fs.ts'
@@ -83,6 +83,7 @@ import { registerAdapterIpc } from './ipc/adapters'
 import { registerProjectMcpIpc } from './ipc/project-mcp'
 import { registerOnboardingIpc } from './ipc/onboarding'
 import { configureSetupEnvironment } from './setup-environment'
+import { agentConfigEnvReady, createAgentConfigEnvironment } from './agent-config-dirs'
 import { OnboardingStore } from './onboarding-state'
 import { registerProjectPetsIpc } from './ipc/project-pets'
 
@@ -208,11 +209,16 @@ import { setPluginPanelWindowBounds, MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MA
 // the tray application silently.
 teeConsoleToLog()
 // setup.ts reaches Electron only through this seam so the installers can also run from the CLI and tests.
+// macOS／Linux 從 Dock 啟動時看不到 shell 設定檔的 CLAUDE_CONFIG_DIR 等變數，啟動就先在背景問 login shell。
+const agentConfigEnvironment = createAgentConfigEnvironment()
+void agentConfigEnvironment.ready()
 configureSetupEnvironment({
   appData: () => app.getPath('appData'),
   userData: () => app.getPath('userData'),
   isPackaged: () => app.isPackaged,
   resourcesPath: () => process.resourcesPath,
+  agentConfigEnv: () => agentConfigEnvironment.snapshot(),
+  agentConfigEnvReady: () => agentConfigEnvironment.ready(),
 })
 
 const runMarker = acquireRunMarker(join(app.getPath('userData'), 'logs'))
@@ -358,7 +364,11 @@ async function bootstrapApp(): Promise<void> {
     callback(false)
   })
 
-  await startupStep('integration-scripts', () => { mainState.eventToken = refreshInstalledIntegrationScripts(app.getVersion()) })
+  await startupStep('integration-scripts', () => {
+    mainState.eventToken = refreshInstalledIntegrationScripts(app.getVersion(), { deferAgentConfig: true })
+    // 改寫 agent 設定目錄裡的檔案要等目錄解析完，不阻塞啟動。
+    void agentConfigEnvReady().then(() => refreshAgentConfigIntegrations(app.getVersion()))
+  })
   await startupStep('adapters', () => {
     mainState.agentAdapterRegistry = createAgentAdapterRegistry(createAgentAdapterOperations({ claudePermissionRespondEnabled: isClaudePermissionRespondEnabled }))
     mainState.projectMcpRegistry = new ProjectMcpRegistryStore(
@@ -692,6 +702,7 @@ async function bootstrapApp(): Promise<void> {
     installIntegration,
     uninstallIntegration,
     isIntegrationTarget,
+    agentConfigReady: agentConfigEnvReady,
   })
 
   registerProjectPetsIpc({

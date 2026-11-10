@@ -7,6 +7,8 @@
 //                                          [--hook-port-base 27373 | --real-hook-ports]（說明見下）
 //                                          [--reuse-root <上次啟動日誌的 root>]
 // --reuse-root 沿用上一次的暫時 HOME 與 userData 重新啟動（token 與已安裝的 hook 都還在），用來量測 app 冷啟動。
+// --agent-config-dirs 帶上指向隔離 HOME 內 moved/ 的 CLAUDE_CONFIG_DIR／CODEX_HOME／XDG_CONFIG_HOME，
+// 驗證 app 讀寫搬走的 agent 設定目錄；搭配 scripts/e2e-real-hook.mts --agent-config-dirs。
 // --app-root runs another copy of the app (e.g. an extracted packaged app.asar) instead of this repo.
 // Prints one JSON line with the temp root, ports and pid, then keeps running.
 // 測試 app 預設使用自己的本機埠（event／permission／presentation = base、base+1、base+2，base 為 27373），
@@ -157,14 +159,26 @@ if (!reuseRoot) {
   mkdirSync(join(root, 'home'))
   mkdirSync(join(root, 'ud'))
 }
+// 只允許指向這個隔離 root 的值；bootstrap 的隔離檢查只放行完全相同的值。
+const agentConfigEnv = process.argv.includes('--agent-config-dirs')
+  ? {
+      CLAUDE_CONFIG_DIR: join(root, 'home', 'moved', 'claude'),
+      CODEX_HOME: join(root, 'home', 'moved', 'codex'),
+      XDG_CONFIG_HOME: join(root, 'home', 'moved', 'xdg'),
+    }
+  : {}
+for (const dir of [agentConfigEnv.CLAUDE_CONFIG_DIR, agentConfigEnv.CODEX_HOME]) if (dir) mkdirSync(dir, { recursive: true })
 const { catalogFixture, tamperedArchivePath } = createCatalogFixture(root)
 const bootstrap = join(root, 'bootstrap.cjs')
 writeFileSync(bootstrap, `
 const path = require('node:path')
 const { app, safeStorage, shell } = require('electron')
 const root = ${JSON.stringify(root)}
+const allowedAgentEnv = ${JSON.stringify(agentConfigEnv)}
 const userData = path.join(root, 'ud')
 app.setPath('userData', userData)
+// Windows 在隔離 USERPROFILE 下取不到 appData（設定精靈的整合狀態會失敗），一樣指到隔離 root 內。
+app.setPath('appData', path.join(root, 'home', 'AppData', 'Roaming'))
 if (typeof app.setAppPath === 'function') app.setAppPath(${JSON.stringify(appRoot)})
 const calls = { isEncryptionAvailable: 0, encryptString: 0, decryptString: 0 }
 const shellOpenExternalCalls = []
@@ -223,7 +237,7 @@ const fake = safeStorage.encryptString.toString().includes('agent-pets-e2e')
   && safeStorage.isEncryptionAvailable.toString().includes('calls')
   && childProcess.execFile.toString().includes('blockedExecs')
 const isolated = app.getPath('userData') === userData && require('node:os').homedir() === path.join(root, 'home')
-  && !Object.keys(process.env).some(key => /^(CLAUDE|ANTHROPIC|OPENAI|CODEX|OPENCODE)/i.test(key))
+  && !Object.keys(process.env).some(key => /^(CLAUDE|ANTHROPIC|OPENAI|CODEX|OPENCODE)/i.test(key) && process.env[key] !== allowedAgentEnv[key])
 if (!fake || !isolated) {
   console.error('AGENT_PETS_E2E_ABORT fake=' + fake + ' isolated=' + isolated)
   process.exit(1)
@@ -263,6 +277,7 @@ const child = spawn(electronBinary, [
     // Windows 的 os.homedir() 讀 USERPROFILE 而非 HOME；少了它隔離檢查會失敗並中止。
     USERPROFILE: join(root, 'home'),
     ...hookPortEnv,
+    ...agentConfigEnv,
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 })

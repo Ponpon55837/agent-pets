@@ -850,3 +850,39 @@ test('undated lines inherit the previous real timestamp, never the file mtime, s
   assert.equal(rescan.recordsImported, 0)
   assert.deepEqual(seen.map(record => record.occurredAt), [dated, dated])
 })
+
+test('scans the folders configDirs returns (CLAUDE_CONFIG_DIR／CODEX_HOME) instead of ~/.claude and ~/.codex', async t => {
+  const fixture = setup()
+  const now = Date.UTC(2026, 10, 10, 1, 0, 0)
+  const store = new HistoryStore(fixture.database, { now: () => now, localDate: () => '2026-11-10' })
+  t.after(() => { store.close(); fixture.cleanup() })
+  const moved = { claude: path.join(fixture.home, 'moved-claude'), codex: path.join(fixture.home, 'moved-codex') }
+  const claudeRecord = (id: string, input: number) => ({
+    type: 'assistant',
+    timestamp: new Date(now).toISOString(),
+    session_id: `claude-${id}`,
+    message: { id, usage: { input_tokens: input, output_tokens: 1 } },
+  })
+  // 預設位置的舊紀錄不應被讀到：使用者搬目錄後，agent 不再寫那裡。
+  writeJsonl(path.join(fixture.home, '.claude', 'projects', 'p', 'old.jsonl'), [claudeRecord('old', 1_000)])
+  writeJsonl(path.join(moved.claude, 'projects', 'p', 'new.jsonl'), [claudeRecord('new', 40)])
+  writeJsonl(path.join(moved.claude, 'transcripts', 't.jsonl'), [claudeRecord('transcript', 2)])
+  writeJsonl(path.join(moved.codex, 'sessions', 's.jsonl'), [{
+    type: 'event_msg',
+    timestamp: new Date(now).toISOString(),
+    session_id: 'codex-moved',
+    payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 7, output_tokens: 1 }, total_token_usage: { input_tokens: 7, output_tokens: 1 } } },
+  }])
+
+  let calls = 0
+  const reader = new LocalUsageReader({
+    homeDir: fixture.home,
+    configDirs: () => { calls += 1; return moved },
+    history: store,
+    now: () => now,
+  })
+  const scan = await reader.scan()
+  assert.equal(calls, 1, 'resolved once per scan')
+  assert.equal(scan.filesScanned, 3)
+  assert.equal(store.getSummary().totals.tokenInput, 49)
+})

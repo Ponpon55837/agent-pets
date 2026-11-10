@@ -1,4 +1,5 @@
 import type {
+  AdapterConfigDirStatus,
   AdapterContext,
   AdapterDetection,
   AdapterHealth,
@@ -26,10 +27,13 @@ export interface AdapterInspection {
   health: AdapterHealth
   message: string
   checks: DiagnosticReport['checks']
+  configDir?: AdapterConfigDirStatus
 }
 
 export interface AgentAdapterOperations {
   inspect(id: AgentAdapterId): AdapterInspection
+  /** Resolves once the agents' config folders are known (login-shell lookup); install and uninstall wait for it. */
+  ready?(): Promise<void>
   /** Async preconditions (e.g. resolving Node.js) that must pass before install writes anything. */
   prepare?(target: AdapterInstallTarget): Promise<void>
   install(target: AdapterInstallTarget): InstallReport | void
@@ -75,6 +79,7 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
         installed: inspection.installed,
         health: inspection.health,
         message: inspection.message,
+        ...(inspection.configDir ? { configDir: inspection.configDir } : {}),
         capabilities: operations.capabilities?.(definition.id, definition.capabilities) ?? definition.capabilities,
         sources: definition.sources,
         sourceLabels: definition.sourceLabels,
@@ -84,6 +89,8 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
       }
     },
     install: async () => {
+      // Before the first detect, so "before" and the write both use the final folders.
+      if (definition.installTarget) await operations.ready?.()
       const self = createAdapter(definition, operations)
       const before = (await self.detect(context())).health
       let report: InstallReport = { changedFiles: [], backupPaths: [] }
@@ -101,7 +108,10 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
       return { ...(await self.detect(context())), outcome: buildOutcome(definition.id, report, before) }
     },
     uninstall: async () => {
-      if (definition.installTarget) operations.uninstall(definition.installTarget)
+      if (definition.installTarget) {
+        await operations.ready?.()
+        operations.uninstall(definition.installTarget)
+      }
       return (await createAdapter(definition, operations).detect(context()))
     },
     diagnose: async ctx => {

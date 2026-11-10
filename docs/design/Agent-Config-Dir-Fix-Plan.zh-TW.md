@@ -1,6 +1,6 @@
 # 階段計畫：尊重 Agent 設定目錄覆寫（`CLAUDE_CONFIG_DIR`／`CODEX_HOME`）
 
-> 狀態：規劃中，尚未實作 · 基準：`main` @ 404ab6f，版本 1.12.5 · 建議版號：**patch（1.12.6）**，理由是修正 adapter 的安裝與讀取位置，沒有改變公開契約、持久化 schema 或安全邊界。
+> 狀態：實作中（重構階段 1，見[階段記錄](../phase-reports/refactor-01-agent-config-dirs.md)） · 基準：`main` @ 404ab6f，版本 1.12.5 · 建議版號：**patch（1.12.6）**，理由是修正 adapter 的安裝與讀取位置，沒有改變公開契約、持久化 schema 或安全邊界。
 >
 > 來源：[共用模組抽取評估](../architecture/refactor-opportunities-2026-11-10.zh-TW.md) 第 10 項。
 
@@ -22,8 +22,10 @@
 | `CLAUDE_CONFIG_DIR` | 設定後所有 `~/.claude` 路徑改到該目錄，含 `settings.json`、`.credentials.json`、`projects/` | Claude Code 官方文件（settings、claude-directory） |
 | `CLAUDE_CONFIG_DIR` 格式 | 文件要求絕對路徑；專案與 local settings 不能設定它 | Claude Code 官方文件（env-vars） |
 | `CODEX_HOME` | Codex state 的根目錄：config、auth、logs、sessions；目錄必須已存在 | Codex 官方文件（environment-variables） |
-| Codex `hooks.json` | 文件列出 `~/.codex/hooks.json`，並說明 hooks 位於「active config layers」旁；**未明說會跟著 `CODEX_HOME`** | Codex 官方文件（hooks），第 0 步實測 |
-| OpenCode | 官方文件未提 `XDG_CONFIG_HOME`；目前文件寫 `plugins/`，本專案用 `plugin/` | OpenCode 官方文件，第 0 步讀原始碼確認 |
+| Codex `hooks.json` | **跟著 `CODEX_HOME`**：`<CODEX_HOME>/hooks.json` 的 hook 實際觸發，`[features] hooks = true` 讀 `<CODEX_HOME>/config.toml`，sessions 寫到 `<CODEX_HOME>/sessions` | 第 0 步實測（codex-cli 0.163.0）；原始碼 `codex-rs/hooks/src/engine/discovery.rs` 以 config layer 資料夾 `join("hooks.json")` |
+| Codex hook 信任 | 新 hook 要在 `config.toml` 的 `[hooks.state."<hooks.json 路徑>:<event>:<i>:<j>"]` 有相符的 `trusted_hash` 才會在 `exec` 執行；鍵含完整路徑，所以換 `CODEX_HOME` 後要在 Codex 互動介面重新信任一次 | 第 0 步實測；`codex-rs/config/src/fingerprint.rs` |
+| OpenCode | 全域設定目錄是 `$XDG_CONFIG_HOME/opencode`（Windows 也一樣），未設定時 `~/.config/opencode`；`plugin/` 與 `plugins/` 都會載入並執行；`OPENCODE_CONFIG_DIR` 是**額外疊加**的目錄，不取代全域目錄，所以不處理（處理反而會讓插件載入兩次） | 第 0 步實測（opencode 1.19.3：`debug paths`、`debug config` 與會寫標記檔的插件） |
+| Claude Code 實測 | `<CLAUDE_CONFIG_DIR>/settings.json` 的 `SessionStart`、`SessionEnd` hook 在未登入時也會觸發；`projects/` 建立在該目錄 | 第 0 步實測（Claude Code 2.1.321，暫存目錄，未複製憑證） |
 | 本機可實測 | `codex-cli 0.163.0`、Claude Code `2.1.321`、`opencode 1.19.3` 皆已安裝；四個相關變數目前都未設定 | 本機檢查 |
 
 ### 第 0 步：實作前必須實測

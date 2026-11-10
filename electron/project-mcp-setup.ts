@@ -19,6 +19,7 @@ import type {
   ProjectMcpSetupSummary,
 } from '../src/types/project-mcp.ts'
 import { PROJECT_MCP_CLIENTS } from '../src/types/project-mcp.ts'
+import { currentAgentConfigDirs } from './agent-config-dirs.ts'
 import { isRecord } from './value-guards.ts'
 
 const MAX_CONFIG_BYTES = 1024 * 1024
@@ -726,14 +727,16 @@ export function installProjectMcp(
   return summary
 }
 
-// Folders and files that signal which agent clients the user actually uses.
+// Folders and files that signal which agent clients the user actually uses. The user-level folders
+// follow CLAUDE_CONFIG_DIR／CODEX_HOME／XDG_CONFIG_HOME; the project-level ones are not affected by them.
 function detectClients(projectPath: string, homeDirectory: string): Record<ProjectMcpClientId, boolean> {
   const exists = (target: string) => fs.existsSync(target)
+  const userDirs = currentAgentConfigDirs({ homeDir: homeDirectory })
   return {
-    codex: exists(path.join(projectPath, '.codex')) || exists(path.join(homeDirectory, '.codex')),
+    codex: exists(path.join(projectPath, '.codex')) || exists(userDirs.codex.path),
     claude: exists(path.join(projectPath, '.mcp.json')) || exists(path.join(projectPath, '.claude'))
-      || exists(path.join(homeDirectory, '.claude')),
-    opencode: exists(path.join(projectPath, 'opencode.json')) || exists(path.join(homeDirectory, '.config', 'opencode')),
+      || exists(userDirs.claude.path),
+    opencode: exists(path.join(projectPath, 'opencode.json')) || exists(userDirs.opencode.path),
   }
 }
 

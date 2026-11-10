@@ -7,6 +7,7 @@ import test from 'node:test'
 import { installProjectMcp } from '../electron/project-mcp-setup.ts'
 import { installProjectMcp as install2, planProjectMcp, removeProjectMcp } from '../electron/project-mcp-setup.ts'
 import { addLocalExcludes, findGitLocation, readTrackedPaths } from '../electron/git-tracking.ts'
+import { configureSetupEnvironment } from '../electron/setup-environment.ts'
 
 function createProject(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-project-mcp-'))
@@ -489,4 +490,32 @@ test('a customized entry is a conflict, never stale, and survives updateStale', 
     assert.equal(result.status, 'conflict')
     assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), custom)
   } finally { cleanup(projectPath) }
+})
+
+test('user-level detection follows CODEX_HOME, CLAUDE_CONFIG_DIR and XDG_CONFIG_HOME', () => {
+  const projectPath = createProject()
+  const home = createProject()
+  const elsewhere = createProject()
+  try {
+    // 預設位置有資料夾，但變數已把 agent 目錄搬走，所以不能據此建議。
+    fs.mkdirSync(path.join(home, '.codex'))
+    fs.mkdirSync(path.join(elsewhere, 'codex'))
+    fs.mkdirSync(path.join(elsewhere, 'claude'))
+    fs.mkdirSync(path.join(elsewhere, 'xdg', 'opencode'), { recursive: true })
+    const suggested = (env: Record<string, string>) => {
+      configureSetupEnvironment({ agentConfigEnv: () => env })
+      const plan = planProjectMcp(projectPath, options(projectPath), home)
+      return Object.fromEntries((plan.clients ?? []).map(item => [item.client, item.suggested]))
+    }
+    assert.deepEqual(suggested({}), { codex: true, claude: false, opencode: false })
+    assert.deepEqual(suggested({
+      CODEX_HOME: path.join(elsewhere, 'codex'),
+      CLAUDE_CONFIG_DIR: path.join(elsewhere, 'claude'),
+      XDG_CONFIG_HOME: path.join(elsewhere, 'xdg'),
+    }), { codex: true, claude: true, opencode: true })
+    assert.deepEqual(suggested({ CLAUDE_CONFIG_DIR: path.join(elsewhere, 'missing') }), { codex: true, claude: false, opencode: false })
+  } finally {
+    configureSetupEnvironment({ agentConfigEnv: () => ({}) })
+    cleanup(projectPath); cleanup(home); cleanup(elsewhere)
+  }
 })

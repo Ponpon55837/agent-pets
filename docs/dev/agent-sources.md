@@ -35,7 +35,7 @@
    - `src/components/SetupWizard.vue` 的 `RESTART_KEYS`
    - 家族有訂閱額度時，`src/components/DesktopPet.vue` 的 `QUOTA_FAMILY_TIER`
    - `electron/presentation-controller.ts`：插件 `agentFamily` 的字面型別要先擴充，這裡才會編譯通過。擴充那個型別等於改了公開契約，要同步更新 `docs/plugins/`。
-4. hook 這一側要另外改，它們不讀 registry：`integrations/agent-hook.mjs`、`integrations/install.mjs`、`electron/setup.ts`（含 `IntegrationTarget`）、`electron/hook-config.ts`。`integrations/*.mjs` 安裝後是在 app 之外由 Node 單獨執行，不能 import `src/`；`setup.ts` 與 `hook-config.ts` 負責寫入使用者的設定檔，這一輪由 hook 強化線負責，所以沒有改成讀 registry。
+4. hook 這一側要另外改，它們不讀 registry（使用者層設定目錄的位置與環境變數則集中在 `electron/agent-config-dirs.ts` 的 `AGENT_CONFIG_DIR_SPECS`，新家族若有可搬移的設定目錄要加在那裡）：`integrations/agent-hook.mjs`、`integrations/install.mjs`、`electron/setup.ts`（含 `IntegrationTarget`）、`electron/hook-config.ts`。`integrations/*.mjs` 安裝後是在 app 之外由 Node 單獨執行，不能 import `src/`；`setup.ts` 與 `hook-config.ts` 負責寫入使用者的設定檔，這一輪由 hook 強化線負責，所以沒有改成讀 registry。
 5. 更新 `tests/agent-source-registry.test.mts` 裡固定的值。
 
 ## 刻意沒有併進來的對照
