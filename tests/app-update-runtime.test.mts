@@ -120,7 +120,8 @@ test('manual check works regardless of the toggle and reports up to date, new ve
     h.setNow(DAY + 122_000)
     await h.runtime.checkNow()
     assert.equal(h.runtime.getState().lastResult, 'failed')
-    assert.equal(h.runtime.getState().latestVersion, null)
+    // 失敗不抹掉先前確認過的新版。
+    assert.equal(h.runtime.getState().latestVersion, '1.15.0')
     h.setBody('{}', 500)
     h.setNow(DAY + 183_000)
     await h.runtime.checkNow()
@@ -129,6 +130,49 @@ test('manual check works regardless of the toggle and reports up to date, new ve
     h.setNow(DAY + 244_000)
     await h.runtime.checkNow()
     assert.equal(h.runtime.getState().lastResult, 'up_to_date')
+    assert.equal(h.runtime.getState().latestVersion, null)
+  } finally { h.cleanup() }
+})
+
+test('a failed check keeps the known update and openRelease; a later up_to_date clears it', async () => {
+  const h = setup()
+  try {
+    await h.runtime.checkNow()
+    assert.equal(h.runtime.getState().latestVersion, '1.14.0')
+    h.setBody('not json')
+    h.setNow(DAY + 61_000)
+    await h.runtime.checkNow()
+    const failed = h.runtime.getState()
+    assert.equal(failed.lastResult, 'failed')
+    assert.equal(failed.latestVersion, '1.14.0')
+    assert.equal(failed.lastCheckedAt, DAY + 61_000)
+    assert.equal(await h.runtime.openRelease(), true)
+    assert.deepEqual(h.opened, [`${APP_UPDATE_RELEASES_PREFIX}tag/v1.14.0`])
+    // 重啟後仍保留。
+    assert.equal(new AppUpdateStore(h.dir).get().latestVersion, '1.14.0')
+    h.setBody(releaseBody('v1.13.1'))
+    h.setNow(DAY + 122_000)
+    await h.runtime.checkNow()
+    assert.equal(h.runtime.getState().lastResult, 'up_to_date')
+    assert.equal(h.runtime.getState().latestVersion, null)
+    assert.equal(await h.runtime.openRelease(), false)
+  } finally { h.cleanup() }
+})
+
+test('a stored update that the running app has already reached is no longer shown', async () => {
+  const h = setup()
+  try {
+    await h.runtime.checkNow()
+    const upgraded = createAppUpdateRuntime({
+      state: { pluginNetworkClient: null, pluginFeedController: null },
+      userDataDirectory: () => h.dir,
+      appVersion: () => '1.14.0',
+      translate: key => key,
+      openExternal: async url => { h.opened.push(url) },
+      now: () => DAY,
+    })
+    assert.equal(upgraded.getState().latestVersion, null)
+    assert.equal(await upgraded.openRelease(), false)
   } finally { h.cleanup() }
 })
 

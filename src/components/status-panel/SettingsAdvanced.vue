@@ -25,8 +25,12 @@ const updateStatus = computed(() => {
   if (updates.notice === 'open_failed') return { tone: 'warn' as const, icon: 'alert', text: t('update.openFailed') }
   const state = updates.state
   if (!state) return null
-  if (state.lastResult === 'update_available' && state.latestVersion) {
-    return { tone: 'info' as const, icon: 'sparkle', text: t('update.available', { version: state.latestVersion }) }
+  // 最近一次檢查失敗但先前已確認有新版時，仍顯示新版並附註失敗。
+  if (state.latestVersion) {
+    const text = state.lastResult === 'failed'
+      ? t('update.availableCheckFailed', { version: state.latestVersion })
+      : t('update.available', { version: state.latestVersion })
+    return { tone: 'info' as const, icon: 'sparkle', text }
   }
   if (state.lastResult === 'up_to_date') return { tone: 'success' as const, icon: 'check', text: t('update.upToDate') }
   if (state.lastResult === 'failed') return { tone: 'danger' as const, icon: 'alert', text: t('update.failed') }

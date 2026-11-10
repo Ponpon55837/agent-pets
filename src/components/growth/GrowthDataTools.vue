@@ -35,7 +35,11 @@ async function performReset(): Promise<void> {
   resetting.value = true
   resetMessage.value = ''
   try {
-    const result: GrowthResetResult | undefined = await window.electronAPI?.resetGrowth()
+    // 使用者在對話框按下確認之後才向主程序申請一次性 token，再立刻用它重設。
+    const armed = await window.electronAPI?.armGrowthReset()
+    const result: GrowthResetResult | undefined = armed?.ok
+      ? await window.electronAPI?.resetGrowth(armed.token)
+      : armed
     resetFailed.value = !result?.ok
     resetMessage.value = result?.ok
       ? t('growth.resetDone')
@@ -56,7 +60,12 @@ async function compactDatabases(): Promise<void> {
   try {
     const result: DbMaintenanceResult | undefined = await window.electronAPI?.runDbMaintenance()
     if (result?.ok) compactResult.value = result
-    else compactMessage.value = t(COMPACT_ERRORS[result?.error ?? ''] ?? 'growth.compactFailed')
+    else if (result?.error === 'insufficient_space') {
+      compactMessage.value = t('growth.compactInsufficientSpace', {
+        needed: formatBytes(result.neededBytes),
+        available: formatBytes(result.availableBytes),
+      })
+    } else compactMessage.value = t(COMPACT_ERRORS[result?.error ?? ''] ?? 'growth.compactFailed')
   } catch {
     compactMessage.value = t('growth.compactFailed')
   } finally {

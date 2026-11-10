@@ -9,6 +9,7 @@
   "update.checking": "檢查中…",
   "update.upToDate": "已是最新版本",
   "update.available": "有新版 {version}",
+  "update.availableCheckFailed": "有新版 {version}（最近一次檢查失敗）",
   "update.failed": "檢查失敗，請稍後再試",
   "update.rateLimited": "檢查太頻繁，請稍後再試",
   "update.viewRelease": "查看版本",

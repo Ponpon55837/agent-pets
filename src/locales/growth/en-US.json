@@ -214,6 +214,7 @@
   "growth.compactBusy": "The database is in use. Try again in a moment.",
   "growth.compactScanning": "A local usage scan is running. Try again when it finishes.",
   "growth.compactFailed": "Maintenance failed. Try again later.",
+  "growth.compactInsufficientSpace": "Not enough disk space: compacting needs about {needed} free, but only {available} is available.",
   "growth.maintenanceRateLimited": "Too many requests. Wait a few seconds and try again.",
   "growth.resetTitle": "Reset growth data",
   "growth.resetHelp": "Clears XP, streaks and achievements so you start over. History, pets and settings are kept.",

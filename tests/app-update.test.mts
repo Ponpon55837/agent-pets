@@ -85,6 +85,13 @@ test('parseLatestRelease replaces a hostile html_url with a constructed project 
   assert.equal(parsed.kind, 'release')
 })
 
+test('the fallback release URL is rebuilt from the normalized version, whether or not the tag has a v prefix', () => {
+  for (const tag of ['v1.2.3', '1.2.3', 'V1.2.3']) {
+    const parsed = parseLatestRelease(release({ tag_name: tag, html_url: null }))
+    assert.deepEqual(parsed, { kind: 'release', release: { version: '1.2.3', url: `${APP_UPDATE_RELEASES_PREFIX}tag/v1.2.3` } }, tag)
+  }
+})
+
 test('parseLatestRelease ignores drafts and prereleases', () => {
   assert.deepEqual(parseLatestRelease(release({ draft: true })), { kind: 'ignored' })
   assert.deepEqual(parseLatestRelease(release({ prerelease: true })), { kind: 'ignored' })

@@ -15,7 +15,7 @@ export const useAppUpdateStore = defineStore('appUpdate', () => {
   /** 最近一次手動操作的結果（頻率限制／開啟失敗）；refresh 與下一次檢查會清掉。 */
   const notice = ref<AppUpdateOutcomeView | null>(null)
 
-  const updateAvailable = computed(() => state.value?.lastResult === 'update_available' && !!state.value.latestVersion)
+  const updateAvailable = computed(() => !!state.value?.latestVersion)
 
   function apply(next: unknown): void {
     if (!next || typeof next !== 'object') return
