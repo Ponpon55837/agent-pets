@@ -7,6 +7,7 @@ import {
   type GrowthState,
   type GrowthWindow,
 } from '../electron/main/growth-service.ts'
+import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 
 // 階段 11 之前在 electron/main/runtime.ts 內的成就／progression 行為，改由抽出的服務搭配
 // 假 store、假視窗與 node:test 假計時器驗證。
@@ -218,4 +219,22 @@ test('a window hidden during a broadcast gets exactly one resync on show', t => 
   assert.equal(h.hiddenSent.length, 1)
   h.service.resyncProgression(h.hiddenWindow!)
   assert.equal(h.hiddenSent.length, 1)
+})
+
+test('granted awards are broadcast with level and stage transitions; an empty result sends nothing', t => {
+  const h = setup(t)
+  const base = { snapshot: { ...snapshot(5), level: 2, evolutionStage: 1 }, levelBefore: 1, stageBefore: 0 }
+  h.service.broadcastProgressionAwards({ ...base, awards: [] } as never)
+  assert.equal(h.sent.filter(([channel]) => channel === IPC_CHANNELS.progressionAwarded).length, 0)
+
+  h.service.broadcastProgressionAwards({ ...base, awards: [{ ruleId: 'task-success', amount: 3, extra: 'dropped' }] } as never)
+  const awarded = h.sent.filter(([channel]) => channel === IPC_CHANNELS.progressionAwarded)
+  assert.equal(awarded.length, 1)
+  const payload = awarded[0][1] as Record<string, unknown>
+  // 只送出規則與數量；ledger 的其他欄位不外流到 renderer。
+  assert.deepEqual(payload.awards, [{ ruleId: 'task-success', amount: 3 }])
+  assert.deepEqual(
+    { petId: payload.petId, levelBefore: payload.levelBefore, levelAfter: payload.levelAfter, stageBefore: payload.stageBefore, stageAfter: payload.stageAfter },
+    { petId: 'pet-a', levelBefore: 1, levelAfter: 2, stageBefore: 0, stageAfter: 1 },
+  )
 })
