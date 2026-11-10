@@ -49,7 +49,7 @@
 ## 5. 待使用者決定與後續
 
 1. **Loopback 位址檢查**（階段 6 評估）：目前只有 permission server 拒絕非 loopback 的 `remoteAddress`。建議 event 與 presentation server 也加上同樣檢查，並在 README 註明 WSL／容器轉送不支援。這是安全邊界變更，本版未改。
-2. **插件通知收件匣的相對時間**（階段 10 實機觀察）：`PluginNotificationInbox.vue` 以元件建立時的 `now` 計算，晚到的通知會顯示成未來時間；建議改用 `useNow()`。
+2. **插件通知收件匣的相對時間**（階段 10 實機觀察，**已於 1.13.1 修正**，見 [fix-inbox-relative-time](fix-inbox-relative-time.md)）：`PluginNotificationInbox.vue` 以元件建立時的 `now` 計算，晚到的通知會顯示成未來時間；建議改用 `useNow()`。
 3. **未拆的部分**：agentStore 的 sessions 與淘汰規則（階段 9）、plugin 控制器的 catalog／安裝／偏好（階段 10）、runtime 的其他服務（階段 11），各自的建議做法記錄在對應的工作記錄。
 
 ## 6. 殘餘風險
