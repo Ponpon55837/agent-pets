@@ -39,6 +39,16 @@ export default defineConfig(({ mode }) => {
   const startElectron = createElectronStarter(mode === GPU_SAFE_DEV_MODE)
 
   return {
+    build: {
+      rollupOptions: {
+        output: {
+          // Vue 執行期與 Pinia 兩個視窗一開始都會載入，獨立成一個 chunk，讓共用 chunk 只放 app 程式碼、
+          // 不超過 scripts/check-bundle-size.mjs 的單一 chunk 上限；只挑這幾個套件，避免把只在延遲載入頁面
+          // 用到的相依拉進首屏。
+          manualChunks: (id: string) => (/[\\/]node_modules[\\/](?:\.pnpm[\\/][^\\/]+[\\/]node_modules[\\/])?(?:@vue|vue|pinia)[\\/]/.test(id) ? 'vue-vendor' : undefined),
+        },
+      },
+    },
     plugins: [
       vue(),
       electron({
