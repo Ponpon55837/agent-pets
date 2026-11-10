@@ -50,7 +50,7 @@ import { PluginFeedController } from '../plugin-feed.ts'
 import { filterPluginRequestHeaders, PluginNetworkClient, stripPluginSetCookieHeaders } from '../plugin-net.ts'
 import { isPublicPluginNetworkHost } from '../plugin-net.ts'
 import { PluginHostGrantController, sanitizePluginHostRequestReason } from '../plugin-host-grants.ts'
-import { PluginSecretsStore } from '../plugin-secrets.ts'
+import { createSafeStorageEncryption, PluginSecretsStore } from '../plugin-secrets.ts'
 import { PluginSecretConsentStore } from '../plugin-secret-consent.ts'
 import { PluginSettingsStore } from '../plugin-settings.ts'
 import { PluginAgentStatusController } from '../plugin-agent-status.ts'
@@ -947,7 +947,7 @@ export async function createPluginServices(): Promise<void> {
     mainState.pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
   })
   mainState.pluginPreferences = new PluginPreferencesStore(userDataDirectory)
-  mainState.pluginSecretsStore = new PluginSecretsStore(userDataDirectory, safeStorage)
+  mainState.pluginSecretsStore = new PluginSecretsStore(userDataDirectory, createSafeStorageEncryption(safeStorage))
   mainState.pluginSecretConsentStore = new PluginSecretConsentStore(userDataDirectory)
   mainState.pluginSettingsStore = new PluginSettingsStore(userDataDirectory)
   mainState.pluginHostGrantController = new PluginHostGrantController()
@@ -2925,7 +2925,13 @@ export function createDesktopServices(): void {
       quit: () => app.quit(),
     },
   )
-  mainState.desktopTray.create()
+  try {
+    mainState.desktopTray.create()
+  } catch (error) {
+    // Linux desktops without a StatusNotifier/AppIndicator host (or a missing icon) must not
+    // take the app down; the pet window and panel keep working without the tray.
+    console.error('Tray is unavailable', error instanceof Error ? error.message : error)
+  }
 }
 
 export function getPetsJsonPath(): string {

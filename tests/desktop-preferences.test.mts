@@ -189,6 +189,17 @@ test('uses only the original regular portable executable for Windows startup', (
   assert.equal(resolveLoginItemExecutable('win32', false, portablePath, portablePath), null)
 })
 
+test('NSIS installs (no portable variable) register the installed exe for Windows startup', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-nsis-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const installed = path.join(directory, 'Agent Pets.exe')
+  fs.writeFileSync(installed, 'installed app')
+
+  assert.equal(resolveLoginItemExecutable('win32', true, installed, undefined), installed)
+  assert.equal(resolveLoginItemExecutable('win32', true, path.join(directory, 'missing.exe'), undefined), null)
+  assert.equal(resolveLoginItemExecutable('win32', false, installed, undefined), null)
+})
+
 test('dndUntil is validated, bounded, and cleared when DND is off', async () => {
   const { parseDesktopPreferencesPatch } = await import('../electron/desktop-preferences.ts')
   assert.deepEqual(parseDesktopPreferencesPatch({ dndUntil: null }), { dndUntil: null })

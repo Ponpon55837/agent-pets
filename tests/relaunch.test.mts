@@ -22,6 +22,13 @@ test('relaunch uses the portable launcher on windows, default exec path elsewher
   assert.deepEqual(resolveRelaunchOptions('darwin', true, ['app', '--a', RELAUNCH_FLAG], '/ignored', '/app'), { args: ['--a', RELAUNCH_FLAG] })
 })
 
+test('relaunch of an NSIS install uses process.execPath (no portable launcher variable)', () => {
+  assert.deepEqual(
+    resolveRelaunchOptions('win32', true, ['C:\\Apps\\Agent Pets.exe', '--a'], undefined, 'C:\\Apps\\Agent Pets.exe'),
+    { args: ['--a', RELAUNCH_FLAG] },
+  )
+})
+
 test('single-instance lock retries only for relaunched instances', async () => {
   let attempts = 0
   const sleeps: number[] = []
