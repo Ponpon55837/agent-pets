@@ -65,6 +65,8 @@ import { shouldPlaySuccessSound } from '@/utils/sound-policy'
 import { AGENT_STATE_PRESENTATION } from '@/utils/agent-state-presentation'
 import { SUCCESS_DISPLAY_MS } from '@/utils/pet-motion-plan'
 import { readPetFeedbackDefaults } from '@/utils/pet-defaults'
+import { DEFAULT_PET_ID, MOOD_BASELINE, MOOD_SYSTEM_VERSION, STORAGE_KEYS } from '@/utils/storage-keys'
+import { readStored, safeStorageReader, writeStored } from '@/utils/local-storage'
 import { SESSION_REMOVE_MS, sessionLifecycleAction } from '@/utils/session-lifecycle'
 import { isDesktopEffectActive } from '@/utils/desktop-effects'
 import {
@@ -122,18 +124,12 @@ const QUOTA_SETTLE_DELAY_MS = 8_000
 // Floor between two session-driven refreshes, so a batch of agents finishing
 // one after another can't turn the settle hook into a tight polling loop.
 const QUOTA_SETTLE_MIN_INTERVAL_MS = 45_000
-const MOOD_BASELINE = 10
-const MOOD_SYSTEM_VERSION = '2'
 const MOOD_SUCCESS_REWARD = 4
 const MOOD_ERROR_PENALTY = 6
 const MOOD_TOOL_COMPLETIONS_PER_POINT = 2
 const MOOD_TOOL_PROGRESS_CAP = 8
 const MOOD_TIME_INTERVAL_MS = 5 * 60_000
 const MOOD_TIME_PROGRESS_CAP = 4
-// Always kept available as the ultimate fallback (see PetAnimation's
-// loadImage and the various "|| 'aang-airbender'" defaults below) — so it's
-// the one pet that can't be removed/hidden from the list.
-const DEFAULT_PET_ID = 'aang-airbender'
 const MAX_QUOTA_WINDOWS = 32
 const MAX_QUOTA_TEXT_LENGTH = 96
 const EVOLUTION_STAGES = new Set(['egg', 'baby', 'teen', 'adult', 'master'])
@@ -265,8 +261,8 @@ export const useAgentStore = defineStore('agent', () => {
   const panelView = computed(() => panelRoute.value.view)
   const showWizard = computed(() => panelRoute.value.overlay === 'wizard')
   const showProjectMcpPanel = computed(() => panelRoute.value.overlay === 'mcp')
-  const selectedPet = ref<string>(localStorage.getItem('agent-pet-id') || 'aang-airbender')
-  const petScale = ref(parseFloat(localStorage.getItem('agent-pet-scale') || '1'))
+  const selectedPet = ref<string>(readStored(STORAGE_KEYS.petId))
+  const petScale = ref(readStored(STORAGE_KEYS.petScale))
   const pets = ref<PetEntry[]>([])
   const petsLoaded = ref(false)
   const projectPets = ref<ProjectPetView[]>([])
@@ -294,15 +290,7 @@ export const useAgentStore = defineStore('agent', () => {
   // Built-in pets ship as bundled assets, so "removing" one just hides it
   // from your own picker rather than deleting a file — persisted the same
   // way custom-pet deletion is, just via a local id list instead of disk.
-  function loadHiddenBuiltins(): string[] {
-    try {
-      const raw = JSON.parse(localStorage.getItem('agent-pet-hidden') || '[]')
-      return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string') : []
-    } catch {
-      return []
-    }
-  }
-  const hiddenBuiltinIds = ref<string[]>(loadHiddenBuiltins())
+  const hiddenBuiltinIds = ref<string[]>(readStored(STORAGE_KEYS.hiddenBuiltinPets))
   const visiblePets = computed(() => {
     const hidden = new Set(hiddenBuiltinIds.value)
     return pets.value.filter(p => !hidden.has(p.id))
@@ -311,28 +299,15 @@ export const useAgentStore = defineStore('agent', () => {
   // Per-family skin overrides (e.g. Codex looks like the cat, Claude looks
   // like the monkey king) — a family with no entry here just falls back to
   // the global `selectedPet`. Keyed by AgentFamilyKey（localStorage 的既有格式，key 不能改名）.
-  // 啟動時與其他視窗改了 localStorage 時都走這裡：只收家族 registry 裡的 key 與字串值，
-  // 寫回時不會把手改或舊版留下的雜項帶下去，另一個視窗也不能塞進非字串的值。
-  function parseFamilyPetIds(json: string | null): Record<string, string> {
-    try {
-      const raw = JSON.parse(json || '{}')
-      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-        const out: Record<string, string> = {}
-        for (const [k, v] of Object.entries(raw)) {
-          if (isAgentFamilyKey(k) && typeof v === 'string') out[k] = v
-        }
-        return out
-      }
-    } catch {}
-    return {}
-  }
-  const familyPetIds = ref<Record<string, string>>(parseFamilyPetIds(localStorage.getItem('agent-pet-family-map')))
+  // 啟動與跨視窗同步都經過 registry 的同一個解析（STORAGE_KEYS.familyPetIds），只收家族 key 與字串值。
+  const familyPetIds = ref<Record<string, string>>(readStored(STORAGE_KEYS.familyPetIds))
 
-  function syncFamilyPetIds(json: string | null): void {
-    familyPetIds.value = parseFamilyPetIds(json)
+  /** 另一個視窗改了家族對應時，App.vue 把 registry 解析後的值交給這裡。 */
+  function syncFamilyPetIds(value: Record<string, string>): void {
+    familyPetIds.value = value
   }
 
-  // 寫入路徑跟讀取（parseFamilyPetIds）用同一個白名單：不是家族 registry 裡的 key 一律忽略。
+  // 寫入路徑跟讀取用同一個白名單：不是家族 registry 裡的 key 一律忽略。
   function setFamilyPet(familyKey: string, petId: string | null) {
     if (!isAgentFamilyKey(familyKey)) return
     const next = { ...familyPetIds.value }
@@ -342,7 +317,7 @@ export const useAgentStore = defineStore('agent', () => {
       delete next[familyKey]
     }
     familyPetIds.value = next
-    localStorage.setItem('agent-pet-family-map', JSON.stringify(next))
+    writeStored(STORAGE_KEYS.familyPetIds, next)
   }
 
   // Falls back to the global default if the family has no override, or its
@@ -389,20 +364,19 @@ export const useAgentStore = defineStore('agent', () => {
     return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
   }
 
-  let initialMood = clampMood(parseFloat(localStorage.getItem('agent-pet-mood') || String(MOOD_BASELINE)))
-  const needsMoodReset = localStorage.getItem('agent-pet-mood-version') !== MOOD_SYSTEM_VERSION
-    || localStorage.getItem('agent-pet-mood-date') !== todayKey()
+  // 版本不同（migration）或跨日都重設回起始值。
+  let initialMood = clampMood(readStored(STORAGE_KEYS.mood))
+  const needsMoodReset = readStored(STORAGE_KEYS.moodVersion) !== MOOD_SYSTEM_VERSION
+    || readStored(STORAGE_KEYS.moodDate) !== todayKey()
   if (needsMoodReset) {
     initialMood = MOOD_BASELINE
-    localStorage.setItem('agent-pet-mood', String(MOOD_BASELINE))
-    localStorage.setItem('agent-pet-mood-date', todayKey())
-    localStorage.setItem('agent-pet-mood-version', MOOD_SYSTEM_VERSION)
+    persistMoodReset()
   }
   const mood = ref(initialMood)
-  const moodVisualsEnabled = ref(localStorage.getItem('agent-pet-mood-visuals') !== '0')
+  const moodVisualsEnabled = ref(readStored(STORAGE_KEYS.moodVisuals))
 
   // 主程序的偏好設定送到之前先用 localStorage 快取；只有 '1' 算開，沒有快取時跟 SOUND_DEFAULTS.soundEnabled 一樣是關。
-  const soundEnabled = ref(localStorage.getItem('agent-pet-sound') === '1')
+  const soundEnabled = ref(readStored(STORAGE_KEYS.sound))
   const soundVolume = ref(SOUND_DEFAULTS.soundVolume)
   const soundOnPermission = ref(SOUND_DEFAULTS.soundOnPermission)
   const soundOnError = ref(SOUND_DEFAULTS.soundOnError)
@@ -411,14 +385,14 @@ export const useAgentStore = defineStore('agent', () => {
   // Off by default — showing one pet per active tool family is a bigger
   // visual/layout change than the other additions, so it stays opt-in
   // rather than silently changing behavior for people with 2+ tools running.
-  const multiPetEnabled = ref(localStorage.getItem('agent-pet-multi') === '1')
+  const multiPetEnabled = ref(readStored(STORAGE_KEYS.multiPet))
 
   // Off by default — the click/state-change bounce, idle fidget sway, and
   // waiting-permission shake found it distracting. Off leaves the core
   // sprite state animation (and frame speed-up / mood glow) untouched.
   // On by default (key-event feedback: reaction bounce, urgency shake, reward
   // glow). Decorative ambient motion is a separate, opt-in switch below.
-  const feedbackDefaults = readPetFeedbackDefaults(localStorage)
+  const feedbackDefaults = readPetFeedbackDefaults(safeStorageReader)
   const reactionsEnabled = ref(feedbackDefaults.reactions)
 
   // On by default — completion / failure / waiting bubbles. The noisier
@@ -512,7 +486,7 @@ export const useAgentStore = defineStore('agent', () => {
 
   function adjustMood(delta: number) {
     mood.value = clampMood(mood.value + delta)
-    localStorage.setItem('agent-pet-mood', String(mood.value))
+    writeStored(STORAGE_KEYS.mood, mood.value)
   }
 
   // Always sets to the low daily baseline, so the visible energy build-up is
@@ -520,31 +494,31 @@ export const useAgentStore = defineStore('agent', () => {
   function resetMood() {
     mood.value = MOOD_BASELINE
     moodTaskProgress.clear()
-    localStorage.setItem('agent-pet-mood', String(MOOD_BASELINE))
-    localStorage.setItem('agent-pet-mood-date', todayKey())
-    localStorage.setItem('agent-pet-mood-version', MOOD_SYSTEM_VERSION)
+    persistMoodReset()
+  }
+
+  function persistMoodReset() {
+    writeStored(STORAGE_KEYS.mood, MOOD_BASELINE)
+    writeStored(STORAGE_KEYS.moodDate, todayKey())
+    writeStored(STORAGE_KEYS.moodVersion, MOOD_SYSTEM_VERSION)
   }
 
   // Petting the pet lifts its mood a little, capped per day so it cannot be farmed.
   const PAT_DAILY_LIMIT = 5
 
   function patPet(): boolean {
-    let count = 0
-    try {
-      const [day, saved] = (localStorage.getItem('agent-pet-pat') ?? '').split(':')
-      if (day === todayKey()) count = Number(saved) || 0
-    } catch {}
+    const today = todayKey()
+    const saved = readStored(STORAGE_KEYS.patCount)
+    const count = saved.day === today ? saved.count : 0
     if (count >= PAT_DAILY_LIMIT) return false
-    try {
-      localStorage.setItem('agent-pet-pat', `${todayKey()}:${count + 1}`)
-    } catch {}
+    writeStored(STORAGE_KEYS.patCount, { day: today, count: count + 1 })
     adjustMood(1)
     return true
   }
 
   function setMoodVisualsEnabled(enabled: boolean) {
     moodVisualsEnabled.value = enabled
-    localStorage.setItem('agent-pet-mood-visuals', enabled ? '1' : '0')
+    writeStored(STORAGE_KEYS.moodVisuals, enabled)
   }
 
   // --- Toast 提示 ----------------------------------------------------------
@@ -897,7 +871,7 @@ export const useAgentStore = defineStore('agent', () => {
 
   function setSoundEnabled(enabled: boolean) {
     soundEnabled.value = enabled
-    localStorage.setItem('agent-pet-sound', enabled ? '1' : '0')
+    writeStored(STORAGE_KEYS.sound, enabled)
     updateDesktopPreferences({ soundEnabled: enabled })
   }
 
@@ -935,7 +909,7 @@ export const useAgentStore = defineStore('agent', () => {
     launchAtStartupSupported.value = preferences.launchAtStartupSupported
     launchAtStartupStatus.value = preferences.launchAtStartupStatus ?? 'unsupported'
     desktopPreferencesReady.value = true
-    localStorage.setItem('agent-pet-sound', preferences.soundEnabled ? '1' : '0')
+    writeStored(STORAGE_KEYS.sound, preferences.soundEnabled)
     if (preferences.dndEnabled) clearPresentation()
     else if (!preferences.presentationMcpEnabled) clearMcpPresentation()
   }
@@ -1082,40 +1056,40 @@ export const useAgentStore = defineStore('agent', () => {
 
   function setMultiPetEnabled(enabled: boolean) {
     multiPetEnabled.value = enabled
-    localStorage.setItem('agent-pet-multi', enabled ? '1' : '0')
+    writeStored(STORAGE_KEYS.multiPet, enabled)
   }
 
   function setReactionsEnabled(enabled: boolean) {
     reactionsEnabled.value = enabled
-    localStorage.setItem('agent-pet-fx', enabled ? '1' : '0')
+    writeStored(STORAGE_KEYS.reactions, enabled)
   }
 
   function setBubbleEnabled(enabled: boolean) {
     bubbleEnabled.value = enabled
-    localStorage.setItem('agent-pet-bubble', enabled ? '1' : '0')
+    writeStored(STORAGE_KEYS.bubble, enabled)
   }
 
   function setAmbientEnabled(enabled: boolean) {
     ambientEnabled.value = enabled
-    localStorage.setItem('agent-pet-ambient', enabled ? '1' : '0')
+    writeStored(STORAGE_KEYS.ambient, enabled)
   }
 
   function setActivityBubbleEnabled(enabled: boolean) {
     activityBubbleEnabled.value = enabled
-    localStorage.setItem('agent-pet-activity', enabled ? '1' : '0')
+    writeStored(STORAGE_KEYS.activityBubble, enabled)
   }
 
   // --- 寵物選擇與視窗模式 -----------------------------------------------------
 
   function setPet(petId: string) {
     selectedPet.value = petId
-    localStorage.setItem('agent-pet-id', petId)
+    writeStored(STORAGE_KEYS.petId, petId)
     void setProgressionPet(petId)
   }
 
   function setScale(scale: number) {
     petScale.value = scale
-    localStorage.setItem('agent-pet-scale', String(scale))
+    writeStored(STORAGE_KEYS.petScale, scale)
   }
 
   function setPetWindowModeState(value: unknown): void {
@@ -2084,7 +2058,7 @@ export const useAgentStore = defineStore('agent', () => {
     if (pet?.builtIn) {
       if (!hiddenBuiltinIds.value.includes(petId)) {
         hiddenBuiltinIds.value = [...hiddenBuiltinIds.value, petId]
-        localStorage.setItem('agent-pet-hidden', JSON.stringify(hiddenBuiltinIds.value))
+        writeStored(STORAGE_KEYS.hiddenBuiltinPets, hiddenBuiltinIds.value)
       }
     } else {
       await window.electronAPI?.removeCustomPet(petId)

@@ -32,6 +32,8 @@ import PermissionNoticeBubble from '@/components/permission/PermissionNoticeBubb
 import { formatDateParts } from '@/utils/intl-format'
 import { PET_CELL_HEIGHT } from '@/types/pet-atlas'
 import { useReducedMotion } from '@/composables/useReducedMotion'
+import { STORAGE_KEYS } from '@/utils/storage-keys'
+import { readStored, writeStored } from '@/utils/local-storage'
 
 const store = useAgentStore()
 const clickAreaRef = ref<HTMLElement | null>(null)
@@ -305,31 +307,20 @@ const bubbleSelection = computed(() => {
 
 // --- 首次啟動引導（coach mark）-----------------------------------------------
 
-const COACH_STORAGE_KEY = 'agent-pet-coach-v1'
 const COACH_VISIBLE_MS = 20_000
 const coachArmed = ref(false)
 let coachTimer: ReturnType<typeof setTimeout> | null = null
-
-function coachAlreadySeen(): boolean {
-  try {
-    return localStorage.getItem(COACH_STORAGE_KEY) === '1'
-  } catch {
-    return true
-  }
-}
 
 function dismissCoach(): void {
   if (coachTimer) clearTimeout(coachTimer)
   coachTimer = null
   if (!coachArmed.value) return
   coachArmed.value = false
-  try {
-    localStorage.setItem(COACH_STORAGE_KEY, '1')
-  } catch {}
+  writeStored(STORAGE_KEYS.coachSeen, true)
 }
 
 function armCoach(): void {
-  if (coachAlreadySeen()) return
+  if (readStored(STORAGE_KEYS.coachSeen)) return
   coachArmed.value = true
   coachTimer = setTimeout(dismissCoach, COACH_VISIBLE_MS)
 }

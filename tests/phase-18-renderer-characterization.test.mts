@@ -32,7 +32,7 @@ test('status panel preserves dashboard and settings navigation contracts', () =>
   assert.match(source, /'tablist'/)
   assert.match(source, /role="tabpanel"/)
   assert.match(source, /ArrowRight/)
-  assert.match(source, /localStorage\.getItem\(SETTINGS_GROUP_STORAGE_KEY\)/)
+  assert.match(source, /readStored\(STORAGE_KEYS\.settingsGroup\)/)
   assert.match(source, /onPanelOpenPluginView/)
   assert.match(source, /store\.decidePermission\(store\.permissionRequest\.requestId, \$event\)/)
   assert.match(source, /store\.clearOfflineSessions\(\)/)
