@@ -4,6 +4,7 @@ import { useDialogA11y } from '@/composables/useDialogA11y'
 import type {
   AdapterRuntimeStatus,
   AgentAdapterId,
+  AgentConfigDirIgnoredReason,
   DiagnosticReport,
   InstallErrorCode,
   InstallOutcome,
@@ -165,6 +166,7 @@ const INSTALL_ERROR_KEYS: Record<InstallErrorCode, TranslationKey> = {
   read_only: 'onboarding.errorReadOnly',
   node_missing: 'onboarding.errorNodeMissing',
   node_unsupported: 'onboarding.errorNodeUnsupported',
+  config_dir_unusable: 'onboarding.errorConfigDirUnusable',
   unknown: 'onboarding.errorUnknown',
 }
 
@@ -349,6 +351,34 @@ const FIX_KEYS: Readonly<Record<string, TranslationKey>> = {
   'hook-command': 'onboarding.fix.hook-command',
   'node': 'onboarding.fix.node',
 }
+
+// --- 設定目錄（CLAUDE_CONFIG_DIR／CODEX_HOME／XDG_CONFIG_HOME）-----------------------------------
+const CONFIG_DIR_IGNORED_KEYS = {
+  invalid: 'onboarding.configDir.ignored.invalid',
+  not_absolute: 'onboarding.configDir.ignored.not_absolute',
+  missing: 'onboarding.configDir.ignored.missing',
+} as const satisfies Record<AgentConfigDirIgnoredReason, TranslationKey>
+
+interface ConfigDirNote {
+  key: 'env' | 'ignored' | 'stale'
+  text: string
+  warn: boolean
+}
+
+function buildConfigDirNotes(tool: ToolStatus): ConfigDirNote[] {
+  const dir = tool.configDir
+  if (!dir) return []
+  const params = { variable: dir.variable, path: dir.path }
+  const notes: ConfigDirNote[] = []
+  // 預設位置且沒有殘留時不顯示：絕大多數使用者沒設定這些變數，不需要多一行。
+  if (dir.ignored) notes.push({ key: 'ignored', text: t(CONFIG_DIR_IGNORED_KEYS[dir.ignored], params), warn: true })
+  else if (dir.source === 'env') notes.push({ key: 'env', text: t('onboarding.configDir.env', params), warn: false })
+  if (dir.staleLocation) notes.push({ key: 'stale', text: t('onboarding.configDir.stale', { path: dir.staleLocation }), warn: true })
+  return notes
+}
+
+// 每次 render 只算一次（模板裡同時用在 v-if 與 v-for）；切換語系時 t() 會讓它重算。
+const configDirNotesById = computed(() => new Map(tools.value.map(tool => [tool.id, buildConfigDirNotes(tool)])))
 
 const SUMMARY_KEYS: Readonly<Record<string, TranslationKey>> = {
   ready: 'onboarding.summary.ready',
@@ -537,6 +567,15 @@ onUnmounted(() => {
           <div class="source-list">
             <span v-for="source in tool.sourceLabels" :key="source" class="source-chip">{{ source }}</span>
           </div>
+          <p
+            v-for="note in configDirNotesById.get(tool.id) ?? []"
+            :key="note.key"
+            class="config-dir-note"
+            :class="{ warn: note.warn }"
+          >
+            <Icon v-if="note.warn" name="warning" :size="13" />
+            <span>{{ note.text }}</span>
+          </p>
           <ul class="capability-list" :aria-label="t('onboarding.capTitle')">
             <li v-for="row in capabilityRows(tool)" :key="row.id" :class="row.supported ? 'cap-yes' : 'cap-no'">
               <Icon :name="row.supported ? 'check' : 'close'" :size="13" />

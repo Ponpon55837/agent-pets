@@ -1,9 +1,7 @@
+import type { AppLocale } from './locale.ts'
 import type { PetMotionManifest } from './pet-atlas.ts'
 
-export type PluginLocalizedText = {
-  'zh-TW': string
-  'en-US': string
-}
+export type PluginLocalizedText = Record<AppLocale, string>
 
 export type PluginSettingScalar = string | number | boolean
 

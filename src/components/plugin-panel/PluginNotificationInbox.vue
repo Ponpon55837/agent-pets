@@ -6,8 +6,8 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import Icon from '@/components/ui/Icon.vue'
 import Select from '@/components/ui/Select.vue'
 import { usePluginController } from '@/composables/plugin/context'
-import { formatRelativeTime, linkHost } from '@/utils/relative-time'
-import { formatDateTimeFull } from '@/utils/intl-format'
+import { linkHost } from '@/utils/link-host'
+import { FEED_RELATIVE_TIME, formatDateTimeFull, formatRelative } from '@/utils/intl-format'
 import type { PluginNotificationRecord } from '@/types/plugin'
 
 const {
@@ -34,7 +34,7 @@ function toggle(id: string): void {
 }
 
 function when(record: PluginNotificationRecord): string {
-  return formatRelativeTime(record.item.createdAt, now, locale.value)
+  return formatRelative(record.item.createdAt, now, locale.value, FEED_RELATIVE_TIME)
 }
 </script>
 

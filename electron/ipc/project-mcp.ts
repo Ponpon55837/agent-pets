@@ -14,6 +14,7 @@ import type {
   ProjectMcpRemovalSummary,
   ProjectMcpSetupSummary,
 } from '../../src/types/project-mcp.ts'
+import type { AppLocale } from '../../src/types/locale.ts'
 import { PROJECT_MCP_CLIENTS } from '../../src/types/project-mcp.ts'
 import { IPC_CHANNELS } from './channels.ts'
 
@@ -35,7 +36,7 @@ export interface ProjectMcpIpcDependencies {
   installOptions(): ProjectMcpInstallOptions
   getRegistry(): ProjectMcpRegistryStore | null
   /** Current app language, for native dialog text. */
-  getLocale?(): 'zh-TW' | 'en-US'
+  getLocale?(): AppLocale
 }
 
 const MAX_REMEMBERED_PICKS = 16

@@ -41,7 +41,8 @@ To remove integrations, use **Remove** on a tool's card in the wizard (only that
 - **respond** — the permission request can be allowed once or denied from the pet bubble. OpenCode always; Claude Code after you turn on **Answer Claude Code permissions from the pet** (see [Permission bubble](#permission-bubble)).
 - **observe** — the pet shows Waiting Permission, but you approve inside the tool itself (Codex only reports that it is waiting; there is no way to send a decision back).
 - Codex does not report a "waiting for input" state. Codex Desktop shares `~/.codex` with the CLI and has no separate install API, so it works only if that build runs the same hooks; verify with **Wait for real event**.
-- **Token usage: exact** means per-message counts read from the agent's own local session logs (`~/.codex/sessions`, `~/.claude/projects`). **estimated** means the number comes from the event the agent sent, as OpenCode and Generic HTTP integrations do; Codex and Claude Code usage on live events is not counted, so local logs stay the single source.
+- **Token usage: exact** means per-message counts read from the agent's own local session logs (`~/.codex/sessions`, `~/.claude/projects`, or the folders below when they are moved). **estimated** means the number comes from the event the agent sent, as OpenCode and Generic HTTP integrations do; Codex and Claude Code usage on live events is not counted, so local logs stay the single source.
+- **Moved config folders.** Hooks, detection, quota and token usage follow `CLAUDE_CONFIG_DIR` (Claude Code), `CODEX_HOME` (Codex) and `XDG_CONFIG_HOME` (OpenCode, `<XDG_CONFIG_HOME>/opencode`). The value must be an absolute path (Codex also needs the folder to exist); an unusable value is shown on the tool's card and installing is refused instead of writing to the default folder. On macOS and Linux an app opened from the Dock or desktop also reads them from your login shell (`$SHELL -l`, 2 s limit). Restart Agent Pets after changing them. If Agent Pets was installed before you set a variable, the card points out the old location; **Remove** cleans both. Codex asks you to trust the hooks again in a new `CODEX_HOME`.
 - A **Generic HTTP** adapter is available to local integrations through the authenticated `/v1/events` endpoint (see [Event server](#event-server)). It is observe-only.
 
 ## The pet
@@ -180,7 +181,8 @@ The main-process log is `logs/main.log` inside the app's userData folder (`~/Lib
 |---------|---------------|
 | Pet stays Offline | Press **Wait for real event** and run a prompt. No event: restart the tool (hooks load at start), then **Diagnose**. |
 | Diagnose: Node.js executable missing | Install Node.js 18+, then press **Repair**; it writes the absolute path (a bare `node` fails in apps launched from Finder or the Dock). Switching nvm versions also needs a **Repair**. |
-| Codex hooks not enabled | **Repair** adds `hooks = true` under `[features]` in `~/.codex/config.toml`. |
+| Codex hooks not enabled | **Repair** adds `hooks = true` under `[features]` in `config.toml` inside `CODEX_HOME` (default `~/.codex`). |
+| Card: config folder cannot be used | `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `XDG_CONFIG_HOME` is relative, starts with `~`, or points to a missing folder. Fix it and restart Agent Pets. |
 | Install refused: not valid JSON | `settings.json` / `hooks.json` has comments or a syntax error. Agent Pets leaves it untouched; fix or move the file, then install again. |
 | Banner: event receiver offline | A local port (17373–17375) is held by another program or an older Agent Pets. Close it; the app retries automatically, or press **Retry now**. |
 | Hook script out of date | **Repair** redeploys it. |

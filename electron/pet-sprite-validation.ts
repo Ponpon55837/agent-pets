@@ -11,9 +11,11 @@ import {
   PET_CELL_WIDTH,
   petAtlasGridFromSize,
 } from '../src/types/pet-atlas.ts'
+import { rasterImageTypeIn, sniffRasterImageType, type RasterImageType } from './raster-image.ts'
 
 // 匯入 spritesheet 的結構檢查：畫面端依固定格線（src/types/pet-atlas.ts）切圖，
-// 尺寸不對的圖不會報錯，只會畫成空白或錯亂的格子。這裡只讀圖片檔頭。
+// 尺寸不對的圖不會報錯，只會畫成空白或錯亂的格子。這裡只讀圖片檔頭；
+// 格式一律由 raster-image.ts 的完整 signature 判定，各讀取函式不再自己比對前幾個位元組。
 
 export type SpriteValidationError = 'E_TYPE' | 'E_SIZE' | 'E_ROWS' | 'E_ORIENTATION'
 
@@ -186,10 +188,12 @@ function readWebpOrientation(bytes: Uint8Array): number {
  * than 1 would swap or mirror the cell grid we validated.
  */
 export function readImageOrientation(bytes: Uint8Array): number {
-  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50) return readPngOrientation(bytes)
-  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57) return readWebpOrientation(bytes)
-  if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) return readJpegInfo(bytes)?.orientation ?? 1
-  return 1
+  switch (sniffRasterImageType(bytes)) {
+    case 'image/png': return readPngOrientation(bytes)
+    case 'image/webp': return readWebpOrientation(bytes)
+    case 'image/jpeg': return readJpegInfo(bytes)?.orientation ?? 1
+    case null: return 1
+  }
 }
 
 function isPngAnimated(bytes: Uint8Array): boolean {
@@ -225,16 +229,21 @@ function isWebpAnimated(bytes: Uint8Array): boolean {
  * O(chunks)；不做任何解碼。
  */
 export function readImageAnimated(bytes: Uint8Array): boolean {
-  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50) return isPngAnimated(bytes)
-  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57) return isWebpAnimated(bytes)
-  return false
+  switch (sniffRasterImageType(bytes)) {
+    case 'image/png': return isPngAnimated(bytes)
+    case 'image/webp': return isWebpAnimated(bytes)
+    case 'image/jpeg':
+    case null: return false
+  }
 }
 
 export function readImageSize(bytes: Uint8Array): ImageSize | null {
-  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50) return readPngSize(bytes)
-  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57) return readWebpSize(bytes)
-  if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) return readJpegSize(bytes)
-  return null
+  switch (sniffRasterImageType(bytes)) {
+    case 'image/png': return readPngSize(bytes)
+    case 'image/webp': return readWebpSize(bytes)
+    case 'image/jpeg': return readJpegSize(bytes)
+    case null: return null
+  }
 }
 
 // 從檔頭讀到的上限（不必解碼）；數值定義在 pet-atlas.ts，讓一張高度壓縮的小檔無法讓畫面端配置數 GB。
@@ -276,4 +285,16 @@ export function detectSpriteAtlas(size: ImageSize, declaredVersion?: unknown): S
     version, columns, rows, width: size.width, height: size.height,
     frameWidth: PET_CELL_WIDTH, frameHeight: PET_CELL_HEIGHT, warnings,
   }
+}
+
+// 寵物 spritesheet 接受的格式：匯入、自訂寵物、插件 skin 的讀取與 agent-pets:// 回應共用。
+// 插件套件安裝時另有較窄的白名單（plugin-registry.ts）。
+const PET_SPRITE_TYPES: ReadonlySet<RasterImageType> = new Set(['image/png', 'image/jpeg', 'image/webp'])
+
+export function rasterContentType(data: Uint8Array): RasterImageType | null {
+  return rasterImageTypeIn(data, PET_SPRITE_TYPES)
+}
+
+export function isSupportedRasterImage(data: Uint8Array): boolean {
+  return rasterContentType(data) !== null
 }

@@ -1,4 +1,5 @@
 import type {
+  AdapterConfigDirStatus,
   AdapterContext,
   AdapterDetection,
   AdapterHealth,
@@ -17,6 +18,7 @@ import { normalizeAgentStatusEvent } from './event-normalizer.ts'
 import { buildOutcome, failedOutcome } from './install-outcome.ts'
 import { AGENT_ADAPTER_REGISTRY } from '../src/types/agent-adapter.ts'
 import { familyOfSource } from '../src/types/agent.ts'
+import { LOCAL_WIRE_PATHS } from '../src/types/local-wire.ts'
 
 const ADAPTER_VERSION = '1.0.0'
 const ADAPTER_IDS: ReadonlySet<string> = new Set(AGENT_ADAPTER_REGISTRY.map(definition => definition.id))
@@ -26,10 +28,13 @@ export interface AdapterInspection {
   health: AdapterHealth
   message: string
   checks: DiagnosticReport['checks']
+  configDir?: AdapterConfigDirStatus
 }
 
 export interface AgentAdapterOperations {
   inspect(id: AgentAdapterId): AdapterInspection
+  /** Resolves once the agents' config folders are known (login-shell lookup); install and uninstall wait for it. */
+  ready?(): Promise<void>
   /** Async preconditions (e.g. resolving Node.js) that must pass before install writes anything. */
   prepare?(target: AdapterInstallTarget): Promise<void>
   install(target: AdapterInstallTarget): InstallReport | void
@@ -49,7 +54,7 @@ function inspectGenericHttp(): AdapterInspection {
   return {
     installed: true,
     health: 'ready',
-    message: 'The local /v1/events ingress is available through the authenticated receiver.',
+    message: `The local ${LOCAL_WIRE_PATHS.events} ingress is available through the authenticated receiver.`,
     checks: [
       check('loopback', 'pass', 'The receiver binds to loopback only.'),
       check('token', 'pass', 'Requests need the token created at install time.'),
@@ -75,6 +80,7 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
         installed: inspection.installed,
         health: inspection.health,
         message: inspection.message,
+        ...(inspection.configDir ? { configDir: inspection.configDir } : {}),
         capabilities: operations.capabilities?.(definition.id, definition.capabilities) ?? definition.capabilities,
         sources: definition.sources,
         sourceLabels: definition.sourceLabels,
@@ -84,6 +90,8 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
       }
     },
     install: async () => {
+      // Before the first detect, so "before" and the write both use the final folders.
+      if (definition.installTarget) await operations.ready?.()
       const self = createAdapter(definition, operations)
       const before = (await self.detect(context())).health
       let report: InstallReport = { changedFiles: [], backupPaths: [] }
@@ -101,7 +109,10 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
       return { ...(await self.detect(context())), outcome: buildOutcome(definition.id, report, before) }
     },
     uninstall: async () => {
-      if (definition.installTarget) operations.uninstall(definition.installTarget)
+      if (definition.installTarget) {
+        await operations.ready?.()
+        operations.uninstall(definition.installTarget)
+      }
       return (await createAdapter(definition, operations).detect(context()))
     },
     diagnose: async ctx => {
@@ -157,7 +168,7 @@ const DEFAULT_OPERATIONS: AgentAdapterOperations = {
   inspect: id => ({
     installed: id === 'generic-http',
     health: id === 'generic-http' ? 'ready' : 'needs_install',
-    message: id === 'generic-http' ? 'The local /v1/events ingress is available.' : 'The adapter is not installed.',
+    message: id === 'generic-http' ? `The local ${LOCAL_WIRE_PATHS.events} ingress is available.` : 'The adapter is not installed.',
     checks: id === 'generic-http'
       ? inspectGenericHttp().checks
       : [check('runtime', 'warn', 'Setup operations are unavailable in this runtime.')],

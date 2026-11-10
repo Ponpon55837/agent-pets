@@ -57,8 +57,18 @@ export interface ProjectPathResolver {
   trackSeen(value: unknown, seenAt?: number): { projectId: string } | null
 }
 
+export interface LocalUsageConfigDirs {
+  claude: string
+  codex: string
+}
+
 export interface LocalUsageReaderOptions {
   homeDir: string
+  /**
+   * Agent config folders, read at the start of every scan (CLAUDE_CONFIG_DIR／CODEX_HOME may only be
+   * known after the login-shell lookup). Defaults to ~/.claude and ~/.codex under homeDir.
+   */
+  configDirs?: () => LocalUsageConfigDirs
   history: HistoryStore
   now?: () => number
   maxFiles?: number
@@ -714,7 +724,7 @@ function parseCodexUsageRecord(
 }
 
 export class LocalUsageReader {
-  private readonly homeDir: string
+  private readonly configDirs: () => LocalUsageConfigDirs
   private readonly history: HistoryStore
   private readonly now: () => number
   private readonly maxFiles: number
@@ -731,7 +741,8 @@ export class LocalUsageReader {
   private diagnostics: LocalUsageScanDiagnostics | null = null
 
   constructor(options: LocalUsageReaderOptions) {
-    this.homeDir = options.homeDir
+    const { homeDir } = options
+    this.configDirs = options.configDirs ?? (() => ({ claude: join(homeDir, '.claude'), codex: join(homeDir, '.codex') }))
     this.history = options.history
     this.now = options.now ?? Date.now
     this.maxFiles = Math.max(1, Math.min(DEFAULT_MAX_FILES, Math.floor(options.maxFiles ?? DEFAULT_MAX_FILES)))
@@ -759,10 +770,11 @@ export class LocalUsageReader {
 
   private async scanNow(): Promise<LocalUsageScanResult> {
     const startedAt = Date.now()
+    const dirs = this.configDirs()
     const roots: UsageRoot[] = [
-      { provider: 'codex', adapterId: 'codex', agentId: 'codex', directory: join(this.homeDir, '.codex', 'sessions') },
-      { provider: 'claude-code', adapterId: 'claude-code', agentId: 'claude', directory: join(this.homeDir, '.claude', 'projects') },
-      { provider: 'claude-code', adapterId: 'claude-code', agentId: 'claude', directory: join(this.homeDir, '.claude', 'transcripts') },
+      { provider: 'codex', adapterId: 'codex', agentId: 'codex', directory: join(dirs.codex, 'sessions') },
+      { provider: 'claude-code', adapterId: 'claude-code', agentId: 'claude', directory: join(dirs.claude, 'projects') },
+      { provider: 'claude-code', adapterId: 'claude-code', agentId: 'claude', directory: join(dirs.claude, 'transcripts') },
     ]
     const result: LocalUsageScanResult = {
       filesScanned: 0, filesSkipped: 0, recordsParsed: 0, recordsImported: 0, filesDeferred: 0, pending: false, bytesRead: 0,

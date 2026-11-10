@@ -7,7 +7,10 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { configureSetupEnvironment } from '../electron/setup-environment.ts'
+import { AgentConfigDirError, type AgentConfigEnv } from '../electron/agent-config-dirs.ts'
 import {
+  agentConfigDirStatus,
+  agentPresence,
   claudeCodeSettingsPath,
   claudePermissionRespondPath,
   syncClaudePermissionRespondOptIn,
@@ -18,6 +21,7 @@ import {
   codexHooksPath,
   hookScriptPath,
   installIntegration,
+  openCodeCliPluginPath,
   uninstallIntegration,
 } from '../electron/setup.ts'
 import { fileHasAgentPetsHooks, isCodexHooksFeatureEnabled } from '../electron/hook-config.ts'
@@ -27,9 +31,13 @@ import { ConfigRefusedError } from '../electron/safe-config-write.ts'
 // user's actual home directory or the macOS Keychain.
 const integrations = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'integrations')
 
-function withHome<T>(work: (home: string) => T): T {
+// The machine's own CLAUDE_CONFIG_DIR／CODEX_HOME／XDG_CONFIG_HOME must never leak in: tests pass
+// their own variables (default: none), so a developer's real config folder is never written.
+function withHome<T>(work: (home: string) => T, env: (home: string) => AgentConfigEnv = () => ({})): T {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-setup-home-'))
+  const agentEnv = env(home)
   configureSetupEnvironment({
+    agentConfigEnv: () => agentEnv,
     homeDir: () => home,
     appData: () => path.join(home, 'AppData'),
     userData: () => path.join(home, 'userData'),
@@ -245,3 +253,134 @@ test('the startup upgrade leaves settings without Agent Pets hooks untouched', (
     assert.equal(fs.readFileSync(claudeCodeSettingsPath(), 'utf8'), mine)
   })
 })
+
+// --- CLAUDE_CONFIG_DIR／CODEX_HOME／XDG_CONFIG_HOME ------------------------------------------------
+
+function made(dir: string): string {
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+test('without the variables every path and status is the 1.12.5 default', () => {
+  withHome((home) => {
+    assert.equal(claudeCodeSettingsPath(), path.join(home, '.claude', 'settings.json'))
+    assert.equal(codexHooksPath(), path.join(home, '.codex', 'hooks.json'))
+    assert.equal(codexConfigPath(), path.join(home, '.codex', 'config.toml'))
+    assert.equal(openCodeCliPluginPath(), path.join(home, '.config', 'opencode', 'plugin', 'desktop-pet.js'))
+    installIntegration()
+    for (const kind of ['claude', 'codex', 'opencode'] as const) {
+      const status = agentConfigDirStatus(kind)
+      assert.equal(status.source, 'default')
+      assert.equal(status.ignored, undefined)
+      assert.equal(status.staleLocation, undefined)
+    }
+  })
+})
+
+test('CLAUDE_CONFIG_DIR and CODEX_HOME receive the hooks; the default folders stay untouched', () => {
+  withHome((home) => {
+    installIntegration('claudeCode')
+    installIntegration('codex')
+    const claudeDir = path.join(home, 'work', 'claude')
+    const codexHome = path.join(home, 'work', 'codex')
+    assert.equal(fileHasAgentPetsHooks(path.join(claudeDir, 'settings.json')), true)
+    assert.equal(fileHasAgentPetsHooks(path.join(codexHome, 'hooks.json')), true)
+    assert.equal(isCodexHooksFeatureEnabled(fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8')), true)
+    assert.equal(fs.existsSync(path.join(home, '.claude')), false)
+    assert.equal(fs.existsSync(path.join(home, '.codex')), false)
+    assert.deepEqual({ ...agentPresence(), opencode: false }, { claude: true, codex: true, opencode: false })
+    const status = agentConfigDirStatus('claude')
+    assert.deepEqual(status, { variable: 'CLAUDE_CONFIG_DIR', path: claudeDir, source: 'env' })
+  }, home => ({
+    CLAUDE_CONFIG_DIR: made(path.join(home, 'work', 'claude')),
+    CODEX_HOME: made(path.join(home, 'work', 'codex')),
+  }))
+})
+
+test('XDG_CONFIG_HOME moves the OpenCode CLI plugin', () => {
+  withHome((home) => {
+    installIntegration('opencode')
+    assert.ok(fs.existsSync(path.join(home, 'xdg', 'opencode', 'plugin', 'desktop-pet.js')))
+    assert.equal(fs.existsSync(path.join(home, '.config', 'opencode')), false)
+  }, home => ({ XDG_CONFIG_HOME: path.join(home, 'xdg') }))
+})
+
+test('an unusable variable refuses the install and writes nothing anywhere', () => {
+  const cases: Array<[Parameters<typeof installIntegration>[0], (home: string) => AgentConfigEnv]> = [
+    ['claudeCode', () => ({ CLAUDE_CONFIG_DIR: 'relative/claude' })],
+    ['claudeCode', home => ({ CLAUDE_CONFIG_DIR: path.join(home, 'not-created') })],
+    ['codex', home => ({ CODEX_HOME: path.join(home, 'not-created') })],
+    ['codex', () => ({ CODEX_HOME: '~/codex' })],
+    ['opencode', () => ({ XDG_CONFIG_HOME: 'relative' })],
+  ]
+  for (const [target, env] of cases) {
+    withHome((home) => {
+      assert.throws(() => installIntegration(target), AgentConfigDirError, JSON.stringify(env(home)))
+      assert.deepEqual(fs.readdirSync(home), [], 'not even the hook script or tokens are written')
+    }, env)
+  }
+})
+
+test('an ignored variable is reported without its value, and reads fall back to the default', () => {
+  withHome((home) => {
+    const status = agentConfigDirStatus('codex')
+    assert.deepEqual(status, { variable: 'CODEX_HOME', path: path.join(home, '.codex'), source: 'default', ignored: 'missing' })
+  }, () => ({ CODEX_HOME: path.join(os.tmpdir(), 'agent-pets-missing-codex-home-x9') }))
+})
+
+test('setting the variables after installing reports the old location and uninstall clears both', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-setup-move-'))
+  try {
+    withHomeAt(home, {}, () => {
+      installIntegration()
+    })
+    const moved = {
+      CLAUDE_CONFIG_DIR: made(path.join(home, 'moved', 'claude')),
+      CODEX_HOME: made(path.join(home, 'moved', 'codex')),
+      XDG_CONFIG_HOME: path.join(home, 'moved', 'xdg'),
+    }
+    withHomeAt(home, moved, () => {
+      assert.equal(agentConfigDirStatus('claude').staleLocation, path.join(home, '.claude', 'settings.json'))
+      assert.equal(agentConfigDirStatus('codex').staleLocation, path.join(home, '.codex', 'hooks.json'))
+      assert.equal(agentConfigDirStatus('opencode').staleLocation, path.join(home, '.config', 'opencode', 'plugin', 'desktop-pet.js'))
+      installIntegration()
+      uninstallIntegration()
+      for (const file of [
+        path.join(home, '.claude', 'settings.json'), path.join(moved.CLAUDE_CONFIG_DIR, 'settings.json'),
+        path.join(home, '.codex', 'hooks.json'), path.join(moved.CODEX_HOME, 'hooks.json'),
+      ]) assert.equal(fileHasAgentPetsHooks(file), false, file)
+      assert.equal(fs.existsSync(path.join(home, '.config', 'opencode', 'plugin', 'desktop-pet.js')), false)
+      assert.equal(fs.existsSync(path.join(moved.XDG_CONFIG_HOME, 'opencode', 'plugin', 'desktop-pet.js')), false)
+      assert.equal(fs.existsSync(hookScriptPath()), false, 'no remaining config refers to the shared script')
+      for (const kind of ['claude', 'codex', 'opencode'] as const) assert.equal(agentConfigDirStatus(kind).staleLocation, undefined)
+    })
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('the shared hook script stays while only the old location still uses it', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-setup-stale-'))
+  try {
+    withHomeAt(home, {}, () => { installIntegration('claudeCode') })
+    withHomeAt(home, { CLAUDE_CONFIG_DIR: made(path.join(home, 'moved')) }, () => {
+      uninstallIntegration('codex')
+      assert.ok(fs.existsSync(hookScriptPath()), 'the default settings.json still runs the script')
+    })
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+function withHomeAt(home: string, env: AgentConfigEnv, work: () => void): void {
+  configureSetupEnvironment({
+    agentConfigEnv: () => env,
+    homeDir: () => home,
+    appData: () => path.join(home, 'AppData'),
+    userData: () => path.join(home, 'userData'),
+    isPackaged: () => false,
+    integrationsDir: () => integrations,
+    nodePath: () => process.execPath,
+  })
+  work()
+}

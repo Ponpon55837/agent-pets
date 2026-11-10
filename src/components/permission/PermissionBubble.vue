@@ -9,8 +9,8 @@ import PermissionRiskBadge from '@/components/permission/PermissionRiskBadge.vue
 import PermissionDetails from '@/components/permission/PermissionDetails.vue'
 import PermissionCountdown from '@/components/permission/PermissionCountdown.vue'
 import { usePermissionClock } from '@/components/permission/usePermissionClock'
+import { formatClockDuration } from '@/utils/intl-format'
 import {
-  formatDuration,
   groupPermissionRequests,
   PERMISSION_CLICK_GUARD_MS,
   permissionRemainingMs,
@@ -235,7 +235,7 @@ onBeforeUnmount(() => {
             {{ permissionSourceName(group.first.agentId) }} · {{ group.first.projectId || t('projectUnknown') }}
           </span>
           <span v-if="group.count > 1" class="permission-queue-count">x{{ group.count }}</span>
-          <span class="permission-queue-time">{{ formatDuration(permissionRemainingMs(group.first, now)) }}</span>
+          <span class="permission-queue-time">{{ formatClockDuration(permissionRemainingMs(group.first, now)) }}</span>
           <span v-if="group.first.risk === 'high'" class="permission-queue-risk">{{ t('permissionRiskHigh') }}</span>
         </li>
       </ol>

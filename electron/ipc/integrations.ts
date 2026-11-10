@@ -22,6 +22,8 @@ export interface IntegrationIpcDependencies {
   installIntegration(target?: IntegrationTarget): void
   uninstallIntegration(target?: IntegrationTarget | 'all'): void
   isIntegrationTarget(value: unknown): value is IntegrationTarget
+  /** 等 agent 設定目錄解析完成（login shell 查詢）才改寫設定檔，避免先寫到預設位置。 */
+  agentConfigReady?(): Promise<void>
 }
 
 export function registerIntegrationIpc(deps: IntegrationIpcDependencies): void {
@@ -47,12 +49,13 @@ export function registerIntegrationIpc(deps: IntegrationIpcDependencies): void {
     }
   })
 
-  deps.ipcMain.handle(IPC_CHANNELS.installIntegrations, (event, target?: unknown) => {
+  deps.ipcMain.handle(IPC_CHANNELS.installIntegrations, async (event, target?: unknown) => {
     deps.assertTrustedIpcSender(event, deps.getPanelWindow())
     if (target !== undefined && !deps.isIntegrationTarget(target)) {
       return { ok: false, error: 'Unsupported integration target' }
     }
     try {
+      await deps.agentConfigReady?.()
       deps.installIntegration(target as IntegrationTarget | undefined)
       return { ok: true }
     } catch (error) {
@@ -60,13 +63,14 @@ export function registerIntegrationIpc(deps: IntegrationIpcDependencies): void {
     }
   })
 
-  deps.ipcMain.handle(IPC_CHANNELS.uninstallIntegrations, (event, target?: unknown) => {
+  deps.ipcMain.handle(IPC_CHANNELS.uninstallIntegrations, async (event, target?: unknown) => {
     deps.assertTrustedIpcSender(event, deps.getPanelWindow())
     // 'all' also removes tokens and bridge scripts (full cleanup before removing the app).
     if (target !== undefined && target !== 'all' && !deps.isIntegrationTarget(target)) {
       return { ok: false, error: 'Unsupported integration target' }
     }
     try {
+      await deps.agentConfigReady?.()
       deps.uninstallIntegration(target as IntegrationTarget | 'all' | undefined)
       return { ok: true }
     } catch (error) {

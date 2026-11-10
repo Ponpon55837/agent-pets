@@ -1,22 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-
-function generatedPlugin(source: 'opencode-cli' | 'opencode-desktop'): string {
-  const setup = readFileSync(new URL('../electron/setup.ts', import.meta.url), 'utf8')
-  const functionStart = setup.indexOf('function openCodePluginContent(')
-  const templateStart = setup.indexOf('return `', functionStart) + 'return `'.length
-  const templateEndMatch = /\r?\n`\r?\n}/.exec(setup.slice(templateStart))
-  const templateEnd = templateEndMatch ? templateStart + templateEndMatch.index : -1
-  assert.notEqual(functionStart, -1)
-  assert.notEqual(templateStart, -1)
-  assert.notEqual(templateEnd, -1)
-  return setup.slice(templateStart, templateEnd).replace('${source}', source)
-}
+import { openCodePluginContent } from '../electron/setup.ts'
 
 test('generated OpenCode plugins are valid modules with permission hooks', async () => {
   for (const source of ['opencode-cli', 'opencode-desktop'] as const) {
-    const code = generatedPlugin(source)
+    const code = openCodePluginContent(source)
     const moduleUrl = `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`
     const plugin = await import(moduleUrl)
     const hooks = await plugin.DesktopPetPlugin({

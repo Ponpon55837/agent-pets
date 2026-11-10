@@ -21,12 +21,14 @@ import StatusPanelSessions from '@/components/status-panel/StatusPanelSessions.v
 import StatusPanelUsage from '@/components/status-panel/StatusPanelUsage.vue'
 import PluginTabContent from '@/components/status-panel/PluginTabContent.vue'
 import { usePluginTabs } from '@/composables/usePluginTabs'
-import { isBuiltInDashboardTab, parseStoredDashboardTab, pluginIdOfTab, resolveDashboardTab } from '@/utils/plugin-tabs'
+import { isBuiltInDashboardTab, pluginIdOfTab, resolveDashboardTab } from '@/utils/plugin-tabs'
 import { requestPluginDetail, type PluginDetailRequestSection } from '@/utils/plugin-detail-request'
 import { panelThemeTargetRequest } from '@/utils/settings-navigation'
 import { closePanelThemeEditor, panelThemeEditorRequest } from '@/composables/useMyPanelThemes'
 import { countByBucket } from '@/utils/session-view'
-import { DEFAULT_SETTINGS_GROUP, SETTINGS_GROUPS, isSettingsGroupId, type SettingsGroupId } from '@/utils/settingsRegistry'
+import { SETTINGS_GROUPS, type SettingsGroupId } from '@/utils/settingsRegistry'
+import { STORAGE_KEYS } from '@/utils/storage-keys'
+import { readStored, writeStored } from '@/utils/local-storage'
 
 const store = useAgentStore()
 const panelRoot = ref<HTMLElement | null>(null)
@@ -60,19 +62,8 @@ function onHeaderMenu(id: string): void {
 
 type DashboardTab = string
 
-const DASHBOARD_TAB_STORAGE_KEY = 'agent-pets-dashboard-tab'
-const SETTINGS_GROUP_STORAGE_KEY = 'agent-pets-settings-group'
-
-function readStoredSettingsGroup(): SettingsGroupId {
-  try {
-    const stored = localStorage.getItem(SETTINGS_GROUP_STORAGE_KEY)
-    if (isSettingsGroupId(stored)) return stored
-  } catch {}
-  return DEFAULT_SETTINGS_GROUP
-}
-
 // The last-used group is remembered across panel opens.
-const settingsGroup = ref<SettingsGroupId>(readStoredSettingsGroup())
+const settingsGroup = ref<SettingsGroupId>(readStored(STORAGE_KEYS.settingsGroup))
 const dashboardTab = ref<DashboardTab>('sessions')
 const pluginTabs = usePluginTabs()
 // Usage and History mount on first visit, then stay mounted so their state survives tab switches.
@@ -178,7 +169,7 @@ function openPluginSettings(): void {
 function selectDashboardTab(tab: DashboardTab): void {
   dashboardTab.value = tab
   if (isBuiltInDashboardTab(tab)) visitedTabs.value.add(tab)
-  try { localStorage.setItem(DASHBOARD_TAB_STORAGE_KEY, tab) } catch {}
+  writeStored(STORAGE_KEYS.dashboardTab, tab)
   // refreshQuota() is TTL-gated, so this only reaches the network when the
   // reading is stale; a first-ever open still loads.
   if (tab === 'sessions' || tab === 'usage') void store.refreshQuota()
@@ -208,8 +199,7 @@ watch(() => [pluginTabs.loading.value, pluginTabIds.value.join('|')] as const, (
   if (pluginTabs.loading.value) return
   if (!restoredTab) {
     restoredTab = true
-    let stored: string | null = null
-    try { stored = parseStoredDashboardTab(localStorage.getItem(DASHBOARD_TAB_STORAGE_KEY)) } catch {}
+    const stored = readStored(STORAGE_KEYS.dashboardTab)
     if (stored && stored !== dashboardTab.value) {
       const resolved = resolveDashboardTab(stored, pluginTabIds.value)
       if (resolved !== dashboardTab.value) selectDashboardTab(resolved)
@@ -237,7 +227,7 @@ watch(() => store.panelOpenCount, async () => {
 })
 
 watch(settingsGroup, group => {
-  try { localStorage.setItem(SETTINGS_GROUP_STORAGE_KEY, group) } catch {}
+  writeStored(STORAGE_KEYS.settingsGroup, group)
 })
 
 onMounted(() => {

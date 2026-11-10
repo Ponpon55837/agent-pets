@@ -1,5 +1,6 @@
 import { IPC_CHANNELS } from '../ipc/channels'
 import { sanitizePetId } from '../pet-id.ts'
+import { rasterContentType } from '../pet-sprite-validation.ts'
 import { app, BrowserWindow, WebContentsView, screen, ipcMain, dialog, net, session, protocol, globalShortcut, powerMonitor, shell, safeStorage, Notification, nativeTheme } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
@@ -7,8 +8,7 @@ import { logMain, mainLogger } from '../diagnostics/main-log'
 import { buildDiagnosticsReport, registerDiagnosticsSection } from '../diagnostics/report'
 import { eventPipelineStats } from '../event-stats'
 import { resolveLocalPorts } from './ports'
-import { openWithCorruptionRecovery } from './db-recovery'
-import { localUsageCatchUpDelayMs, LOCAL_USAGE_TICK_MS, shouldRunLocalUsageTick } from './scan-schedule'
+import { LOCAL_WIRE_HEADERS, LOCAL_WIRE_HOST, LOCAL_WIRE_PATHS } from '../../src/types/local-wire.ts'
 import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
 import { createSessionJumpService, withSessionJumpContext } from './session-jump-runtime'
 import { join, resolve } from 'path'
@@ -80,10 +80,9 @@ import type { PresentationIntent } from '../../src/types/presentation'
 import type { PluginEventSourceStatusView, PluginPanelPlugin, PluginPanelResult, PluginPanelSnapshot } from '../../src/types/plugin'
 import type { IpcErrorCode } from '../../src/types/ipc'
 
-import type { PetEdge, PetWindowMode, PetWindowModeState } from '../../src/types/pet-window'
 import { createPluginSkinPetId, isPluginSkinPetId, isValidPetId, isValidRegularPetId } from '../../src/utils/pet-id.ts'
 import { availablePluginSkinPetIds } from '../plugin-skins.ts'
-import { EDGE_DWELL_MS, EDGE_REDOCK_AFTER_MS, EDGE_TRIGGER_DISTANCE_PX, clampWindowBounds, edgeWindowBounds, miniWindowBounds, nearestEdge, type WindowBounds } from '../pet-window-mode'
+import { EDGE_TRIGGER_DISTANCE_PX, clampWindowBounds, edgeWindowBounds, miniWindowBounds, nearestEdge } from '../pet-window-mode'
 import { IS_MAC, hookScriptDeployPath, readWindowState, syncClaudePermissionRespondOptIn, writeWindowState } from '../setup'
 
 import { createWindowsFullscreenDetector, nativeWindowHandleToPointer, type WindowsFullscreenState } from '../windows-fullscreen-detector'
@@ -107,10 +106,16 @@ import { PanelThemeRuntime } from './panel-theme-runtime'
 import { emptyPanelThemeState } from '../plugin-panel-themes'
 import { deleteUserImage, prepareUserImage, readUserImageSource, storeUserImage } from '../panel-theme-images'
 import { mainState, type PluginSkinFallbackInfo } from './state'
+import { appUserDataPaths } from './app-user-data'
+import { createPetWindowModeService } from './pet-window-mode-service'
+import { createHistoryRuntimeService } from './history-runtime-service'
 import { EMPTY_ATTENTION } from '../attention-tracker'
 import { attachHotkeyInfo, PermissionHotkeys } from '../permission-hotkeys'
+import { clamp } from '../../src/utils/number'
+import { QUOTA_TOOLTIP_HEADROOM_H, clampPetWindowDimension, initialPetWindowSize } from '../../src/utils/pet-window-size'
 import { PANEL_GAP, PANEL_WIDTH, PANEL_BLUR_HIDE_DELAY_MS, clampPanelSize, clampRectToWorkArea, computePanelPlacement, effectivePanelSize, panelMaxSize, panelMinSize, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
 import { isRecord } from '../value-guards.ts'
+import { currentAgentConfigDirs } from '../agent-config-dirs.ts'
 
 let permissionHotkeys: PermissionHotkeys | null = null
 
@@ -130,16 +135,6 @@ function getPermissionHotkeys(): PermissionHotkeys {
 }
 
 export { PANEL_GAP, PANEL_WIDTH }
-// petWindow's actual bounds include a fixed, unscaled band of transparent
-// space reserved above the visible sprite for the quota tooltip to pop
-// into (see QUOTA_TOOLTIP_HEADROOM_H in agentStore.ts — keep in sync).
-// computePanelBounds must anchor off the visible pet, not the raw window
-// bounds, or the panel opens with a big gap floating above the pet — worst
-// at small pet sizes, where that fixed band is a large fraction of the
-// window's total (scaled) height. Only a fallback now: the renderer reports
-// its measured content height (see petContentHeight), which also accounts
-// for the status lines, whose size does not scale with the pet.
-export const PET_WINDOW_TOP_HEADROOM = 190
 export const MAX_PET_ZIP_BYTES = 10 * 1024 * 1024
 export const MAX_PET_ZIP_ENTRIES = 64
 export const MAX_PET_UNCOMPRESSED_BYTES = 25 * 1024 * 1024
@@ -162,15 +157,15 @@ export function sendIntegrationTestEvent(
 
   return new Promise((resolvePromise, reject) => {
     const request = httpRequest({
-      hostname: '127.0.0.1',
+      hostname: LOCAL_WIRE_HOST,
       // 與事件伺服器實際監聽的埠相同（開發或 e2e 執行可能不是 17373）。
       port: localPorts().event,
-      path: '/v1/events',
+      path: LOCAL_WIRE_PATHS.events,
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         'content-length': Buffer.byteLength(body),
-        'x-agent-pets-token': mainState.eventToken,
+        [LOCAL_WIRE_HEADERS.eventToken]: mainState.eventToken,
       },
     }, (response) => {
       response.resume()
@@ -256,10 +251,6 @@ export function animateBounds(target: { x: number; y: number; width: number; hei
   }, 16)
 }
 
-export function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(value, max))
-}
-
 export function finiteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
@@ -336,7 +327,7 @@ export async function pluginPanelSnapshot(): Promise<PluginPanelResult<PluginPan
   try {
     const preferences = mainState.pluginPreferences.get()
     const plugins: PluginPanelPlugin[] = await Promise.all(mainState.pluginRegistry.list().map(async entry => {
-      const root = resolve(app.getPath('userData'), 'plugins', entry.id, entry.currentVersion)
+      const root = appUserDataPaths().pluginVersionRoot(entry.id, entry.currentVersion)
       const source = await readRegularFileWithin(root, 'plugin.json', 256 * 1024)
       let manifest: PluginPanelPlugin['manifest'] = null
       if (source) {
@@ -374,17 +365,6 @@ export function safeJoin(base: string, ...parts: string[]): string | null {
   return resolvedPath
 }
 
-export function isSupportedRasterImage(data: Uint8Array): boolean {
-  const png = data.length >= 8
-    && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47
-    && data[4] === 0x0d && data[5] === 0x0a && data[6] === 0x1a && data[7] === 0x0a
-  const jpeg = data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff
-  const webp = data.length >= 12
-    && Buffer.from(data.subarray(0, 4)).toString('ascii') === 'RIFF'
-    && Buffer.from(data.subarray(8, 12)).toString('ascii') === 'WEBP'
-  return png || jpeg || webp
-}
-
 export function contentTypeFor(filePath: string): string {
   switch (path.extname(filePath).toLowerCase()) {
     case '.html': return 'text/html; charset=utf-8'
@@ -398,17 +378,6 @@ export function contentTypeFor(filePath: string): string {
     case '.woff2': return 'font/woff2'
     default: return 'application/octet-stream'
   }
-}
-
-export function rasterContentType(data: Uint8Array): string | null {
-  if (data.length >= 8
-    && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47
-    && data[4] === 0x0d && data[5] === 0x0a && data[6] === 0x1a && data[7] === 0x0a) return 'image/png'
-  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'image/jpeg'
-  if (data.length >= 12
-    && Buffer.from(data.subarray(0, 4)).toString('ascii') === 'RIFF'
-    && Buffer.from(data.subarray(8, 12)).toString('ascii') === 'WEBP') return 'image/webp'
-  return null
 }
 
 export async function readRegularFileWithin(root: string, relativePath: string, maxBytes: number): Promise<Buffer | null> {
@@ -516,7 +485,7 @@ export function enabledPluginRoot(pluginId: string): string | null {
   if (!context?.pluginsEnabled || !context.enabled) return null
   const entry = mainState.pluginRegistry?.list().find(plugin => plugin.id === pluginId)
   if (!entry || (entry.status !== 'installed' && entry.status !== 'enabled')) return null
-  return resolve(app.getPath('userData'), 'plugins', entry.id, entry.currentVersion)
+  return appUserDataPaths().pluginVersionRoot(entry.id, entry.currentVersion)
 }
 
 export async function refreshPluginRuntimeContexts(): Promise<void> {
@@ -528,7 +497,7 @@ export async function refreshPluginRuntimeContexts(): Promise<void> {
     if (entry.status !== 'installed' && entry.status !== 'enabled') continue
     const preference = preferences?.plugins[entry.id]
     if (!preference) continue
-    const root = resolve(app.getPath('userData'), 'plugins', entry.id, entry.currentVersion)
+    const root = appUserDataPaths().pluginVersionRoot(entry.id, entry.currentVersion)
     const source = await readRegularFileWithin(root, 'plugin.json', 256 * 1024)
     if (!source) continue
     try {
@@ -971,7 +940,7 @@ export function initializePluginCatalogAutoCheck(): void {
 
 export async function createPluginServices(): Promise<void> {
   if (mainState.pluginRegistry || mainState.pluginPreferences || mainState.pluginHostWindow) return
-  const userDataDirectory = app.getPath('userData')
+  const userDataDirectory = appUserDataPaths().root
   mainState.pluginRegistry = new PluginRegistry(userDataDirectory)
   mainState.pluginDeveloperModeWatcher = new PluginDeveloperModeWatcher(500, pluginId => {
     // Surfaces in the plugin's diagnostics in the manager instead of vanishing.
@@ -1023,7 +992,7 @@ export async function createPluginServices(): Promise<void> {
   await refreshPluginRuntimeContexts()
   mainState.panelThemeRuntime = new PanelThemeRuntime({
     userDataDirectory,
-    pluginRoot: (pluginId, version) => resolve(userDataDirectory, 'plugins', pluginId, version),
+    pluginRoot: (pluginId, version) => appUserDataPaths().pluginVersionRoot(pluginId, version),
     readRegularFileWithin,
     send: state => {
       const window = mainState.panelWindow
@@ -1472,8 +1441,8 @@ export async function createPluginServices(): Promise<void> {
     translate: key => t(key),
     readUserImage: readUserImageSource,
     prepareUserImage,
-    storeUserImage: (pluginId, prepared) => storeUserImage(app.getPath('userData'), pluginId, prepared),
-    deleteUserImage: (pluginId, file) => deleteUserImage(app.getPath('userData'), pluginId, file),
+    storeUserImage: (pluginId, prepared) => storeUserImage(appUserDataPaths().root, pluginId, prepared),
+    deleteUserImage: (pluginId, file) => deleteUserImage(appUserDataPaths().root, pluginId, file),
     pluginPanelError,
     now: Date.now,
   })
@@ -1494,250 +1463,40 @@ export async function createPluginServices(): Promise<void> {
 
 }
 
-export function clearEdgeDwell(): void {
-  cancelEdgeRedock()
-  if (mainState.edgeDwellHandle) clearTimeout(mainState.edgeDwellHandle)
-  mainState.edgeDwellHandle = null
-  mainState.edgeDwellCandidate = null
-}
+// 寵物視窗模式由獨立服務負責；保留這些匯出名稱，IPC registrar、托盤與建立視窗的接線不變。
+export const petWindowModes = createPetWindowModeService({
+  state: mainState,
+  // 延後綁定：Electron 的 screen 模組要等 app ready 後才能使用。
+  screen: {
+    getDisplayMatching: rect => screen.getDisplayMatching(rect),
+    getAllDisplays: () => screen.getAllDisplays(),
+    getPrimaryDisplay: () => screen.getPrimaryDisplay(),
+    getCursorScreenPoint: () => screen.getCursorScreenPoint(),
+  },
+  writeWindowState,
+  edgeModeEnabled: () => currentDesktopPreferences().edgeModeEnabled,
+  hasActivePermissionRequests: () => mainState.permissionBroker?.hasActiveRequests() ?? false,
+  repositionPanel: () => repositionVisiblePanel(),
+  onVisibilityChanged: () => mainState.pluginFeedController?.onVisibilityChanged(),
+  onModeApplied: () => mainState.desktopTray?.rebuild(),
+})
 
-export function petModeState(): PetWindowModeState {
-  return mainState.petWindowEdge
-    ? { mode: mainState.petWindowMode, edge: mainState.petWindowEdge }
-    : { mode: mainState.petWindowMode }
-}
-
-export function broadcastPetWindowMode(): void {
-  mainState.pluginFeedController?.onVisibilityChanged()
-  const state = petModeState()
-  for (const window of [mainState.petWindow, mainState.panelWindow]) {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send(IPC_CHANNELS.petWindowModeUpdated, state)
-    }
-  }
-}
-
-export function displayForBounds(bounds: WindowBounds) {
-  return screen.getDisplayMatching({
-    x: Math.round(bounds.x),
-    y: Math.round(bounds.y),
-    width: Math.max(1, Math.round(bounds.width)),
-    height: Math.max(1, Math.round(bounds.height)),
-  })
-}
-
-export function displayForSavedState(saved: ReturnType<typeof readWindowState>) {
-  if (saved?.displayId !== undefined) {
-    const byId = screen.getAllDisplays().find(display => display.id === saved.displayId)
-    if (byId) return byId
-  }
-  const savedBounds = saved?.normalBounds ?? (
-    saved && saved.width !== undefined && saved.height !== undefined
-      ? { x: saved.x, y: saved.y, width: saved.width, height: saved.height }
-      : null
-  )
-  return savedBounds ? displayForBounds(savedBounds) : screen.getPrimaryDisplay()
-}
-
-export function persistCurrentPetWindowState(): void {
-  if (!mainState.petWindow || mainState.petWindow.isDestroyed()) return
-  const bounds = mainState.petWindow.getBounds()
-  const display = displayForBounds(bounds)
-  const normal = mainState.edgeRestoreBounds ?? mainState.normalPetBounds ?? bounds
-  writeWindowState({
-    x: bounds.x,
-    y: bounds.y,
-    width: bounds.width,
-    height: bounds.height,
-    mode: mainState.petWindowMode,
-    edge: mainState.petWindowEdge ?? undefined,
-    displayId: display.id,
-    displayBounds: display.bounds,
-    normalBounds: normal,
-  })
-}
-
-export function scheduleShimejiPositionPersist(): void {
-  if (mainState.shimejiPersistHandle) clearTimeout(mainState.shimejiPersistHandle)
-  mainState.shimejiPersistHandle = setTimeout(() => {
-    mainState.shimejiPersistHandle = null
-    persistCurrentPetWindowState()
-  }, 2_000)
-}
-
-export function applyNormalPetBounds(): void {
-  if (!mainState.petWindow || mainState.petWindow.isDestroyed()) return
-  clearEdgeDwell()
-  const current = mainState.petWindow.getBounds()
-  const restore = mainState.edgeRestoreBounds ?? mainState.normalPetBounds ?? current
-  const display = displayForBounds(restore)
-  const normal = clampWindowBounds(restore, display.workArea)
-  mainState.normalPetBounds = normal
-  mainState.edgeRestoreBounds = null
-  mainState.petWindowMode = 'normal'
-  mainState.petWindowEdge = null
-  mainState.petWindow.setIgnoreMouseEvents(false)
-  mainState.petWindow.setBounds(normal)
-  repositionVisiblePanel()
-  persistCurrentPetWindowState()
-  broadcastPetWindowMode()
-  mainState.desktopTray?.rebuild()
-}
-
-export function applyMiniPetBounds(): void {
-  if (!mainState.petWindow || mainState.petWindow.isDestroyed()) return
-  clearEdgeDwell()
-  const current = mainState.petWindow.getBounds()
-  const normalSource = mainState.edgeRestoreBounds ?? mainState.normalPetBounds ?? current
-  const display = displayForBounds(normalSource)
-  mainState.normalPetBounds = clampWindowBounds(normalSource, display.workArea)
-  mainState.edgeRestoreBounds = null
-  mainState.petWindowMode = 'mini'
-  mainState.petWindowEdge = null
-  mainState.petWindow.setIgnoreMouseEvents(false)
-  mainState.petWindow.setBounds(miniWindowBounds(mainState.normalPetBounds, display.workArea))
-  repositionVisiblePanel()
-  persistCurrentPetWindowState()
-  broadcastPetWindowMode()
-  mainState.desktopTray?.rebuild()
-}
-
-export function applyEdgePetBounds(edge: PetEdge): void {
-  if (!mainState.petWindow || mainState.petWindow.isDestroyed()) return
-  if (!currentDesktopPreferences().edgeModeEnabled) {
-    applyNormalPetBounds()
-    return
-  }
-  clearEdgeDwell()
-  const current = mainState.petWindow.getBounds()
-  // Edge can only be entered from a full-size normal window. Capture the
-  // actual bounds at this moment so expansion returns to the user's exact
-  // pre-edge position, even if a previous persisted snapshot is stale.
-  const normalSource = mainState.petWindowMode === 'normal'
-    ? current
-    : mainState.edgeRestoreBounds ?? mainState.normalPetBounds ?? current
-  const display = displayForBounds(normalSource)
-  mainState.normalPetBounds = clampWindowBounds(normalSource, display.workArea)
-  mainState.edgeRestoreBounds = { ...mainState.normalPetBounds }
-  mainState.petWindowMode = 'edge'
-  mainState.petWindowEdge = edge
-  // Edge is an explicit, opaque handle-sized window. Keep it interactive so
-  // a click or drag can expand it; click-through remains owned by Normal's
-  // transparent-region hit testing.
-  mainState.petWindow.setIgnoreMouseEvents(false)
-  mainState.petWindow.setBounds(edgeWindowBounds(mainState.normalPetBounds, display.workArea, edge))
-  repositionVisiblePanel()
-  persistCurrentPetWindowState()
-  broadcastPetWindowMode()
-  mainState.desktopTray?.rebuild()
-}
-
-export function setPetWindowMode(mode: PetWindowMode): void {
-  if (!mainState.petWindow || mainState.petWindow.isDestroyed()) return
-  // A permission bubble must remain fully usable. The Broker remains the
-  // authority, so a compact/partially hidden window is never allowed while a
-  // request is pending.
-  if (mode !== 'normal' && (mainState.permissionBroker?.hasActiveRequests() ?? false)) {
-    applyNormalPetBounds()
-    return
-  }
-  if (mode === 'normal') applyNormalPetBounds()
-  else if (mode === 'mini') applyMiniPetBounds()
-  else if (mainState.petWindowEdge) applyEdgePetBounds(mainState.petWindowEdge)
-}
-
-export function toggleMiniMode(): void {
-  setPetWindowMode(mainState.petWindowMode === 'mini' ? 'normal' : 'mini')
-}
-
-let edgeRedockHandle: ReturnType<typeof setInterval> | null = null
-
-export function cancelEdgeRedock(): void {
-  if (edgeRedockHandle) clearInterval(edgeRedockHandle)
-  edgeRedockHandle = null
-}
-
-// After a hover-expand from the edge, tuck the pet back once the cursor has
-// stayed away and the pet is still resting against that edge.
-export function scheduleEdgeRedock(): void {
-  cancelEdgeRedock()
-  if (!currentDesktopPreferences().edgeModeEnabled) return
-  let outsideSince: number | null = null
-  edgeRedockHandle = setInterval(() => {
-    const window = mainState.petWindow
-    if (!window || window.isDestroyed() || mainState.petWindowMode !== 'normal' || mainState.dragPollHandle) {
-      cancelEdgeRedock()
-      return
-    }
-    const bounds = window.getBounds()
-    const display = displayForBounds(bounds)
-    if (!nearestEdge(bounds, display.workArea, EDGE_TRIGGER_DISTANCE_PX)) {
-      cancelEdgeRedock()
-      return
-    }
-    const cursor = screen.getCursorScreenPoint()
-    const inside = cursor.x >= bounds.x && cursor.x <= bounds.x + bounds.width
-      && cursor.y >= bounds.y && cursor.y <= bounds.y + bounds.height
-    if (inside || mainState.permissionBroker?.hasActiveRequests()) {
-      outsideSince = null
-      return
-    }
-    outsideSince ??= Date.now()
-    if (Date.now() - outsideSince >= EDGE_REDOCK_AFTER_MS) {
-      cancelEdgeRedock()
-      scheduleEdgeDwell()
-    }
-  }, 400)
-}
-
-export function scheduleEdgeDwell(): void {
-  clearEdgeDwell()
-  if (
-    !mainState.petWindow
-    || mainState.petWindow.isDestroyed()
-    || mainState.petWindowMode !== 'normal'
-    || !currentDesktopPreferences().edgeModeEnabled
-  ) return
-  const bounds = mainState.petWindow.getBounds()
-  const display = displayForBounds(bounds)
-  const edge = nearestEdge(bounds, display.workArea, EDGE_TRIGGER_DISTANCE_PX)
-  if (!edge) return
-  mainState.edgeDwellCandidate = { displayId: display.id, edge }
-  mainState.edgeDwellHandle = setTimeout(() => {
-    mainState.edgeDwellHandle = null
-    const candidate = mainState.edgeDwellCandidate
-    mainState.edgeDwellCandidate = null
-    if (!candidate || !mainState.petWindow || mainState.petWindow.isDestroyed()) return
-    const current = mainState.petWindow.getBounds()
-    const currentDisplay = displayForBounds(current)
-    const currentEdge = nearestEdge(current, currentDisplay.workArea, EDGE_TRIGGER_DISTANCE_PX)
-    if (currentDisplay.id === candidate.displayId && currentEdge === candidate.edge) {
-      applyEdgePetBounds(candidate.edge)
-    }
-  }, EDGE_DWELL_MS)
-}
-
-export function rehomePetWindowForDisplayChange(): void {
-  if (!mainState.petWindow || mainState.petWindow.isDestroyed()) return
-  const current = mainState.petWindow.getBounds()
-  const display = displayForBounds(current)
-  const normalSource = mainState.edgeRestoreBounds ?? mainState.normalPetBounds ?? current
-  mainState.normalPetBounds = clampWindowBounds(normalSource, display.workArea)
-  if (mainState.petWindowMode === 'edge') mainState.edgeRestoreBounds = { ...mainState.normalPetBounds }
-  if (mainState.petWindowMode === 'mini') {
-    mainState.petWindow.setBounds(miniWindowBounds(mainState.normalPetBounds, display.workArea))
-  } else if (mainState.petWindowMode === 'edge' && mainState.petWindowEdge) {
-    mainState.petWindow.setBounds(edgeWindowBounds(mainState.normalPetBounds, display.workArea, mainState.petWindowEdge))
-  } else {
-    mainState.petWindowMode = 'normal'
-    mainState.petWindowEdge = null
-    mainState.petWindow.setIgnoreMouseEvents(false)
-    mainState.petWindow.setBounds(mainState.normalPetBounds)
-  }
-  repositionVisiblePanel()
-  persistCurrentPetWindowState()
-  broadcastPetWindowMode()
-}
+export const {
+  clearEdgeDwell,
+  cancelEdgeRedock,
+  displayForBounds,
+  displayForSavedState,
+  scheduleShimejiPositionPersist,
+  scheduleEdgeRedock,
+  scheduleEdgeDwell,
+} = petWindowModes
+export const petModeState = petWindowModes.modeState
+export const broadcastPetWindowMode = petWindowModes.broadcastMode
+export const persistCurrentPetWindowState = petWindowModes.persistCurrentState
+export const applyNormalPetBounds = petWindowModes.applyNormalBounds
+export const setPetWindowMode = petWindowModes.setMode
+export const toggleMiniMode = petWindowModes.toggleMini
+export const rehomePetWindowForDisplayChange = petWindowModes.rehomeForDisplayChange
 
 export function applyPetCaptureProtection(): void {
   if (!mainState.petWindow || mainState.petWindow.isDestroyed()) return
@@ -1879,14 +1638,9 @@ export function createPetWindow() {
   // the 1x (L) size and only shrink once the store hydrates — long enough for
   // the panel to open against L-sized bounds, and, because the window is
   // bottom-anchored, enough to walk the pet down the screen every launch.
-  // The fallback is a rough guess; keep it in sync with PET_BASE_W/H,
-  // QUOTA_TOOLTIP_MIN_W and QUOTA_TOOLTIP_HEADROOM_H in agentStore.ts.
-  const w = saved?.width !== undefined
-    ? Math.round(clamp(saved.width, 80, 1_600))
-    : Math.max(Math.round(250 * scale), 260)
-  const h = saved?.height !== undefined
-    ? Math.round(clamp(saved.height, 80, 1_600))
-    : Math.round(232 * scale) + 190
+  const fallback = initialPetWindowSize(scale)
+  const w = saved?.width !== undefined ? clampPetWindowDimension(saved.width) : fallback.width
+  const h = saved?.height !== undefined ? clampPetWindowDimension(saved.height) : fallback.height
 
   const savedDisplay = displayForSavedState(saved)
   const savedNormal = saved?.normalBounds ?? (
@@ -2109,10 +1863,14 @@ export function computePanelBounds(height: number, width = PANEL_WIDTH) {
   // headroom band is only added above, not to the sides). Prefer the height
   // the pet renderer measured for its own content: it depends on pet size AND
   // status-line count, which the headroom constant cannot express.
+  // The fixed, unscaled headroom is only the fallback: the panel must anchor
+  // off the visible pet, not the raw window bounds, or it opens with a big gap
+  // floating above the pet — worst at small pet sizes, where that band is a
+  // large fraction of the window's total (scaled) height.
   return computePanelPlacement({
     petBounds,
     petContentHeight: mainState.petContentHeight,
-    petHeadroom: PET_WINDOW_TOP_HEADROOM,
+    petHeadroom: QUOTA_TOOLTIP_HEADROOM_H,
     workArea: screen.getDisplayMatching(petBounds).workArea,
     width,
     height,
@@ -2126,7 +1884,7 @@ export function computePanelBounds(height: number, width = PANEL_WIDTH) {
 
 function panelSizeStore(): PanelSizeStore {
   if (!mainState.panelSizeStore) {
-    const store = new PanelSizeStore(join(app.getPath('userData'), 'panel-size.json'))
+    const store = new PanelSizeStore(appUserDataPaths().panelSize)
     mainState.panelUserSize = store.load()
     app.once('before-quit', () => store.flush())
     mainState.panelSizeStore = store
@@ -2753,41 +2511,6 @@ export function currentHistorySummary(projectId?: string, rangeDays = 7): Histor
     : summary
 }
 
-// Opening the History tab must not rescan the whole log tree each time; the
-// 60s timer is the regular cadence, so panel-triggered refreshes are throttled.
-const LOCAL_USAGE_MIN_SCAN_INTERVAL_MS = 10_000
-let localUsageLastScanAt = 0
-let localUsageCatchUpTimer: ReturnType<typeof setTimeout> | null = null
-let localUsageStalledScans = 0
-
-export async function refreshLocalUsage(options: { catchUp?: boolean } = {}): Promise<void> {
-  if (!mainState.localUsageReader || mainState.localUsageScanPromise) return mainState.localUsageScanPromise ?? Promise.resolve()
-  if (!options.catchUp && Date.now() - localUsageLastScanAt < LOCAL_USAGE_MIN_SCAN_INTERVAL_MS) return
-  mainState.localUsageScanPromise = mainState.localUsageReader.scan()
-    .then(result => {
-      localUsageLastScanAt = Date.now()
-      if (result.recordsImported > 0) broadcastHistoryUpdated()
-      evaluateLocalTokenAchievements()
-      localUsageStalledScans = result.bytesRead > 0 ? 0 : localUsageStalledScans + 1
-      // A budget-limited scan continues shortly instead of waiting a full tick.
-      const delay = localUsageCatchUpDelayMs(result.pending, powerMonitor.isOnBatteryPower(), localUsageStalledScans)
-      if (delay !== null && !localUsageCatchUpTimer && !mainState.isQuitting) {
-        localUsageCatchUpTimer = setTimeout(() => {
-          localUsageCatchUpTimer = null
-          void refreshLocalUsage({ catchUp: true })
-        }, delay)
-        localUsageCatchUpTimer.unref?.()
-      }
-    })
-    .catch(error => {
-      console.error('Local token usage scan failed', error)
-    })
-    .finally(() => {
-      mainState.localUsageScanPromise = null
-    })
-  return mainState.localUsageScanPromise
-}
-
 function flushHistoryUpdated(): void {
   for (const window of [mainState.petWindow, mainState.panelWindow]) {
     historySender.send(window, sendHistoryUpdatedTo)
@@ -2854,7 +2577,7 @@ export function createPresentationServices(presentationToken: string): void {
 export function createProgressionServices(): void {
   if (mainState.progressionStore) return
   try {
-    mainState.progressionStore = new ProgressionStore(join(app.getPath('userData'), 'progression.sqlite'))
+    mainState.progressionStore = new ProgressionStore(appUserDataPaths().progression)
   } catch (error) {
     // A missing SQLite runtime must not prevent the desktop pet from starting;
     // the renderer simply keeps its progression card unavailable until the
@@ -2872,7 +2595,7 @@ export const ACHIEVEMENT_STORE_RETRY_DELAYS_MS = [3_000, 10_000, 30_000]
 export function createAchievementServices(): void {
   if (mainState.achievementStore) return
   try {
-    mainState.achievementStore = new AchievementStore(join(app.getPath('userData'), 'achievements.sqlite'))
+    mainState.achievementStore = new AchievementStore(appUserDataPaths().achievements)
     mainState.achievementStoreRetryAttempt = 0
     if (mainState.achievementStoreRetryTimer) {
       clearTimeout(mainState.achievementStoreRetryTimer)
@@ -2908,20 +2631,28 @@ export function scheduleAchievementStoreRetry(): void {
   }, delay)
 }
 
-const HISTORY_STORE_RETRY_DELAYS_MS = [30_000, 120_000, 600_000] as const
-const STARTUP_DEFERRED_WORK_MS = 10_000
-let deferredHistoryWorkTimer: ReturnType<typeof setTimeout> | null = null
-let historyStoreRetryTimer: ReturnType<typeof setTimeout> | null = null
-let historyPruneTimer: ReturnType<typeof setInterval> | null = null
-const HISTORY_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000
-let historyStoreRetryAttempt = 0
+// 歷史資料庫、本機用量掃描與它們的計時器由獨立服務負責；成就與廣播留在這裡，以回呼傳入。
+export const historyRuntime = createHistoryRuntimeService({
+  state: mainState,
+  databasePath: () => appUserDataPaths().history,
+  openStore: databasePath => new HistoryStore(databasePath),
+  createLocalUsageReader: options => new LocalUsageReader(options),
+  homeDir: () => app.getPath('home'),
+  configDirs: () => {
+    const { claude, codex } = currentAgentConfigDirs()
+    return { claude: claude.path, codex: codex.path }
+  },
+  isOnBatteryPower: () => powerMonitor.isOnBatteryPower(),
+  onRecovered: notifyHistoryRecovered,
+  onHistoryUpdated: () => broadcastHistoryUpdated(),
+  onLocalRecordsImported: (records, retentionDays) => syncLocalTokenAchievements(records, retentionDays),
+  onLocalScanFinished: () => evaluateLocalTokenAchievements(),
+  onDeferredStartupWork: () => reconcileAchievementsFromHistory(),
+  logError: (message, error) => console.error(message, error),
+})
 
-export function cancelHistoryStoreRetry(): void {
-  if (deferredHistoryWorkTimer) clearTimeout(deferredHistoryWorkTimer)
-  deferredHistoryWorkTimer = null
-  if (historyStoreRetryTimer) clearTimeout(historyStoreRetryTimer)
-  historyStoreRetryTimer = null
-}
+export const createHistoryServices = historyRuntime.start
+export const refreshLocalUsage = historyRuntime.refreshLocalUsage
 
 function notifyHistoryRecovered(): void {
   try {
@@ -2931,73 +2662,6 @@ function notifyHistoryRecovered(): void {
       body: t('reliability.history.recoveredBody'),
     }).show()
   } catch {}
-}
-
-export function createHistoryServices(): void {
-  if (mainState.historyStore) return
-  try {
-    const databasePath = join(app.getPath('userData'), 'history.sqlite')
-    mainState.historyStore = openWithCorruptionRecovery(
-      databasePath,
-      () => new HistoryStore(databasePath),
-      {
-        log: (message, detail) => console.error(message, detail),
-        verify: store => store.quickCheck(),
-        dispose: store => store.close(),
-        onRecovered: () => notifyHistoryRecovered(),
-      },
-    )
-    if (!mainState.historyStore) throw new Error('History database could not be opened')
-    historyStoreRetryAttempt = 0
-    const retentionDays = mainState.historyStore.getRetentionDays()
-    mainState.localUsageReader = new LocalUsageReader({
-      homeDir: app.getPath('home'),
-      history: mainState.historyStore,
-      projectRouting: mainState.projectRoutingStore,
-      onRecordsImported: records => syncLocalTokenAchievements(records, retentionDays),
-    })
-    let scanTick = 0
-    mainState.localUsageScanTimer = setInterval(() => {
-      scanTick += 1
-      if (!shouldRunLocalUsageTick(scanTick, powerMonitor.isOnBatteryPower())) return
-      void refreshLocalUsage()
-    }, LOCAL_USAGE_TICK_MS)
-    mainState.localUsageScanTimer.unref?.()
-    // Heavy first-run work waits until the pet has been on screen for a while.
-    if (deferredHistoryWorkTimer) clearTimeout(deferredHistoryWorkTimer)
-    deferredHistoryWorkTimer = setTimeout(() => {
-      deferredHistoryWorkTimer = null
-      reconcileAchievementsFromHistory()
-      void refreshLocalUsage()
-    }, STARTUP_DEFERRED_WORK_MS)
-    deferredHistoryWorkTimer.unref?.()
-    // A tray app runs for weeks: expire old events/sessions at runtime too,
-    // in bounded batches that yield between steps.
-    if (historyPruneTimer) clearInterval(historyPruneTimer)
-    historyPruneTimer = setInterval(() => {
-      void mainState.historyStore?.pruneInBatches().catch(error => console.error('History prune failed', error))
-      try { mainState.progressionStore?.pruneStaleActivity() } catch (error) { console.error('XP activity prune failed', error) }
-    }, HISTORY_PRUNE_INTERVAL_MS)
-    historyPruneTimer.unref?.()
-  } catch (error) {
-    // History is an additive HUD feature. A broken history database must not
-    // prevent the pet, event receiver, XP, or permission controls from booting.
-    console.error('History storage is unavailable', error)
-    if (historyPruneTimer) clearInterval(historyPruneTimer)
-    historyPruneTimer = null
-    try { mainState.historyStore?.close() } catch {}
-    mainState.historyStore = null
-    mainState.localUsageReader = null
-    const delay = HISTORY_STORE_RETRY_DELAYS_MS[historyStoreRetryAttempt]
-    if (delay !== undefined && !historyStoreRetryTimer && !mainState.isQuitting) {
-      historyStoreRetryAttempt += 1
-      historyStoreRetryTimer = setTimeout(() => {
-        historyStoreRetryTimer = null
-        createHistoryServices()
-      }, delay)
-      historyStoreRetryTimer.unref?.()
-    }
-  }
 }
 
 /**
@@ -3103,7 +2767,7 @@ export function cancelPermissionRequests(
 }
 
 function permissionAuditPath(): string {
-  return join(app.getPath('userData'), 'permission-audit.jsonl')
+  return appUserDataPaths().permissionAudit
 }
 
 export function listPermissionAuditEntries(limit: number): PermissionAuditEntry[] {
@@ -3153,7 +2817,7 @@ function applyClaudePermissionRespond(preferences: DesktopPreferences): void {
 export function createPermissionServices(permissionToken: string): void {
   if (mainState.permissionBroker || mainState.permissionRelay || mainState.permissionAdapterServer) return
 
-  trimPermissionAuditOnStartup(permissionAuditPath(), join(app.getPath('userData'), 'permission-audit.json'))
+  trimPermissionAuditOnStartup(permissionAuditPath(), appUserDataPaths().legacyPermissionAudit)
   const relay = new PermissionAdapterRelay()
   const broker = new PermissionBroker({
     onChanged: schedulePermissionUiSync,
@@ -3208,7 +2872,7 @@ export function createDesktopServices(): void {
   if (mainState.desktopPreferences || mainState.desktopTray || mainState.desktopNotifications) return
 
   mainState.desktopPreferences = new DesktopPreferencesStore(
-    join(app.getPath('userData'), 'desktop-preferences.json'),
+    appUserDataPaths().desktopPreferences,
     createLoginItemAdapter({
       platform: process.platform,
       app,
@@ -3223,7 +2887,7 @@ export function createDesktopServices(): void {
   mainState.sessionJump = createSessionJumpService(currentDesktopPreferences)
 
   mainState.desktopNotifications = new DesktopNotificationService({
-    logFilePath: join(app.getPath('userData'), 'notification-log.json'),
+    logFilePath: appUserDataPaths().notificationLog,
     getPreferences: currentDesktopPreferences,
     isAppFocused: () => [mainState.petWindow, mainState.panelWindow].some(window => window?.isFocused()),
     onNotificationClick: target => { void openNotificationTarget(target) },
@@ -3339,7 +3003,7 @@ export function createProjectRoutingServices(): void {
   if (mainState.projectRoutingStore) return
   try {
     mainState.projectRoutingStore = new ProjectRoutingStore(
-      join(app.getPath('userData'), 'project-routing.sqlite'),
+      appUserDataPaths().projectRouting,
       { defaultPetId: 'aang-airbender' },
     )
   } catch (error) {

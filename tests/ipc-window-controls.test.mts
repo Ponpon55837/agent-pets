@@ -42,7 +42,6 @@ test('window control IPC keeps sender scopes, bounds clamps, and hidden-pet pref
     setPanelFullscreenAutoHidden: value => calls.push(`panel-auto-hidden:${value}`),
     setPanelBlurLock: lock => calls.push(`blur-lock:${JSON.stringify(lock)}`),
     finiteNumber: value => typeof value === 'number' && Number.isFinite(value) ? value : null,
-    clamp: (value, min, max) => Math.min(max, Math.max(min, value)),
     requestPanelMinimum: size => calls.push(`panel-minimum:${JSON.stringify(size)}`),
     resetPanelSize: () => calls.push('panel-reset-size'),
     getDisplayWorkArea: () => ({ x: 0, y: 0, width: 1_000, height: 800 }),

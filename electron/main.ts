@@ -69,7 +69,7 @@ import { locale, t } from '../src/i18n'
 import { createPluginSkinPetId } from '../src/utils/pet-id.ts'
 
 import { clampWindowBounds } from './pet-window-mode'
-import { hookScriptDeployPath, installIntegration, uninstallIntegration, refreshInstalledIntegrationScripts, ensurePermissionToken, ensurePresentationToken, ensurePresentationMcpScript, presentationMcpScriptPath, resolveNodeBin } from './setup'
+import { hookScriptDeployPath, installIntegration, uninstallIntegration, refreshInstalledIntegrationScripts, refreshAgentConfigIntegrations, ensurePermissionToken, ensurePresentationToken, ensurePresentationMcpScript, presentationMcpScriptPath, resolveNodeBin } from './setup'
 import { parsePetBehaviorManifest } from './pet-behavior-manifest'
 import { shouldDisableDevHardwareAcceleration } from './dev-runtime'
 import { ensureDirectoryWithin, writeFileWithin } from './ipc/pet-assets-fs.ts'
@@ -83,11 +83,13 @@ import { registerAdapterIpc } from './ipc/adapters'
 import { registerProjectMcpIpc } from './ipc/project-mcp'
 import { registerOnboardingIpc } from './ipc/onboarding'
 import { configureSetupEnvironment } from './setup-environment'
+import { agentConfigEnvReady, createAgentConfigEnvironment } from './agent-config-dirs'
 import { OnboardingStore } from './onboarding-state'
 import { registerProjectPetsIpc } from './ipc/project-pets'
 
 import { registerPetAssetIpc } from './ipc/pet-assets'
 import { PetImportStaging } from './pet-import.ts'
+import { isSupportedRasterImage, rasterContentType } from './pet-sprite-validation.ts'
 import { isIntegrationTarget, registerIntegrationIpc } from './ipc/integrations'
 import { registerWindowControlsIpc } from './ipc/window-controls'
 import { registerQuotaIpc } from './ipc/quota'
@@ -104,6 +106,7 @@ import { t as translate } from '../src/i18n'
 
 
 import { mainState } from './main/state'
+import { appUserDataPaths } from './main/app-user-data'
 import { createShutdownCoordinator } from './main/shutdown'
 import { acquireSingleInstanceLock, relaunchApp } from './relaunch'
 import { disposeMainTimers } from './main/dispose-timers'
@@ -112,7 +115,7 @@ import { acquireRunMarker } from './diagnostics/session-marker'
 import { writeHookStartupMarker } from './main/hook-startup-marker'
 import type { LocalServerListenStatus } from './local-server-listen'
 import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
-import { setPluginPanelWindowBounds, MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, broadcastProgressionIfChanged, clamp, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, isClaudePermissionRespondEnabled, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isSupportedRasterImage, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, rasterContentType, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, cancelHistoryStoreRetry, localPorts, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode, requestPanelMinimum, resetPanelSize } from './main/runtime'
+import { setPluginPanelWindowBounds, MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, broadcastProgressionIfChanged, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, isClaudePermissionRespondEnabled, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, historyRuntime, localPorts, petWindowModes, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode, requestPanelMinimum, resetPanelSize } from './main/runtime'
 
 
 
@@ -208,14 +211,19 @@ import { setPluginPanelWindowBounds, MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MA
 // the tray application silently.
 teeConsoleToLog()
 // setup.ts reaches Electron only through this seam so the installers can also run from the CLI and tests.
+// macOS／Linux 從 Dock 啟動時看不到 shell 設定檔的 CLAUDE_CONFIG_DIR 等變數，啟動就先在背景問 login shell。
+const agentConfigEnvironment = createAgentConfigEnvironment()
+void agentConfigEnvironment.ready()
 configureSetupEnvironment({
   appData: () => app.getPath('appData'),
   userData: () => app.getPath('userData'),
   isPackaged: () => app.isPackaged,
   resourcesPath: () => process.resourcesPath,
+  agentConfigEnv: () => agentConfigEnvironment.snapshot(),
+  agentConfigEnvReady: () => agentConfigEnvironment.ready(),
 })
 
-const runMarker = acquireRunMarker(join(app.getPath('userData'), 'logs'))
+const runMarker = acquireRunMarker(appUserDataPaths().logs)
 // 越早寫越好：從這裡到事件埠開始監聽之間送出的 hook 事件，會在連線被拒時短暫重試而不是遺失。
 const hookStartupMarker = writeHookStartupMarker(hookScriptDeployPath(), localPorts().event)
 const crashGuard = installCrashGuard({
@@ -358,11 +366,15 @@ async function bootstrapApp(): Promise<void> {
     callback(false)
   })
 
-  await startupStep('integration-scripts', () => { mainState.eventToken = refreshInstalledIntegrationScripts(app.getVersion()) })
+  await startupStep('integration-scripts', () => {
+    mainState.eventToken = refreshInstalledIntegrationScripts(app.getVersion(), { deferAgentConfig: true })
+    // 改寫 agent 設定目錄裡的檔案要等目錄解析完，不阻塞啟動。
+    void agentConfigEnvReady().then(() => refreshAgentConfigIntegrations(app.getVersion()))
+  })
   await startupStep('adapters', () => {
     mainState.agentAdapterRegistry = createAgentAdapterRegistry(createAgentAdapterOperations({ claudePermissionRespondEnabled: isClaudePermissionRespondEnabled }))
     mainState.projectMcpRegistry = new ProjectMcpRegistryStore(
-      join(app.getPath('userData'), 'project-mcp-registry.json'),
+      appUserDataPaths().projectMcpRegistry,
     )
   })
   await startupStep('project-routing', createProjectRoutingServices)
@@ -580,7 +592,6 @@ async function bootstrapApp(): Promise<void> {
       if (lock.modal !== undefined) mainState.panelModalOpen = lock.modal
     },
     finiteNumber,
-    clamp,
     requestPanelMinimum,
     resetPanelSize,
     getDisplayWorkArea: bounds => screen.getDisplayMatching(bounds).workArea,
@@ -666,7 +677,7 @@ async function bootstrapApp(): Promise<void> {
     refreshLocalUsage,
     currentHistorySummary,
     broadcastHistoryUpdated,
-    onHistoryCleared: () => pruneCorruptCopies(join(app.getPath('userData'), 'history.sqlite'), 0),
+    onHistoryCleared: () => pruneCorruptCopies(appUserDataPaths().history, 0),
     documentsPath: () => app.getPath('documents'),
     joinPath: join,
     showSaveDialog: (window, options) => window
@@ -692,6 +703,7 @@ async function bootstrapApp(): Promise<void> {
     installIntegration,
     uninstallIntegration,
     isIntegrationTarget,
+    agentConfigReady: agentConfigEnvReady,
   })
 
   registerProjectPetsIpc({
@@ -709,7 +721,7 @@ async function bootstrapApp(): Promise<void> {
     logError: (message, error) => console.error(message, error),
   })
 
-  const onboardingStore = new OnboardingStore(join(app.getPath('userData'), 'onboarding.json'))
+  const onboardingStore = new OnboardingStore(appUserDataPaths().onboarding)
   registerOnboardingIpc({
     ipcMain,
     assertTrustedIpcSender: event => assertTrustedIpcSender(event),
@@ -851,7 +863,7 @@ function teardownMainServices(): void {
   mainState.panelBlurHideHandle = null
   mainState.windowsFullscreenAutoHiddenPet = false
   mainState.windowsFullscreenAutoHiddenPanel = false
-  cancelHistoryStoreRetry()
+  historyRuntime.dispose()
   if (mainState.pluginCatalogAutoCheckTimer) clearInterval(mainState.pluginCatalogAutoCheckTimer)
   mainState.pluginCatalogAutoCheckTimer = null
   if (mainState.localUsageScanTimer) clearInterval(mainState.localUsageScanTimer)
@@ -870,6 +882,7 @@ function teardownMainServices(): void {
   mainState.historyStore = null
   mainState.projectRoutingStore?.close()
   mainState.projectRoutingStore = null
+  petWindowModes.dispose()
   disposeMainTimers(mainState)
 }
 

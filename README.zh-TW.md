@@ -41,7 +41,8 @@
 - **respond** — 權限請求可直接在寵物氣泡上「允許一次」或「拒絕」。OpenCode 一律支援；Claude Code 需開啟**從寵物回覆 Claude Code 權限**（見[權限氣泡](#權限氣泡)）。
 - **observe** — 寵物會顯示「等待權限」，但必須回到工具本身核准（Codex 只會回報正在等待，沒有管道把決定送回去）。
 - Codex 不會回報「等待輸入」狀態。Codex Desktop 與 CLI 共用 `~/.codex`，且沒有獨立的安裝 API，所以只有在該版本執行相同 hook 時才有作用，請用**等待真實事件**確認。
-- **Token usage：exact** 表示逐則訊息讀取 Agent 自己的本機工作階段紀錄（`~/.codex/sessions`、`~/.claude/projects`）。**estimated** 表示數字來自 Agent 送來的事件，例如 OpenCode 與 Generic HTTP 整合；Codex 與 Claude Code 事件上的用量不計入，讓本機紀錄維持唯一來源。
+- **Token usage：exact** 表示逐則訊息讀取 Agent 自己的本機工作階段紀錄（`~/.codex/sessions`、`~/.claude/projects`，搬移設定目錄時改讀下方的位置）。**estimated** 表示數字來自 Agent 送來的事件，例如 OpenCode 與 Generic HTTP 整合；Codex 與 Claude Code 事件上的用量不計入，讓本機紀錄維持唯一來源。
+- **搬移設定目錄**：hook、偵測、額度與 Token 用量會跟著 `CLAUDE_CONFIG_DIR`（Claude Code）、`CODEX_HOME`（Codex）與 `XDG_CONFIG_HOME`（OpenCode，位置是 `<XDG_CONFIG_HOME>/opencode`）。值必須是絕對路徑（Codex 另外要求資料夾已存在）；無法使用時，工具卡片會說明原因，並拒絕安裝，而不是寫到預設位置。macOS 與 Linux 從 Dock 或桌面開啟時，也會向 login shell（`$SHELL -l`，上限 2 秒）讀這些變數。修改後請重新啟動 Agent Pets。如果先裝了 Agent Pets 才設定變數，卡片會指出舊位置，按**移除**會一併清除。換了 `CODEX_HOME` 後，Codex 會要求重新信任 hook。
 - **Generic HTTP** adapter 供本機整合透過需驗證的 `/v1/events` 端點使用（見[事件伺服器](#事件伺服器)），僅能觀察。
 
 ## 寵物
@@ -180,7 +181,8 @@ Hook 會附上每次安裝專屬的 `X-Agent-Pets-Token` 標頭（讀自 `~/.des
 |------|----------|
 | 寵物一直顯示離線 | 按**等待真實事件**並執行一個提示詞。沒有事件：重新啟動工具（hook 在啟動時載入），再按**診斷**。 |
 | 診斷：找不到 Node.js 執行檔 | 安裝 Node.js 18 以上，然後按**修復**；它會寫入絕對路徑（從 Finder 或 Dock 啟動的 App 找不到單純的 `node`）。切換 nvm 版本後也需要**修復**。 |
-| Codex hooks 未啟用 | **修復**會在 `~/.codex/config.toml` 的 `[features]` 加入 `hooks = true`。 |
+| Codex hooks 未啟用 | **修復**會在 `CODEX_HOME`（預設 `~/.codex`）內 `config.toml` 的 `[features]` 加入 `hooks = true`。 |
+| 卡片：設定目錄無法使用 | `CLAUDE_CONFIG_DIR`、`CODEX_HOME` 或 `XDG_CONFIG_HOME` 是相對路徑、以 `~` 開頭，或指向不存在的資料夾。修正後重新啟動 Agent Pets。 |
 | 安裝被拒：不是有效的 JSON | `settings.json`／`hooks.json` 含註解或語法錯誤。Agent Pets 不會動它；請修正或移開該檔案後再安裝。 |
 | 橫幅：事件接收器離線 | 本機埠（17373–17375）被其他程式或舊的 Agent Pets 占用。關閉它；App 會自動重試，也可按**立即重試**。 |
 | Hook 腳本過期 | **修復**會重新部署。 |

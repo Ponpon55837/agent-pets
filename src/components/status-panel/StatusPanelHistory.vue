@@ -26,6 +26,8 @@ import Select from '@/components/ui/Select.vue'
 import TabPanel from '@/components/ui/TabPanel.vue'
 import Tabs from '@/components/ui/Tabs.vue'
 import { formatDate } from '@/utils/intl-format'
+import { STORAGE_KEYS, type HistoryView } from '@/utils/storage-keys'
+import { readStored, writeStored } from '@/utils/local-storage'
 
 const props = defineProps<{ active: boolean }>()
 const store = useAgentStore()
@@ -49,35 +51,18 @@ let actionTimer: ReturnType<typeof setTimeout> | null = null
 let dayWatchTimer: ReturnType<typeof setInterval> | null = null
 
 // --- remembered per-viewer view state (all optional conveniences) -----------
-const RANGE_KEY = 'agent-pet-history-range'
-const COLLAPSE_KEY = 'agent-pet-history-collapsed'
-const INTRO_KEY = 'agent-pet-history-intro-dismissed'
-const VIEW_KEY = 'agent-pet-history-view'
-type HistoryView = 'overview' | 'sessions'
-
-function readRange(): HistoryRangeDays {
-  try {
-    const stored = Number(localStorage.getItem(RANGE_KEY))
-    return HISTORY_RANGE_OPTIONS.find(option => option === stored) ?? 7
-  } catch { return 7 }
-}
-function readCollapsed(): Record<string, boolean> {
-  try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY) ?? '{}') as Record<string, boolean> } catch { return {} }
-}
-const historyRange = ref<HistoryRangeDays>(readRange())
-const collapsed = ref<Record<string, boolean>>(readCollapsed())
-const historyView = ref<HistoryView>('overview')
-try { if (localStorage.getItem(VIEW_KEY) === 'sessions') historyView.value = 'sessions' } catch { /* convenience only */ }
+const historyRange = ref<HistoryRangeDays>(readStored(STORAGE_KEYS.historyRange))
+const collapsed = ref<Record<string, boolean>>(readStored(STORAGE_KEYS.historyCollapsed))
+const historyView = ref<HistoryView>(readStored(STORAGE_KEYS.historyView))
 const viewItems = computed(() => [
   { id: 'overview', label: t('growth.viewOverview') },
   { id: 'sessions', label: t('growth.viewSessions') },
 ])
 function selectView(view: string): void {
   historyView.value = view === 'sessions' ? 'sessions' : 'overview'
-  try { localStorage.setItem(VIEW_KEY, historyView.value) } catch { /* convenience only */ }
+  writeStored(STORAGE_KEYS.historyView, historyView.value)
 }
-const introDismissed = ref(true)
-try { introDismissed.value = localStorage.getItem(INTRO_KEY) === '1' } catch { introDismissed.value = false }
+const introDismissed = ref(readStored(STORAGE_KEYS.historyIntroDismissed))
 
 const RANGE_LABEL_KEYS = { 7: 'growth.range7', 30: 'growth.range30', 90: 'growth.range90' } as const
 const TOKEN_LABEL_KEYS: Partial<Record<HistorySummary['tokenQuality'], TranslationKey>> = {
@@ -87,18 +72,18 @@ const TOKEN_LABEL_KEYS: Partial<Record<HistorySummary['tokenQuality'], Translati
 function selectRange(days: HistoryRangeDays): void {
   if (historyRange.value === days) return
   historyRange.value = days
-  try { localStorage.setItem(RANGE_KEY, String(days)) } catch { /* convenience only */ }
+  writeStored(STORAGE_KEYS.historyRange, days)
   void refreshHistory()
 }
 
 function toggleSection(key: string, event: Event): void {
   collapsed.value = { ...collapsed.value, [key]: !(event.target as HTMLDetailsElement).open }
-  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(collapsed.value)) } catch { /* convenience only */ }
+  writeStored(STORAGE_KEYS.historyCollapsed, collapsed.value)
 }
 
 function dismissIntro(): void {
   introDismissed.value = true
-  try { localStorage.setItem(INTRO_KEY, '1') } catch { /* convenience only */ }
+  writeStored(STORAGE_KEYS.historyIntroDismissed, true)
 }
 
 // --- derived data ------------------------------------------------------------

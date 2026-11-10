@@ -2,6 +2,7 @@ import type { AgentAdapterId, InstallErrorCode, InstallOutcome, InstallReport } 
 import type { ConfigWriteResult } from './safe-config-write.ts'
 import { ConfigRefusedError } from './safe-config-write.ts'
 import { NodeNotFoundError, NodeUnsupportedError } from './node-resolver.ts'
+import { AgentConfigDirError } from './agent-config-dirs.ts'
 
 export function reportFromWrites(results: ReadonlyArray<ConfigWriteResult>): InstallReport {
   const written = results.filter(result => result.status === 'written')
@@ -20,6 +21,8 @@ export function classifyInstallError(error: unknown): { code: InstallErrorCode, 
   }
   if (error instanceof NodeNotFoundError) return { code: 'node_missing' }
   if (error instanceof NodeUnsupportedError) return { code: 'node_unsupported' }
+  // 只回報變數名稱，不回報它的值。
+  if (error instanceof AgentConfigDirError) return { code: 'config_dir_unusable', path: error.variable }
   const errno = (error as NodeJS.ErrnoException | null)?.code
   const target = (error as NodeJS.ErrnoException | null)?.path
   const path = typeof target === 'string' ? target : undefined
