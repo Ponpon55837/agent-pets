@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
+import * as fsp from 'node:fs/promises'
 import * as path from 'node:path'
-import { renameSyncWithRetry } from './fs-rename.ts'
+import { renameSyncWithRetry, renameWithRetry } from './fs-rename.ts'
 
 // 「同目錄暫存檔 → 寫入 → rename」的底層步驟。刻意不做任何政策決策：
 // symlink（追隨或拒絕）、目錄驗證、大小上限、備份都由呼叫端先處理，
@@ -25,11 +26,15 @@ export function pidTimestampTemporaryPath(targetPath: string): string {
   return path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.tmp`)
 }
 
-export function writeFileAtomicSync(targetPath: string, data: string | Uint8Array, options: AtomicFileWriteOptions): void {
-  const { temporaryPath, mode } = options
+function assertSameDirectory(targetPath: string, temporaryPath: string): void {
   if (path.dirname(temporaryPath) !== path.dirname(targetPath)) {
     throw new TypeError('atomic write temporary file must live next to its target')
   }
+}
+
+export function writeFileAtomicSync(targetPath: string, data: string | Uint8Array, options: AtomicFileWriteOptions): void {
+  const { temporaryPath, mode } = options
+  assertSameDirectory(targetPath, temporaryPath)
   // 只清除自己建立的暫存檔：`wx` 遇到同名檔案（EEXIST）時那個檔案不是我們的。
   let created = false
   try {
@@ -50,5 +55,31 @@ export function writeFileAtomicSync(targetPath: string, data: string | Uint8Arra
   }
   if (options.enforceMode && mode !== undefined && process.platform !== 'win32') {
     try { fs.chmodSync(targetPath, mode) } catch {}
+  }
+}
+
+/** 與 writeFileAtomicSync 規則完全相同的非同步版，給主程序不能被磁碟 I/O 卡住的路徑使用。 */
+export async function writeFileAtomic(targetPath: string, data: string | Uint8Array, options: AtomicFileWriteOptions): Promise<void> {
+  const { temporaryPath, mode } = options
+  assertSameDirectory(targetPath, temporaryPath)
+  let created = false
+  try {
+    const handle = await fsp.open(temporaryPath, 'wx', mode)
+    created = true
+    try {
+      await handle.writeFile(data)
+      if (options.fsync) await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    await renameWithRetry(temporaryPath, targetPath)
+  } catch (error) {
+    if (created) {
+      try { await fsp.rm(temporaryPath, { force: true }) } catch {}
+    }
+    throw error
+  }
+  if (options.enforceMode && mode !== undefined && process.platform !== 'win32') {
+    try { await fsp.chmod(targetPath, mode) } catch {}
   }
 }

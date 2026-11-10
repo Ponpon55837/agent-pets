@@ -37,8 +37,8 @@ export interface AgentAdapterOperations {
   ready?(): Promise<void>
   /** Async preconditions (e.g. resolving Node.js) that must pass before install writes anything. */
   prepare?(target: AdapterInstallTarget): Promise<void>
-  install(target: AdapterInstallTarget): InstallReport | void
-  uninstall(target: AdapterInstallTarget): void
+  install(target: AdapterInstallTarget): InstallReport | void | Promise<InstallReport | void>
+  uninstall(target: AdapterInstallTarget): void | Promise<void>
   /**
    * Runtime capability projection. Claude Code answers permissions only while the user has
    * turned that on, so its reported capability follows the main-process preference.
@@ -98,7 +98,7 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
       try {
         if (definition.installTarget) {
           await operations.prepare?.(definition.installTarget)
-          report = operations.install(definition.installTarget) ?? report
+          report = await operations.install(definition.installTarget) ?? report
         }
       } catch (error) {
         // Keep the failure structured; the IPC layer turns this into a per-adapter result.
@@ -111,7 +111,7 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
     uninstall: async () => {
       if (definition.installTarget) {
         await operations.ready?.()
-        operations.uninstall(definition.installTarget)
+        await operations.uninstall(definition.installTarget)
       }
       return (await createAdapter(definition, operations).detect(context()))
     },
