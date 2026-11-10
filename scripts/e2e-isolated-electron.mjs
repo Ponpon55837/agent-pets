@@ -21,7 +21,7 @@
 // 請看啟動日誌的「listening on」確認。--real-hook-ports 刻意使用預設埠，給需要真實 hook 的測試；這類測試請盡量縮短。
 import { spawn } from 'node:child_process'
 import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
@@ -328,6 +328,8 @@ const portIsFree = port => new Promise(resolvePort => {
 for (const [label, port] of [['--inspect-port', inspectPort], ['--debug-port', debugPort]]) {
   if (!await portIsFree(port)) {
     console.error(`AGENT_PETS_E2E_ABORT ${label} ${port} is already in use; pick a free port`)
+    // 這次才建立的暫存根目錄不留下；--reuse-root 是呼叫端的資料，不動。
+    if (!reuseRoot) rmSync(root, { recursive: true, force: true })
     process.exit(1)
   }
 }

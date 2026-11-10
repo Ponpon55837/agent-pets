@@ -252,7 +252,8 @@ export function createGrowthService(deps: GrowthServiceDeps): GrowthService {
     const store = state.achievementStore
     if (!store) return
     try {
-      // Ledger only: a first import arrives in hundreds of 500-record batches,
+      // Ledger only: a first import arrives in many small batches
+      // (local-usage `importBatchRecords`, default 100),
       // so unlock evaluation runs once per scan (evaluateLocalTokens).
       const result = store.syncLocalTokenUsage(records, {
         // One day of slack past the scanner's own retention cutoff.
