@@ -19,8 +19,8 @@ import { playCue } from '@/utils/sound'
 import { formatDateParts } from '@/utils/intl-format'
 
 const store = useAgentStore()
-// "Switch to app" uses macOS LaunchServices; on Windows it is not offered yet (docs/ux-overhaul/windows-todo.md).
-const isMac = /Mac/i.test(navigator.platform)
+// 「切換到 App」只在 macOS（LaunchServices）與 Windows（白名單視窗活化）實作；Linux 不提供。
+const canSwitchApp = /Mac|Win/i.test(navigator.platform)
 
 // Product names are proper nouns, not translatable copy. Claude Code moves to
 // the approver list only while answering from the pet is turned on.
@@ -122,7 +122,7 @@ function preview(cue: SoundCue): void {
   <Card :title="t('panel.jumpSettingsHeading')">
     <ToggleRow :model-value="store.sessionJumpEnabled" :label="t('panel.jumpSetting')" :help="t('panel.jumpSettingHelp')" @update:model-value="store.setSessionJumpEnabled($event)" />
     <ToggleRow
-      v-if="isMac"
+      v-if="canSwitchApp"
       :model-value="store.sessionJumpSwitchAppEnabled"
       :disabled="!store.sessionJumpEnabled"
       :label="t('panel.jumpSwitchSetting')"
