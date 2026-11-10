@@ -9,6 +9,9 @@
 // --reuse-root 沿用上一次的暫時 HOME 與 userData 重新啟動（token 與已安裝的 hook 都還在），用來量測 app 冷啟動。
 // --agent-config-dirs 帶上指向隔離 HOME 內 moved/ 的 CLAUDE_CONFIG_DIR／CODEX_HOME／XDG_CONFIG_HOME，
 // 驗證 app 讀寫搬走的 agent 設定目錄；搭配 scripts/e2e-real-hook.mts --agent-config-dirs。
+// --offscreen 讓 app 看到的每個顯示器都位在螢幕外（同尺寸、x 往左移 20000），所有視窗改用 showInactive()
+// 且不 focus，驗證過程不會把視窗帶到使用者面前；每個 BrowserWindow 的建立參數記在
+// globalThis.__agentPetsE2E.createdWindows（例如寵物視窗的冷啟動尺寸）。也會轉傳 PET_SCALE。
 // --app-root runs another copy of the app (e.g. an extracted packaged app.asar) instead of this repo.
 // Prints one JSON line with the temp root, ports and pid, then keeps running.
 // 測試 app 預設使用自己的本機埠（event／permission／presentation = base、base+1、base+2，base 為 27373），
@@ -169,10 +172,64 @@ const agentConfigEnv = process.argv.includes('--agent-config-dirs')
   : {}
 for (const dir of [agentConfigEnv.CLAUDE_CONFIG_DIR, agentConfigEnv.CODEX_HOME]) if (dir) mkdirSync(dir, { recursive: true })
 const { catalogFixture, tamperedArchivePath } = createCatalogFixture(root)
+const offscreen = process.argv.includes('--offscreen')
 const bootstrap = join(root, 'bootstrap.cjs')
 writeFileSync(bootstrap, `
 const path = require('node:path')
-const { app, safeStorage, shell } = require('electron')
+const electron = require('electron')
+const { app, safeStorage, shell } = electron
+const createdWindows = []
+if (${offscreen}) {
+  const RealBrowserWindow = electron.BrowserWindow
+  class OffscreenBrowserWindow extends RealBrowserWindow {
+    constructor(options = {}) {
+      super({ ...options, show: false })
+      createdWindows.push({ width: options.width, height: options.height, x: options.x, y: options.y })
+      if (options.show !== false) this.showInactive()
+    }
+    show() { this.showInactive() }
+    focus() {}
+    // 原生的 getAllWindows() 只認得未衍生的 BrowserWindow。
+    static getAllWindows() { return electron.BaseWindow.getAllWindows().filter(win => win instanceof RealBrowserWindow) }
+  }
+  // electron 模組的 BrowserWindow 不可重新定義，所以讓 app 的 require('electron') 拿到一個只換掉
+  // BrowserWindow、其餘沿用原模組的物件。
+  // screen 是 Proxy，直接改它的方法不會生效，所以同樣給 app 一個包裝：顯示器同尺寸，但 x 往左移 20000。
+  let offscreenScreen = null
+  const makeOffscreenScreen = () => {
+    const real = electron.screen
+    const shift = rect => ({ ...rect, x: rect.x - 20000 })
+    const display = () => { const d = real.getPrimaryDisplay(); return { ...d, bounds: shift(d.bounds), workArea: shift(d.workArea) } }
+    const overrides = {
+      getPrimaryDisplay: display,
+      getAllDisplays: () => [display()],
+      getDisplayMatching: () => display(),
+      getDisplayNearestPoint: () => display(),
+    }
+    return new Proxy(real, {
+      get(target, key) {
+        if (Object.hasOwn(overrides, key)) return overrides[key]
+        const value = Reflect.get(target, key)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+  }
+  const shim = Object.create(electron, {
+    BrowserWindow: { value: OffscreenBrowserWindow, enumerable: true },
+    screen: { get: () => (offscreenScreen ??= makeOffscreenScreen()), enumerable: true },
+  })
+  const Module = require('node:module')
+  const realLoad = Module._load
+  Module._load = function (request, ...rest) {
+    return request === 'electron' ? shim : realLoad.call(this, request, ...rest)
+  }
+  // 換不掉就中止，絕不在使用者螢幕上開視窗。
+  const abortOffscreen = () => { console.error('AGENT_PETS_E2E_ABORT offscreen patch failed'); process.exit(1) }
+  if (require('electron').BrowserWindow !== OffscreenBrowserWindow) abortOffscreen()
+  app.whenReady().then(() => {
+    if (require('electron').screen.getPrimaryDisplay().workArea.x > -10000) abortOffscreen()
+  })
+}
 const root = ${JSON.stringify(root)}
 const allowedAgentEnv = ${JSON.stringify(agentConfigEnv)}
 const userData = path.join(root, 'ud')
@@ -247,6 +304,7 @@ globalThis.__agentPetsE2E = {
   userData,
   calls,
   blockedExecs,
+  createdWindows,
   catalogFixture: ${JSON.stringify(catalogFixture)},
   tamperedArchivePath: ${JSON.stringify(tamperedArchivePath)},
   pluginIssueReportBaseUrl: 'https://github.com/example/agent-pets-plugins/issues/new',
@@ -270,7 +328,9 @@ const child = spawn(electronBinary, [
   env: {
     ...Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'USER', 'LOGNAME', 'SHELL', 'DISPLAY', 'XDG_RUNTIME_DIR', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP',
       // 連接埠覆寫（僅限 dev build），讓已安裝的 Agent Pets 能保有 17373–17375。
-      'AGENT_PETS_EVENT_PORT', 'AGENT_PETS_PERMISSION_PORT', 'AGENT_PETS_PRESENTATION_PORT']
+      'AGENT_PETS_EVENT_PORT', 'AGENT_PETS_PERMISSION_PORT', 'AGENT_PETS_PRESENTATION_PORT',
+      // 寵物冷啟動倍率（dev 用的 createPetWindow() 預設值）。
+      'PET_SCALE']
       .filter(key => process.env[key] !== undefined)
       .map(key => [key, process.env[key]])),
     HOME: join(root, 'home'),

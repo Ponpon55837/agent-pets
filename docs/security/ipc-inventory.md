@@ -123,7 +123,7 @@
 | `panel-reset-size` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | resetPanelSize (send) | `tests/ipc-window-controls.test.mts` |
 | `panel-blur-lock` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | 型別；長度／數量上限；無效輸入回安全預設或錯誤 | setPanelBlurLock (send) | `tests/ipc-window-controls.test.mts` |
 | `panel-hide` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | hidePanel (send) | `tests/ipc-window-controls.test.mts` |
-| `pet-resize` | `on` | 寵物視窗 main frame | 型別；無效輸入回安全預設或錯誤 | resizeWindow (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `pet-resize` | `on` | 寵物視窗 main frame | 型別；無效輸入回安全預設或錯誤 | resizeWindow (send) | `tests/pet-window-size.test.mts` |
 | `pet-content-height` | `on` | 寵物視窗 main frame | 型別；無效輸入回安全預設或錯誤 | reportContentHeight (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `pet-quit` | `on` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | quitApp (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `pet-restart` | `on` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | restartApp (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |

@@ -45,9 +45,10 @@ test('the quota tooltip does not nest a backdrop-filter inside the glass status 
 })
 
 test('the pet permission bubble never grows past the reserved headroom, so the source and risk badge stay on screen', async () => {
-  const { QUOTA_TOOLTIP_HEADROOM_H } = await import('../src/utils/pet-window-height.ts')
-  const runtime = readFileSync('electron/main/runtime.ts', 'utf8')
-  assert.match(runtime, new RegExp(`PET_WINDOW_TOP_HEADROOM = ${QUOTA_TOOLTIP_HEADROOM_H}\\b`))
+  const { QUOTA_TOOLTIP_HEADROOM_H } = await import('../src/utils/pet-window-size.ts')
+  const { PET_WINDOW_HEADROOM_PX } = await import('../electron/pet-drag.ts')
+  assert.equal(PET_WINDOW_HEADROOM_PX, QUOTA_TOOLTIP_HEADROOM_H)
+  assert.match(readFileSync('electron/main/runtime.ts', 'utf8'), /petHeadroom: QUOTA_TOOLTIP_HEADROOM_H,/)
   assert.match(readFileSync('src/styles/tokens.css', 'utf8'), new RegExp(`--pet-bubble-headroom: ${QUOTA_TOOLTIP_HEADROOM_H}px;`))
   const bubble = readFileSync('src/components/permission/PermissionBubble.vue', 'utf8')
   assert.match(bubble, /\.permission-request \{[^}]*max-height: calc\(var\(--pet-bubble-headroom\) - 4px\);[^}]*flex-direction: column;/)

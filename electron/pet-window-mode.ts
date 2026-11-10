@@ -1,4 +1,5 @@
 import type { PetEdge, PetWindowMode } from '../src/types/pet-window'
+import { clamp } from '../src/utils/number.ts'
 
 export interface WindowBounds {
   x: number
@@ -22,10 +23,6 @@ export const EDGE_DWELL_MS = 650
 
 function finiteOr(value: number, fallback: number): number {
   return Number.isFinite(value) ? value : fallback
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(value, max))
 }
 
 export function clampWindowBounds(bounds: WindowBounds, workArea: WorkArea): WindowBounds {

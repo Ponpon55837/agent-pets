@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import * as path from 'node:path'
 import type { PermissionDecisionValue, PermissionRisk } from '../src/types/permission'
 import { FAMILY_SOURCES, familySourceSet, type SourceOfFamily } from '../src/types/agent.ts'
+import { isOpaqueId128 as isIdentifier } from '../src/types/id-patterns.ts'
 import {
   PermissionBroker,
   type AdapterPermissionDecision,
@@ -28,7 +29,6 @@ const MAX_CREATE_REQUESTS_PER_MINUTE = 60
 const MAX_CREATE_REQUESTS_PER_MINUTE_PER_HOST = 240
 const MAX_BUDGET_WINDOWS = 256
 const MAX_EXTERNAL_RECORDS = 400
-const ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
 // The broker applies the final display limits (and counts what it cuts); the
 // adapter only bounds how much it accepts so memory use stays predictable.
 const MAX_PATTERNS = 20
@@ -479,10 +479,6 @@ function normalizeResultPayload(value: unknown): (
   const data = value as Record<string, unknown>
   if (!isIdentifier(data.decisionId) || !isDeliveryResult(data.result)) return null
   return { ...lookup, decisionId: data.decisionId, result: data.result }
-}
-
-function isIdentifier(value: unknown): value is string {
-  return typeof value === 'string' && ID_PATTERN.test(value)
 }
 
 function isDeliveryResult(value: unknown): value is PermissionDeliveryResult {

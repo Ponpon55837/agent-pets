@@ -456,7 +456,7 @@
   --pet-bubble-info-accent: var(--color-info);
   --pet-bubble-plugin-border: color-mix(in srgb, var(--organic-sage) 56%, transparent);
   --pet-bubble-plugin-text: var(--color-text);
-  /* 寵物視窗頂端預留給提示與權限泡泡的高度（與 QUOTA_TOOLTIP_HEADROOM_H、PET_WINDOW_TOP_HEADROOM 相同）。 */
+  /* 寵物視窗頂端預留給提示與權限泡泡的高度（與 src/utils/pet-window-size.ts 的 QUOTA_TOOLTIP_HEADROOM_H 相同）。 */
   --pet-bubble-headroom: 190px;
   --pet-drag-shadow: drop-shadow(0 10px 14px color-mix(in srgb, var(--color-shadow) var(--pet-drag-shadow-strength), transparent));
   --organic-status-surface: color-mix(in srgb, var(--color-surface) 92%, transparent);

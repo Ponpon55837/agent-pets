@@ -16,6 +16,7 @@ const RESPOND_OPT_IN_PATH = path.join(DEPLOY_DIR, 'claude-permission-respond')
 const POLL_INTERVAL_MS = 450
 const MIN_WAIT_SECONDS = 15
 const MAX_WAIT_SECONDS = 120
+// 與 src/types/id-patterns.ts 的 OPAQUE_ID_128_PATTERN 相同（hook 由 Node 直接執行，不能匯入 TS；有測試檢查）。
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
 // 送到 app 的時限分兩段（量測依據見 docs/dev/hook-delivery.md）。請求一旦交給作業系統，app 晚點才讀也收得到
 // （即使這個程序已結束），所以長的時限只涵蓋把請求送出去，機器很忙時這段可能要將近 1 秒。

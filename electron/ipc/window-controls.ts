@@ -4,6 +4,8 @@ import type { PresentationStatusSnapshot } from '../../src/types/presentation'
 import type { PetWindowMode } from '../../src/types/pet-window'
 import { normalizePresentationStatus } from '../presentation-controller.ts'
 import { IPC_CHANNELS } from './channels.ts'
+import { clamp } from '../../src/utils/number.ts'
+import { clampPetWindowDimension } from '../../src/utils/pet-window-size.ts'
 
 type Bounds = { x: number; y: number; width: number; height: number }
 
@@ -28,7 +30,6 @@ export interface WindowControlsIpcDependencies {
   setPanelFullscreenAutoHidden(value: boolean): void
   setPanelBlurLock(lock: { pinned?: boolean; modal?: boolean }): void
   finiteNumber(value: unknown): number | null
-  clamp(value: number, min: number, max: number): number
   /** A transient minimum size (wizard / MCP page), or null to release it. Never changes the user's own size. */
   requestPanelMinimum(size: { width: number; height: number } | null): void
   /** Forget the user's panel size and go back to the first-run default. */
@@ -92,8 +93,8 @@ export function registerWindowControlsIpc(deps: WindowControlsIpcDependencies): 
     if (height === null) return
     const requestedWidth = deps.finiteNumber(data.width)
     deps.requestPanelMinimum({
-      width: requestedWidth === null ? 0 : Math.round(deps.clamp(requestedWidth, 0, 20_000)),
-      height: Math.round(deps.clamp(height, 0, 20_000)),
+      width: requestedWidth === null ? 0 : Math.round(clamp(requestedWidth, 0, 20_000)),
+      height: Math.round(clamp(height, 0, 20_000)),
     })
   })
 
@@ -124,8 +125,8 @@ export function registerWindowControlsIpc(deps: WindowControlsIpcDependencies): 
     const rawWidth = deps.finiteNumber(data.width)
     const rawHeight = deps.finiteNumber(data.height)
     if (rawWidth === null || rawHeight === null) return
-    const width = Math.round(deps.clamp(rawWidth, 80, 1_600))
-    const height = Math.round(deps.clamp(rawHeight, 80, 1_600))
+    const width = clampPetWindowDimension(rawWidth)
+    const height = clampPetWindowDimension(rawHeight)
     if (deps.getPetWindowMode() !== 'normal') {
       const current = deps.getEdgeRestoreBounds() ?? deps.getNormalPetBounds() ?? petWindow.getBounds()
       const next = { ...current, width, height }
@@ -147,8 +148,8 @@ export function registerWindowControlsIpc(deps: WindowControlsIpcDependencies): 
     let newY = anchorBottomCenter.y - height
     const maxX = Math.max(workArea.x, workArea.x + workArea.width - width)
     const maxY = Math.max(workArea.y, workArea.y + workArea.height - height)
-    newX = deps.clamp(newX, workArea.x, maxX)
-    newY = deps.clamp(newY, workArea.y, maxY)
+    newX = clamp(newX, workArea.x, maxX)
+    newY = clamp(newY, workArea.y, maxY)
     deps.animateBounds({ x: newX, y: newY, width, height })
     deps.setAnchorBottomCenter({ x: newX + Math.round(width / 2), y: newY + height })
     deps.persistPetBounds(newX, newY, width, height)
@@ -160,7 +161,7 @@ export function registerWindowControlsIpc(deps: WindowControlsIpcDependencies): 
     const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
     const rawHeight = deps.finiteNumber(data.height)
     if (rawHeight === null) return
-    const next = Math.round(deps.clamp(rawHeight, 40, 1_600))
+    const next = Math.round(clamp(rawHeight, 40, 1_600))
     if (next === deps.getPetContentHeight()) return
     deps.setPetContentHeight(next)
     deps.repositionVisiblePanel()

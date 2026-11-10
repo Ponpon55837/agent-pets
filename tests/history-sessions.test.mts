@@ -180,6 +180,15 @@ test('filters: project, agent, outcome, date range and escaped search', (t) => {
   assert.deepEqual(labels({ outcome: 'active' }), [])
 })
 
+test('the adapter filter keeps its 1-64 character opaque-id limit', () => {
+  for (const adapterId of ['a', 'generic-http', 'x.y_z:w', 'a'.repeat(64)]) {
+    assert.equal(normalizeSessionQuery({ adapterId }, NOW).adapterId, adapterId, adapterId)
+  }
+  for (const adapterId of ['', 'a'.repeat(65), 'a b', 'a/b']) {
+    assert.equal(normalizeSessionQuery({ adapterId }, NOW).adapterId, undefined, adapterId)
+  }
+})
+
 test('query normalisation drops anything invalid and bounds the rest', () => {
   assert.deepEqual(normalizeSessionQuery(null, NOW), { limit: 30 })
   assert.deepEqual(normalizeSessionQuery([1, 2], NOW), { limit: 30 })

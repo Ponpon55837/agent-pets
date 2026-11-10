@@ -109,6 +109,8 @@ import { deleteUserImage, prepareUserImage, readUserImageSource, storeUserImage 
 import { mainState, type PluginSkinFallbackInfo } from './state'
 import { EMPTY_ATTENTION } from '../attention-tracker'
 import { attachHotkeyInfo, PermissionHotkeys } from '../permission-hotkeys'
+import { clamp } from '../../src/utils/number'
+import { QUOTA_TOOLTIP_HEADROOM_H, clampPetWindowDimension, initialPetWindowSize } from '../../src/utils/pet-window-size'
 import { PANEL_GAP, PANEL_WIDTH, PANEL_BLUR_HIDE_DELAY_MS, clampPanelSize, clampRectToWorkArea, computePanelPlacement, effectivePanelSize, panelMaxSize, panelMinSize, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
 import { isRecord } from '../value-guards.ts'
 import { currentAgentConfigDirs } from '../agent-config-dirs.ts'
@@ -131,16 +133,6 @@ function getPermissionHotkeys(): PermissionHotkeys {
 }
 
 export { PANEL_GAP, PANEL_WIDTH }
-// petWindow's actual bounds include a fixed, unscaled band of transparent
-// space reserved above the visible sprite for the quota tooltip to pop
-// into (see QUOTA_TOOLTIP_HEADROOM_H in agentStore.ts — keep in sync).
-// computePanelBounds must anchor off the visible pet, not the raw window
-// bounds, or the panel opens with a big gap floating above the pet — worst
-// at small pet sizes, where that fixed band is a large fraction of the
-// window's total (scaled) height. Only a fallback now: the renderer reports
-// its measured content height (see petContentHeight), which also accounts
-// for the status lines, whose size does not scale with the pet.
-export const PET_WINDOW_TOP_HEADROOM = 190
 export const MAX_PET_ZIP_BYTES = 10 * 1024 * 1024
 export const MAX_PET_ZIP_ENTRIES = 64
 export const MAX_PET_UNCOMPRESSED_BYTES = 25 * 1024 * 1024
@@ -255,10 +247,6 @@ export function animateBounds(target: { x: number; y: number; width: number; hei
       mainState.resizeAnimHandle = null
     }
   }, 16)
-}
-
-export function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(value, max))
 }
 
 export function finiteNumber(value: unknown): number | null {
@@ -1880,14 +1868,9 @@ export function createPetWindow() {
   // the 1x (L) size and only shrink once the store hydrates — long enough for
   // the panel to open against L-sized bounds, and, because the window is
   // bottom-anchored, enough to walk the pet down the screen every launch.
-  // The fallback is a rough guess; keep it in sync with PET_BASE_W/H,
-  // QUOTA_TOOLTIP_MIN_W and QUOTA_TOOLTIP_HEADROOM_H in agentStore.ts.
-  const w = saved?.width !== undefined
-    ? Math.round(clamp(saved.width, 80, 1_600))
-    : Math.max(Math.round(250 * scale), 260)
-  const h = saved?.height !== undefined
-    ? Math.round(clamp(saved.height, 80, 1_600))
-    : Math.round(232 * scale) + 190
+  const fallback = initialPetWindowSize(scale)
+  const w = saved?.width !== undefined ? clampPetWindowDimension(saved.width) : fallback.width
+  const h = saved?.height !== undefined ? clampPetWindowDimension(saved.height) : fallback.height
 
   const savedDisplay = displayForSavedState(saved)
   const savedNormal = saved?.normalBounds ?? (
@@ -2110,10 +2093,14 @@ export function computePanelBounds(height: number, width = PANEL_WIDTH) {
   // headroom band is only added above, not to the sides). Prefer the height
   // the pet renderer measured for its own content: it depends on pet size AND
   // status-line count, which the headroom constant cannot express.
+  // The fixed, unscaled headroom is only the fallback: the panel must anchor
+  // off the visible pet, not the raw window bounds, or it opens with a big gap
+  // floating above the pet — worst at small pet sizes, where that band is a
+  // large fraction of the window's total (scaled) height.
   return computePanelPlacement({
     petBounds,
     petContentHeight: mainState.petContentHeight,
-    petHeadroom: PET_WINDOW_TOP_HEADROOM,
+    petHeadroom: QUOTA_TOOLTIP_HEADROOM_H,
     workArea: screen.getDisplayMatching(petBounds).workArea,
     width,
     height,

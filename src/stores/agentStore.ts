@@ -38,7 +38,6 @@ import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement
 import { ACHIEVEMENT_DEFINITIONS } from '@/types/achievement'
 import type { PetWindowMode, PetWindowModeState } from '@/types/pet-window'
 import { normalizePetWindowModeState } from '@/types/pet-window'
-import { PET_CELL_WIDTH } from '@/types/pet-atlas'
 import type { PetBehaviorManifest, PluginSkinPetSource } from '@/types/pet'
 import type { PluginFeedItem } from '@/types/plugin'
 import type { ProjectPetView } from '@/types/project-pet'
@@ -77,7 +76,7 @@ import {
   type RecentAward,
 } from '@/utils/progression-events'
 import { isPluginSkinPetId, isValidPetId } from '@/utils/pet-id'
-import { petWindowHeight } from '@/utils/pet-window-height'
+import { petWindowHeight, petWindowWidth } from '@/utils/pet-window-size'
 import { noteUnread } from '@/utils/unread-results'
 import {
   INITIAL_PANEL_ROUTE,
@@ -123,7 +122,6 @@ const QUOTA_SETTLE_DELAY_MS = 8_000
 // Floor between two session-driven refreshes, so a batch of agents finishing
 // one after another can't turn the settle hook into a tight polling loop.
 const QUOTA_SETTLE_MIN_INTERVAL_MS = 45_000
-const PET_BASE_W = 250 // wide enough for a status line like "OpenCode (CLI+Desktop)"
 const MOOD_BASELINE = 10
 const MOOD_SYSTEM_VERSION = '2'
 const MOOD_SUCCESS_REWARD = 4
@@ -1635,21 +1633,7 @@ export const useAgentStore = defineStore('agent', () => {
   // of collapsing them all into a single highest-priority pet.
   const isMultiPet = computed(() => multiPetEnabled.value && familyLines.value.length > 1)
 
-  // 每隻寵物一格 sprite 寬，加上 .multi-pet-row 的間距（倍率 1 時 8px）與一點餘裕。
-  const MULTI_PET_CELL_W = PET_CELL_WIDTH + 12
-  // The quota tooltip (DesktopPet.vue) shrinks to its content but is capped
-  // at 244px regardless of pet size, same reasoning as
-  // QUOTA_TOOLTIP_HEADROOM_H below — the pet window must stay at least that
-  // wide (plus a little slack either side of the centered tooltip) or a
-  // small pet size clips the tooltip at the window edge.
-  const QUOTA_TOOLTIP_MIN_W = 260
-  const scaledW = computed(() => {
-    if (isMultiPet.value) {
-      const count = familyLines.value.length
-      return Math.round((count * MULTI_PET_CELL_W + 16) * petScale.value)
-    }
-    return Math.max(Math.round(PET_BASE_W * petScale.value), QUOTA_TOOLTIP_MIN_W)
-  })
+  const scaledW = computed(() => petWindowWidth(familyLines.value.length, isMultiPet.value, petScale.value))
   const scaledH = computed(() => {
     // The toast/activity bubble deliberately does NOT grow the window here
     // (see DesktopPet.vue) — it overlays the existing canvas instead, so

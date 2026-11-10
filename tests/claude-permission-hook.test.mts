@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { OPAQUE_ID_128_PATTERN } from '../src/types/id-patterns.ts'
 
 // Runs the real integrations/agent-hook.mjs against fake local servers. The hook hard-codes the
 // app's ports, so each test runs a copy whose ports point at ephemeral test servers; HOME is a
@@ -352,7 +353,7 @@ test('an unusual session id still becomes a valid bounded identifier', async () 
     await runHook(h, permissionRequest({ session_id: `bad id/${'x'.repeat(300)}` }))
     const request = h.permissionCalls.find(call => call.route === 'request')!
     for (const key of ['instanceId', 'sessionId', 'permissionId']) {
-      assert.match(String(request.body[key]), /^[A-Za-z0-9._:-]{1,128}$/, key)
+      assert.match(String(request.body[key]), OPAQUE_ID_128_PATTERN, key)
     }
   } finally {
     await h.close()

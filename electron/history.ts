@@ -45,7 +45,7 @@ import {
   sanitizeToolName,
   type StoredSessionFinalState,
 } from './history-sessions.ts'
-import { isProjectId } from '../src/types/id-patterns.ts'
+import { isOpaqueId256, isProjectId } from '../src/types/id-patterns.ts'
 
 type SqliteRow = Record<string, unknown>
 
@@ -93,7 +93,6 @@ const COMPLETED_SESSION_PAGE_ROWS = 5000
 const LOCAL_USAGE_CUTOFF_KEY = 'local_usage_cutoff_at'
 const HISTORY_RANGES: readonly number[] = [7, 30, 90]
 const ACTIVE_STATES = new Set<AgentState>(['thinking', 'tool-running'])
-const SAFE_ID = /^[A-Za-z0-9._:-]{1,256}$/
 // 模型 id 只允許常見識別字元，最多一個 `provider/model` 斜線段；`<synthetic>` 之類的佔位值、
 // 含空白、`..`、磁碟代號或看起來像本機路徑（Users/、home/…）的字串一律視為未知，避免路徑外洩到 UI 或匯出。
 const MODEL_SEGMENT = '[A-Za-z0-9][A-Za-z0-9._:@+-]{0,63}'
@@ -322,7 +321,7 @@ function isQueuedHeartbeat(item: HistoryQueuedEvent): boolean {
   const { event } = item
   return isActiveState(event.state)
     && tokenUsage(event).quality === 'none'
-    && !SAFE_ID.test(event.eventId ?? '')
+    && !isOpaqueId256(event.eventId)
     && !event.sourceEventId
 }
 
@@ -403,7 +402,7 @@ export class HistoryStore {
   recordEvent(event: AgentStatusEvent, petId = DEFAULT_PET_ID, receivedAt = this.now()): boolean {
     if (event.originalEvent === 'AgentPetsIntegrationTest') return false
     const safePet = safePetId(petId)
-    const adapterId = SAFE_ID.test(event.adapterId ?? '') ? event.adapterId! : 'generic-http'
+    const adapterId = isOpaqueId256(event.adapterId) ? event.adapterId : 'generic-http'
     const agentId = safeText(event.source, 'unknown')
     const externalId = safeText(event.sessionId).slice(0, MAX_SESSION_ID_LENGTH)
     if (!externalId) return false
@@ -419,8 +418,8 @@ export class HistoryStore {
     const safeReceivedAt = Number.isFinite(receivedAt) ? receivedAt : this.now()
     const state = event.state
     const usage = tokenUsage(event)
-    const eventId = SAFE_ID.test(event.eventId ?? '')
-      ? event.eventId!
+    const eventId = isOpaqueId256(event.eventId)
+      ? event.eventId
       : digest(`${adapterId}:${agentId}:${externalId}:${state}:${occurredAt}:${projectId}:${event.originalEvent ?? ''}`)
     const sourceEventId = typeof event.sourceEventId === 'string' ? safeText(event.sourceEventId) : null
     const localDate = this.localDate(occurredAt)
@@ -456,7 +455,7 @@ export class HistoryStore {
       // rebuild only sums active_delta_ms, which the rollup row preserves.
       const isHeartbeat = isActiveState(state)
         && usage.quality === 'none'
-        && !SAFE_ID.test(event.eventId ?? '')
+        && !isOpaqueId256(event.eventId)
         && sourceEventId === null
       let inserted: number
       if (isHeartbeat) {
@@ -761,7 +760,7 @@ export class HistoryStore {
 
   private applyTokenUsage(record: HistoryTokenUsageRecord, receivedAt: number): boolean {
     const safePet = LOCAL_USAGE_PET_ID
-    const adapterId = SAFE_ID.test(record.adapterId) ? record.adapterId : ''
+    const adapterId = isOpaqueId256(record.adapterId) ? record.adapterId : ''
     const agentId = safeText(record.agentId, 'unknown')
     const sourceEventId = safeText(record.sourceEventId)
     if (!adapterId || !agentId || !sourceEventId) return false

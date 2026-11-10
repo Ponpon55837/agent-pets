@@ -8,6 +8,7 @@ import type {
   PermissionRisk,
 } from '../src/types/permission'
 import { PERMISSION_DEFAULT_TTL_SECONDS } from '../src/types/permission.ts'
+import { isOpaqueId128 as isIdentifier } from '../src/types/id-patterns.ts'
 import { redactSensitiveText } from './permission-redact.ts'
 
 const DEFAULT_TTL_MS = PERMISSION_DEFAULT_TTL_SECONDS * 1000
@@ -24,7 +25,6 @@ const DEFAULT_MAX_REQUEST_RECORDS = 5_000
 const TERMINAL_RETENTION_MS = 10 * 60_000
 const MAX_TERMINAL_RECORDS = 200
 const MAX_ACTIVE_PER_SESSION = 20
-const IDENTIFIER_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
 
 export type PermissionDeliveryResult = 'delivered' | 'already_resolved' | 'rejected'
 
@@ -145,10 +145,6 @@ export interface PermissionBrokerOptions {
   onChanged?: () => void
   onAudit?: (record: Readonly<PermissionAuditRecord>) => void
   maxRequestRecords?: number
-}
-
-function isIdentifier(value: unknown): value is string {
-  return typeof value === 'string' && IDENTIFIER_PATTERN.test(value)
 }
 
 function sanitizeText(
