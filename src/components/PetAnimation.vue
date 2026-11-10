@@ -2,7 +2,6 @@
 import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import type { AgentState } from '@/types/agent'
 import type { PetAutonomousBehavior, PetBehaviorManifest } from '@/types/pet'
-import type { PresentationReaction } from '@/types/presentation'
 import Icon from '@/components/ui/Icon.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import {
