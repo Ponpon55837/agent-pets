@@ -55,7 +55,7 @@
 | `pnpm exec vue-tsc --noEmit` | 通過 |
 | `pnpm lint` | 通過 |
 | `pnpm run check:design:strict` | 通過（raw-colors 0） |
-| `pnpm test:unit` | 見工作記錄最後一次執行；1.13.2 線上新增 `agent-hook-mapping`（20）、`hook-literal-contract`（12）、`safe-config-write-async`，並擴充 `claude-permission-hook`（+4）、`setup-install`、`hook-config`、`hook-startup-marker`（+2） |
+| `pnpm test:unit` | 1605 個：1602 通過、1 略過、2 失敗。失敗的是 `agent-hook-delivery` 既有的時限測試（hook 1.18 s／2.46 s，上限 1／2 s）。load average 約 210–300 時，HEAD `38a75fa` 單獨跑同一檔案也一樣失敗（1.20／1.79 s），屬於負載造成，不是回歸。本線新增 `agent-hook-mapping`（20）、`hook-literal-contract`（12）、`safe-config-write-async`，並擴充 `claude-permission-hook`（+4）、`setup-install`、`hook-config`、`hook-startup-marker`（+2） |
 | `tests/ipc-inventory.test.mts` | 包含在 test:unit，沒有新增 IPC 頻道 |
 | `git diff --check` | 通過 |
 
