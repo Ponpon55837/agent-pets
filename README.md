@@ -216,6 +216,7 @@ pnpm dev
 | `pnpm check:design` / `check:design:strict` | Reports hard-coded colors, sizes, spacing, transition durations and easings; `--strict` fails on them ([docs/dev/design-tokens.md](docs/dev/design-tokens.md)) |
 | `pnpm build` / `pnpm build:fast` | Type check, Vite build, then electron-builder into `release/` (`build:fast` skips compression) |
 | `pnpm bench`, `pnpm bench:lag` | Performance benchmarks |
+| `pnpm bench:lag:check` | Event-loop lag check against `scripts/bench/event-loop-lag.baseline.json`; exits 1 past a threshold (see `docs/perf/event-loop-lag-baseline.md`) |
 
 Both build commands first close project-owned Agent Pets processes. To check a change in a real Electron app without touching your data, run `pnpm exec vite build` then `node scripts/e2e-isolated-electron.mjs` (temporary home and userData, fake `safeStorage`, so macOS Keychain is never touched; its local ports default to 27373–27375 so an installed copy keeps 17373–17375 — `--hook-port-base` picks another range, `--real-hook-ports` uses the defaults, `--reuse-root` restarts with an earlier run's home for cold-start tests; see [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)).
 

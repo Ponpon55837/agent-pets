@@ -216,6 +216,7 @@ pnpm dev
 | `pnpm check:design` / `check:design:strict` | 回報寫死的顏色、尺寸、間距、transition 時長與 easing；`--strict` 會直接失敗（見 [docs/dev/design-tokens.md](docs/dev/design-tokens.md)） |
 | `pnpm build` / `pnpm build:fast` | 型別檢查、Vite 建置，再由 electron-builder 輸出到 `release/`（`build:fast` 不壓縮） |
 | `pnpm bench`、`pnpm bench:lag` | 效能基準測試 |
+| `pnpm bench:lag:check` | 對照 `scripts/bench/event-loop-lag.baseline.json` 檢查事件迴圈延遲，超過門檻就以 1 結束（見 `docs/perf/event-loop-lag-baseline.md`） |
 
 兩個建置指令都會先關閉本專案的 Agent Pets 程序。若想在真實 Electron App 中驗證修改又不動到你的資料，先執行 `pnpm exec vite build`，再執行 `node scripts/e2e-isolated-electron.mjs`（暫時的 home 與 userData、假的 `safeStorage`，所以不會碰到 macOS 鑰匙圈；本機埠預設為 27373–27375，已安裝的版本可保有 17373–17375，`--hook-port-base` 可改用另一組，`--real-hook-ports` 才用預設埠，`--reuse-root` 沿用上一次的 home 重新啟動，供冷啟動測試使用；見 [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)）。
 

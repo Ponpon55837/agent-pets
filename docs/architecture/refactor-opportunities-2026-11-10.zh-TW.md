@@ -77,6 +77,8 @@
 
 ### 6. main runtime 按服務拆分
 
+> 狀態（2026-11-10）：階段 11 抽出寵物視窗模式與 History runtime；1.13.2 整合輪線 2 再抽出 Plugin runtime、plugin catalog、growth 服務與面板幾何，`runtime.ts` 降到約 2,190 行，見 [phase-main-runtime-split.md](../phase-reports/phase-main-runtime-split.md)。
+
 **證據：** [runtime.ts](../../electron/main/runtime.ts) 約 3,443 行，包含 Plugin 組裝、視窗模式、History／Progression／Permission 服務與協定處理。Phase 18 已完成第一輪 runtime／state 分離。
 
 **建議：** 延續既有服務邊界，每次抽出一組 runtime，例如 Plugin runtime 或視窗管理；透過明確依賴與啟動／dispose 介面連接，避免只把大檔搬到另一個位置。
