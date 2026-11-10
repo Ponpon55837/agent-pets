@@ -32,8 +32,8 @@
 1. 在 `AgentSource`（或 `AgentFamilyKey`）的 union 加上新值，再到表裡補一列。漏填的話型別檢查會失敗。
 2. 新家族要在 `AGENT_ADAPTER_REGISTRY` 加一個 adapter。`family` 指向新家族；`sources` 由家族推導，不要手寫。
 3. 下列地方會因型別檢查失敗而提醒你補上：
-   - `src/components/SetupWizard.vue` 的 `RESTART_KEYS`
-   - 家族有訂閱額度時，`src/components/DesktopPet.vue` 的 `QUOTA_FAMILY_TIER`
+   - `src/components/setup-wizard/setup-wizard-text.ts` 的 `RESTART_KEYS`
+   - 家族有訂閱額度時，`src/composables/usePetStatusLines.ts` 的 `QUOTA_FAMILY_TIER`
    - `electron/presentation-controller.ts`：插件 `agentFamily` 的字面型別要先擴充，這裡才會編譯通過。擴充那個型別等於改了公開契約，要同步更新 `docs/plugins/`。
 4. hook 這一側要另外改，它們不讀 registry（使用者層設定目錄的位置與環境變數則集中在 `electron/agent-config-dirs.ts` 的 `AGENT_CONFIG_DIR_SPECS`，新家族若有可搬移的設定目錄要加在那裡）：
    - `integrations/agent-hook.mjs` 的 `validSources`：新家族若走這支 hook，把它的來源加進去。`integrations/*.mjs` 安裝後是在 app 之外由 Node 單獨執行，不能 import `src/`，所以保留字面值；`tests/agent-source-registry.test.mts` 要求 `validSources` 正好等於經過 hook 的家族（目前是 Codex 與 Claude）在 registry 裡的來源，漏加或多加都會失敗，新家族走 hook 時也要更新那個測試裡的家族清單。
