@@ -27,9 +27,14 @@ Linux 沒有簽章步驟。
 
 GitHub repo 的 Settings → Secrets and variables → Actions → New repository secret，逐一新增上表的名稱與值。
 
-目前 workflow 沒有使用 `environment`，所以放在 repository secrets。若想放進 `release` environment（可加上審核者與分支限制），除了建立該 environment 與 secrets，也要在 `release.yml` 的 `build` job 加上 `environment: release`，secrets 才會傳進來。
+目前 workflow 沒有使用 `environment`，所以放在 repository secrets。若想再加一層保護（審核者、分支限制），可放進 `release` environment：除了建立該 environment 與 secrets，也要在 `release.yml` 的 `build` job 加上 `environment: release`，secrets 才會傳進來。
 
-`release.yml` 只在 push 到 `main` 與手動觸發（`workflow_dispatch`）時執行，fork 的 pull request 拿不到這些 secrets。手動觸發可以選任何分支，只有對 repo 有寫入權限的人能做；若要避免在其他分支簽章，請使用 environment 的分支限制。
+`release.yml` 只在 push 到 `main` 與手動觸發（`workflow_dispatch`）時執行，fork 的 pull request 拿不到這些 secrets。手動觸發可以選任何分支，但 workflow 本身已限制：
+
+- **只有 `main`（`github.ref == 'refs/heads/main'`）會讀取簽章 secrets。** **Detect signing credentials** 步驟的 env 以 `github.ref == 'refs/heads/main' && secrets.X || ''` 傳入，其他分支拿到的全是空字串，`mac`／`notarize`／`windows` 三個輸出都是 `false`；**Prepare signing files** 與 Package、驗證步驟都依這些輸出決定，所以不會執行簽章路徑，secret 也不會進入任何步驟的環境。
+- **只有 `main` 會發版。** `release` job 有 `if: github.ref == 'refs/heads/main'`。其他分支手動觸發時仍會建置並上傳 artifact（沒簽章，macOS 為 ad-hoc），可用來試打包，但不會建立 tag 與 GitHub Release。
+
+這樣有寫入權的人推一個分支再手動觸發，也無法用 secrets 簽未經審查的 commit；要簽章與發版的內容必須先進 `main`。environment 仍可作為額外保護（例如要求核准才進入簽章），但不再是防止其他分支簽章的唯一手段。
 
 ## 取得方式
 

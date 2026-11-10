@@ -10,6 +10,8 @@
 //   4. 經 CDP 讀 renderer store，確認該 session 的狀態等於送出的狀態。
 //   5. 經主程序的 inspector 呼叫 app.quit()（Windows 沒有 SIGTERM 語意），確認在時限內以 0 結束。
 //   6. 刪掉暫存 root。任何失敗以非 0 結束，並印出 app 日誌尾端。
+// 所有網路操作都有逾時：inspector 接了連線卻不回應時，單次呼叫在 5 秒後失敗；整個流程另有看門狗
+// （--timeout 加 60 秒），觸發時印出日誌尾端、結束 Electron、刪暫存 root 並以非 0 結束，不會卡到 job 逾時。
 // 本機執行請一律加 --offscreen，視窗才不會出現在螢幕上。
 import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:net'
@@ -54,6 +56,10 @@ const tolerateQuitHang = process.argv.includes('--tolerate-quit-hang')
 const EXPECTED_STATE = 'thinking'
 const SESSION_ID = `ci-smoke-${Date.now().toString(36)}`
 const QUIT_TIMEOUT_MS = 20_000
+// 單次 fetch／inspector 呼叫的上限；inspector 掛住時不能讓流程卡著。
+const REQUEST_TIMEOUT_MS = 5_000
+// 整個流程的看門狗額外寬限：--timeout 之外還要容納 session 狀態（15 秒）與退出（20 秒）的等待。
+const WATCHDOG_SLACK_MS = 60_000
 
 let log = ''
 let launcher = null
@@ -66,11 +72,20 @@ function fail(message) {
 
 const sleep = ms => new Promise(resolvePromise => setTimeout(resolvePromise, ms))
 
-/** 每 100 ms 檢查一次，直到 check() 回傳真值；逾時就失敗。 */
+/** 讓 promise 最多等 ms 毫秒；逾時回傳 TIMED_OUT（原 promise 之後的結果或錯誤會被忽略）。 */
+const TIMED_OUT = Symbol('timed out')
+function withTimeout(promise, ms) {
+  let timer
+  const timeout = new Promise(resolvePromise => { timer = setTimeout(() => resolvePromise(TIMED_OUT), Math.max(ms, 0)) })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
+/** 每 100 ms 檢查一次，直到 check() 回傳真值；逾時就失敗。單次 check() 也受剩餘時間約束，不會卡住超過期限。 */
 async function waitFor(description, check, ms = timeoutMs) {
   const deadline = Date.now() + ms
   for (;;) {
-    const value = await check()
+    const value = await withTimeout(Promise.resolve().then(check), deadline - Date.now())
+    if (value === TIMED_OUT) fail(`timed out waiting for ${description}`)
     if (value) return value
     if (launcher?.exitCode !== null && launcher?.exitCode !== undefined) fail(`app exited early (code ${launcher.exitCode}) while waiting for ${description}`)
     if (Date.now() > deadline) fail(`timed out waiting for ${description}`)
@@ -78,29 +93,38 @@ async function waitFor(description, check, ms = timeoutMs) {
   }
 }
 
-/** 對一個 inspector／CDP 的 WebSocket 送一個 Runtime.evaluate，回傳 value。 */
+/**
+ * 對一個 inspector／CDP 的 WebSocket 送一個 Runtime.evaluate，回傳 value。
+ * fetch、連線與等回應都共用 REQUEST_TIMEOUT_MS；逾時會關閉 socket 並以 timedOut 錯誤失敗。
+ * app.quit() 會讓 socket 在回應前就關閉，視為成功送達（回傳 undefined）。
+ */
 async function evaluate(port, targetFilter, expression) {
-  const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
+  const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+  const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal })).json()
   const target = targets.find(targetFilter)
   if (!target) throw new Error('inspector target not ready')
   const ws = new WebSocket(target.webSocketDebuggerUrl)
+  let timer
   try {
-    await new Promise((done, reject) => {
-      ws.addEventListener('open', done, { once: true })
-      ws.addEventListener('error', () => reject(new Error('inspector socket error')), { once: true })
-    })
     return await new Promise((done, reject) => {
+      timer = setTimeout(() => reject(Object.assign(new Error(`inspector request timed out after ${REQUEST_TIMEOUT_MS} ms`), { timedOut: true })), REQUEST_TIMEOUT_MS)
+      let opened = false
+      ws.addEventListener('open', () => {
+        opened = true
+        ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }))
+      }, { once: true })
+      ws.addEventListener('error', () => reject(new Error('inspector socket error')), { once: true })
       ws.addEventListener('message', event => {
         const data = JSON.parse(String(event.data))
         if (data.id !== 1) return
         if (data.error || data.result?.exceptionDetails) reject(new Error(JSON.stringify(data.error ?? data.result.exceptionDetails.text)))
         else done(data.result?.result?.value)
       })
-      // app.quit() 會讓 socket 在回應前就關閉，視為成功送達。
-      ws.addEventListener('close', () => done(undefined), { once: true })
-      ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }))
+      // app.quit() 會讓 socket 在回應前就關閉，視為成功送達；連線尚未建立就關閉則是失敗。
+      ws.addEventListener('close', () => (opened ? done(undefined) : reject(new Error('inspector socket closed before opening'))), { once: true })
     })
   } finally {
+    clearTimeout(timer)
     ws.close()
   }
 }
@@ -110,7 +134,7 @@ const rendererState = sessionId => evaluate(debugPort, t => t.type === 'page' &&
   if (!store) return { ready: false }
   const session = Object.values(store.sessions).find(s => s.sessionId === ${JSON.stringify(sessionId)})
   return { ready: true, state: session?.state ?? null }
-})()`).catch(() => ({ ready: false }))
+})()`).then(value => value ?? { ready: false }, () => ({ ready: false }))
 
 /** 失敗時確保 Electron 不會殘留；Windows 要連同子程序一起結束。 */
 function killApp() {
@@ -170,6 +194,7 @@ async function main() {
   const response = await fetch(`http://${LOCAL_WIRE_HOST}:${hookPortBase}${LOCAL_WIRE_PATHS.events}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', [LOCAL_WIRE_HEADERS.eventToken]: token },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     body: JSON.stringify({
       source: 'claude',
       sessionId: SESSION_ID,
@@ -188,7 +213,11 @@ async function main() {
   console.log(`SMOKE OK: event accepted (204), renderer store shows session ${SESSION_ID} as ${seen}`)
 
   // 走 app 自己的退出路徑；inspector 掛在主程序的 bootstrap.cjs（CJS），所以 process.mainModule 可用。
-  await evaluate(inspectPort, () => true, `process.mainModule.require('electron').app.quit()`)
+  // 呼叫送出後主程序可能不回應也不關 socket；逾時不算失敗，交給下面的退出時限判斷。
+  await evaluate(inspectPort, () => true, `process.mainModule.require('electron').app.quit()`).catch(error => {
+    if (!error.timedOut) throw error
+    console.warn(`SMOKE WARN: ${error.message}; waiting for the app to exit anyway`)
+  })
   const outcome = await Promise.race([exited, sleep(QUIT_TIMEOUT_MS).then(() => null)])
   if (!outcome) {
     const teardownRan = await portFree(hookPortBase)
@@ -201,14 +230,31 @@ async function main() {
   console.log('SMOKE OK: app quit cleanly (exit 0)')
 }
 
+/** 看門狗觸發或失敗時共用：印出日誌尾端。 */
+const printLogTail = () => {
+  console.error('--- app log tail ---')
+  console.error(log.split('\n').slice(-60).join('\n'))
+}
+
+// 看門狗：任何一步（含自己沒涵蓋到的）卡住時，在 --timeout 加寬限後印出日誌、清理並以非 0 結束，
+// 不要拖到 job 逾時才被取消（那樣連日誌都看不到）。正常結束時在 finally 取消。
+const watchdog = setTimeout(() => {
+  process.exitCode = 1
+  console.error(`SMOKE FAIL: watchdog fired after ${(timeoutMs + WATCHDOG_SLACK_MS) / 1000}s; the smoke test is hung`)
+  printLogTail()
+  killApp()
+  try { removeRoot() } catch (error) { console.error(`SMOKE WARN: could not remove temp root: ${error.message}`) }
+  process.exit(1)
+}, timeoutMs + WATCHDOG_SLACK_MS)
+
 try {
   await main()
 } catch (error) {
   process.exitCode = 1
   console.error(`SMOKE FAIL: ${error.message}`)
-  console.error('--- app log tail ---')
-  console.error(log.split('\n').slice(-60).join('\n'))
+  printLogTail()
 } finally {
+  clearTimeout(watchdog)
   killApp()
   removeRoot()
 }

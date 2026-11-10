@@ -331,7 +331,11 @@ const child = spawn(electronBinary, [
   cwd: repoRoot,
   // Only pass what Electron needs; never the user's tokens, account ids or agent settings.
   env: {
-    ...Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'USER', 'LOGNAME', 'SHELL', 'DISPLAY', 'XDG_RUNTIME_DIR', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP',
+    ...Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'USER', 'LOGNAME', 'SHELL', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP',
+      // Linux 顯示連線：HOME 換成暫存目錄後，Electron 找不到 ~/.Xauthority，必須沿用呼叫端的設定。
+      // xvfb-run -a 會用 -auth 檔並匯出 XAUTHORITY（只是 X cookie 檔的路徑，不含憑證內容）；
+      // Wayland 桌面則靠 WAYLAND_DISPLAY 與 XDG_RUNTIME_DIR 找到 compositor 的 socket。
+      'DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR',
       // 連接埠覆寫（僅限 dev build），讓已安裝的 Agent Pets 能保有 17373–17375。
       'AGENT_PETS_EVENT_PORT', 'AGENT_PETS_PERMISSION_PORT', 'AGENT_PETS_PRESENTATION_PORT',
       // 寵物冷啟動倍率（dev 用的 createPetWindow() 預設值）。

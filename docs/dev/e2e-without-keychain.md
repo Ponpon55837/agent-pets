@@ -49,7 +49,7 @@ CI 與本機都用 `scripts/ci-smoke-electron.mjs` 確認建置出的 app 真的
 ```bash
 pnpm exec vite build
 node scripts/ci-smoke-electron.mjs --offscreen      # 本機一律加 --offscreen，視窗不會出現在螢幕上
-# CI（Linux）：xvfb-run -a pnpm run test:smoke
+# CI（Linux）：xvfb-run -a pnpm run test:smoke；macOS 另加 --tolerate-quit-hang
 ```
 
 它做的事：
@@ -62,9 +62,13 @@ node scripts/ci-smoke-electron.mjs --offscreen      # 本機一律加 --offscree
 
 任何一步失敗都以非 0 結束並印出 app 日誌尾端，且一定會結束殘留的 Electron 程序。啟動前會確認三個事件埠與 inspect／debug 埠都空閒；inspect／debug 預設向作業系統要空閒埠，事件埠預設 28573–28575（可用 `--hook-port-base`、`--inspect-port`、`--debug-port` 指定，與其他工作樹的測試並行時使用）。
 
-部分 macOS 環境（例如沒有 GUI session 的沙盒）連一個空白的 Electron app 呼叫 `app.quit()` 都可能卡住不結束，與本 app 無關。本機遇到時加 `--tolerate-quit-hang`：只有在 app 的 `will-quit` 清理已執行（事件埠已關閉）卻沒在時限內結束時，才改為警告並強制結束；CI 不加這個旗標。
+部分 macOS 環境（例如沒有 GUI session 的沙盒）連一個空白的 Electron app 呼叫 `app.quit()` 都可能卡住不結束，與本 app 無關。本機遇到時加 `--tolerate-quit-hang`：只有在 app 的 `will-quit` 清理已執行（事件埠已關閉）卻沒在時限內結束時，才改為警告並強制結束。CI 的 Linux job（`ci.yml`）與 Windows job 不加這個旗標；`ci-platforms.yml` 的 macOS job 有加（`runner.os == 'macOS'` 時），事件埠沒關閉的真正卡住在所有平台仍然失敗。
 
-Linux 的 Chromium sandbox：Ubuntu 24.04 的 AppArmor 預設禁止 unprivileged user namespace，沒有 SUID 的 `chrome-sandbox` 時 Electron 會啟動失敗。我們**不**在 app 加 `--no-sandbox`（那會讓測試與正式行為不同），而是在 CI 的一次性 runner 上用 `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` 放寬限制，顯示由 `xvfb-run -a` 提供。Linux 上 `safeStorage` 已被假造，不需要 keyring。
+逾時保護：每次 fetch 與 inspector（CDP）呼叫最多 5 秒；等待條件（`waitFor`）的單次檢查也受剩餘時間限制；整個流程另有看門狗（`--timeout` 加 60 秒），觸發時印出 app 日誌尾端、結束 Electron、刪掉暫存 root 並以非 0 結束，所以 inspector 接了連線卻不回應也不會卡到 job 逾時。
+
+Linux 的 Chromium sandbox：Ubuntu 24.04 的 AppArmor 預設禁止 unprivileged user namespace，沒有 SUID 的 `chrome-sandbox` 時 Electron 會啟動失敗。我們**不**在 app 加 `--no-sandbox`（那會讓測試與正式行為不同），而是在 CI 的一次性 runner 上用 `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` 放寬限制，顯示由 `xvfb-run -a` 提供。啟動器會把 `DISPLAY`、`XAUTHORITY`（`xvfb-run -a` 的 X cookie 檔路徑）與 `WAYLAND_DISPLAY`、`XDG_RUNTIME_DIR` 傳給 Electron，因為 HOME 已換成暫存目錄，Electron 找不到 `~/.Xauthority`。
+
+Linux 的 `safeStorage` 與插件機密：e2e 的假 `safeStorage` 只假造 `isEncryptionAvailable`、`encryptString`、`decryptString`，**沒有**假造 `getSelectedStorageBackend()`。App 在 Linux 上透過 `createSafeStorageEncryption`（`electron/plugin-secrets.ts`）判斷插件機密能否儲存，除了 `isEncryptionAvailable()` 還會要求 `getSelectedStorageBackend()` 不是 `basic_text` 或 `unknown`。所以 Linux 的 e2e 與冒煙測試裡，這個函式回報「不可用」（CI runner 沒有 keyring，真實的 backend 是 `basic_text`），插件機密會被拒絕儲存，測試**不會**走到插件機密儲存的路徑；macOS 與 Windows 因為只看 `isEncryptionAvailable()`，假的實作會被用到。需要在 Linux 驗證插件機密時，要在有 gnome-keyring／KWallet 的桌面實機上測試，或另外補假造 backend 的 e2e（目前沒有做）。
 
 單元測試（`pnpm test:unit`）完全不啟動 Electron。想縮短迭代可用 `pnpm test:unit:watch`，或
 `node --test --experimental-strip-types tests/<file>.test.mts --test-name-pattern "<名稱>"`。
