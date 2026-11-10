@@ -193,5 +193,5 @@ export function useShimejiBehavior() {
   onMounted(() => { void initializeEnvironment() })
   onBeforeUnmount(disposeEnvironment)
 
-  return { behavior, facing, pointerOverPet, reducedMotion, onPointerEnter, onPointerLeave }
+  return { behavior, facing, reducedMotion, onPointerEnter, onPointerLeave }
 }
