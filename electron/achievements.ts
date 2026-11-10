@@ -21,6 +21,10 @@ import { isProjectId } from '../src/types/id-patterns.ts'
 
 type SqliteRow = Record<string, unknown>
 
+/** 解鎖評估與快照每次事件都會查定義，用索引避免逐筆線性掃描。 */
+const DEFINITION_BY_ID: ReadonlyMap<string, (typeof ACHIEVEMENT_DEFINITIONS)[number]> =
+  new Map(ACHIEVEMENT_DEFINITIONS.map(definition => [definition.id, definition]))
+
 interface SqliteStatement {
   run(...params: unknown[]): { changes: number | bigint }
   get(...params: unknown[]): SqliteRow | undefined
@@ -440,7 +444,7 @@ export class AchievementStore {
     const unlocked = new Map<AchievementId, SqliteRow>()
     for (const row of rows) {
       const id = row.achievement_id
-      if (typeof id === 'string' && ACHIEVEMENT_DEFINITIONS.some(definition => definition.id === id)) {
+      if (typeof id === 'string' && DEFINITION_BY_ID.has(id)) {
         unlocked.set(id as AchievementId, row)
       }
     }
@@ -486,7 +490,7 @@ export class AchievementStore {
     const context = this.readContext(petId, this.localDate(occurredAt), nightOwlCompletion, progression)
     const unlocks: AchievementUnlock[] = []
     for (const evaluation of evaluateAchievements(context)) {
-      const definition = ACHIEVEMENT_DEFINITIONS.find(candidate => candidate.id === evaluation.id)
+      const definition = DEFINITION_BY_ID.get(evaluation.id)
       if (!definition) continue
       const tokenQuality = evaluation.tokenQuality ?? 'none'
       const unlockedAt = this.now()
