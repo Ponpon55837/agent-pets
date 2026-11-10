@@ -4,6 +4,7 @@ import type { AgentSource } from '../src/types/agent'
 import type { AdapterDiagnoseIpcResult, AdapterInstallIpcResult } from '../src/types/ipc'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
+import type { AppUpdateCheckResponse, AppUpdateState } from '../src/types/app-update'
 import type { SessionJumpRequest, SessionJumpResult } from '../src/types/session-jump'
 import type { PermissionDecisionValue, PermissionRequestView, PermissionAuditEntry } from '../src/types/permission'
 import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from '../src/types/progression'
@@ -315,6 +316,22 @@ const electronAPI: ElectronAPI = {
 
   openLoginItemsSettings: (): Promise<boolean> => {
     return ipcRenderer.invoke(IPC_CHANNELS.desktopOpenLoginItemsSettings)
+  },
+
+  getAppUpdateState: (): Promise<AppUpdateState> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.appUpdateGet)
+  },
+
+  setAppUpdateEnabled: (enabled: boolean): Promise<AppUpdateState> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.appUpdateSetEnabled, enabled)
+  },
+
+  checkAppUpdate: (): Promise<AppUpdateCheckResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.appUpdateCheck)
+  },
+
+  openAppUpdateRelease: (): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.appUpdateOpenRelease)
   },
 
   setDesktopPreferences: (patch: DesktopPreferencesPatch): Promise<DesktopPreferences> => {

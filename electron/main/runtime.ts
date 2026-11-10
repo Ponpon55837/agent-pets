@@ -80,6 +80,7 @@ import { createPanelGeometry } from './panel-geometry'
 import { createPetWindowModeService } from './pet-window-mode-service'
 import { createHistoryRuntimeService } from './history-runtime-service'
 import { createPluginCatalogRuntime, decodeCatalogBase64 } from './plugin-catalog-runtime'
+import { createAppUpdateRuntime } from './app-update-runtime'
 import { createPluginRuntime } from './plugin-runtime'
 import { EMPTY_ATTENTION } from '../attention-tracker'
 import { attachHotkeyInfo, PermissionHotkeys } from '../permission-hotkeys'
@@ -818,6 +819,15 @@ export const createMainPluginCatalogGateway = pluginCatalogRuntime.gateway
 export const checkPluginCatalogUpdates = pluginCatalogRuntime.checkUpdates
 export const initializePluginCatalogAutoCheck = pluginCatalogRuntime.initializeAutoCheck
 export { decodeCatalogBase64 }
+
+// App 新版檢查（只提示、不下載安裝）由獨立服務負責；網路沿用 plugin 的 pluginNetworkClient。
+export const appUpdateRuntime = createAppUpdateRuntime({
+  state: mainState,
+  userDataDirectory: () => appUserDataPaths().root,
+  appVersion: () => app.getVersion(),
+  translate: (key, params) => t(key, params),
+  openExternal: url => shell.openExternal(url),
+})
 
 // Plugin runtime 組裝由獨立服務負責：`start()` 建立所有 plugin 服務，`dispose()` 依固定順序釋放。
 // 保留 `createPluginServices` 這個匯出名稱，main.ts 的啟動步驟不變。

@@ -2,6 +2,7 @@
 
 import type { OnboardingAction, OnboardingState } from '@/types/onboarding'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '@/types/desktop'
+import type { AppUpdateCheckResponse, AppUpdateState } from '@/types/app-update'
 import type { SessionJumpRequest, SessionJumpResult } from '@/types/session-jump'
 import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView, PermissionAuditEntry } from '@/types/permission'
 import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from '@/types/progression'
@@ -143,6 +144,10 @@ export interface ElectronAPI {
       onPanelOpenPluginView: (callback: (pluginId: string) => void) => () => void
       initializeDesktopPreferences: (legacySoundEnabled: boolean) => Promise<DesktopPreferences>
       openLoginItemsSettings: () => Promise<boolean>
+      getAppUpdateState: () => Promise<AppUpdateState>
+      setAppUpdateEnabled: (enabled: boolean) => Promise<AppUpdateState>
+      checkAppUpdate: () => Promise<AppUpdateCheckResponse>
+      openAppUpdateRelease: () => Promise<boolean>
       setDesktopPreferences: (patch: DesktopPreferencesPatch) => Promise<DesktopPreferences>
       getPowerSaveState: () => Promise<boolean>
       onPowerSaveStateUpdated: (callback: (powerSave: boolean) => void) => () => void
