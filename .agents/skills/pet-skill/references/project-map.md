@@ -40,6 +40,7 @@
 
 - Chromium sandbox and context isolation enabled; Node integration disabled.
 - Plugins are untrusted. Worker Web APIs are reduced, RPC identity is host-owned, manifests and archive paths are validated, plugin storage is scoped, and permission/contribution changes require user review.
+- Plugin permission units (`network:<host>`, `secrets:<name>`, `contributes:<id>` …) come from one generator, `src/utils/plugin-permission-units.ts`: main uses `grantedPermissionUnits()` (deduplicated, sorted) for install grants, `registry.json` `grantedPermissions.units` and update reconsent; the install sheet uses `permissionUnitsInDisplayOrder()`. Its per-contribution table is an exhaustive mapped type over `PLUGIN_CONTRIBUTION_REGISTRY`, so a new contribution must declare its units there. Risk grouping and copy stay renderer-only in `src/utils/plugin-permissions.ts` and never feed an authorization decision.
 - Plugin network requests require declared or user-approved HTTPS hosts; DNS/IP and each redirect are rechecked. Plugin requests do not send or retain cookies.
 - Custom panel pages use a separate sandboxed WebContentsView and non-persistent partition, with same-plugin resources only and no secrets or host-request capability in the page bridge.
 - Plugin secrets use Electron safeStorage; secret settings are never echoed in snapshots, and no secret value is written to logs or diagnostics.

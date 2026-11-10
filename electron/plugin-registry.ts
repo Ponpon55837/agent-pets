@@ -11,6 +11,7 @@ import type { PluginManifest, PluginRuntimeState } from '../src/types/plugin.ts'
 import type { PluginRegistryError } from '../src/types/ipc.ts'
 import { isPluginId, isKeyFingerprint, isSemverCore } from '../src/types/id-patterns.ts'
 import { isRecord } from './value-guards.ts'
+import { grantedPermissionUnits } from '../src/utils/plugin-permission-units.ts'
 
 export const PLUGIN_ARCHIVE_MAX_BYTES = 5 * 1024 * 1024
 export const PLUGIN_ARCHIVE_SKIN_MAX_BYTES = 25 * 1024 * 1024
@@ -75,37 +76,6 @@ function compareVersions(left: string, right: string): number {
     if (difference !== 0) return Math.sign(difference)
   }
   return 0
-}
-
-function permissionUnits(manifest: PluginManifest): string[] {
-  const result = new Set<string>()
-  for (const [key, value] of Object.entries(manifest.permissions)) {
-    if (key === 'network' && value && typeof value === 'object' && !Array.isArray(value) && 'hosts' in value) {
-      const network = value as { hosts: string[]; userGranted?: boolean }
-      for (const host of network.hosts) result.add(`network:${host}`)
-      if (network.userGranted) result.add('network:userGranted')
-    } else if (key === 'links' && value && typeof value === 'object' && !Array.isArray(value) && 'hosts' in value) {
-      for (const host of (value as { hosts: string[] }).hosts) result.add(`links:${host}`)
-    } else if (key === 'secrets' && Array.isArray(value)) {
-      for (const secret of value) result.add(`secrets:${secret}`)
-    } else if (key === 'schedule' && value) {
-      result.add('schedule')
-    } else if (value === true) {
-      result.add(key)
-    }
-  }
-  if (manifest.contributes.feed) result.add('contributes:feed')
-  if (manifest.contributes.reaction) result.add('contributes:reaction')
-  if (manifest.contributes.panelView) result.add('contributes:panelView')
-  if (manifest.contributes.commands?.length) result.add('contributes:commands')
-  if (manifest.contributes.tray?.commands.length) result.add('contributes:tray')
-  if (manifest.contributes.badge) result.add('contributes:badge')
-  if (manifest.contributes.skins?.length) result.add(`contributes:skins:${manifest.contributes.skins.length}`)
-  if (manifest.contributes.eventSource) result.add('contributes:eventSource')
-  const panelThemes = manifest.contributes.panelThemes ?? []
-  if (panelThemes.length) result.add(`contributes:panelThemes:${panelThemes.length}`)
-  if (panelThemes.some(theme => theme.fonts.length > 0)) result.add('contributes:panelThemeFonts')
-  return [...result].sort()
 }
 
 function hasRasterSignature(data: Uint8Array): boolean {
@@ -392,7 +362,7 @@ export class PluginRegistry {
       ? 'new'
       : comparison > 0 ? 'update'
         : comparison < 0 ? 'downgrade' : 'reinstall'
-    const requestedPermissions = permissionUnits(manifest)
+    const requestedPermissions = grantedPermissionUnits(manifest)
     const grantedPermissions = isRecord(existing?.grantedPermissions) && Array.isArray(existing.grantedPermissions.units)
       ? existing.grantedPermissions.units.filter((value): value is string => typeof value === 'string')
       : []
@@ -551,7 +521,7 @@ export class PluginRegistry {
         currentVersion: manifest.version,
         status: 'installed',
         installedAt: now,
-        grantedPermissions: { units: permissionUnits(manifest) },
+        grantedPermissions: { units: grantedPermissionUnits(manifest) },
         signatureStatus: prepared.publicPlan.developerMode ? 'unverified' : prepared.publicPlan.signatureStatus ?? 'unsigned',
         ...(signatureFingerprint ? { signatureFingerprint } : {}),
         ...(trustedKeyFingerprint ? { trustedKeyFingerprint } : {}),
