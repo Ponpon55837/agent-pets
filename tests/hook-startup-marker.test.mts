@@ -4,6 +4,11 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { HOOK_STARTUP_MARKER_LINGER_MS, hookStartupMarkerName, writeHookStartupMarker } from '../electron/main/hook-startup-marker.ts'
+import { hookStartupLocation } from '../electron/main/hook-startup-location.ts'
+import { resolveLocalPorts } from '../electron/main/ports.ts'
+import { LOCAL_PORT_ENV } from '../src/types/local-wire.ts'
+import { configureSetupEnvironment, setupEnvironment } from '../electron/setup-environment.ts'
+import { hookScriptDeployPath } from '../electron/setup.ts'
 
 // app 啟動標記：hook 連線被拒時只有看到它才重試（見 docs/dev/hook-delivery.md）。
 
@@ -81,5 +86,36 @@ test('an unwritable directory never throws', () => {
     marker.listening()
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+// electron/main/early-hook-startup-marker.ts 在 main.ts 其餘模組載入前就寫標記，所以不能呼叫 runtime.ts 的 localPorts()
+// 與 setup.ts 的 hookScriptDeployPath()；它改用 hookStartupLocation，這裡確認兩邊算出同一組值。
+test('the early marker location equals the event port and deploy folder main.ts used before', () => {
+  const environments: Array<[Record<string, string | undefined>, boolean]> = [
+    [{}, false],
+    [{ [LOCAL_PORT_ENV.event]: '27373' }, false],
+    [{ [LOCAL_PORT_ENV.event]: '27373' }, true],
+    [{ [LOCAL_PORT_ENV.event]: 'nope' }, false],
+    [{ [LOCAL_PORT_ENV.event]: '80' }, false],
+  ]
+  for (const [env, isPackaged] of environments) {
+    const location = hookStartupLocation(env, isPackaged)
+    assert.equal(location.eventPort, resolveLocalPorts(env, isPackaged).event, JSON.stringify([env, isPackaged]))
+    assert.equal(location.directory, hookScriptDeployPath())
+  }
+  // 打包版忽略環境變數；開發版讀得到覆寫。
+  assert.equal(hookStartupLocation({ [LOCAL_PORT_ENV.event]: '27373' }, true).eventPort, 17373)
+  assert.equal(hookStartupLocation({ [LOCAL_PORT_ENV.event]: '27373' }, false).eventPort, 27373)
+})
+
+test('the early marker location follows the configured setup home directory', () => {
+  const original = setupEnvironment().homeDir
+  const home = path.join(os.tmpdir(), 'agent-pets-early-marker-home')
+  try {
+    configureSetupEnvironment({ homeDir: () => home })
+    assert.equal(hookStartupLocation({}, false, setupEnvironment().homeDir()).directory, hookScriptDeployPath())
+  } finally {
+    configureSetupEnvironment({ homeDir: original })
   }
 })

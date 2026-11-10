@@ -40,6 +40,7 @@
 
 - **respond** — 權限請求可直接在寵物氣泡上「允許一次」或「拒絕」。OpenCode 一律支援；Claude Code 需開啟**從寵物回覆 Claude Code 權限**（見[權限氣泡](#權限氣泡)）。
 - **observe** — 寵物會顯示「等待權限」，但必須回到工具本身核准（Codex 只會回報正在等待，沒有管道把決定送回去）。
+- Claude Code：壓縮上下文時顯示「思考中」，手動 `/compact` 結束後回到閒置。「等待權限」與「等待輸入」依 Claude Code 結構化的通知類型判斷（舊版改看通知文字）。舊版本安裝的 hook，會在新版本第一次啟動時補上新的事件，並先備份。
 - Codex 不會回報「等待輸入」狀態。Codex Desktop 與 CLI 共用 `~/.codex`，且沒有獨立的安裝 API，所以只有在該版本執行相同 hook 時才有作用，請用**等待真實事件**確認。
 - **Token usage：exact** 表示逐則訊息讀取 Agent 自己的本機工作階段紀錄（`~/.codex/sessions`、`~/.claude/projects`，搬移設定目錄時改讀下方的位置）。**estimated** 表示數字來自 Agent 送來的事件，例如 OpenCode 與 Generic HTTP 整合；Codex 與 Claude Code 事件上的用量不計入，讓本機紀錄維持唯一來源。
 - **搬移設定目錄**：hook、偵測、額度與 Token 用量會跟著 `CLAUDE_CONFIG_DIR`（Claude Code）、`CODEX_HOME`（Codex）與 `XDG_CONFIG_HOME`（OpenCode，位置是 `<XDG_CONFIG_HOME>/opencode`）。值必須是絕對路徑（Codex 另外要求資料夾已存在）；無法使用時，工具卡片會說明原因，並拒絕安裝，而不是寫到預設位置。macOS 與 Linux 從 Dock 或桌面開啟時，也會向 login shell（`$SHELL -l`，上限 2 秒）讀這些變數。修改後請重新啟動 Agent Pets。如果先裝了 Agent Pets 才設定變數，卡片會指出舊位置，按**移除**會一併清除。換了 `CODEX_HOME` 後，Codex 會要求重新信任 hook。
@@ -120,7 +121,7 @@ Agent 要求權限時，寵物上會出現液態玻璃氣泡，面板內也會�
 - **快捷鍵** — 只有在最上層請求符合條件（低或中風險）時才註冊全域快捷鍵：macOS 為 **Cmd+Shift+Y** 允許一次、**Cmd+Shift+N** 拒絕；Windows 為 **Ctrl+Shift+Y**、**Ctrl+Shift+N**。若按鍵被其他 App 占用，氣泡會說明，按鈕仍可使用。氣泡本身：**N** 或 **Esc** 拒絕；低風險按 **Y** 即允許一次，其他風險需按住 **Y** 0.6 秒。
 - **佇列** — 多個待處理請求會以可展開的清單顯示；**全部拒絕**需要再按一次確認。
 - 對無法在此回覆的 Agent（Codex，以及未開啟下列選項時的 Claude Code），氣泡只是提醒，請回到該工具處理。只提供「允許一次」與「拒絕」，刻意不提供永久核准。
-- **Claude Code**（預設關閉）— 在**設定 → 桌面 → 權限請求**開啟**從寵物回覆 Claude Code 權限**。之後 Claude Code 的 `PermissionRequest` hook 會在**等待秒數**內（預設 90 秒，可設 15–120 秒）等你回覆，終端機裡 Claude Code 自己的權限對話框同時保留，先回覆的一方生效，寵物卡片也會提示可在終端機回覆。一次點擊只回覆一個工具呼叫：若另一個工具呼叫正在等待完全相同的請求（例如兩個 subagent 執行同一個指令），第二個只能在終端機回覆。泡泡會在該工具執行完、Claude 開始下一個工具呼叫或權限詢問、回合結束或送出新提示，或等待逾時時撤下。由於終端機可能先回覆，權限紀錄會把 Claude Code 的決定標示為「終端機可能已先回覆」。寵物沒開、選項關閉、等待逾時或發生任何錯誤時，hook 不輸出任何內容，Claude Code 照原本流程進行（非互動的 `-p` 執行則照常拒絕）。你自己的 deny 規則仍優先於寵物的允許。拒絕時 Claude 只會收到固定文字 `Denied in Agent Pets. (已在 Agent Pets 拒絕)`。若其他工具也註冊了 `PermissionRequest` hook，會與我們並行執行，以哪一方的回覆為準由 Claude Code 決定。
+- **Claude Code**（預設關閉）— 在**設定 → 桌面 → 權限請求**開啟**從寵物回覆 Claude Code 權限**。之後 Claude Code 的 `PermissionRequest` hook 會在**等待秒數**內（預設 90 秒，可設 15–120 秒）等你回覆，終端機裡 Claude Code 自己的權限對話框同時保留，先回覆的一方生效，寵物卡片也會提示可在終端機回覆。一次點擊只回覆一個工具呼叫：若另一個工具呼叫正在等待完全相同的請求（例如兩個 subagent 執行同一個指令），第二個只能在終端機回覆。泡泡會在該工具執行完、Claude 開始下一個工具呼叫或權限詢問、回合結束或送出新提示，或等待逾時時撤下。由於終端機可能先回覆，權限紀錄會把 Claude Code 的決定標示為「終端機可能已先回覆」。寵物還在啟動時，被拒絕的請求會重試最多 5 秒，等待秒數也扣掉同樣的時間。寵物沒開、選項關閉、等待逾時或發生任何錯誤時，hook 不輸出任何內容，Claude Code 照原本流程進行（非互動的 `-p` 執行則照常拒絕）。你自己的 deny 規則仍優先於寵物的允許。拒絕時 Claude 只會收到固定文字 `Denied in Agent Pets. (已在 Agent Pets 拒絕)`。若其他工具也註冊了 `PermissionRequest` hook，會與我們並行執行，以哪一方的回覆為準由 Claude Code 決定。
 - **權限氣泡**可在設定中關閉；關閉後待處理請求仍由 broker 保管並顯示在系統匣標記上。**設定 → 桌面**也會列出最近的決定紀錄（只含時間、工具、來源與結果）。
 
 ## 插件
@@ -223,7 +224,7 @@ pnpm dev
 
 **Agent 狀態** — 依狀態而定的資料都集中在兩張以 `satisfies Record<AgentState, …>` 檢查的表：`src/types/agent.ts` 的 `AGENT_STATE_POLICY`（優先度、桌面通知、歷史結局，主行程共用）與 `src/utils/agent-state-presentation.ts` 的 `AGENT_STATE_PRESENTATION`（標籤、顏色、螢幕閱讀器文字、狀態列用字、迷你徽章、音效）。新增狀態時兩張表沒填齊，型別檢查就會失敗。唯一的例外是每個狀態對應的寵物動作：它要看前一個狀態與時間，所以留在 `src/utils/pet-motion-plan.ts` 用邏輯判斷。
 
-**Agent 來源** — 6 個事件來源（`claude`、`codex-desktop` 等）與 3 個工具家族（Codex、Claude、OpenCode）只在 `src/types/agent.ts` 列一次：`AGENT_SOURCE_REGISTRY`（名稱、家族、CLI 或 Desktop）與 `AGENT_FAMILY_REGISTRY`（家族名稱、adapter id、有沒有訂閱額度、本機 token 紀錄）。來源名稱、狀態列的家族順序、每家族的寵物、quota 條、通知上的名稱、adapter 的來源清單，以及主行程的白名單（事件來源、權限來源、插件不能用的名稱）都由這兩張表推導。hook 腳本與安裝程式（`integrations/`、`electron/setup.ts`、`electron/hook-config.ts`）仍各自寫著來源字串。新增來源前先看 [docs/dev/agent-sources.md](docs/dev/agent-sources.md)。
+**Agent 來源** — 6 個事件來源（`claude`、`codex-desktop` 等）與 3 個工具家族（Codex、Claude、OpenCode）只在 `src/types/agent.ts` 列一次：`AGENT_SOURCE_REGISTRY`（名稱、家族、CLI 或 Desktop）與 `AGENT_FAMILY_REGISTRY`（家族名稱、adapter id、有沒有訂閱額度、本機 token 紀錄）。來源名稱、狀態列的家族順序、每家族的寵物、quota 條、通知上的名稱、adapter 的來源清單，以及主行程的白名單（事件來源、權限來源、插件不能用的名稱）都由這兩張表推導。hook 腳本與安裝程式（`integrations/`、`electron/setup.ts`、`electron/hook-config.ts`）仍各自寫著來源字串，由 `tests/hook-literal-contract.test.mts` 等契約測試核對（清單見下方文件）。新增來源前先看 [docs/dev/agent-sources.md](docs/dev/agent-sources.md)。
 
 **音效** — 哪個狀態播哪個 cue，由 `AGENT_STATE_PRESENTATION` 的 `cue` 欄位決定。其餘跟音效有關的資料都在 `src/types/sound.ts`，以 `satisfies Record<SoundCue, …>` 檢查並深層凍結。表裡有每個 cue 的音形（頻率、時間、增益、波形）、對應的開關和試聽按鈕，也有共用的包絡、同一個 cue 3 秒內只播一次的節流、任務至少跑 15 秒完成時才出聲的門檻、0–100 的音量範圍，以及主行程也會用到的持久化預設值。`src/utils/sound.ts` 只負責排程 Web Audio 節點；`src/utils/sound-policy.ts` 只判斷能不能播，條件是音效開著、沒開勿擾、寵物看得到，而且這個 cue 自己的開關也開著。`tests/sound-registry.test.mts` 會比對每個狀態排程出去的聲音，確認跟改成 registry 之前完全相同；見 [docs/dev/sound-registry.md](docs/dev/sound-registry.md)。
 
