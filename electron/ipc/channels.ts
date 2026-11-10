@@ -20,6 +20,7 @@ export const IPC_CHANNELS = {
   getCustomPetSprite: 'get-custom-pet-sprite',
   dbMaintenanceRun: 'db-maintenance-run',
   growthReset: 'growth-reset',
+  growthResetArm: 'growth-reset-arm',
   historyClear: 'history-clear',
   historyExport: 'history-export',
   historyRevealExport: 'history-reveal-export',

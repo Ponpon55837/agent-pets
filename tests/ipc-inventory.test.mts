@@ -43,7 +43,7 @@ test('IPC inventory matches main registrations, preload APIs, and sender guards'
 
 test('growth reset and database maintenance IPC are panel-only handlers with preload APIs', () => {
   const inventory = analyzeIpcInventory()
-  for (const channel of [IPC_CHANNELS.growthReset, IPC_CHANNELS.dbMaintenanceRun]) {
+  for (const channel of [IPC_CHANNELS.growthResetArm, IPC_CHANNELS.growthReset, IPC_CHANNELS.dbMaintenanceRun]) {
     const row = inventory.rows.find(item => item.channel === channel)
     assert.ok(row, channel)
     assert.match(row.sender, /設定面板 main frame/)
@@ -51,6 +51,7 @@ test('growth reset and database maintenance IPC are panel-only handlers with pre
     assert.equal(row.hasPreloadApi, true)
   }
   const registrar = readFileSync(path.resolve('electron/ipc/growth-maintenance.ts'), 'utf8')
+  assert.match(registrar, /handleTrusted\(deps\.ipcMain, IPC_CHANNELS\.growthResetArm, deps\.getPanelWindow/)
   assert.match(registrar, /handleTrusted\(deps\.ipcMain, IPC_CHANNELS\.growthReset, deps\.getPanelWindow/)
   assert.match(registrar, /handleTrusted\(deps\.ipcMain, IPC_CHANNELS\.dbMaintenanceRun, deps\.getPanelWindow/)
 })

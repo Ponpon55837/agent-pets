@@ -9,7 +9,7 @@ import type { SessionJumpRequest, SessionJumpResult } from '../src/types/session
 import type { PermissionDecisionValue, PermissionRequestView, PermissionAuditEntry } from '../src/types/permission'
 import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
-import { GROWTH_RESET_CONFIRMATION, type DbMaintenanceResult, type GrowthResetResult } from '../src/types/growth-maintenance'
+import type { DbMaintenanceResult, GrowthResetArmResult, GrowthResetResult } from '../src/types/growth-maintenance'
 import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySessionDetail, HistorySessionPage, HistorySessionQuery, HistorySummary, HistoryUsageBlock } from '../src/types/history'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 import type { PetBehaviorManifest, PluginSkinPetSource } from '../src/types/pet'
@@ -506,8 +506,12 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.projectPetsSetEnabled, enabled)
   },
 
-  resetGrowth: (): Promise<GrowthResetResult> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.growthReset, GROWTH_RESET_CONFIRMATION)
+  armGrowthReset: (): Promise<GrowthResetArmResult> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.growthResetArm)
+  },
+
+  resetGrowth: (token: string): Promise<GrowthResetResult> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.growthReset, token)
   },
 
   runDbMaintenance: (): Promise<DbMaintenanceResult> => {

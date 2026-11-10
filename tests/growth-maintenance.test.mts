@@ -8,6 +8,7 @@ import { HistoryStore } from '../electron/history.ts'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import {
   DB_MAINTENANCE_MIN_INTERVAL_MS,
+  GROWTH_RESET_ARM_MIN_INTERVAL_MS,
   GROWTH_RESET_MIN_INTERVAL_MS,
   registerGrowthMaintenanceIpc,
 } from '../electron/ipc/growth-maintenance.ts'
@@ -15,7 +16,7 @@ import { createDbMaintenanceService } from '../electron/main/db-maintenance-serv
 import { createGrowthService, type GrowthState } from '../electron/main/growth-service.ts'
 import { ProgressionStore } from '../electron/progression.ts'
 import { SqliteBusyError, optimizeAndVacuum, sqliteFootprintBytes } from '../electron/sqlite-maintenance.ts'
-import { GROWTH_RESET_CONFIRMATION } from '../src/types/growth-maintenance.ts'
+import { GROWTH_RESET_TOKEN_TTL_MS } from '../src/types/growth-maintenance.ts'
 import { formatBytes } from '../src/utils/bytes-format.ts'
 
 const DAY = 24 * 60 * 60 * 1000
@@ -233,8 +234,11 @@ test('history compact refuses inside HistoryStore.batch', t => {
   assert.doesNotThrow(() => h.history.compact())
 })
 
-function maintenance(h: ReturnType<typeof harness>, extra: { scanning?: () => boolean, logged?: string[] } = {}) {
+const roomy = async () => ({ bavail: 1e9, bsize: 4096 })
+
+function maintenance(h: ReturnType<typeof harness>, extra: { scanning?: () => boolean, logged?: string[], statfs?: (directory: string) => Promise<{ bavail: number | bigint, bsize: number | bigint }> } = {}) {
   return createDbMaintenanceService({
+    statfs: extra.statfs ?? roomy,
     getHistoryStore: () => h.history,
     getProgressionStore: () => h.progression,
     getAchievementStore: () => h.achievements,
@@ -318,6 +322,59 @@ test('maintenance is unavailable without stores and never throws on store failur
   void t
 })
 
+test('maintenance stops with insufficient_space before touching any database', async t => {
+  const h = harness(t)
+  seed(h)
+  const compacted: string[] = []
+  for (const [name, store] of [['history', h.history], ['progression', h.progression], ['achievements', h.achievements]] as const) {
+    const original = store.compact.bind(store)
+    store.compact = () => { compacted.push(name); original() }
+  }
+  const asked: string[] = []
+  const result = await maintenance(h, { statfs: async directory => { asked.push(directory); return { bavail: 1, bsize: 1 } } }).run()
+  assert.equal(result.ok, false)
+  if (result.ok || result.error !== 'insufficient_space') return assert.fail('expected insufficient_space')
+  assert.equal(result.availableBytes, 1)
+  assert.equal(result.neededBytes, sqliteFootprintBytes(h.paths.history) * 2)
+  assert.deepEqual(compacted, [])
+  assert.deepEqual(asked, [h.directory])
+  // 空間足夠剛好兩倍時放行（BigInt 結果也可接受）。
+  const exact = sqliteFootprintBytes(h.paths.history) * 2
+  assert.equal((await maintenance(h, { statfs: async () => ({ bavail: BigInt(exact + 1_000_000), bsize: 1n }) }).run()).ok, true)
+})
+
+test('maintenance yields between databases and rechecks scanning before each compact', async t => {
+  const h = harness(t)
+  const order: string[] = []
+  for (const [name, store] of [['history', h.history], ['progression', h.progression], ['achievements', h.achievements]] as const) {
+    const original = store.compact.bind(store)
+    store.compact = () => { order.push(name); original() }
+  }
+  // 在第一個 compact 之後的讓出期間啟動掃描：第二個資料庫不可被整理。
+  let scanning = false
+  const timer = { fired: false }
+  const service = maintenance(h, { scanning: () => scanning })
+  const originalCompact = h.history.compact.bind(h.history)
+  h.history.compact = () => { originalCompact(); order.push('history-done'); setImmediate(() => { timer.fired = true }); setImmediate(() => { scanning = true }) }
+  assert.deepEqual(await service.run(), { ok: false, error: 'scanning' })
+  assert.equal(timer.fired, true)
+  assert.deepEqual(order, ['history', 'history-done'])
+
+  // 讓出期間有交易：compact 回報 busy。
+  scanning = false
+  raw(h.progression).exec('BEGIN IMMEDIATE')
+  assert.deepEqual(await maintenance(h).run(), { ok: false, error: 'busy' })
+  raw(h.progression).exec('ROLLBACK')
+})
+
+test('maintenance proceeds when statfs itself fails, since VACUUM would roll back safely', async t => {
+  const h = harness(t)
+  const result = await maintenance(h, { statfs: async () => { throw new Error('ENOSYS') } }).run()
+  assert.equal(result.ok, true)
+  const nan = await maintenance(h, { statfs: async () => ({ bavail: Number.NaN, bsize: 4096 }) }).run()
+  assert.equal(nan.ok, true)
+})
+
 function ipcHarness(overrides: { resetResult?: unknown } = {}) {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const panel = { id: 'panel' }
@@ -343,27 +400,80 @@ function ipcHarness(overrides: { resetResult?: unknown } = {}) {
   }
 }
 
-test('growth reset IPC only serves the panel window and requires the exact confirmation literal', async () => {
+type ArmResult = { ok: true, token: string } | { ok: false, error: string }
+const arm = async (h: ReturnType<typeof ipcHarness>): Promise<string> => {
+  const result = await h.invoke(IPC_CHANNELS.growthResetArm, h.panel) as ArmResult
+  assert.equal(result.ok, true)
+  return (result as { token: string }).token
+}
+
+test('growth reset IPC only serves the panel window and rejects missing or malformed tokens', async () => {
   const h = ipcHarness()
-  assert.deepEqual(h.channels, [IPC_CHANNELS.growthReset, IPC_CHANNELS.dbMaintenanceRun])
-  assert.throws(() => h.invoke(IPC_CHANNELS.growthReset, { id: 'pet' }, GROWTH_RESET_CONFIRMATION), /untrusted/)
+  assert.deepEqual(h.channels, [IPC_CHANNELS.growthResetArm, IPC_CHANNELS.growthReset, IPC_CHANNELS.dbMaintenanceRun])
+  assert.throws(() => h.invoke(IPC_CHANNELS.growthResetArm, { id: 'pet' }), /untrusted/)
+  assert.throws(() => h.invoke(IPC_CHANNELS.growthReset, { id: 'pet' }, 'x'), /untrusted/)
   assert.deepEqual(h.counts(), { resets: 0, runs: 0 })
-  for (const bad of [undefined, null, true, 1, 'reset', 'RESET-GROWTH', { confirm: GROWTH_RESET_CONFIRMATION }, [GROWTH_RESET_CONFIRMATION], `${GROWTH_RESET_CONFIRMATION} `]) {
+  // 沒有 arm 過：任何值都拒絕，包含舊版的固定字面值。
+  for (const bad of [undefined, null, 'reset-growth', 1]) {
     h.advance(GROWTH_RESET_MIN_INTERVAL_MS)
     assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, bad), { ok: false, error: 'invalid_request' })
   }
+  // arm 之後，缺少、型別錯誤、長度錯誤、同長度錯誤值都拒絕，且每次嘗試都會讓 token 失效。
+  for (const bad of [undefined, null, true, 7, {}, [], '', 'short', 'x'.repeat(64), '0'.repeat(64)]) {
+    const token = await arm(h)
+    assert.notEqual(token, bad)
+    assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, bad), { ok: false, error: 'invalid_request' })
+    assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, token), { ok: false, error: 'invalid_request' })
+    h.advance(GROWTH_RESET_ARM_MIN_INTERVAL_MS)
+  }
   assert.equal(h.counts().resets, 0)
-  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, GROWTH_RESET_CONFIRMATION), { ok: true })
+})
+
+test('growth reset IPC succeeds once after arm and the token is single-use', async () => {
+  const h = ipcHarness()
+  const token = await arm(h)
+  assert.match(token, /^[0-9a-f]{64}$/)
+  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, token), { ok: true })
+  assert.equal(h.counts().resets, 1)
+  h.advance(GROWTH_RESET_MIN_INTERVAL_MS)
+  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, token), { ok: false, error: 'invalid_request' })
   assert.equal(h.counts().resets, 1)
 })
 
-test('growth reset IPC rate limits repeated requests', async () => {
+test('growth reset IPC token expires, only the newest token is valid, and a failed reset still burns it', async () => {
+  const h = ipcHarness({ resetResult: { ok: false, error: 'failed' } })
+  const expired = await arm(h)
+  h.advance(GROWTH_RESET_TOKEN_TTL_MS + 1)
+  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, expired), { ok: false, error: 'invalid_request' })
+
+  const older = await arm(h)
+  h.advance(GROWTH_RESET_ARM_MIN_INTERVAL_MS)
+  const newer = await arm(h)
+  assert.notEqual(older, newer)
+  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, older), { ok: false, error: 'invalid_request' })
+  // 舊 token 的嘗試已讓目前 token 一併失效。
+  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, newer), { ok: false, error: 'invalid_request' })
+  assert.equal(h.counts().resets, 0)
+
+  h.advance(GROWTH_RESET_ARM_MIN_INTERVAL_MS)
+  const last = await arm(h)
+  h.advance(GROWTH_RESET_TOKEN_TTL_MS)
+  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, last), { ok: false, error: 'failed' })
+  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, last), { ok: false, error: 'invalid_request' })
+  assert.equal(h.counts().resets, 1)
+})
+
+test('growth reset IPC rate limits both arming and repeated resets', async () => {
   const h = ipcHarness()
-  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, GROWTH_RESET_CONFIRMATION), { ok: true })
-  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, GROWTH_RESET_CONFIRMATION), { ok: false, error: 'rate_limited' })
+  const token = await arm(h)
+  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthResetArm, h.panel), { ok: false, error: 'rate_limited' })
+  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, token), { ok: true })
+  h.advance(GROWTH_RESET_ARM_MIN_INTERVAL_MS)
+  const second = await arm(h)
+  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, second), { ok: false, error: 'rate_limited' })
   assert.equal(h.counts().resets, 1)
   h.advance(GROWTH_RESET_MIN_INTERVAL_MS)
-  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, GROWTH_RESET_CONFIRMATION), { ok: true })
+  assert.deepEqual(await h.invoke(IPC_CHANNELS.growthReset, h.panel, await arm(h)), { ok: true })
 })
 
 test('db maintenance IPC only serves the panel window and rate limits', async () => {
