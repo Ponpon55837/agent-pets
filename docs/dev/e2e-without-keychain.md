@@ -42,5 +42,29 @@ node --experimental-strip-types scripts/e2e-real-hook.mts --home <home> --cold-s
 
 腳本會用 `e2e-isolated-electron.mjs --reuse-root` 以同一個 HOME 重新啟動 app，從啟動那一刻起每 `--interval` ms 對一個新 session 送一個 `Stop`，最後分開列出主程序收到幾個、寵物畫面收到幾個，以及 Electron 建立、載入 main.js、寫入啟動標記、事件埠監聽的時間點。app 啟動時會把部署的 hook 換回送往 17373 的版本，所以冷啟動改用 `~/.desktop-pet-e2e/` 裡不會被覆寫的副本，事件不會送到正式版。埠已被佔用時腳本拒絕執行。
 
+## CI 冒煙測試
+
+CI 與本機都用 `scripts/ci-smoke-electron.mjs` 確認建置出的 app 真的能跑起來（script 名稱 `pnpm run test:smoke`）：
+
+```bash
+pnpm exec vite build
+node scripts/ci-smoke-electron.mjs --offscreen      # 本機一律加 --offscreen，視窗不會出現在螢幕上
+# CI（Linux）：xvfb-run -a pnpm run test:smoke
+```
+
+它做的事：
+
+1. 透過 `scripts/e2e-isolated-electron.mjs` 啟動 app（隔離 HOME／userData、假的 `safeStorage`，不碰鑰匙圈與使用者設定）。
+2. 等 `AGENT_PETS_E2E_READY`、事件埠 listening 日誌與 renderer 的 `agent` store 出現（逾時預設 60 秒）。
+3. 用隔離 HOME 裡的 token，以 `src/types/local-wire.ts` 的路徑與 header POST 一筆 `thinking` 事件，預期 HTTP 204。
+4. 經 `--remote-debugging-port`（CDP）讀 renderer store，確認該 session 的狀態是 `thinking`。
+5. 經主程序的 `--inspect` 埠呼叫 `app.quit()`（Windows 沒有 SIGTERM 語意，所以不靠訊號），確認 app 在 20 秒內以 0 結束，最後刪除暫存 root。
+
+任何一步失敗都以非 0 結束並印出 app 日誌尾端，且一定會結束殘留的 Electron 程序。啟動前會確認三個事件埠與 inspect／debug 埠都空閒；inspect／debug 預設向作業系統要空閒埠，事件埠預設 28573–28575（可用 `--hook-port-base`、`--inspect-port`、`--debug-port` 指定，與其他工作樹的測試並行時使用）。
+
+部分 macOS 環境（例如沒有 GUI session 的沙盒）連一個空白的 Electron app 呼叫 `app.quit()` 都可能卡住不結束，與本 app 無關。本機遇到時加 `--tolerate-quit-hang`：只有在 app 的 `will-quit` 清理已執行（事件埠已關閉）卻沒在時限內結束時，才改為警告並強制結束；CI 不加這個旗標。
+
+Linux 的 Chromium sandbox：Ubuntu 24.04 的 AppArmor 預設禁止 unprivileged user namespace，沒有 SUID 的 `chrome-sandbox` 時 Electron 會啟動失敗。我們**不**在 app 加 `--no-sandbox`（那會讓測試與正式行為不同），而是在 CI 的一次性 runner 上用 `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` 放寬限制，顯示由 `xvfb-run -a` 提供。Linux 上 `safeStorage` 已被假造，不需要 keyring。
+
 單元測試（`pnpm test:unit`）完全不啟動 Electron。想縮短迭代可用 `pnpm test:unit:watch`，或
 `node --test --experimental-strip-types tests/<file>.test.mts --test-name-pattern "<名稱>"`。

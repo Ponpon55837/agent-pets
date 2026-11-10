@@ -65,8 +65,8 @@ function compareRendererTypes() {
   const typeStart = typeSource.indexOf('export interface ElectronAPI {')
   const typeEnd = typeSource.indexOf('\n}', typeStart)
   const apiTypes = typeSource.slice(typeStart, typeEnd)
-  const preloadNames = new Set([...preload.matchAll(/^  ([A-Za-z_$][\w$]*):/gm)].map(match => match[1]))
-  const typeNames = new Set([...apiTypes.matchAll(/^      ([A-Za-z_$][\w$]*):/gm)].map(match => match[1]))
+  const preloadNames = new Set([...preload.matchAll(/^ {2}([A-Za-z_$][\w$]*):/gm)].map(match => match[1]))
+  const typeNames = new Set([...apiTypes.matchAll(/^ {6}([A-Za-z_$][\w$]*):/gm)].map(match => match[1]))
   return {
     missingTypes: [...preloadNames].filter(name => !typeNames.has(name)),
     extraTypes: [...typeNames].filter(name => !preloadNames.has(name)),
@@ -121,7 +121,6 @@ function directTests(channel, apis, testFiles) {
 }
 
 export function analyzeIpcInventory() {
-  const main = source(mainPath)
   const registrationSources = collectRegistrationSources()
   const registrations = registrationSources.flatMap(({ path, text }) => [
     ...[...text.matchAll(/(?:ipcMain|deps\.ipcMain)\.(handle|on)\(\s*IPC_CHANNELS\.([A-Za-z_$][\w$]*)/g)]

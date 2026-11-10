@@ -11,11 +11,12 @@ A desktop pet that shows what your AI coding agents are doing: thinking, running
 Download the latest build from the [Releases](https://github.com/Ponpon55837/agent-pets/releases) page.
 
 - **macOS** — `AgentPets-<version>-arm64.dmg` (Apple Silicon) or `AgentPets-<version>-x64.dmg` (Intel). Open it and drag the app to Applications.
-- **Windows** — `AgentPets-<version>.exe`, a portable app that needs no installer.
+- **Windows** — `AgentPets-Setup-<version>.exe`, an installer (per-user, no administrator rights; uninstalling keeps your settings and data), or `AgentPets-<version>.exe`, a portable app that needs no installer.
+- **Linux (unverified)** — `AgentPets-<version>-x86_64.AppImage` or `AgentPets-<version>-amd64.deb`. CI builds them, but they have not been tested on a Linux machine, so Linux is not a supported platform yet. Launch at login and click-through are not available on Linux; without a system keyring (gnome-keyring/KWallet) plugin secrets cannot be stored; on a desktop without a system tray the app still runs, without the tray menu.
 
 Each release also has `SHA256SUMS.txt`; run `shasum -a 256 -c SHA256SUMS.txt --ignore-missing` in the download folder to check the files.
 
-Builds have no developer certificate and are not notarized (the macOS app is only ad-hoc signed so its bundle is sealed), so the OS warns the first time:
+Published builds have no developer certificate and are not notarized (the macOS app is only ad-hoc signed so its bundle is sealed), so the OS warns the first time (the release workflow already supports real signing and turns it on once the maintainer adds the certificates; see [docs/dev/release-signing.md](docs/dev/release-signing.md)):
 
 - **macOS (Gatekeeper)** — right-click the app in Applications, choose **Open**, then confirm. Or use **System Settings → Privacy & Security → Open Anyway**. As a last resort: `xattr -dr com.apple.quarantine "/Applications/Agent Pets.app"`.
 - **Windows (SmartScreen)** — choose **More info → Run anyway**.
@@ -189,7 +190,7 @@ The main-process log is `logs/main.log` inside the app's userData folder (`~/Lib
 | Claude Code does not show the project MCP | Approve `agent-pets` in `/mcp`. Codex needs the project to be trusted. |
 | Pet frozen or blank | Use **Reload pet** in the Tray (Advanced) or **Restart Pet** in Settings → Advanced. |
 | macOS: **Launch at login** stays pending | Approve Agent Pets in System Settings → General → Login Items (the toggle has a button). Move the app to the Applications folder first; a login item cannot be registered from a disk image or Downloads. |
-| Windows: **Restart** closes the app without reopening | Fixed for the portable build: it now relaunches the original `.exe`, not its temporary extraction folder. If it still fails, start the `.exe` again by hand. |
+| Windows: **Restart** closes the app without reopening | Fixed for the portable build: it now relaunches the original `.exe`, not its temporary extraction folder; the installed build relaunches the `.exe` in its install folder. If it still fails, start the `.exe` again by hand. |
 | Bug report | Export diagnostics and attach the file. |
 
 ## Development
@@ -208,7 +209,8 @@ pnpm dev
 | `pnpm dev` / `pnpm dev:safe` | Vite + Electron dev run; `dev:safe` uses software rendering on Windows when the GPU process crashes |
 | `pnpm test:unit` / `pnpm test:unit:watch` | Node built-in tests in `tests/` (no Electron launched) |
 | `pnpm test:coverage` | Unit tests with an 85% line floor on main-process modules |
-| `pnpm lint` | Main-process guard (unhandled `loadURL`, global error handlers) |
+| `pnpm test:smoke` | After `pnpm exec vite build`: starts the isolated Electron app, sends one event, checks the state and quits (add `--offscreen` locally) |
+| `pnpm lint` | ESLint (Vue/TypeScript, `@/` import rule, floating promises in `electron/`) plus the main-process crash-guard check |
 | `pnpm exec vue-tsc --noEmit` | Type check |
 | `pnpm check:bundle-size` | Fails if a renderer chunk exceeds 250 KB (run after `vite build`) |
 | `pnpm check:bundle` | Verifies the plugin panel tokens bundle |
@@ -230,11 +232,11 @@ Both build commands first close project-owned Agent Pets processes. To check a c
 
 `node integrations/install.mjs` installs the hooks from a checkout with the same safeguards as the wizard (`--claude-code` limits it to Claude Code, `--uninstall` removes them).
 
-**CI** — `ci.yml` runs on pull requests and `main` pushes that change more than docs: type check, `pnpm lint`, `pnpm test:coverage`, `vite build`, bundle-size, plugin-panel-bundle and contrast checks, a design-token report and a non-blocking dependency audit. `ci-platforms.yml` runs the type check and unit tests on macOS and Windows weekly and on demand.
+**CI** — `ci.yml` runs on pull requests and `main` pushes that change more than docs: type check, `pnpm lint`, `pnpm test:coverage`, `vite build`, bundle-size, plugin-panel-bundle and contrast checks, a design-token report, an Electron smoke test (`pnpm test:smoke`: starts the app with an isolated HOME and a fake `safeStorage`, sends one event, checks the pet's state and quits; on Linux under xvfb, see [docs/dev/e2e-without-keychain.md](docs/dev/e2e-without-keychain.md)) and a production dependency audit (fails on high or worse; only warns when the advisory service is unreachable). Workflow actions are pinned to commit SHAs. `ci-platforms.yml` runs the type check, unit tests and smoke test on macOS and Windows weekly, on demand, and on pull requests that change it or the smoke scripts.
 
 ## Versioning and release
 
-Bump `version` in `package.json` (patch by default; minor for a persistent-schema, public-contract or security-boundary change). When that commit lands on `main` and no `v<version>` tag exists, `.github/workflows/release.yml` runs the type check and unit tests, builds the macOS arm64 and x64 `.dmg` files and the Windows portable `.exe`, then creates the tag and a GitHub Release with generated notes. It can also be re-run from the Actions tab and skips versions that are already tagged. Each macOS job builds on a runner of its own architecture (Intel for x64) so native modules match, and electron-builder ad-hoc signs the whole bundle after it writes the fuses (`mac.identity: "-"`; no certificate, no notarization). `scripts/check-mac-bundle.mjs` then mounts the dmg and fails the release unless `codesign --verify --deep --strict` passes, the fuses equal `build.electronFuses`, and every Mach-O and `*.node` file is the target architecture. The release job uploads `SHA256SUMS.txt` with the installers. If electron-builder fails to download Electron or its tools from GitHub releases, the job retries twice through `scripts/release-asset-mirror.mjs`, a 127.0.0.1-only proxy that fetches the same release assets through the GitHub API; checksums are still verified by electron-builder.
+Bump `version` in `package.json` (patch by default; minor for a persistent-schema, public-contract or security-boundary change). When that commit lands on `main` and no `v<version>` tag exists, `.github/workflows/release.yml` runs the type check and unit tests, builds the macOS arm64 and x64 `.dmg` files, the Windows installer and portable `.exe` files and the Linux `.AppImage` and `.deb`, then creates the tag and a GitHub Release with generated notes. It can also be re-run from the Actions tab and skips versions that are already tagged. Each macOS job builds on a runner of its own architecture (Intel for x64) so native modules match, and without signing secrets electron-builder ad-hoc signs the whole bundle after it writes the fuses (`mac.identity: "-"`; no certificate, no notarization) and Windows builds are unsigned. Once Developer ID, App Store Connect API key or Windows certificate secrets are set, the next release signs, notarizes and staples automatically (secret names and how to get them: [docs/dev/release-signing.md](docs/dev/release-signing.md)). `scripts/check-mac-bundle.mjs` then mounts the dmg and fails the release unless `codesign --verify --deep --strict` passes, the fuses equal `build.electronFuses`, and every Mach-O and `*.node` file is the target architecture; with real signing it also checks the Developer ID, hardened runtime, `spctl` and the notarization ticket, and on Windows the Authenticode status of both `.exe` files. The release job uploads `SHA256SUMS.txt` with the installers. If electron-builder fails to download Electron or its tools from GitHub releases, the job retries twice through `scripts/release-asset-mirror.mjs`, a 127.0.0.1-only proxy that fetches the same release assets through the GitHub API; checksums are still verified by electron-builder.
 
 ## License
 

@@ -22,7 +22,6 @@ const MAX_AGE_MS = 45 * 60_000
 const MAX_PATH_LENGTH = 4096
 const RATE_WINDOW_MS = 10_000
 const RATE_LIMIT_PER_ACTION = 5
-// eslint-disable-next-line no-control-regex
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 // Package directories are refused outright; the folder is only ever revealed, but there is no
 // reason to point Finder at a bundle. (Document packages such as .xcodeproj are covered by the

@@ -9,7 +9,7 @@ function fixture() {
   const listeners = new Map<string, (event: unknown, payload?: unknown) => void>()
   const calls: string[] = []
   let position: [number, number] = [100, 200]
-  let size: [number, number] = [80, 80]
+  const size: [number, number] = [80, 80]
   let bounds = { x: 100, y: 200, width: 80, height: 80 }
   let cursor = { x: 10, y: 10 }
   let dragHandle: ReturnType<typeof setInterval> | null = null

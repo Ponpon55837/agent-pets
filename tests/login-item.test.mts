@@ -63,3 +63,12 @@ test('unpackaged apps are unsupported and windows keeps the portable path', (t) 
   assert.equal(adapter.getStatus(), 'enabled')
   assert.equal(createLoginItemAdapter({ platform: 'win32', app: win.app, execPath: 'C:\\Temp\\x.exe' }).supported, false)
 })
+
+test('linux has no login-item support and never calls the Electron API', () => {
+  const linux = fakeApp()
+  const adapter = createLoginItemAdapter({ platform: 'linux', app: linux.app, execPath: '/tmp/.mount_AgentP/agent-pets' })
+  assert.equal(adapter.supported, false)
+  assert.equal(adapter.getStatus(), 'unsupported')
+  assert.equal(adapter.setLaunchAtStartup(true), 'unsupported')
+  assert.deepEqual(linux.calls, [])
+})

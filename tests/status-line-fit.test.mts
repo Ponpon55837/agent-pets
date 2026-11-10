@@ -187,7 +187,7 @@ test('quota colours are chosen in CSS by data-quota-tier, not built as strings i
     const returned = new RegExp(`return [^\\n]*'${tier}'`).test(vue) || new RegExp(`^  \\w+: '${tier}',$`, 'm').test(vue)
     assert.ok(returned, `quotaTier returns ${tier}`)
   }
-  assert.match(vue, /const QUOTA_FAMILY_TIER = Object\.freeze\(\{\n  codex: 'normal',\n  claude: 'claude',\n\} as const satisfies Record<QuotaFamilyKey, QuotaTier>\)/)
+  assert.match(vue, /const QUOTA_FAMILY_TIER = Object\.freeze\(\{\n {2}codex: 'normal',\n {2}claude: 'claude',\n\} as const satisfies Record<QuotaFamilyKey, QuotaTier>\)/)
   assert.equal(vue.match(/:data-quota-tier="quotaTier\(line\.key\)"/g)?.length, 2)
   assert.doesNotMatch(vue.split('<template>')[0], /'var\(--/)
 })

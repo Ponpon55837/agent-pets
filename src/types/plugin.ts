@@ -167,7 +167,7 @@ export interface PluginContributionValueMap {
 }
 
 type AssertPluginContributionKeysMatch<T extends true> = T
-type PluginContributionRegistryCoverage = AssertPluginContributionKeysMatch<
+type _PluginContributionRegistryCoverage = AssertPluginContributionKeysMatch<
   [Exclude<PluginContributionId, keyof PluginContributionValueMap>, Exclude<keyof PluginContributionValueMap, PluginContributionId>] extends [never, never]
     ? true
     : false

@@ -2005,7 +2005,13 @@ export function createDesktopServices(): void {
       quit: () => app.quit(),
     },
   )
-  mainState.desktopTray.create()
+  try {
+    mainState.desktopTray.create()
+  } catch (error) {
+    // Linux desktops without a StatusNotifier/AppIndicator host (or a missing icon) must not
+    // take the app down; the pet window and panel keep working without the tray.
+    console.error('Tray is unavailable', error instanceof Error ? error.message : error)
+  }
 }
 
 export function getPetsJsonPath(): string {
