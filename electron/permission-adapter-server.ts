@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import * as path from 'node:path'
@@ -6,6 +6,7 @@ import type { PermissionDecisionValue, PermissionRisk } from '../src/types/permi
 import { FAMILY_SOURCES, familySourceSet, type SourceOfFamily } from '../src/types/agent.ts'
 import { isOpaqueId128 as isIdentifier } from '../src/types/id-patterns.ts'
 import { LOCAL_WIRE_HEADERS, LOCAL_WIRE_PATHS } from '../src/types/local-wire.ts'
+import { hasJsonContentType, JSON_RESPONSE_HEADERS, readBoundedJson, sendJson, tokenMatches } from './loopback-http.ts'
 import {
   PermissionBroker,
   type AdapterPermissionDecision,
@@ -188,6 +189,7 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
   const randomId = options.randomId ?? randomUUID
   const records = new Map<string, ExternalRequestRecord>()
   const createWindows = new Map<string, { startedAt: number; count: number }>()
+  const expectedToken = Buffer.from(options.token)
 
   return createServer(async (request, response) => {
     setSecurityHeaders(response)
@@ -199,12 +201,11 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
       sendJson(response, 403, { error: 'forbidden' })
       return
     }
-    if (!hasValidToken(request, options.token)) {
+    if (!tokenMatches(request.headers[LOCAL_WIRE_HEADERS.permissionToken], expectedToken)) {
       sendJson(response, 401, { error: 'unauthorized' })
       return
     }
-    const contentType = request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase()
-    if (contentType !== 'application/json') {
+    if (!hasJsonContentType(request)) {
       sendJson(response, 415, { error: 'application_json_required' })
       return
     }
@@ -554,42 +555,18 @@ function isLoopback(address: string | undefined): boolean {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
 }
 
-function hasValidToken(request: IncomingMessage, expected: string): boolean {
-  const value = request.headers[LOCAL_WIRE_HEADERS.permissionToken]
-  if (typeof value !== 'string') return false
-  const actualBuffer = Buffer.from(value)
-  const expectedBuffer = Buffer.from(expected)
-  return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer)
-}
-
+/**
+ * 這個 server 的 client 不區分 body 失敗的原因：過大、空 body、錯誤 JSON 與中斷都回 null，
+ * 由各路由的 normalize 函式轉成 400 `invalid_request`（沒有 413）。
+ */
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
-  const declaredLength = Number(request.headers['content-length'] ?? 0)
-  if (!Number.isFinite(declaredLength) || declaredLength < 0 || declaredLength > MAX_BODY_BYTES) return null
-  const chunks: Buffer[] = []
-  let size = 0
-  try {
-    for await (const chunk of request) {
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-      size += buffer.length
-      if (size > MAX_BODY_BYTES) return null
-      chunks.push(buffer)
-    }
-    if (size === 0) return null
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'))
-  } catch {
-    return null
-  }
+  const body = await readBoundedJson(request, MAX_BODY_BYTES)
+  return body.ok ? body.value : null
 }
 
+/** 先設好，讓沒有 body 的 204 回應也帶同一組 header。 */
 function setSecurityHeaders(response: ServerResponse): void {
-  response.setHeader('cache-control', 'no-store')
-  response.setHeader('content-type', 'application/json; charset=utf-8')
-  response.setHeader('x-content-type-options', 'nosniff')
-}
-
-function sendJson(response: ServerResponse, status: number, body: unknown): void {
-  response.statusCode = status
-  response.end(JSON.stringify(body))
+  for (const [name, value] of Object.entries(JSON_RESPONSE_HEADERS)) response.setHeader(name, value)
 }
 
 function consumeCreateBudget(

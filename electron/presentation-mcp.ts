@@ -1,6 +1,6 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { timingSafeEqual } from 'node:crypto'
+import { createServer, type IncomingMessage, type Server } from 'node:http'
 import type { PresentationController } from './presentation-controller.ts'
+import { hasJsonContentType, readBoundedJson, sendJson, tokenMatches } from './loopback-http.ts'
 import { LOCAL_WIRE_HEADERS, LOCAL_WIRE_PATHS } from '../src/types/local-wire.ts'
 
 export const PRESENTATION_TOKEN_HEADER = LOCAL_WIRE_HEADERS.presentationToken
@@ -18,30 +18,9 @@ interface PresentationMcpServerOptions {
   controller: PresentationController
 }
 
-function writeJson(response: ServerResponse, status: number, value: unknown): void {
-  const body = JSON.stringify(value)
-  response.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
-    'x-content-type-options': 'nosniff',
-    'content-length': Buffer.byteLength(body),
-  })
-  response.end(body)
-}
-
 function readClientId(request: IncomingMessage): string | null {
   const value = request.headers[PRESENTATION_CLIENT_HEADER]
   return typeof value === 'string' ? value : null
-}
-
-function readToken(request: IncomingMessage): Buffer {
-  const value = request.headers[PRESENTATION_TOKEN_HEADER]
-  return Buffer.from(typeof value === 'string' ? value : '')
-}
-
-function isAuthorized(request: IncomingMessage, expectedToken: Buffer): boolean {
-  const supplied = readToken(request)
-  return supplied.length === expectedToken.length && timingSafeEqual(supplied, expectedToken)
 }
 
 function isAllowedPath(request: IncomingMessage): boolean {
@@ -53,17 +32,17 @@ export function createPresentationMcpServer(options: PresentationMcpServerOption
   let rateWindowStartedAt = Date.now()
   let requestsInWindow = 0
 
-  const server = createServer((request, response) => {
+  const server = createServer(async (request, response) => {
     if (!isAllowedPath(request)) {
-      writeJson(response, 404, { error: 'not_found' })
+      sendJson(response, 404, { error: 'not_found' })
       return
     }
     if (request.headers.origin) {
-      writeJson(response, 403, { error: 'browser origins are not allowed' })
+      sendJson(response, 403, { error: 'browser origins are not allowed' })
       return
     }
-    if (!isAuthorized(request, expectedToken)) {
-      writeJson(response, 401, { error: 'unauthorized' })
+    if (!tokenMatches(request.headers[PRESENTATION_TOKEN_HEADER], expectedToken)) {
+      sendJson(response, 401, { error: 'unauthorized' })
       request.resume()
       return
     }
@@ -75,77 +54,67 @@ export function createPresentationMcpServer(options: PresentationMcpServerOption
     }
     requestsInWindow += 1
     if (requestsInWindow > MAX_REQUESTS_PER_WINDOW) {
-      response.setHeader('retry-after', '10')
-      writeJson(response, 429, { error: 'too_many_requests' })
+      sendJson(response, 429, { error: 'too_many_requests' }, { 'retry-after': '10' })
       request.resume()
       return
     }
 
-    if (request.method === 'GET' && request.url === STATUS_PATH) {
-      writeJson(response, 200, {
-        ...options.controller.getStatus(),
-        queueDepth: options.controller.getQueueDepth(),
-      })
-      return
-    }
-
     if (request.url === STATUS_PATH) {
-      response.setHeader('allow', 'GET')
-      writeJson(response, 405, { error: 'method_not_allowed' })
+      if (request.method === 'GET') {
+        sendJson(response, 200, {
+          ...options.controller.getStatus(),
+          queueDepth: options.controller.getQueueDepth(),
+        })
+        return
+      }
+      sendJson(response, 405, { error: 'method_not_allowed' }, { allow: 'GET' })
       request.resume()
       return
     }
 
     if (request.method !== 'POST') {
-      response.setHeader('allow', request.url === STATUS_PATH ? 'GET' : 'POST')
-      writeJson(response, 405, { error: 'method_not_allowed' })
+      sendJson(response, 405, { error: 'method_not_allowed' }, { allow: 'POST' })
       return
     }
-    const contentType = request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase()
-    if (contentType !== 'application/json') {
-      writeJson(response, 415, { error: 'application/json required' })
+    if (!hasJsonContentType(request)) {
+      sendJson(response, 415, { error: 'application/json required' })
       request.resume()
       return
     }
 
-    const chunks: Buffer[] = []
-    let totalBytes = 0
-    let rejected = false
-    request.on('data', (chunk: Buffer) => {
-      if (rejected) return
-      totalBytes += chunk.length
-      if (totalBytes > MAX_BODY_BYTES) {
-        rejected = true
-        writeJson(response, 413, { error: 'request_too_large' })
-        request.resume()
-        return
+    // 錯誤字串是既有契約：presentation-mcp.mjs 把 body 的 error 當成工具錯誤訊息，所以保留
+    // `request_too_large`／`invalid_json`，不與 event server 的字串統一。空 body 視為 `{}`。
+    const read = await readBoundedJson(request, MAX_BODY_BYTES)
+    let body: unknown = {}
+    if (read.ok) {
+      body = read.value
+    } else {
+      switch (read.reason) {
+        case 'too_large':
+          sendJson(response, 413, { error: 'request_too_large' })
+          return
+        case 'invalid_json':
+          sendJson(response, 400, { error: 'invalid_json' })
+          return
+        case 'aborted':
+          return
+        case 'empty':
+          break
       }
-      chunks.push(chunk)
-    })
-    request.on('end', () => {
-      if (rejected) return
-      let body: unknown = {}
-      try {
-        const raw = Buffer.concat(chunks).toString('utf8')
-        body = raw.length > 0 ? JSON.parse(raw) : {}
-      } catch {
-        writeJson(response, 400, { error: 'invalid_json' })
-        return
-      }
+    }
 
-      const clientId = readClientId(request)
-      if (request.url === DISCONNECT_PATH) {
-        writeJson(response, 200, {
-          removed: clientId ? options.controller.disconnectClient(clientId) : 0,
-        })
-        return
-      }
-      if (request.url !== INTENTS_PATH || !clientId) {
-        writeJson(response, 400, { error: 'client_id_required' })
-        return
-      }
-      writeJson(response, 200, options.controller.submit(clientId, body))
-    })
+    const clientId = readClientId(request)
+    if (request.url === DISCONNECT_PATH) {
+      sendJson(response, 200, {
+        removed: clientId ? options.controller.disconnectClient(clientId) : 0,
+      })
+      return
+    }
+    if (request.url !== INTENTS_PATH || !clientId) {
+      sendJson(response, 400, { error: 'client_id_required' })
+      return
+    }
+    sendJson(response, 200, options.controller.submit(clientId, body))
   })
 
   return server
