@@ -12,14 +12,14 @@
 
 - 請求只由主程序發出，網址是 `electron/app-update.ts` 的常數：`https://api.github.com/repos/Ponpon55837/agent-pets/releases/latest`。renderer、設定檔與 IPC payload 都不能指定網址。
 - 走既有的 `PluginNetworkClient`（`pluginNetworkClient`，`plugin-network` session）：主機白名單只有 `api.github.com`、HTTPS、逾時 10 秒、回應上限 256 KB、每分鐘 3 次、DNS 解析到私有位址即拒絕、redirect 逐跳重驗。
-- 失敗（離線、逾時、非 2xx、非 JSON、過大）一律靜默，只在設定頁顯示「檢查失敗」。
+- 失敗（離線、逾時、非 2xx、非 JSON、過大）一律靜默，只在設定頁顯示「檢查失敗」。先前確認過的新版不會因一次失敗而消失；只有成功檢查且回報已是最新時才清除，使用者升級到該版後也不再顯示。
 - e2e 模式（`globalThis.__agentPetsE2E` 存在）只讀 `appUpdateFixture`，不會連網。
 
 ## 回應處理
 
 - 只取 `tag_name`、`html_url`、`draft`、`prerelease`。`draft`、`prerelease` 與帶 prerelease 後綴的 tag 不提示。
 - 版本以 semver 與 `app.getVersion()` 比對（接受單一 `v` 前綴；非法字串視為沒有新版）。
-- `html_url` 必須以 `https://github.com/Ponpon55837/agent-pets/releases/` 開頭且通過 URL 解析驗證，否則改用 `releases/tag/<tag_name>` 自行組出。
+- `html_url` 必須以 `https://github.com/Ponpon55837/agent-pets/releases/` 開頭且通過 URL 解析驗證，否則由驗證、正規化後的版本組出 `releases/tag/v<version>`，不使用原始 `tag_name`。
 
 ## 持久化與開啟
 
