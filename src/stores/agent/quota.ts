@@ -125,7 +125,7 @@ export function useQuota() {
   })
 
   // 近期用量樣本（每個「服務商:視窗」各一條，有界）。只存在 renderer 記憶體，不另開 IPC；
-  // 面板關閉期間不會有新樣本，重開後需要重新累積才會顯示預測。
+  // 面板隱藏時仍會收到寵物視窗輪詢後的廣播，renderer 重新載入才會從零累積。
   const quotaSeries = new Map<string, QuotaSeries>()
 
   function recordSamples(usage: QuotaUsage): void {
