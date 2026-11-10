@@ -23,6 +23,7 @@
     "check:bundle-size": "node scripts/check-bundle-size.mjs",
     "check:bundle": "node scripts/check-plugin-panel-tokens-bundle.mjs",
     "bench:lag": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bench/event-loop-lag.mjs",
+    "bench:lag:check": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bench/event-loop-lag.mjs --check",
     "check:contrast": "node scripts/check-contrast.mjs",
     "check:design": "node scripts/check-design-tokens.mjs",
     "check:design:strict": "node scripts/check-design-tokens.mjs --strict --raw-colors=fail",

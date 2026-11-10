@@ -886,3 +886,28 @@ test('scans the folders configDirs returns (CLAUDE_CONFIG_DIR／CODEX_HOME) inst
   assert.equal(scan.filesScanned, 3)
   assert.equal(store.getSummary().totals.tokenInput, 49)
 })
+
+test('imports in small batches without changing the result and notifies the consumer per batch', async t => {
+  const fixture = setup()
+  const now = Date.UTC(2026, 7, 13, 1, 0, 0)
+  const store = new HistoryStore(fixture.database, { now: () => now, localDate: () => '2026-08-13' })
+  t.after(() => { store.close(); fixture.cleanup() })
+  writeJsonl(path.join(fixture.home, '.claude', 'projects', 'p', 'session.jsonl'), Array.from({ length: 25 }, (_, index) => ({
+    type: 'assistant',
+    timestamp: new Date(now + index * 1_000).toISOString(),
+    session_id: 'claude-session',
+    message: { id: `message-${index}`, usage: { input_tokens: 10, output_tokens: 2 } },
+  })))
+  const batchSizes: number[] = []
+  const reader = new LocalUsageReader({
+    homeDir: fixture.home,
+    history: store,
+    now: () => now,
+    importBatchRecords: 10,
+    onRecordsImported: records => { batchSizes.push(records.length) },
+  })
+  const scan = await reader.scan()
+  assert.equal(scan.recordsImported, 25)
+  assert.deepEqual(batchSizes, [10, 10, 5])
+  assert.equal(store.getSummary().totals.tokenInput, 250)
+})

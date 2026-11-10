@@ -77,6 +77,8 @@ export interface LocalUsageReaderOptions {
   maxLineBytes?: number
   /** Wall-clock work budget per scan; the rest continues on the next scan. */
   maxScanMs?: number
+  /** 每批寫入 History 的筆數；批次越小，主執行緒單次被同步寫入佔住的時間越短。 */
+  importBatchRecords?: number
   /** Monotonic clock for the work budget (tests inject a fake one). */
   clock?: () => number
   projectRouting?: ProjectPathResolver | null
@@ -109,7 +111,9 @@ export interface LocalUsageScanDiagnostics extends LocalUsageScanResult {
 // thousands of session logs never blocks the main process for long.
 const YIELD_EVERY = 25
 const PARSE_SLICE_BYTES = 1024 * 1024
-const IMPORT_BATCH_RECORDS = 500
+// node:sqlite 寫入是同步的：實測單批 500 筆約佔住主執行緒 31ms、100 筆約 7ms，
+// 批次之間讓出事件迴圈，所以用小批次縮短單次阻塞（見 docs/perf/local-usage-worker.md）。
+const DEFAULT_IMPORT_BATCH_RECORDS = 100
 const yieldToEventLoop = (): Promise<void> => new Promise(resolve => setImmediate(resolve))
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -734,6 +738,7 @@ export class LocalUsageReader {
   private readonly projectRouting: ProjectPathResolver | null
   private readonly maxScanMs: number
   private readonly clock: () => number
+  private readonly importBatchRecords: number
   private readonly onRecordsImported: ((records: readonly HistoryTokenUsageRecord[]) => void) | null
   private readonly fileCache = new Map<string, LocalUsageFileCacheEntry>()
   private readonly scanCaches = new Map<string, UsageScanCache>()
@@ -752,6 +757,7 @@ export class LocalUsageReader {
     this.projectRouting = options.projectRouting ?? null
     this.maxScanMs = Math.max(50, Math.min(60_000, Math.floor(options.maxScanMs ?? DEFAULT_MAX_SCAN_MS)))
     this.clock = options.clock ?? (() => performance.now())
+    this.importBatchRecords = Math.max(1, Math.min(5_000, Math.floor(options.importBatchRecords ?? DEFAULT_IMPORT_BATCH_RECORDS)))
     this.onRecordsImported = options.onRecordsImported ?? null
   }
 
@@ -911,8 +917,8 @@ export class LocalUsageReader {
       projectByCwd.set(cwd, this.projectRouting?.trackSeen(cwd, seenAt)?.projectId)
     }
     let imported = 0
-    for (let offset = 0; offset < fresh.length; offset += IMPORT_BATCH_RECORDS) {
-      const batch = fresh.slice(offset, offset + IMPORT_BATCH_RECORDS).map(record => ({
+    for (let offset = 0; offset < fresh.length; offset += this.importBatchRecords) {
+      const batch = fresh.slice(offset, offset + this.importBatchRecords).map(record => ({
         ...record,
         projectId: record.cwd ? projectByCwd.get(record.cwd) : undefined,
       }))
@@ -921,7 +927,7 @@ export class LocalUsageReader {
         // A downstream ledger failure must never stop History from importing.
         try { this.onRecordsImported(batch) } catch (error) { console.error('Local usage consumer failed', error) }
       }
-      if (offset + IMPORT_BATCH_RECORDS < fresh.length) await yieldToEventLoop()
+      if (offset + this.importBatchRecords < fresh.length) await yieldToEventLoop()
     }
     return imported
   }
