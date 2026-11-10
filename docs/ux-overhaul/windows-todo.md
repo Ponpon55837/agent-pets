@@ -22,7 +22,17 @@ UX 翻修（PR #25）和之後的 PR 5（跨平台實測與打包）中，需要
 - [ ] **PM-10 系統匣圖示**：Windows 數字徽章與高 DPI 圖示素材。
 - [ ] **簽章**（已實作、待實機驗證）：`release.yml` 在設定 `WINDOWS_CERTIFICATE_P12`／`WINDOWS_CERTIFICATE_PASSWORD` 後，以 Authenticode 簽可攜版與安裝版兩個 `.exe`，並用 `Get-AuthenticodeSignature` 確認為 Valid（見 [release-signing.md](../dev/release-signing.md)）。待設定憑證後確認 SmartScreen 警告消失；EV／雲端簽章尚不支援。
 - [ ] **NSIS 安裝版**（已實作、待實機驗證）：`AgentPets-Setup-<version>.exe`（per-user、不需系統管理員）。待確認安裝、捷徑、解除安裝保留資料、開機啟動指向安裝目錄的 `.exe`、重新啟動與單一實例、hook 部署的 `resources/integrations` 與 `node.exe` 解析。
-- [ ] **回到工作階段：切換到 App**：macOS 以 `open -b`（LaunchServices）把終端機／IDE 帶到最前面；Windows 目前隱藏這個動作。需要找出不需額外權限、不會被前景鎖定（`SetForegroundWindow` 限制）擋下的方式，並驗證 Windows Terminal（`WT_SESSION`）與 VS Code 的辨識。「顯示專案資料夾」（`shell.showItemInFolder`；拒絕 UNC 與 `name.{CLSID}` 路徑）與「複製專案路徑」也需在 Windows 實機確認。
+- [ ] **回到工作階段：切換到 App**（已實作、待實機驗證）：`electron/windows-window-activator.ts` 以 koffi（延遲載入、僅 win32）依 Z 順序掃描最上層視窗，只接受 `src/types/host-app.ts` 的 `windowsExecutables` 白名單（小寫 basename 完全相等；目錄不比對，因為效果只是把使用者自己的視窗帶到前景），略過不可見、被 DWM 遮蔽（其他虛擬桌面）、工具視窗與有擁有者的對話框；最小化先 `SW_RESTORE`，再 `SetForegroundWindow`；若前景鎖定擋下，單次 `AttachThreadInput` 備援後立刻解除。hook 只送 app 類別（`WT_SESSION`、`TERM_PROGRAM=vscode` 等），不送 PID、路徑或執行檔名。白名單：Windows Terminal、VS Code／Insiders、Cursor、Windsurf、Zed、WezTerm、Hyper、Tabby；JetBrains、Claude Desktop 因 hook 無法辨識或執行檔名無把握而暫不支援（`switchable` 為 false，動作維持隱藏）。沿用 `sessionJumpEnabled`／`sessionJumpSwitchAppEnabled` 與每動作頻率限制。待 Windows 實機確認：
+  - [ ] Windows Terminal：在 WT 分頁跑 agent，點寵物／通知後 WT 視窗到最前面（執行檔 `WindowsTerminal.exe`；Windows 11 預設終端機與傳統 conhost 視窗是否另有執行檔）。
+  - [ ] VS Code（含 Insiders）、Cursor、Windsurf：整合終端機內跑 agent 時辨識為對應 App 並切換（`TERM_PROGRAM=vscode` 加 `CURSOR_TRACE_ID` 判 Cursor；Windsurf 是否能被 hook 辨識）。
+  - [ ] 最小化的視窗會先還原再到前景；被其他虛擬桌面遮蔽的視窗行為（會略過，找不到時回「無法使用」）。
+  - [ ] 前景鎖定：從寵物點擊與通知點擊都能成功；刻意讓別的程式持有前景權時，備援是否生效，失敗時 UI 顯示「失敗」而非卡住。
+  - [ ] 同一程序有多個視窗時挑 Z 順序最上面（最近使用）的那個；無法指定特定視窗或分頁。
+  - [ ] 以系統管理員（高 IL）執行的終端機：能否讀到映像路徑、能否被激活；無法激活時應回「失敗／無法使用」，不崩潰。
+  - [ ] koffi 載入失敗（例如缺 DLL 或被防毒阻擋）時回退為「失敗」，其他功能不受影響，下次點擊會重試載入。
+  - [ ] 偏好設定關閉「切換到 App」後動作隱藏、頻率限制（10 秒 5 次）生效。
+  - [ ] 「顯示專案資料夾」：`shell.showItemInFolder` 在檔案總管選取資料夾；UNC、`\\?\`、`C:foo`、`a:stream`、任一層 `name.{CLSID}` 都被拒絕。
+  - [ ] 「複製專案路徑」：含空白的路徑可複製；含 `% ^ & [ ]`、彎引號（U+2018–201F）或空白後 `#` 的路徑被拒絕，貼進 cmd 與 PowerShell 不會多執行任何東西。
 - [ ] **CI**（已實作、待實機驗證）：`ci-platforms.yml` 的 Windows runner 執行 `pnpm test:smoke`（隔離啟動、送事件、確認狀態、正常結束）；尚未在 Windows runner 實際跑過。
 
 驗證完成後，請把對應項目打勾，並更新該問題的工作記錄狀態。
