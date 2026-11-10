@@ -48,7 +48,7 @@ test('the pet permission bubble never grows past the reserved headroom, so the s
   const { QUOTA_TOOLTIP_HEADROOM_H } = await import('../src/utils/pet-window-size.ts')
   const { PET_WINDOW_HEADROOM_PX } = await import('../electron/pet-drag.ts')
   assert.equal(PET_WINDOW_HEADROOM_PX, QUOTA_TOOLTIP_HEADROOM_H)
-  assert.match(readFileSync('electron/main/runtime.ts', 'utf8'), /petHeadroom: QUOTA_TOOLTIP_HEADROOM_H,/)
+  assert.match(readFileSync('electron/main/panel-geometry.ts', 'utf8'), /petHeadroom: QUOTA_TOOLTIP_HEADROOM_H,/)
   assert.match(readFileSync('src/styles/tokens.css', 'utf8'), new RegExp(`--pet-bubble-headroom: ${QUOTA_TOOLTIP_HEADROOM_H}px;`))
   const bubble = readFileSync('src/components/permission/PermissionBubble.vue', 'utf8')
   assert.match(bubble, /\.permission-request \{[^}]*max-height: calc\(var\(--pet-bubble-headroom\) - 4px\);[^}]*flex-direction: column;/)
