@@ -222,8 +222,8 @@
 | 9 | 第 5 項：agentStore 按領域拆分 | `refactor-09-agent-store.md` | `d5f5b47` |
 | 10 | 第 4 項：Plugin 面板控制器拆分 | `refactor-10-plugin-panel-controller.md` | `26b0b4e` |
 | 11 | 第 6 項：main runtime 拆分；userData 路徑表 | `refactor-11-main-runtime.md` | `7a30439` |
-| 12 | 第 7 項：原子寫檔底層機制 | `refactor-12-atomic-write.md` | 本 commit |
-| 收尾 | 升 minor 版、PR、auto-fix、auto-merge | — | — |
+| 12 | 第 7 項：原子寫檔底層機制 | `refactor-12-atomic-write.md` | `2c02127` |
+| 收尾 | 升 minor 版（1.13.0）、PR、auto-fix、auto-merge | [`phase-release-1-13-0.md`](../phase-reports/phase-release-1-13-0.md) | 本 PR |
 
 測試暫存目錄 helper 與 UI 計時字面值（低優先觀察）在相關階段順手處理，不單獨成階段。
 

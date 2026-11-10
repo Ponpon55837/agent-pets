@@ -1,6 +1,6 @@
 # 階段計畫：尊重 Agent 設定目錄覆寫（`CLAUDE_CONFIG_DIR`／`CODEX_HOME`）
 
-> 狀態：實作中（重構階段 1，見[階段記錄](../phase-reports/refactor-01-agent-config-dirs.md)） · 基準：`main` @ 404ab6f，版本 1.12.5 · 建議版號：**patch（1.12.6）**，理由是修正 adapter 的安裝與讀取位置，沒有改變公開契約、持久化 schema 或安全邊界。
+> 狀態：已實作（重構階段 1，`35f6cb9`，隨 1.13.0 發布，見[階段記錄](../phase-reports/refactor-01-agent-config-dirs.md)） · 基準：`main` @ 404ab6f，版本 1.12.5 · 建議版號：**patch（1.12.6）**，理由是修正 adapter 的安裝與讀取位置，沒有改變公開契約、持久化 schema 或安全邊界。
 >
 > 來源：[共用模組抽取評估](../architecture/refactor-opportunities-2026-11-10.zh-TW.md) 第 10 項。
 
