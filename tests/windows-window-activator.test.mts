@@ -5,6 +5,7 @@ import {
   activateWindowsHost,
   createNativeWindowsApi,
   isAllowedWindowsExecutable,
+  normalizeWindowHandle,
   type WindowsWindowApi,
 } from '../electron/windows-window-activator.ts'
 import { HOST_APPS, windowsExecutablesFor } from '../src/types/host-app.ts'
@@ -23,13 +24,16 @@ interface FakeWindow {
 
 function fakeApi(windows: FakeWindow[], images: Record<number, string | null>, options: { foregroundSticks?: boolean; attachWorks?: boolean; throwOn?: string } = {}) {
   const log: string[] = []
-  let foreground: unknown = 999
-  const byId = (handle: unknown) => windows.find(window => window.id === handle)!
+  let foreground: bigint | null = 999n
+  const byId = (handle: bigint) => windows.find(window => BigInt(window.id) === handle)!
   const guard = (name: string) => { if (options.throwOn === name) throw new Error(`${name} failed`) }
   let attached = false
   const api: WindowsWindowApi = {
-    topWindow: () => windows[0]?.id ?? null,
-    nextWindow: handle => windows[windows.findIndex(window => window.id === handle) + 1]?.id ?? null,
+    topWindow: () => (windows[0] ? BigInt(windows[0].id) : null),
+    nextWindow: handle => {
+      const next = windows[windows.findIndex(window => BigInt(window.id) === handle) + 1]
+      return next ? BigInt(next.id) : null
+    },
     isVisible: handle => byId(handle).visible ?? true,
     isCloaked: handle => byId(handle).cloaked ?? false,
     isMinimized: handle => byId(handle).minimized ?? false,
@@ -96,7 +100,7 @@ test('picks the topmost visible, uncloaked, ownerless window of an allowed proce
     { 10: 'C:\\Windows\\explorer.exe', 20: 'C:\\Program Files\\WindowsTerminal.exe' },
   )
   assert.equal(activateWindowsHost(api, ['windowsterminal.exe']), 'activated')
-  assert.equal(foreground(), 6)
+  assert.equal(foreground(), 6n)
   assert.deepEqual(log, ['foreground:6'])
 })
 
@@ -131,7 +135,7 @@ test('a throwing native layer fails safe instead of throwing', () => {
 
 test('a cyclic window chain terminates', () => {
   const api = fakeApi([{ id: 1, pid: 10 }], { 10: 'C:\\a\\other.exe' }).api
-  const looping: WindowsWindowApi = { ...api, nextWindow: () => 1 }
+  const looping: WindowsWindowApi = { ...api, nextWindow: () => 1n }
   assert.equal(activateWindowsHost(looping, ['code.exe']), 'not_found')
 })
 
@@ -141,4 +145,47 @@ test('koffi is never loaded off Windows and activation then fails safe', async (
   if (process.platform !== 'win32') assert.equal(await activateWindowsApp(['code.exe']), 'failed')
   const { api } = fakeApi([{ id: 1, pid: 20 }], { 20: 'C:\\a\\Code.exe' })
   assert.equal(await activateWindowsApp(['code.exe'], api), 'activated')
+})
+
+test('normalizeWindowHandle maps every native return shape to bigint or null', () => {
+  for (const empty of [null, undefined, 0, 0n, -0, Number.NaN, 1.5, '5', {}, [], true, Object(0n), new Number(0)]) {
+    assert.equal(normalizeWindowHandle(empty), null, String(empty))
+  }
+  assert.equal(normalizeWindowHandle(5n), 5n)
+  assert.equal(normalizeWindowHandle(5), 5n)
+  assert.equal(normalizeWindowHandle(Object(5n)), 5n)
+  assert.equal(normalizeWindowHandle(new Number(5)), 5n)
+})
+
+test('the same window returned as number, bigint or a wrapper still compares equal, so no AttachThreadInput fallback', () => {
+  const log: string[] = []
+  const { api } = fakeApi([{ id: 6, pid: 20 }], { 20: 'C:\\a\\Code.exe' })
+  const shapes: unknown[] = [6, 6n, Object(6n), new Number(6)]
+  let call = 0
+  const mixed: WindowsWindowApi = {
+    ...api,
+    setForeground: () => { log.push('foreground'); return true },
+    // 每次都換一種型別回傳同一個 HWND。
+    foregroundWindow: () => shapes[call++ % shapes.length] as bigint,
+    attachThreadInput: () => { log.push('attach'); return true },
+  }
+  assert.equal(activateWindowsHost(mixed, ['code.exe']), 'activated')
+  assert.deepEqual(log, ['foreground'])
+})
+
+test('a null or zero foreground handle never counts as the target window', () => {
+  for (const empty of [null, 0n, 0]) {
+    const { api } = fakeApi([{ id: 6, pid: 20 }], { 20: 'C:\\a\\Code.exe' })
+    const log: string[] = []
+    const stuck: WindowsWindowApi = {
+      ...api,
+      setForeground: () => true,
+      foregroundWindow: () => empty as bigint | null,
+      attachThreadInput: () => { log.push('attach'); return true },
+    }
+    assert.equal(activateWindowsHost(stuck, ['code.exe']), 'failed')
+    assert.deepEqual(log, [])
+  }
+  const emptyTop = fakeApi([{ id: 6, pid: 20 }], { 20: 'C:\\a\\Code.exe' }).api
+  assert.equal(activateWindowsHost({ ...emptyTop, topWindow: () => 0n }, ['code.exe']), 'not_found')
 })
