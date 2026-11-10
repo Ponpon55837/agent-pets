@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
-import { t, type TranslationKey } from '@/i18n'
+import { t, tPlural, type TranslationKey } from '@/i18n'
 import { useHistoryFormat } from '@/composables/useHistoryFormat'
 import { useAgentStore } from '@/stores/agentStore'
 import { AGENT_ADAPTER_REGISTRY } from '@/types/agent-adapter'
@@ -172,8 +172,8 @@ function outcomeLabel(outcome: HistorySessionOutcome): string {
 function metaLine(item: HistorySessionListItem): string {
   const parts = [duration(item.durationMs)]
   if (item.tracked) {
-    parts.push(t('growth.sessionsTools', { count: item.toolRuns }))
-    if (item.permissionWaits > 0) parts.push(t('growth.sessionsPermissionWaits', { count: item.permissionWaits }))
+    parts.push(tPlural('growth.sessionsTools', item.toolRuns))
+    if (item.permissionWaits > 0) parts.push(tPlural('growth.sessionsPermissionWaits', item.permissionWaits))
   } else {
     parts.push(t('growth.sessionsCountsUnknown'))
   }

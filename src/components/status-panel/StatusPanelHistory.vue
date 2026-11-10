@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { t, type TranslationKey } from '@/i18n'
+import { t, tPlural, type TranslationKey } from '@/i18n'
 import { useHistoryFormat } from '@/composables/useHistoryFormat'
 import { useProgressionLabels } from '@/composables/useProgressionLabels'
 import { useQuotaFormat } from '@/composables/useQuotaFormat'
@@ -139,6 +139,13 @@ function agentHeadline(agent: HistoryAgentStat): string {
     : duration(agent.activeMs)
 }
 
+// 每列的占比與標題一次算好，模板不再為同一列重複呼叫兩次 agentShare。
+const agentRows = computed(() => (historySummary.value?.agents ?? []).map(agent => ({
+  agent,
+  share: agentShare(agent),
+  headline: agentHeadline(agent),
+})))
+
 function trackingDate(): string {
   const since = historySummary.value?.tokenTrackingSince
   if (!since) return ''
@@ -152,11 +159,11 @@ const scanLine = computed(() => {
 })
 const skippedLine = computed(() => {
   const skipped = historySummary.value?.scan?.filesSkipped ?? 0
-  return skipped > 0 ? t('growth.scanSkipped', { count: skipped }) : ''
+  return skipped > 0 ? tPlural('growth.scanSkipped', skipped) : ''
 })
 const deferredLine = computed(() => {
   const deferred = historySummary.value?.scan?.filesDeferred ?? 0
-  return deferred > 0 ? t('growth.scanDeferred', { count: deferred }) : ''
+  return deferred > 0 ? tPlural('growth.scanDeferred', deferred) : ''
 })
 
 // --- loading -------------------------------------------------------------------
@@ -388,9 +395,9 @@ onUnmounted(() => {
               <Button size="sm" :active="agentMetric === 'time'" @click="agentMetric = 'time'">{{ t('growth.agentByTime') }}</Button>
             </div>
             <div class="history-agent-list">
-              <div v-for="agent in historySummary.agents" :key="agent.adapterId" class="history-agent-row">
-                <div class="history-agent-heading"><span>{{ agentDisplayName(agent.adapterId) }}</span><strong>{{ agentHeadline(agent) }} · {{ agentShare(agent) }}%</strong></div>
-                <ProgressTrack :value="agentShare(agent)" tone="success" decorative />
+              <div v-for="{ agent, share, headline } in agentRows" :key="agent.adapterId" class="history-agent-row">
+                <div class="history-agent-heading"><span>{{ agentDisplayName(agent.adapterId) }}</span><strong>{{ headline }} · {{ share }}%</strong></div>
+                <ProgressTrack :value="share" tone="success" decorative />
                 <div class="history-muted">{{ tokens(agent.tokenInput, 'full') }} {{ t('historyTokenIn') }} · {{ tokens(agent.tokenOutput, 'full') }} {{ t('historyTokenOut') }} · {{ tokenLabel(agent.tokenQuality) }}</div>
                 <div class="history-muted history-agent-outcomes">
                   <span>{{ duration(agent.activeMs) }}</span>

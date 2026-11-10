@@ -6,6 +6,7 @@ import { nextRovingId } from '../src/composables/useRovingTabs.ts'
 import {
   SETTINGS_ENTRIES,
   SETTINGS_GROUPS,
+  SETTINGS_GROUP_BY_ID,
   groupOfSection,
   isSettingsGroupId,
   searchSettings,
@@ -87,5 +88,12 @@ test('completion markers are searchable in both languages', () => {
     for (const query of ['完成標記', 'completion', 'badge']) {
       assert.ok(searchSettings(query, translate).some(hit => hit.entry.id === 'completionMarkers'), `${locale}: ${query}`)
     }
+  }
+})
+
+test('groupOfSection resolves every section through the shared index', () => {
+  for (const group of SETTINGS_GROUPS) {
+    for (const section of group.sections) assert.equal(groupOfSection(section), group.id)
+    assert.equal(SETTINGS_GROUP_BY_ID.get(group.id), group)
   }
 })

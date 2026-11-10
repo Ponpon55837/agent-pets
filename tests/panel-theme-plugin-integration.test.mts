@@ -172,11 +172,11 @@ test('every new locale key exists in both languages', () => {
   for (const domain of ['design', 'plugins']) {
     const zh = JSON.parse(fs.readFileSync(`src/locales/${domain}/zh-TW.json`, 'utf8')) as Record<string, string>
     const en = JSON.parse(fs.readFileSync(`src/locales/${domain}/en-US.json`, 'utf8')) as Record<string, string>
-    const keys = (catalog: Record<string, string>) => Object.keys(catalog).filter(key => key.includes('anelTheme')).sort()
+    const keys = (catalog: Record<string, string>) => Object.keys(catalog).filter(key => key.includes('anelTheme') && !key.endsWith('.one')).sort() // zh-TW 沒有 `.one`
     assert.deepEqual(keys(zh), keys(en), domain)
     assert.ok(keys(zh).length > 0)
   }
-  for (const key of ['pluginPermissionPanelThemes', 'pluginPermissionPanelThemeFonts']) {
+  for (const key of ['pluginPermissionPanelThemes.other', 'pluginPermissionPanelThemeFonts']) {
     for (const file of ['src/locales/zh-TW.json', 'src/locales/en-US.json']) {
       assert.ok((JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, string>)[key], `${key} in ${file}`)
     }

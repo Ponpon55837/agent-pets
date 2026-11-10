@@ -1,46 +1,37 @@
 // Plugin 面板控制器：建立共用依賴（忙碌範圍、序列佇列、refresh、錯誤通知），組裝各功能 composable，
-// 並保留跨功能的狀態（快照、目前選取／詳情頁的插件）與尚未拆出的 catalog、安裝、偏好。
+// 並保留跨功能的狀態（快照、目前選取／詳情頁的插件）、快照刷新、指令、回報與生命週期。
+// 目錄、偏好、安裝／移除、已安裝清單已拆到 composables/plugin/。
 // 對元件的回傳欄位與型別固定（tests/plugin-panel-controller-characterization.test.mts）。
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { locale, t, type TranslationKey } from '@/i18n'
-import { resolvePluginIconUrl } from '@/utils/plugin-icon'
+import { locale, t } from '@/i18n'
 import type {
   PluginBadgeView,
   PluginEventSourceStatusView,
-  PluginInstallPlan,
-  PluginGlobalPreferencesPatch,
   PluginPanelPlugin,
   PluginPanelSnapshot,
-  PluginResourceLimits,
   PluginLocalizedText,
 } from '@/types/plugin'
-import type { PluginCatalogPanelItem } from '@/types/plugin-catalog'
-import { DEFAULT_PLUGIN_CATALOG_URL } from '@/types/plugin-catalog'
 import { isValidPetId } from '@/utils/pet-id'
-import { installAcknowledgementReasons, permissionUnitsOfPlan } from '@/utils/plugin-permissions'
-import {
-  permissionHint, permissionLabel, toPermissionGroupViews, type PermissionGroupView,
-} from '@/utils/plugin-permission-copy'
-import { resourceBoundText, resourceInputValue, resourceValueFromInput } from '@/utils/plugin-resource-limits'
-import {
-  applyPreferencePatch, createSerialQueue, mergePreferencesResult, rollbackPreferencePatch,
-  type PluginPreferencePatch,
-} from '@/composables/plugin/plugin-state-sync'
+import { permissionHint, permissionLabel } from '@/utils/plugin-permission-copy'
+import { resourceBoundText, resourceInputValue } from '@/utils/plugin-resource-limits'
+import { createSerialQueue } from '@/composables/plugin/plugin-state-sync'
 import { createBusyScopes, createPluginPanelFeedback, createQueuedRefresh, pluginScope } from '@/composables/plugin/panel-deps'
 import { usePluginNotify } from '@/composables/plugin/usePluginNotify'
 import { usePluginSettingsEditor } from '@/composables/plugin/usePluginSettingsEditor'
 import { usePluginPanelView } from '@/composables/plugin/usePluginPanelView'
 import { usePluginNotifications } from '@/composables/plugin/usePluginNotifications'
 import { usePluginDiagnostics } from '@/composables/plugin/usePluginDiagnostics'
+import { usePluginCatalog } from '@/composables/plugin/usePluginCatalog'
+import { usePluginPreferences } from '@/composables/plugin/usePluginPreferences'
+import { usePluginInstall } from '@/composables/plugin/usePluginInstall'
+import { usePluginInstalledList, type PluginInstalledFilter } from '@/composables/plugin/usePluginInstalledList'
 import { pluginDetailRequestNonce, takePluginDetailRequest } from '@/utils/plugin-detail-request'
-import { isKeyFingerprint } from '@/types/id-patterns'
-
 export type { PermissionEntryView, PermissionGroupView } from '@/utils/plugin-permission-copy'
+export type { PluginInstalledFilter }
 
 // 跨元件重新掛載保留：已處理過的最後一個面板開啟請求序號。
 let consumedPanelRequestNonce = 0
 
-export type PluginInstalledFilter = 'all' | 'enabled' | 'updates' | 'issues'
 
 export type PluginDetailSection = 'overview' | 'settings' | 'commands' | 'themes' | 'diagnostics'
 
@@ -121,109 +112,42 @@ const legacyInitialValues: LegacyInitialValues = {
   panelViewRequestSequence: 0,
 }
 
-// --- 尚未拆出的狀態：指令、catalog、安裝、移除、回報 -----------------------------------
+// --- 目錄、已安裝清單、偏好、安裝／移除 -------------------------------------------------
+// 順序有依賴：目錄 → 已安裝清單（用目錄的可更新索引）→ 偏好（目錄網址變更時重設目錄）→ 安裝／移除。
+// refreshPanel 在下方才宣告，這裡以回呼延後取用。
+
+const {
+  catalogItems, catalogCheckComplete, catalogLoadedAt, catalogError, catalogSearch, updatableItems, updatableIds,
+  filteredCatalogItems, catalogItemFor, resetCatalog, loadPluginCatalog, ensureCatalogLoaded,
+} = usePluginCatalog({ onlineCatalogEnabled, busy: { isBusy, setBusy }, feedback })
+
+const {
+  installedSearch, installedFilter, filteredPlugins, failedPluginIconIds, pluginName, pluginIconUrl, hidePluginIcon,
+  displayFingerprint, pluginStatusLabel, pluginStatusTone,
+} = usePluginInstalledList({ snapshot, plugins, enabledGlobally, updatableIds })
+
+const {
+  catalogUrlDraft, resourceFields, updateGlobalPreferences, saveCatalogUrl, restoreCatalogUrl, updateResourceLimit,
+  updatePluginPreference, updatePluginRate, updatePluginTarget, revokeGrantedHost, enableInstalledPlugin,
+} = usePluginPreferences({
+  snapshot, plugins, enabledGlobally, busy: { setBusy }, enqueueSerial, feedback, notify: notifier.notify,
+  resetCatalog,
+  refreshPanel: options => refreshPanel(options),
+})
+
+const {
+  pendingPlan, updateQueue, pendingRemove, keepData, hasCompatiblePlan, pendingPluginName, pendingPermissionSections,
+  installAcknowledgements, planKindLabel, selectArchive, selectDeveloperFolder, installCatalogPlugin,
+  updateAllCatalogPlugins, confirmInstall, requestRemove, confirmRemove,
+} = usePluginInstall({
+  enabledGlobally, catalogLoadedAt, updatableItems, busy: { isBusy, setBusy }, feedback, pluginName,
+  loadPluginCatalog, enableInstalledPlugin, refreshPanel: () => refreshPanel(),
+})
+
+// --- 其餘狀態：指令、回報 -----------------------------------------------------------
 
 const invokingCommandId = ref('')
-const pendingPlan = ref<PluginInstallPlan | null>(null)
-const pendingRemove = ref<PluginPanelPlugin | null>(null)
 const pendingReportPluginId = ref('')
-const catalogItems = ref<PluginCatalogPanelItem[]>([])
-const catalogById = computed(() => new Map(catalogItems.value.map(item => [item.plugin.id, item])))
-const catalogCheckComplete = ref(false)
-const catalogLoadedAt = ref<number | null>(null)
-const catalogError = ref('')
-const updateQueue = ref<PluginCatalogPanelItem[]>([])
-const catalogSearch = ref('')
-const catalogUrlDraft = ref('')
-const keepData = ref(false)
-const failedPluginIconIds = ref(new Set<string>())
-
-// --- 已安裝清單 ---------------------------------------------------------------
-
-const installedSearch = ref('')
-const installedFilter = ref<PluginInstalledFilter>('all')
-const filteredPlugins = computed(() => {
-  const query = installedSearch.value.trim().toLocaleLowerCase()
-  const filter = installedFilter.value
-  const updatable = filter === 'updates'
-    ? new Set(catalogItems.value.filter(item => item.updateAvailable).map(item => item.plugin.id))
-    : null
-  const tones = new Map(plugins.value.map(plugin => [plugin.id, pluginStatusTone(plugin)]))
-  const matches = plugins.value.filter(plugin => {
-    if (filter === 'enabled' && !plugin.preference.enabled) return false
-    if (filter === 'issues' && tones.get(plugin.id) !== 'warn') return false
-    if (updatable && !updatable.has(plugin.id)) return false
-    if (!query) return true
-    return [plugin.id, pluginName(plugin), plugin.manifest?.author ?? ''].some(value => value.toLocaleLowerCase().includes(query))
-  })
-  // 需要處理的插件（崩潰、不相容）排在最前面；sort 是穩定排序，其餘維持原本順序。
-  const warn = (plugin: PluginPanelPlugin) => Number(tones.get(plugin.id) === 'warn')
-  return matches.sort((left, right) => warn(right) - warn(left))
-})
-const filteredCatalogItems = computed(() => {
-  const query = catalogSearch.value.trim().toLocaleLowerCase()
-  if (!query) return catalogItems.value
-  return catalogItems.value.filter(item => [
-    item.plugin.id,
-    item.plugin.name[locale.value],
-    item.plugin.description[locale.value],
-    item.plugin.author,
-  ].some(value => value.toLocaleLowerCase().includes(query)))
-})
-const hasCompatiblePlan = computed(() => Boolean(pendingPlan.value && pendingPlan.value.kind !== 'incompatible'))
-const pendingPluginName = computed(() => pendingPlan.value?.name?.[locale.value] ?? pendingPlan.value?.pluginId ?? '')
-const resourceFields: Array<{
-  key: keyof PluginResourceLimits
-  label: TranslationKey
-  defaultValue: number
-  min: number
-  max: number
-}> = [
-  { key: 'maxEnabledPlugins', label: 'pluginResourceMaxEnabled', defaultValue: 10, min: 1, max: 50 },
-  { key: 'memoryMbPerPlugin', label: 'pluginResourceMemory', defaultValue: 64, min: 16, max: 512 },
-  { key: 'netMaxResponseBytes', label: 'pluginResourceNetBytes', defaultValue: 2 * 1024 * 1024, min: 64 * 1024, max: 20 * 1024 * 1024 },
-  { key: 'netTimeoutSeconds', label: 'pluginResourceNetTimeout', defaultValue: 15, min: 5, max: 60 },
-  { key: 'netRequestsPerMinute', label: 'pluginResourceNetRate', defaultValue: 30, min: 1, max: 300 },
-  { key: 'storageBytesPerPlugin', label: 'pluginResourceStorage', defaultValue: 1024 * 1024, min: 64 * 1024, max: 50 * 1024 * 1024 },
-  { key: 'globalFeedPer10Min', label: 'pluginResourceGlobalFeed', defaultValue: 60, min: 10, max: 300 },
-  { key: 'scheduleMinIntervalSeconds', label: 'pluginResourceSchedule', defaultValue: 60, min: 30, max: 3_600 },
-]
-
-function pluginName(plugin: PluginPanelPlugin): string {
-  return plugin.manifest?.name[locale.value] ?? plugin.id
-}
-
-function pluginIconUrl(plugin: PluginPanelPlugin): string | null {
-  return resolvePluginIconUrl(
-    plugin.id,
-    plugin.manifest?.icon,
-    plugin.preference.enabled,
-    snapshot.value?.preferences.pluginsEnabled === true,
-    failedPluginIconIds.value.has(plugin.id),
-  )
-}
-
-function hidePluginIcon(pluginId: string): void {
-  failedPluginIconIds.value = new Set([...failedPluginIconIds.value, pluginId])
-}
-
-function displayFingerprint(value: string | undefined): string {
-  return isKeyFingerprint(value)
-    ? value.match(/.{4}/g)?.join(' ') ?? ''
-    : ''
-}
-
-function pluginStatusLabel(plugin: PluginPanelPlugin): string {
-  if (plugin.status === 'disabled_crashed') return t('pluginStatusCrashed')
-  if (plugin.status === 'incompatible' || !plugin.manifest) return t('pluginStatusIncompatible')
-  if (!plugin.preference.enabled || !enabledGlobally.value) return t('pluginStatusDisabled')
-  return t('pluginStatusEnabled')
-}
-
-function pluginStatusTone(plugin: PluginPanelPlugin): 'success' | 'warn' | 'neutral' {
-  if (plugin.status === 'disabled_crashed' || plugin.status === 'incompatible' || !plugin.manifest) return 'warn'
-  return plugin.preference.enabled && enabledGlobally.value ? 'success' : 'neutral'
-}
 
 // --- 詳情頁 -------------------------------------------------------------------
 
@@ -318,134 +242,6 @@ async function invokePluginCommand(commandId: string): Promise<void> {
     invokingCommandId.value = ''
   }
 }
-
-// --- 全域偏好與 catalog --------------------------------------------------------
-
-function resetCatalog(): void {
-  catalogItems.value = []
-  catalogCheckComplete.value = false
-  catalogLoadedAt.value = null
-}
-
-// 全域偏好以串行佇列送出：連續修改（例如多個欄位）依序生效，不會被「忙碌」丟棄。
-// 成功後直接採用主行程回傳的偏好，不再整頁重新抓取。
-async function updateGlobalPreferences(patch: PluginGlobalPreferencesPatch): Promise<void> {
-  await enqueueSerial('global', async () => {
-    const previousCatalogUrl = snapshot.value?.preferences.catalogUrl
-    const stoppedCount = patch.pluginsEnabled === false && enabledGlobally.value
-      ? plugins.value.filter(plugin => plugin.preference.enabled).length
-      : 0
-    setBusy('global', true)
-    try {
-      const result = await window.electronAPI?.setPluginGlobalPreferences(patch)
-      if (!result?.ok) {
-        if (result && !result.ok) setError(result.error)
-        return
-      }
-      if (snapshot.value) mergePreferencesResult(snapshot.value, result.value)
-      catalogUrlDraft.value = result.value.catalogUrl
-      if (patch.pluginsEnabled === false && stoppedCount > 0) {
-        notifier.notify({
-          tone: 'success',
-          text: t('plugins.globalStopped', { count: stoppedCount }),
-          durationMs: 6000,
-          action: { label: t('plugins.undo'), run: () => void updateGlobalPreferences({ pluginsEnabled: true }) },
-        })
-      }
-      if (patch.onlineCatalogEnabled === false
-        || (patch.catalogUrl !== undefined && patch.catalogUrl !== previousCatalogUrl)) {
-        resetCatalog()
-      }
-    } catch {
-      setError('plugin_action_failed')
-    } finally {
-      setBusy('global', false)
-    }
-  })
-}
-
-async function saveCatalogUrl(): Promise<void> {
-  const previousUrl = snapshot.value?.preferences.catalogUrl ?? ''
-  await updateGlobalPreferences({ catalogUrl: catalogUrlDraft.value })
-  if (previousUrl !== snapshot.value?.preferences.catalogUrl) resetCatalog()
-}
-
-async function restoreCatalogUrl(): Promise<void> {
-  catalogUrlDraft.value = DEFAULT_PLUGIN_CATALOG_URL
-  await saveCatalogUrl()
-}
-
-// 目錄載入失敗以 inline 錯誤 + 重試呈現（catalogError），不再只丟 Toast。
-// silent：自動載入（進入探索分頁、背景同步）不顯示成功訊息。
-async function loadPluginCatalog(options: { silent?: boolean } = {}): Promise<void> {
-  const scope = 'catalog'
-  if (isBusy(scope) || !onlineCatalogEnabled.value) return
-  setBusy(scope, true)
-  catalogError.value = ''
-  try {
-    const result = await window.electronAPI?.listPluginCatalog()
-    if (!result?.ok) {
-      catalogError.value = result && !result.ok ? result.error : 'catalog_unavailable'
-      return
-    }
-    catalogItems.value = result.value
-    catalogCheckComplete.value = true
-    catalogLoadedAt.value = Date.now()
-    if (!options.silent) {
-      setStatus(t('pluginCatalogChecked', {
-        entries: String(result.value.length),
-        updates: String(result.value.filter(item => item.updateAvailable).length),
-      }))
-    }
-  } catch {
-    catalogError.value = 'catalog_unavailable'
-  } finally {
-    setBusy(scope, false)
-  }
-}
-
-// 進入探索分頁時：目錄已啟用且尚未載入才自動載入一次（已載入的結果沿用，使用者可手動重新檢查）。
-async function ensureCatalogLoaded(): Promise<void> {
-  if (!onlineCatalogEnabled.value || catalogLoadedAt.value !== null || isBusy('catalog')) return
-  await loadPluginCatalog({ silent: true })
-}
-
-// 「全部更新」：逐一為每個可更新項目產生安裝計畫並開啟同一個確認 Sheet，絕不跳過同意。
-async function installNextQueuedUpdate(): Promise<void> {
-  const next = updateQueue.value[0]
-  if (!next) return
-  updateQueue.value = updateQueue.value.slice(1)
-  await installCatalogPlugin(next)
-}
-
-async function updateAllCatalogPlugins(): Promise<void> {
-  if (pendingPlan.value) return
-  updateQueue.value = catalogItems.value.filter(item => item.updateAvailable)
-  await installNextQueuedUpdate()
-}
-
-function catalogItemFor(pluginId: string): PluginCatalogPanelItem | undefined {
-  return catalogById.value.get(pluginId)
-}
-
-async function installCatalogPlugin(item: PluginCatalogPanelItem): Promise<void> {
-  const scope = 'install'
-  if (isBusy(scope)) return
-  setBusy(scope, true)
-  try {
-    const result = await window.electronAPI?.installPluginFromCatalog(item.plugin.id, item.latestVersion.version)
-    if (!result?.ok) {
-      if (result && !result.ok) setError(result.error)
-      return
-    }
-    pendingPlan.value = result.value
-  } catch {
-    setError('plugin_action_failed')
-  } finally {
-    setBusy(scope, false)
-  }
-}
-
 // --- 回報問題 -----------------------------------------------------------------
 
 // 回報問題先預覽會帶出的資訊，使用者確認後才開啟瀏覽器。
@@ -476,217 +272,7 @@ async function reportPluginIssue(pluginId: string): Promise<void> {
     setBusy(scope, false)
   }
 }
-
-// --- 資源上限與單一插件偏好 -------------------------------------------------------
-
-function updateResourceLimit(key: keyof PluginResourceLimits, raw: string): void {
-  const field = resourceFields.find(item => item.key === key)
-  const value = resourceValueFromInput(key, Number(raw))
-  if (!field || !Number.isSafeInteger(value) || value < field.min || value > field.max) {
-    if (field) {
-      notifier.notify({ tone: 'error', text: t('pluginResourceRangeInvalid', { min: String(field.min), max: String(field.max) }) })
-    }
-    return
-  }
-  void updateGlobalPreferences({ resources: { [key]: value } })
-}
-
-// 單一插件的偏好採樂觀更新：先改畫面，失敗再回滾該欄位並顯示錯誤；同一插件的變更依序送出。
-async function updatePluginPreference(pluginId: string, patch: PluginPreferencePatch): Promise<void> {
-  const current = snapshot.value
-  if (!current) return
-  const previous = applyPreferencePatch(current, pluginId, patch)
-  const scope = pluginScope(pluginId)
-  setBusy(scope, true)
-  try {
-    await enqueueSerial(scope, async () => {
-      try {
-        const result = await window.electronAPI?.setPluginInstancePreferences(pluginId, patch)
-        if (!result?.ok) {
-          if (snapshot.value) rollbackPreferencePatch(snapshot.value, pluginId, previous)
-          setError(result && !result.ok ? result.error : 'plugin_service_unavailable')
-          return
-        }
-        if (snapshot.value) mergePreferencesResult(snapshot.value, result.value)
-        if (patch.enabled !== undefined) void refreshPanel({ silent: true })
-      } catch {
-        if (snapshot.value) rollbackPreferencePatch(snapshot.value, pluginId, previous)
-        setError('plugin_action_failed')
-      }
-    })
-  } finally {
-    setBusy(scope, false)
-  }
-}
-
-async function updatePluginRate(pluginId: string, raw: string): Promise<void> {
-  const value = Number(raw)
-  if (!Number.isSafeInteger(value) || value < 1 || value > 30) {
-    notifier.notify({ tone: 'error', text: t('pluginPerPluginRateRange') })
-    return
-  }
-  await updatePluginPreference(pluginId, { rateLimitPer10Min: value })
-}
-
-async function updatePluginTarget(pluginId: string, targetPetId: string): Promise<void> {
-  await updatePluginPreference(pluginId, { targetPetId: targetPetId || null })
-}
-
-// 撤銷主機授權：立即生效，並以 5 秒內可復原的 Toast 取代確認對話框；
-// 之後插件再要連線時會重新詢問使用者。
-async function revokeGrantedHost(plugin: PluginPanelPlugin, host: string): Promise<void> {
-  const previous = [...plugin.preference.grantedHosts]
-  await updatePluginPreference(plugin.id, {
-    grantedHosts: previous.filter(item => item !== host),
-  })
-  if (plugin.preference.grantedHosts.includes(host)) return
-  notifier.notify({
-    tone: 'success',
-    text: t('plugins.hostRevoked', { host }),
-    durationMs: 5000,
-    action: { label: t('plugins.undo'), run: () => void updatePluginPreference(plugin.id, { grantedHosts: previous }) },
-  })
-}
-
-// --- 安裝與移除 ---------------------------------------------------------------
-
-async function selectArchive(): Promise<void> {
-  const scope = 'install'
-  if (isBusy(scope)) return
-  setBusy(scope, true)
-  pendingPlan.value = null
-  try {
-    const result = await window.electronAPI?.selectPluginArchive()
-    if (!result?.ok) {
-      if (result && !result.ok && !result.cancelled) setError(result.error)
-      return
-    }
-    pendingPlan.value = result.value
-  } catch {
-    setError('plugin_action_failed')
-  } finally {
-    setBusy(scope, false)
-  }
-}
-
-async function selectDeveloperFolder(): Promise<void> {
-  const scope = 'install'
-  if (isBusy(scope)) return
-  setBusy(scope, true)
-  pendingPlan.value = null
-  try {
-    const result = await window.electronAPI?.selectPluginFolder()
-    if (!result?.ok) {
-      if (result && !result.ok && !result.cancelled) setError(result.error, undefined, result.diagnostic)
-      return
-    }
-    pendingPlan.value = result.value
-  } catch {
-    setError('plugin_action_failed')
-  } finally {
-    setBusy(scope, false)
-  }
-}
-
-const PLAN_KIND_LABELS = {
-  new: 'pluginInstallNew',
-  update: 'pluginInstallUpdate',
-  downgrade: 'pluginInstallDowngrade',
-  reinstall: 'pluginInstallReinstall',
-  incompatible: 'pluginIncompatible',
-} as const satisfies Record<PluginInstallPlan['kind'], TranslationKey>
-
-function planKindLabel(plan: PluginInstallPlan): string {
-  return t(PLAN_KIND_LABELS[plan.kind])
-}
-
-// 更新時：新增權限單獨置頂，既有權限折疊；新安裝時所有權限都是「新增」。
-const pendingPermissionSections = computed(() => {
-  const plan = pendingPlan.value
-  if (!plan) return { isUpdate: false, added: [] as PermissionGroupView[], existing: [] as PermissionGroupView[], existingCount: 0 }
-  const units = permissionUnitsOfPlan(plan)
-  const isUpdate = plan.requiresReconsent && plan.addedPermissions.length > 0
-  if (!isUpdate) return { isUpdate: false, added: toPermissionGroupViews(units), existing: [], existingCount: 0 }
-  const added = new Set(plan.addedPermissions)
-  const existingUnits = units.filter(unit => !added.has(unit))
-  return {
-    isUpdate: true,
-    added: toPermissionGroupViews(plan.addedPermissions),
-    existing: toPermissionGroupViews(existingUnits),
-    existingCount: existingUnits.length,
-  }
-})
-const installAcknowledgements = computed(() => installAcknowledgementReasons(pendingPlan.value))
-
-async function confirmInstall(): Promise<void> {
-  const plan = pendingPlan.value
-  const scope = 'install'
-  if (!plan || plan.kind === 'incompatible' || isBusy(scope)) return
-  setBusy(scope, true)
-  try {
-    const result = await window.electronAPI?.installPluginPlan(
-      plan.token,
-      plan.requiresReconsent,
-      plan.requiresSignatureConfirmation === true,
-    )
-    if (!result?.ok) {
-      if (result && !result.ok) setError(result.error)
-      return
-    }
-    pendingPlan.value = null
-    if (catalogLoadedAt.value) void loadPluginCatalog({ silent: true })
-    const installed = result.value
-    setStatus(
-      enabledGlobally.value
-        ? t('pluginInstallSucceeded', { name: pluginName(installed) })
-        : t('plugins.installSucceededGlobalOff', { name: pluginName(installed) }),
-      { label: t(enabledGlobally.value ? 'plugins.enableNow' : 'plugins.enableAll'), run: () => void enableInstalledPlugin(installed.id) },
-    )
-    await refreshPanel()
-  } catch {
-    setError('plugin_action_failed')
-  } finally {
-    setBusy(scope, false)
-  }
-}
-
-// 安裝成功 Toast 的「立即啟用」：全域關閉時一併開啟全域開關。
-async function enableInstalledPlugin(pluginId: string): Promise<void> {
-  if (!enabledGlobally.value) await updateGlobalPreferences({ pluginsEnabled: true })
-  await updatePluginPreference(pluginId, { enabled: true })
-}
-
-function requestRemove(plugin: PluginPanelPlugin): void {
-  pendingRemove.value = plugin
-  keepData.value = true
-}
-
-async function confirmRemove(): Promise<void> {
-  const plugin = pendingRemove.value
-  const scope = pluginScope(plugin?.id ?? '')
-  if (!plugin || isBusy(scope)) return
-  setBusy(scope, true)
-  try {
-    const result = await window.electronAPI?.removeInstalledPlugin(plugin.id, keepData.value)
-    if (!result?.ok) {
-      if (result && !result.ok) setError(result.error)
-      return
-    }
-    pendingRemove.value = null
-    setStatus(t('pluginRemoveSucceeded'))
-    await refreshPanel()
-  } catch {
-    setError('plugin_action_failed')
-  } finally {
-    setBusy(scope, false)
-  }
-}
-
 // --- 跨功能的監聽與生命週期 ------------------------------------------------------
-
-watch(pendingPlan, plan => {
-  if (!plan && updateQueue.value.length) void installNextQueuedUpdate()
-})
 
 watch(selectedPluginId, pluginId => {
   if (panelViewPluginId.value && panelViewPluginId.value !== pluginId) closePluginPanelView()
@@ -737,7 +323,6 @@ onUnmounted(() => {
   removeBadgesListener?.()
   removeEventSourceListener?.()
 })
-
   return {
     snapshot,
     notifications,

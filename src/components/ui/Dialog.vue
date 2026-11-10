@@ -123,6 +123,7 @@ const teleportTarget = computed(() => dialogTeleportTarget(host?.value, nested))
   box-shadow: var(--shadow-panel);
 }
 
+/* 對話框容器是程式聚焦（tabindex=-1）的備援目標；滑鼠點到時不畫環，鍵盤導覽（:focus-visible）仍走全域焦點環。 */
 .dialog:focus:not(:focus-visible) {
   outline: none;
 }
