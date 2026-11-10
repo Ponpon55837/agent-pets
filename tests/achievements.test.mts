@@ -38,7 +38,7 @@ function event(
 function withStore<T>(work: (store: AchievementStore, path: string) => T): T {
   const directory = mkdtempSync(join(tmpdir(), 'agent-pets-achievements-'))
   const path = join(directory, 'achievements.sqlite')
-  let clock = BASE_TIME
+  const clock = BASE_TIME
   const store = new AchievementStore(path, {
     now: () => clock,
     localDate,

@@ -208,7 +208,7 @@ pnpm dev
 | `pnpm dev` / `pnpm dev:safe` | Vite + Electron 開發模式；Windows GPU 程序當機時，`dev:safe` 改用軟體算圖 |
 | `pnpm test:unit` / `pnpm test:unit:watch` | `tests/` 內的 Node 內建測試（不會啟動 Electron） |
 | `pnpm test:coverage` | 單元測試，並對主行程模組設定 85% 行覆蓋率下限 |
-| `pnpm lint` | 主行程守門（未處理的 `loadURL`、全域錯誤處理） |
+| `pnpm lint` | ESLint（Vue／TypeScript、`@/` import 規則、`electron/` 的未處理 Promise）與主行程全域錯誤處理守門 |
 | `pnpm exec vue-tsc --noEmit` | 型別檢查 |
 | `pnpm check:bundle-size` | 任一 renderer chunk 超過 250 KB 即失敗（需先 `vite build`） |
 | `pnpm check:bundle` | 驗證插件面板 tokens 的 bundle |

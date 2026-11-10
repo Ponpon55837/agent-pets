@@ -31,7 +31,6 @@ import type {
   PluginPanelThemeFit,
   PluginPanelThemeFontFace,
   PluginPanelThemeModeDefinition,
-  PluginPanelThemeOverlay,
   PluginPanelThemePosition,
 } from '../src/types/plugin.ts'
 import type { AppLocale } from '../src/types/locale.ts'
@@ -835,16 +834,6 @@ function parseBackground(value: unknown, path: string): ResolvedPanelThemeBackgr
     }
   }
   fail(`${path}.type`, 'must be solid, gradient or image')
-}
-
-function gradientBackdrops(stops: ReadonlyArray<{ color: PanelThemeRgba }>): Backdrop[] {
-  const backdrops: Backdrop[] = stops.map((stop, index) => ({ name: `gradient stop ${index}`, color: stop.color }))
-  for (let index = 0; index + 1 < stops.length; index += 1) {
-    for (const t of [0.25, 0.5, 0.75]) {
-      backdrops.push({ name: `gradient between stops ${index} and ${index + 1}`, color: mixColor(stops[index]!.color, stops[index + 1]!.color, t) })
-    }
-  }
-  return backdrops
 }
 
 function contrastIssue(failure: ContrastFailure): PanelThemeIssue {
