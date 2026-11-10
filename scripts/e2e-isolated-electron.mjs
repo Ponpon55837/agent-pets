@@ -266,9 +266,14 @@ safeStorage.decryptString = (value) => {
 // The app reads Claude/Codex credentials through /usr/bin/security (the real login
 // Keychain, which HOME isolation does not cover) and runs the claude/codex CLIs.
 // Redirect those to /usr/bin/false so test runs can never read the user's Keychain
-// or act with their accounts.
+// or act with their accounts. Windows has no /usr/bin/false (spawn would raise an
+// unhandled ENOENT 'error' event), so it uses cmd.exe with an immediate "exit 1" instead.
 const childProcess = require('node:child_process')
 const blockedExecs = []
+const isWindows = process.platform === 'win32'
+const denyFile = isWindows ? path.join(process.env.SYSTEMROOT || process.env.WINDIR || 'C:/Windows', 'System32', 'cmd.exe') : '/usr/bin/false'
+const denyArgs = isWindows ? ['/d', '/c', 'exit 1'] : []
+const denyShellCommand = isWindows ? 'exit 1' : '/usr/bin/false'
 const isBlockedCommand = (file) => typeof file === 'string'
   && (/(^|\\/)security$/.test(file) || /(^|[\\/\\\\])(claude|codex)(\\.exe|\\.cmd)?$/i.test(file))
 const isBlockedShell = (command) => typeof command === 'string' && /(^|[\\s/])(security|claude|codex)(\\s|$)/.test(command)
@@ -277,8 +282,8 @@ for (const method of ['execFile', 'execFileSync', 'spawn', 'spawnSync']) {
   childProcess[method] = function (file, ...rest) {
     if (!isBlockedCommand(file)) return original.call(this, file, ...rest)
     blockedExecs.push(path.basename(String(file)))
-    const args = Array.isArray(rest[0]) ? [[], ...rest.slice(1)] : rest
-    return original.call(this, '/usr/bin/false', ...args)
+    const args = Array.isArray(rest[0]) ? [denyArgs, ...rest.slice(1)] : [denyArgs, ...rest]
+    return original.call(this, denyFile, ...args)
   }
 }
 for (const method of ['exec', 'execSync']) {
@@ -286,7 +291,7 @@ for (const method of ['exec', 'execSync']) {
   childProcess[method] = function (command, ...rest) {
     if (!isBlockedShell(command)) return original.call(this, command, ...rest)
     blockedExecs.push(String(command).trim().split(/\\s+/)[0])
-    return original.call(this, '/usr/bin/false', ...rest)
+    return original.call(this, denyShellCommand, ...rest)
   }
 }
 const fake = safeStorage.encryptString.toString().includes('agent-pets-e2e')
