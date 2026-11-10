@@ -18,7 +18,6 @@ import { writeJsonAtomic } from './desktop-preferences'
 
 
 
-import { ProgressionStore } from './progression'
 
 
 
@@ -115,7 +114,7 @@ import { acquireRunMarker } from './diagnostics/session-marker'
 import { writeHookStartupMarker } from './main/hook-startup-marker'
 import type { LocalServerListenStatus } from './local-server-listen'
 import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
-import { setPluginPanelWindowBounds, MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, broadcastProgressionIfChanged, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, isClaudePermissionRespondEnabled, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, historyRuntime, localPorts, petWindowModes, pluginCatalogRuntime, pluginRuntime, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode, requestPanelMinimum, resetPanelSize } from './main/runtime'
+import { setPluginPanelWindowBounds, MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, isClaudePermissionRespondEnabled, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isTrustedIpcSender, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, growth, historyRuntime, localPorts, petWindowModes, pluginCatalogRuntime, pluginRuntime, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode, requestPanelMinimum, resetPanelSize } from './main/runtime'
 
 
 
@@ -433,36 +432,9 @@ async function bootstrapApp(): Promise<void> {
       } catch {
         console.error('Desktop notification handling failed')
       }
-      let progressionResult: ReturnType<ProgressionStore['handleEvent']> | undefined
+      growth.handleEvent(event)
       try {
-        progressionResult = mainState.progressionStore?.handleEvent(event, event.routedPetId)
-        if (progressionResult) {
-          broadcastProgressionIfChanged(progressionResult.snapshot)
-          broadcastProgressionAwards(progressionResult)
-        }
-      } catch (error) {
-        console.error('Progression event handling failed', error)
-      }
-      try {
-        // Achievement rules only depend on terminal completions and explicit
-        // token usage. Do not open the achievement SQLite transaction for the
-        // high-frequency thinking/tool-running heartbeat events that carry no
-        // new fact; this keeps the additive subsystem off the hot path.
-        if (
-          currentDesktopPreferences().achievementsEnabled
-          && mainState.achievementStore
-          && (event.state === 'success' || event.tokenUsage !== undefined)
-        ) {
-          const routedPetId = event.routedPetId ?? progressionResult?.snapshot.petId ?? mainState.progressionStore?.getActivePetId() ?? 'aang-airbender'
-          const unlocks = mainState.achievementStore.recordEvent(event, routedPetId, progressionResult?.snapshot)
-          unlocks.forEach(broadcastAchievementUnlock)
-        }
-      } catch (error) {
-        console.error('Achievement event handling failed', error)
-        logAchievementDiagnostic('recordEvent', error, event)
-      }
-      try {
-        const routedPetId = event.routedPetId ?? mainState.progressionStore?.getActivePetId() ?? 'aang-airbender'
+        const routedPetId = event.routedPetId ?? growth.activePetId()
         // Same-turn events share one SQLite commit; the broadcast is coalesced too.
         mainState.historyStore?.queueEvent(event, routedPetId, broadcastHistoryUpdated)
       } catch (error) {
@@ -854,12 +826,7 @@ function teardownMainServices(): void {
   mainState.localUsageScanPromise = null
   mainState.presentationController?.clear()
   mainState.permissionBroker?.shutdown()
-  mainState.progressionStore?.close()
-  mainState.progressionStore = null
-  if (mainState.achievementStoreRetryTimer) clearTimeout(mainState.achievementStoreRetryTimer)
-  mainState.achievementStoreRetryTimer = null
-  mainState.achievementStore?.close()
-  mainState.achievementStore = null
+  growth.dispose()
   mainState.historyStore?.close()
   mainState.historyStore = null
   mainState.projectRoutingStore?.close()

@@ -55,9 +55,7 @@ import type { DesktopPreferences } from '../../src/types/desktop'
 import { CLAUDE_ANSWERABLE_GRACE_MS, withAnswerableClaudeNotice } from '../claude-permission-notice'
 import { locale, setLocale, t } from '../../src/i18n'
 import tokensCss from '../../src/styles/tokens.css?raw'
-import type { ProgressionAwardEvent, ProgressionEventResult, ProgressionSnapshot } from '../../src/types/progression'
-import type { AchievementUnlock } from '../../src/types/achievement'
-import type { HistorySummary, HistoryTokenUsageRecord } from '../../src/types/history'
+import type { HistorySummary } from '../../src/types/history'
 import type { PresentationIntent } from '../../src/types/presentation'
 import type { PluginEventSourceStatusView, PluginPanelPlugin, PluginPanelResult, PluginPanelSnapshot } from '../../src/types/plugin'
 import type { IpcErrorCode } from '../../src/types/ipc'
@@ -69,7 +67,8 @@ import { IS_MAC, hookScriptDeployPath, readWindowState, syncClaudePermissionResp
 import { createWindowsFullscreenDetector, nativeWindowHandleToPointer, type WindowsFullscreenState } from '../windows-fullscreen-detector'
 
 import { createLatestValueCoalescer } from '../ipc/broadcast-coalescer.ts'
-import { createProgressionChangeGate, createVisibleSender } from '../ipc/progression-broadcast-gate.ts'
+import { createVisibleSender } from '../ipc/progression-broadcast-gate.ts'
+import { createGrowthService } from './growth-service.ts'
 
 import { type IntegrationTestSource } from '../ipc/integrations'
 
@@ -1638,7 +1637,7 @@ export function updateDesktopPreferences(patch: unknown): DesktopPreferences {
   broadcastDesktopPreferences(preferences)
   schedulePermissionUiSync()
   if (!achievementsWereEnabled && preferences.achievementsEnabled) {
-    reconcileAchievementsFromHistory()
+    growth.reconcileFromHistory()
   }
   return preferences
 }
@@ -1683,14 +1682,7 @@ export function broadcastPermissionRequests(): void {
   }
 }
 
-const progressionGate = createProgressionChangeGate()
-const progressionSender = createVisibleSender<BrowserWindow>()
 const historySender = createVisibleSender<BrowserWindow>()
-
-function sendProgressionTo(window: BrowserWindow): void {
-  const snapshot = mainState.progressionStore?.getSnapshot()
-  if (snapshot) window.webContents.send(IPC_CHANNELS.progressionUpdated, snapshot)
-}
 
 function sendHistoryUpdatedTo(window: BrowserWindow): void {
   window.webContents.send(IPC_CHANNELS.historyUpdated)
@@ -1700,69 +1692,27 @@ function sendHistoryUpdatedTo(window: BrowserWindow): void {
 // resync so a stale pet or panel never stays behind.
 function attachBroadcastResync(window: BrowserWindow): void {
   window.on('show', () => {
-    progressionSender.resync(window, sendProgressionTo)
+    growth.resyncProgression(window)
     historySender.resync(window, sendHistoryUpdatedTo)
   })
 }
 
-export function broadcastProgression(snapshot?: ProgressionSnapshot): void {
-  const next = snapshot ?? mainState.progressionStore?.getSnapshot()
-  if (!next) return
-  progressionGate.record(next)
-  for (const window of [mainState.petWindow, mainState.panelWindow]) {
-    progressionSender.send(window, w => w.webContents.send(IPC_CHANNELS.progressionUpdated, next))
-  }
-}
+// 成就、progression store 與其廣播由 growth 服務負責；這裡保留原本的匯出名稱，讓 main.ts 與 IPC 不需改動。
+export const growth = createGrowthService({
+  state: mainState,
+  getWindows: () => [mainState.petWindow, mainState.panelWindow],
+  openProgressionStore: () => new ProgressionStore(appUserDataPaths().progression),
+  openAchievementStore: () => new AchievementStore(appUserDataPaths().achievements),
+  achievementsEnabled: () => currentDesktopPreferences().achievementsEnabled,
+  logError: (message, error) => console.error(message, error),
+  logMain,
+})
 
-/** Event hot path: heartbeats leave the snapshot unchanged, so send nothing. */
-export function broadcastProgressionIfChanged(snapshot: ProgressionSnapshot): void {
-  if (!progressionGate.shouldBroadcast(snapshot)) return
-  broadcastProgression(snapshot)
-}
-
-// Tells the pet and panel windows that XP was actually granted (the awards are
-// already deduplicated by the ledger, so a replayed event produces none). The
-// renderer derives toasts and level-up celebrations from this, never XP itself.
-export function broadcastProgressionAwards(result: ProgressionEventResult): void {
-  if (result.awards.length === 0) return
-  const payload: ProgressionAwardEvent = {
-    petId: result.snapshot.petId,
-    awards: result.awards.map(award => ({ ruleId: award.ruleId, amount: award.amount })),
-    at: Date.now(),
-    levelBefore: result.levelBefore,
-    levelAfter: result.snapshot.level,
-    stageBefore: result.stageBefore,
-    stageAfter: result.snapshot.evolutionStage,
-  }
-  for (const window of [mainState.petWindow, mainState.panelWindow]) {
-    if (window && !window.isDestroyed()) {
-      window.webContents.send(IPC_CHANNELS.progressionAwarded, payload)
-    }
-  }
-}
-
-export function broadcastAchievements(petId?: string): void {
-  const targetPet = petId ?? mainState.progressionStore?.getActivePetId() ?? 'aang-airbender'
-  const snapshot = mainState.achievementStore?.getSnapshot(
-    targetPet,
-    mainState.progressionStore?.getSnapshot(targetPet),
-  )
-  if (!snapshot) return
-  for (const window of [mainState.petWindow, mainState.panelWindow]) {
-    if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.achievementsUpdated, snapshot)
-  }
-}
-
-export function broadcastAchievementUnlock(unlock: AchievementUnlock): void {
-  mainState.desktopNotifications?.showAchievement(unlock)
-  for (const window of [mainState.petWindow, mainState.panelWindow]) {
-    if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.achievementUnlocked, unlock)
-  }
-  // The unlock payload identifies the routed pet for the visual reward, but
-  // the gallery in each renderer must remain scoped to its currently selected
-  // pet rather than jumping to a background project pet.
-  broadcastAchievements()
-}
+export const createProgressionServices = growth.startProgression
+export const createAchievementServices = growth.startAchievements
+export const broadcastProgression = growth.broadcastProgression
+export const broadcastAchievements = growth.broadcastAchievements
+export const setActiveProgressionPet = growth.setActivePet
 
 export function currentHistorySummary(projectId?: string, rangeDays = 7): HistorySummary | null {
   if (!mainState.historyStore) return null
@@ -1845,63 +1795,6 @@ export function createPresentationServices(presentationToken: string): void {
   mainState.presentationMcpServer = server
 }
 
-export function createProgressionServices(): void {
-  if (mainState.progressionStore) return
-  try {
-    mainState.progressionStore = new ProgressionStore(appUserDataPaths().progression)
-  } catch (error) {
-    // A missing SQLite runtime must not prevent the desktop pet from starting;
-    // the renderer simply keeps its progression card unavailable until the
-    // runtime is repaired. No in-memory fallback is presented as durable XP.
-    console.error('Progression storage is unavailable', error)
-    mainState.progressionStore = null
-  }
-}
-
-// Init can fail transiently (e.g. antivirus/cloud-sync briefly holding the
-// file at startup); retry a few times with backoff instead of disabling
-// achievements silently for the rest of the session.
-export const ACHIEVEMENT_STORE_RETRY_DELAYS_MS = [3_000, 10_000, 30_000]
-
-export function createAchievementServices(): void {
-  if (mainState.achievementStore) return
-  try {
-    mainState.achievementStore = new AchievementStore(appUserDataPaths().achievements)
-    mainState.achievementStoreRetryAttempt = 0
-    if (mainState.achievementStoreRetryTimer) {
-      clearTimeout(mainState.achievementStoreRetryTimer)
-      mainState.achievementStoreRetryTimer = null
-    }
-    // A retry can succeed after the renderer's initial achievements-init call
-    // already came back null; push the real snapshot now so the gallery
-    // recovers without requiring a manual reload.
-    broadcastAchievements()
-    reconcileAchievementsFromHistory()
-  } catch (error) {
-    // Achievements are an additive feedback surface. A broken achievement
-    // database must never prevent XP, permissions, history, or event ingest.
-    console.error('Achievement storage is unavailable', error)
-    logAchievementDiagnostic('init', error)
-    mainState.achievementStore = null
-    scheduleAchievementStoreRetry()
-  }
-}
-
-export function logAchievementDiagnostic(label: string, error: unknown, extra?: unknown): void {
-  logMain('error', 'achievements', `[${label}] attempt=${mainState.achievementStoreRetryAttempt}`, { error, extra })
-}
-
-export function scheduleAchievementStoreRetry(): void {
-  if (mainState.achievementStoreRetryTimer) return
-  const delay = ACHIEVEMENT_STORE_RETRY_DELAYS_MS[mainState.achievementStoreRetryAttempt]
-  if (delay === undefined) return
-  mainState.achievementStoreRetryAttempt += 1
-  mainState.achievementStoreRetryTimer = setTimeout(() => {
-    mainState.achievementStoreRetryTimer = null
-    createAchievementServices()
-  }, delay)
-}
-
 // 歷史資料庫、本機用量掃描與它們的計時器由獨立服務負責；成就與廣播留在這裡，以回呼傳入。
 export const historyRuntime = createHistoryRuntimeService({
   state: mainState,
@@ -1916,9 +1809,9 @@ export const historyRuntime = createHistoryRuntimeService({
   isOnBatteryPower: () => powerMonitor.isOnBatteryPower(),
   onRecovered: notifyHistoryRecovered,
   onHistoryUpdated: () => broadcastHistoryUpdated(),
-  onLocalRecordsImported: (records, retentionDays) => syncLocalTokenAchievements(records, retentionDays),
-  onLocalScanFinished: () => evaluateLocalTokenAchievements(),
-  onDeferredStartupWork: () => reconcileAchievementsFromHistory(),
+  onLocalRecordsImported: (records, retentionDays) => growth.syncLocalTokenUsage(records, retentionDays),
+  onLocalScanFinished: () => growth.evaluateLocalTokens(),
+  onDeferredStartupWork: () => growth.reconcileFromHistory(),
   logError: (message, error) => console.error(message, error),
 })
 
@@ -1935,92 +1828,8 @@ function notifyHistoryRecovered(): void {
   } catch {}
 }
 
-/**
- * Feeds exact local-log usage into the achievement token ledger (the single
- * token source for Codex and Claude Code). The ledger always updates so no
- * token is lost while achievements are switched off; unlock evaluation only
- * runs, for the active pet, when achievements are enabled.
- */
-let achievementProgressTimer: ReturnType<typeof setTimeout> | null = null
-let localTokenLedgerChanged = false
-
-function syncLocalTokenAchievements(records: readonly HistoryTokenUsageRecord[], retentionDays: number): void {
-  const store = mainState.achievementStore
-  if (!store) return
-  try {
-    // Ledger only: a first import arrives in hundreds of 500-record batches,
-    // so unlock evaluation runs once per scan (evaluateLocalTokenAchievements).
-    const result = store.syncLocalTokenUsage(records, {
-      // One day of slack past the scanner's own retention cutoff.
-      compactBefore: Date.now() - (retentionDays + 1) * 24 * 60 * 60 * 1000,
-      evaluatePetId: null,
-    })
-    if (result.changed) localTokenLedgerChanged = true
-  } catch (error) {
-    console.error('Achievement local token sync failed', error)
-    logAchievementDiagnostic('local-token-sync', error)
-  }
-}
-
-/** Once per completed scan: evaluate the active pet if the ledger changed, and refresh progress. */
-function evaluateLocalTokenAchievements(): void {
-  if (!localTokenLedgerChanged) return
-  localTokenLedgerChanged = false
-  const store = mainState.achievementStore
-  if (!store) return
-  try {
-    if (currentDesktopPreferences().achievementsEnabled) {
-      const petId = mainState.progressionStore?.getActivePetId() ?? 'aang-airbender'
-      const unlocks = store.evaluateTokenAchievements(petId, mainState.progressionStore?.getSnapshot(petId))
-      unlocks.forEach(broadcastAchievementUnlock)
-      if (unlocks.length > 0) return
-    }
-    if (!achievementProgressTimer) {
-      achievementProgressTimer = setTimeout(() => {
-        achievementProgressTimer = null
-        broadcastAchievements()
-      }, 1_000)
-      achievementProgressTimer.unref?.()
-    }
-  } catch (error) {
-    console.error('Achievement local token evaluation failed', error)
-    logAchievementDiagnostic('local-token-evaluate', error)
-  }
-}
-
-export function reconcileAchievementsFromHistory(): void {
-  if (
-    !mainState.achievementStore
-    || !mainState.historyStore
-    || !currentDesktopPreferences().achievementsEnabled
-  ) return
-  try {
-    // Incremental: only sessions since the last reconcile (minus one day of
-    // overlap for late-arriving events) instead of the whole history.
-    const startedAt = Date.now()
-    const previous = mainState.historyStore.getAchievementReconciledAt()
-    const unlocks = mainState.achievementStore.reconcileCompletedSessions(
-      mainState.historyStore.getAchievementCompletedSessions(previous > 0 ? previous - 24 * 60 * 60 * 1000 : 0),
-      petId => mainState.progressionStore?.getSnapshot(petId),
-    )
-    mainState.historyStore.setAchievementReconciledAt(startedAt)
-    unlocks.forEach(broadcastAchievementUnlock)
-  } catch (error) {
-    console.error('Achievement history reconciliation failed', error)
-    logAchievementDiagnostic('history-reconcile', error)
-  }
-}
-
 export function isProgressionPetId(value: unknown): value is string {
   return isValidPetId(value, 128)
-}
-
-export function setActiveProgressionPet(petId: string): ProgressionSnapshot | null {
-  if (!mainState.progressionStore) return null
-  const snapshot = mainState.progressionStore.setActivePet(petId)
-  broadcastProgression(snapshot)
-  broadcastAchievements(petId)
-  return snapshot
 }
 
 export function schedulePermissionUiSync(): void {

@@ -59,12 +59,9 @@ test('teardown releases services in the established order', () => {
     'mainState.localUsageScanPromise = null',
     'mainState.presentationController?.clear()',
     'mainState.permissionBroker?.shutdown()',
-    'mainState.progressionStore?.close()',
-    'mainState.progressionStore = null',
-    'if (mainState.achievementStoreRetryTimer) clearTimeout(mainState.achievementStoreRetryTimer)',
-    'mainState.achievementStoreRetryTimer = null',
-    'mainState.achievementStore?.close()',
-    'mainState.achievementStore = null',
+    // 階段 11 後續：progression／achievement 的釋放順序移進 growth.dispose()，順序由下一個測試固定。
+    // 刻意差異：achievementProgressTimer（進度廣播去抖）改由 dispose() 清除；改前沒有任何清理步驟會停它。
+    'growth.dispose()',
     'mainState.historyStore?.close()',
     'mainState.historyStore = null',
     'mainState.projectRoutingStore?.close()',
@@ -72,6 +69,21 @@ test('teardown releases services in the established order', () => {
     // 階段 11：寵物視窗模式服務另外停止重新貼邊輪詢；改前它是模組變數，沒有任何清理步驟會停。
     'petWindowModes.dispose()',
     'disposeMainTimers(mainState)',
+  ])
+})
+
+test('the growth service releases its stores in the established order', () => {
+  // 改前這些行逐字是 teardownMainServices 的 progression／achievement 段；去抖計時器是唯一新增的清理步驟。
+  assert.deepEqual(blockLines(readFileSync('electron/main/growth-service.ts', 'utf8'), /function dispose\(\): void \{/), [
+    'state.progressionStore?.close()',
+    'state.progressionStore = null',
+    'if (state.achievementStoreRetryTimer) cancel(state.achievementStoreRetryTimer)',
+    'state.achievementStoreRetryTimer = null',
+    // 刻意差異：改前沒有任何清理步驟會清掉這個去抖計時器。
+    'if (achievementProgressTimer) cancel(achievementProgressTimer)',
+    'achievementProgressTimer = null',
+    'state.achievementStore?.close()',
+    'state.achievementStore = null',
   ])
 })
 
