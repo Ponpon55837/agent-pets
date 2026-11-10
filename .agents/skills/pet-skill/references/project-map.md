@@ -23,7 +23,7 @@
 - Quota adapters: `electron/quota.ts`.
 - Desktop preferences: `electron/desktop-preferences.ts`; canonical shared types: `src/types/desktop.ts`.
 - Tray and native notification runtime: `electron/desktop-tray.ts`, `electron/desktop-notifications.ts`, and `electron/notification-policy.ts`.
-- Realtime state and current local persistence: `src/stores/agentStore.ts`.
+- Realtime state and current local persistence: `src/stores/agentStore.ts` assembles the one `useAgentStore()` (its member names and types are a component contract, fixed by `tests/agent-store-characterization.test.mts`). Self-contained domains live in `src/stores/agent/` — `toast.ts`, `presentation.ts`, `plugin-feed.ts`, `mood.ts`, `pet-display-preferences.ts`, `panel-navigation.ts`, `permission-ui.ts` — each file header states its event inputs, timers, storage keys and cross-window sync, and every timer is cleared with `onScopeDispose`. Sessions, eviction, waiting-input reminders, desktop preferences, quota, progression and project pets are still in `agentStore.ts`. Tests load the real store in Node through `tests/support/agent-store-harness.mts` (fake storage, IPC and timers; `tests/support/src-alias.mts` resolves `@/`).
 - Pet surface: `src/components/DesktopPet.vue` and `src/components/PetAnimation.vue`.
 - Panel/settings surface: `src/components/StatusPanel.vue`, `src/components/SetupWizard.vue`, and the independent `src/components/ProjectMcpPanel.vue`.
 - Shared UI primitives (Button, Card, ToggleRow, Select, ProgressTrack, ConfirmDialog, Icon): `src/components/ui/`; design tokens (colour/spacing/radius/font/motion, no bare hex or rgba() elsewhere): `src/styles/tokens.css`. See [ui-design-system.md](ui-design-system.md) before adding or editing any panel UI.

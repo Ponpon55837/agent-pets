@@ -8,11 +8,11 @@
 | `adapter-diagnose` | `handle` | 設定面板 main frame | isAgentAdapterId；無效輸入回安全預設或錯誤 | diagnoseAdapter (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `adapter-install` | `handle` | 設定面板 main frame | isAgentAdapterId；無效輸入回安全預設或錯誤 | installAdapter (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `adapter-uninstall` | `handle` | 設定面板 main frame | isAgentAdapterId；無效輸入回安全預設或錯誤 | uninstallAdapter (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `pet-window-mode-set` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | setPetWindowMode (invoke) | `tests/ipc-desktop.test.mts` |
-| `pet-window-mode-init` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | initializePetWindowMode (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `desktop-preferences-init` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | initializeDesktopPreferences (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `pet-window-mode-set` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | setPetWindowMode (invoke) | `tests/agent-store-characterization.test.mts`<br>`tests/ipc-desktop.test.mts` |
+| `pet-window-mode-init` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | initializePetWindowMode (invoke) | `tests/agent-store-characterization.test.mts` |
+| `desktop-preferences-init` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | initializeDesktopPreferences (invoke) | `tests/agent-store-characterization.test.mts` |
 | `desktop-preferences-set` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | setDesktopPreferences (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `desktop-open-login-items-settings` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | openLoginItemsSettings (invoke) | `tests/ipc-desktop.test.mts` |
+| `desktop-open-login-items-settings` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | openLoginItemsSettings (invoke) | `tests/agent-store-characterization.test.mts`<br>`tests/ipc-desktop.test.mts` |
 | `power-save-state` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getPowerSaveState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-summary` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | getHistorySummary (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-usage-blocks` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getUsageBlocks (invoke) | `tests/ipc-history.test.mts` |
@@ -42,8 +42,8 @@
 | `panel-theme-user-image-import` | `handle` | 設定面板 main frame（共用 sender guard） | 長度／數量上限；isPanelThemeRef, isPanelThemeMode, isDialogOpen；無效輸入回安全預設或錯誤 | importPanelThemeUserImage (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-user-image-clear` | `handle` | 設定面板 main frame（共用 sender guard） | isPanelThemeRef, isPanelThemeMode, isReferenced；無效輸入回安全預設或錯誤 | clearPanelThemeUserImage (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-theme-user-image-options-set` | `handle` | 設定面板 main frame（共用 sender guard） | isPanelThemeRef, isPanelThemeMode, isPanelThemeUserImageOptions；無效輸入回安全預設或錯誤 | setPanelThemeUserImageOptions (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `permission-requests-init` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | initializePermissionRequests (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `permission-decide` | `handle` | 受信任寵物或設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | decidePermission (invoke) | `tests/phase-18-renderer-characterization.test.mts` |
+| `permission-requests-init` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | initializePermissionRequests (invoke) | `tests/agent-store-characterization.test.mts` |
+| `permission-decide` | `handle` | 受信任寵物或設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | decidePermission (invoke) | `tests/agent-store-characterization.test.mts`<br>`tests/phase-18-renderer-characterization.test.mts` |
 | `permission-audit-list` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | listPermissionAudit (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `permission-audit-clear` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | clearPermissionAudit (invoke) | `tests/permission-audit.test.mts` |
 | `add-custom-pet` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | addCustomPet (invoke) | `tests/ipc-pet-assets.test.mts` |
@@ -59,20 +59,20 @@
 | `pet-drag-end` | `on` | 寵物視窗 main frame | 型別；無效輸入回安全預設或錯誤 | notifyDragEnd (send) | `tests/ipc-pet-motion.test.mts` |
 | `pet-window-hover` | `on` | 寵物視窗 main frame | handler／controller 驗證 payload；拒絕無效輸入 | notifyPetHover (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `shimeji-walk-step` | `on` | 寵物視窗 main frame | 型別；數值範圍；無效輸入回安全預設或錯誤 | shimejiWalkStep (send) | `tests/ipc-pet-motion.test.mts` |
-| `load-pets` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | loadPets (invoke) | `tests/ipc-pets.test.mts`<br>`tests/project-pets-ipc-scope.test.mts` |
+| `load-pets` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | loadPets (invoke) | `tests/agent-store-characterization.test.mts`<br>`tests/ipc-pets.test.mts`<br>`tests/project-pets-ipc-scope.test.mts` |
 | `plugin-catalog-list` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | listPluginCatalog (invoke) | `tests/ipc-plugin-catalog.test.mts` |
 | `plugin-catalog-install` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；長度／數量上限；isPluginPanelPluginId, isPluginCatalogUrl；無效輸入回安全預設或錯誤 | installPluginFromCatalog (invoke) | `tests/ipc-plugin-catalog.test.mts` |
 | `plugin-report-issue` | `handle` | 設定面板 main frame（共用 sender guard） | isPluginPanelPluginId；無效輸入回安全預設或錯誤 | reportInstalledPluginIssue (invoke) | `tests/ipc-plugin-catalog.test.mts` |
 | `plugin-feed-unread-count` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | onPluginFeedUnreadCount (on)<br>getPluginFeedUnreadCount (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-badges-get` | `handle` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | getPluginBadges (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-event-source-list` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getPluginEventSourceStatuses (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `plugin-feed-complete` | `handle` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | isSafeItemId；無效輸入回安全預設或錯誤 | completePluginFeed (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `plugin-feed-complete` | `handle` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | isSafeItemId；無效輸入回安全預設或錯誤 | completePluginFeed (invoke) | `tests/agent-store-characterization.test.mts` |
 | `plugin-notifications-list` | `handle` | 設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | listPluginNotifications (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-notifications-read` | `handle` | 設定面板 main frame | isPluginPanelNotificationId；無效輸入回安全預設或錯誤 | markPluginNotificationRead (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-notifications-read-all` | `handle` | 設定面板 main frame | isPluginPanelPluginId；無效輸入回安全預設或錯誤 | markAllPluginNotificationsRead (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-notifications-clear` | `handle` | 設定面板 main frame | isPluginPanelPluginId；無效輸入回安全預設或錯誤 | clearPluginNotifications (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-skin-fallback-notify` | `handle` | 受信任寵物或設定面板 main frame | 長度／數量上限；isPluginSkinPetId；無效輸入回安全預設或錯誤 | notifyPluginSkinFallback (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `plugin-feed-open-link` | `handle` | 受信任寵物或設定面板 main frame | isSafeItemId, isPluginLinkHostAllowed；無效輸入回安全預設或錯誤 | openPluginFeedLink (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `plugin-feed-open-link` | `handle` | 受信任寵物或設定面板 main frame | isSafeItemId, isPluginLinkHostAllowed；無效輸入回安全預設或錯誤 | openPluginFeedLink (invoke) | `tests/agent-store-characterization.test.mts` |
 | `plugin-install-select` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | selectPluginArchive (invoke) | `tests/ipc-plugin-install.test.mts` |
 | `plugin-install-select-folder` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | selectPluginFolder (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-install-confirm` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；isInstallConfirmation；無效輸入回安全預設或錯誤 | installPluginPlan (invoke) | `tests/ipc-plugin-install.test.mts` |
@@ -93,10 +93,10 @@
 | `plugin-secret-consent-get` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | getPluginSecretConsent (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-secret-consent-accept` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | acceptPluginSecretConsent (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `plugin-secret-set` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；長度／數量上限；isPluginPanelPluginId, isUnsafePluginDataError；無效輸入回安全預設或錯誤 | setPluginSecret (invoke) | `tests/ipc-plugin-settings.test.mts` |
-| `progression-init` | `handle` | 受信任寵物或設定面板 main frame | 型別；isProgressionPetId；無效輸入回安全預設或錯誤 | initializeProgression (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `progression-set-pet` | `handle` | 受信任寵物或設定面板 main frame | isProgressionPetId；無效輸入回安全預設或錯誤 | setProgressionPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `progression-init` | `handle` | 受信任寵物或設定面板 main frame | 型別；isProgressionPetId；無效輸入回安全預設或錯誤 | initializeProgression (invoke) | `tests/agent-store-characterization.test.mts` |
+| `progression-set-pet` | `handle` | 受信任寵物或設定面板 main frame | isProgressionPetId；無效輸入回安全預設或錯誤 | setProgressionPet (invoke) | `tests/agent-store-characterization.test.mts` |
 | `progression-insights` | `handle` | 受信任寵物或設定面板 main frame | 型別；isProgressionPetId；無效輸入回安全預設或錯誤 | getProgressionInsights (invoke) | `tests/progression.test.mts` |
-| `achievements-init` | `handle` | 受信任寵物或設定面板 main frame | isProgressionPetId；無效輸入回安全預設或錯誤 | initializeAchievements (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `achievements-init` | `handle` | 受信任寵物或設定面板 main frame | isProgressionPetId；無效輸入回安全預設或錯誤 | initializeAchievements (invoke) | `tests/agent-store-characterization.test.mts` |
 | `project-mcp-setup` | `handle` | 設定面板 main frame | 長度／數量上限；isDialogOpen；無效輸入回安全預設或錯誤 | setupProjectMcp (invoke) | `tests/project-mcp-registry.test.mts`<br>`tests/project-mcp-setup.test.mts` |
 | `project-mcp-apply` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | applyProjectMcp (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `project-mcp-list` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | listProjectMcp (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
@@ -104,9 +104,9 @@
 | `project-mcp-forget` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | forgetProjectMcp (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `project-pets-list` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | listProjectPets (invoke) | `tests/project-pets-ipc-scope.test.mts` |
 | `project-pets-get-enabled` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | getProjectPetsEnabled (invoke) | `tests/project-pets-ipc-scope.test.mts` |
-| `project-pets-set-enabled` | `handle` | 設定面板 main frame（共用 sender guard） | handler／controller 驗證 payload；拒絕無效輸入 | setProjectPetsEnabled (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `project-pets-set-enabled` | `handle` | 設定面板 main frame（共用 sender guard） | handler／controller 驗證 payload；拒絕無效輸入 | setProjectPetsEnabled (invoke) | `tests/agent-store-characterization.test.mts` |
 | `project-pets-pick` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | pickProjectPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `project-pets-bind` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；isProjectId, isValidPetId；無效輸入回安全預設或錯誤 | setProjectPetBinding (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `project-pets-bind` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；isProjectId, isValidPetId；無效輸入回安全預設或錯誤 | setProjectPetBinding (invoke) | `tests/agent-store-characterization.test.mts` |
 | `project-pets-archive` | `handle` | 設定面板 main frame（共用 sender guard） | isProjectId；無效輸入回安全預設或錯誤 | archiveProjectPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `quota-usage` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getQuotaUsage (invoke) | `tests/ipc-quota.test.mts`<br>`tests/quota.test.mts` |
 | `renderer-error-report` | `on` | 受信任寵物或設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | reportRendererError (send) | `tests/ipc-reliability.test.mts` |
@@ -115,14 +115,14 @@
 | `session-snapshot-get` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getSessionSnapshot (invoke) | `tests/ipc-reliability.test.mts` |
 | `diagnostics-export` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | exportDiagnostics (invoke) | `tests/ipc-reliability.test.mts` |
 | `server-health-retry` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | retryServerHealth (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `session-jump` | `handle` | 受信任寵物或設定面板 main frame | isValidSessionJumpRequest；無效輸入回安全預設或錯誤 | runSessionJump (invoke) | `tests/ipc-session-jump.test.mts`<br>`tests/session-jump.test.mts` |
+| `session-jump` | `handle` | 受信任寵物或設定面板 main frame | isValidSessionJumpRequest；無效輸入回安全預設或錯誤 | runSessionJump (invoke) | `tests/agent-store-characterization.test.mts`<br>`tests/ipc-session-jump.test.mts`<br>`tests/session-jump.test.mts` |
 | `pet-mouse-passthrough` | `on` | 寵物視窗 main frame | 型別；無效輸入回安全預設或錯誤 | setMousePassthrough (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `pet-hide-request` | `on` | 寵物視窗 main frame | handler／controller 驗證 payload；拒絕無效輸入 | requestPetHide (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `panel-toggle` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | togglePanel (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `panel-resize` | `on` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | resizePanel (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `panel-toggle` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | togglePanel (send) | `tests/agent-store-characterization.test.mts` |
+| `panel-resize` | `on` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | resizePanel (send) | `tests/agent-store-characterization.test.mts` |
 | `panel-reset-size` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | resetPanelSize (send) | `tests/ipc-window-controls.test.mts` |
-| `panel-blur-lock` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | 型別；長度／數量上限；無效輸入回安全預設或錯誤 | setPanelBlurLock (send) | `tests/ipc-window-controls.test.mts` |
-| `panel-hide` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | hidePanel (send) | `tests/ipc-window-controls.test.mts` |
+| `panel-blur-lock` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | 型別；長度／數量上限；無效輸入回安全預設或錯誤 | setPanelBlurLock (send) | `tests/agent-store-characterization.test.mts`<br>`tests/ipc-window-controls.test.mts` |
+| `panel-hide` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | hidePanel (send) | `tests/agent-store-characterization.test.mts`<br>`tests/ipc-window-controls.test.mts` |
 | `pet-resize` | `on` | 寵物視窗 main frame | 型別；無效輸入回安全預設或錯誤 | resizeWindow (send) | `tests/pet-window-size.test.mts` |
 | `pet-content-height` | `on` | 寵物視窗 main frame | 型別；無效輸入回安全預設或錯誤 | reportContentHeight (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `pet-quit` | `on` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | quitApp (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
