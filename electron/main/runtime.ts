@@ -68,6 +68,7 @@ import { createWindowsFullscreenDetector, nativeWindowHandleToPointer, type Wind
 
 import { createLatestValueCoalescer } from '../ipc/broadcast-coalescer.ts'
 import { createVisibleSender } from '../ipc/progression-broadcast-gate.ts'
+import { createDbMaintenanceService } from './db-maintenance-service.ts'
 import { createGrowthService } from './growth-service.ts'
 
 import { type IntegrationTestSource } from '../ipc/integrations'
@@ -1812,6 +1813,19 @@ export const historyRuntime = createHistoryRuntimeService({
   onLocalRecordsImported: (records, retentionDays) => growth.syncLocalTokenUsage(records, retentionDays),
   onLocalScanFinished: () => growth.evaluateLocalTokens(),
   onDeferredStartupWork: () => growth.reconcileFromHistory(),
+  logError: (message, error) => console.error(message, error),
+})
+
+// 使用者觸發的資料庫整理；啟動流程不使用。
+export const dbMaintenance = createDbMaintenanceService({
+  getHistoryStore: () => mainState.historyStore,
+  getProgressionStore: () => mainState.progressionStore,
+  getAchievementStore: () => mainState.achievementStore,
+  databasePaths: () => {
+    const paths = appUserDataPaths()
+    return [paths.history, paths.progression, paths.achievements]
+  },
+  isLocalScanActive: () => mainState.localUsageScanPromise !== null,
   logError: (message, error) => console.error(message, error),
 })
 

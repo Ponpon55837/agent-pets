@@ -8,6 +8,7 @@ import type { SessionJumpRequest, SessionJumpResult } from '../src/types/session
 import type { PermissionDecisionValue, PermissionRequestView, PermissionAuditEntry } from '../src/types/permission'
 import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from '../src/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '../src/types/achievement'
+import { GROWTH_RESET_CONFIRMATION, type DbMaintenanceResult, type GrowthResetResult } from '../src/types/growth-maintenance'
 import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySessionDetail, HistorySessionPage, HistorySessionQuery, HistorySummary, HistoryUsageBlock } from '../src/types/history'
 import type { PetWindowMode, PetWindowModeState } from '../src/types/pet-window'
 import type { PetBehaviorManifest, PluginSkinPetSource } from '../src/types/pet'
@@ -486,6 +487,14 @@ const electronAPI: ElectronAPI = {
 
   setProjectPetsEnabled: (enabled: boolean): Promise<boolean> => {
     return ipcRenderer.invoke(IPC_CHANNELS.projectPetsSetEnabled, enabled)
+  },
+
+  resetGrowth: (): Promise<GrowthResetResult> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.growthReset, GROWTH_RESET_CONFIRMATION)
+  },
+
+  runDbMaintenance: (): Promise<DbMaintenanceResult> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.dbMaintenanceRun)
   },
 
   clearHistory: (): Promise<HistoryClearResult> => {

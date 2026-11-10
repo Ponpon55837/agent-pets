@@ -27,6 +27,7 @@ import {
 import { latestUsageBlocks, USAGE_BLOCK_MS, type UsageBlockEntry } from '../src/utils/usage-blocks.ts'
 import { dateOffset, localDateKey } from '../src/utils/local-date.ts'
 import { applyWalPragmas, type SqlitePragmaState } from './sqlite-pragmas.ts'
+import { optimizeAndVacuum } from './sqlite-maintenance.ts'
 import { StatementCache } from './sqlite-statements.ts'
 import { eventPipelineStats } from './event-stats.ts'
 import { isValidPetId } from '../src/utils/pet-id.ts'
@@ -59,6 +60,7 @@ interface SqliteDatabase {
   exec(sql: string): void
   prepare(sql: string): SqliteStatement
   close(): void
+  isTransaction?: boolean
 }
 
 type DatabaseSyncConstructor = new (filePath: string) => SqliteDatabase
@@ -1365,6 +1367,12 @@ export class HistoryStore {
 
   prune(): number {
     return this.pruneEvents()
+  }
+
+  /** 使用者觸發的資料庫整理（optimize + VACUUM）；排隊事件先寫入，交易進行中會丟 SqliteBusyError。 */
+  compact(): void {
+    if (this.transactionDepth === 0) this.flushQueued()
+    optimizeAndVacuum(this.database, this.transactionDepth > 0)
   }
 
   rebuildDailyStats(): void {

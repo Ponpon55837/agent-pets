@@ -41,6 +41,20 @@ test('IPC inventory matches main registrations, preload APIs, and sender guards'
   assert.match(pluginUiBridgeSource, /export interface PluginPanelPublicApi/)
 })
 
+test('growth reset and database maintenance IPC are panel-only handlers with preload APIs', () => {
+  const inventory = analyzeIpcInventory()
+  for (const channel of [IPC_CHANNELS.growthReset, IPC_CHANNELS.dbMaintenanceRun]) {
+    const row = inventory.rows.find(item => item.channel === channel)
+    assert.ok(row, channel)
+    assert.match(row.sender, /設定面板 main frame/)
+    assert.equal(row.hasSenderGuard, true)
+    assert.equal(row.hasPreloadApi, true)
+  }
+  const registrar = readFileSync(path.resolve('electron/ipc/growth-maintenance.ts'), 'utf8')
+  assert.match(registrar, /handleTrusted\(deps\.ipcMain, IPC_CHANNELS\.growthReset, deps\.getPanelWindow/)
+  assert.match(registrar, /handleTrusted\(deps\.ipcMain, IPC_CHANNELS\.dbMaintenanceRun, deps\.getPanelWindow/)
+})
+
 test('renderer windows and plugin views explicitly retain Electron security defaults', () => {
   assert.ok(mainSource.split('\n').length < 1_200)
   assert.equal((runtimeSource.match(/new BrowserWindow\(/g) ?? []).length, 2)

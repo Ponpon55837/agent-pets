@@ -40,6 +40,7 @@ function setup(t: TestContext, options: { failOpens?: number; enabled?: boolean;
     syncLocalTokenUsage: () => { calls.push('sync'); return { changed: ledgerChanged } },
     evaluateTokenAchievements: () => { calls.push('evaluate'); return unlocks },
     reconcileCompletedSessions: () => { calls.push('reconcile'); return [] },
+    getGrowthResetAt: () => 0,
     close: () => calls.push('achievement.close'),
   }
   const progression = {
