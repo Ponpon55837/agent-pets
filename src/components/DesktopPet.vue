@@ -39,7 +39,6 @@ const store = useAgentStore()
 const clickAreaRef = ref<HTMLElement | null>(null)
 const dragOffset = ref({ x: 0, y: 0 })
 const hasMoved = ref(false)
-let mouseDownTime = 0
 const petAnimRef = ref<InstanceType<typeof PetAnimation> | null>(null)
 const { items: multiPetInstances, setRef: setMultiPetRef } = useKeyedRefs<InstanceType<typeof PetAnimation>>()
 const { items: multiPetItemElements, setRef: setMultiPetItem } = useKeyedRefs<HTMLElement>()
@@ -720,7 +719,6 @@ function onMouseDown(e: MouseEvent) {
   dismissCoach()
   store.markPetInteraction()
   hasMoved.value = false
-  mouseDownTime = Date.now()
   // Keeps the window catching events while the button is held, even before a
   // drag has actually begun.
   store.isDragging = true

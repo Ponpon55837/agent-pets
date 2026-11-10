@@ -1,7 +1,7 @@
 import { IPC_CHANNELS } from './ipc/channels'
 import type { ElectronAPI } from '../src/types/electron-api'
 import type { AgentSource } from '../src/types/agent'
-import type { AdapterDiagnoseIpcResult, AdapterInstallIpcResult, AdapterUninstallIpcResult } from '../src/types/ipc'
+import type { AdapterDiagnoseIpcResult, AdapterInstallIpcResult } from '../src/types/ipc'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
 import type { SessionJumpRequest, SessionJumpResult } from '../src/types/session-jump'

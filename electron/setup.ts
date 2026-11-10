@@ -1,6 +1,5 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import * as os from 'os'
 import { randomBytes } from 'crypto'
 import { setupEnvironment } from './setup-environment.ts'
 import { createNodeResolver, NodeNotFoundError, NodeUnsupportedError, type NodeInfo } from './node-resolver.ts'
@@ -32,7 +31,6 @@ import {
   disableCodexHooksFeatureText,
   enableCodexHooksFeatureText,
   fileHasAgentPetsHooks,
-  isAgentPetsHook,
   isLegacyElectronHook,
   mergeAgentPetsHooksFile,
   removeAgentPetsHooksFile,

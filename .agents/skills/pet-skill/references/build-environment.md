@@ -38,12 +38,22 @@
 依序執行：
 
 1. `pnpm.cmd exec vue-tsc --noEmit`（目前 package.json 沒有另設 `type-check` script）；
-2. `pnpm.cmd test:unit`；
-3. `pnpm.cmd build`；
-4. `git diff --check`、`git status --short`，確認沒有 lockfile、生成物或 `.claude/` 的非預期變更；
-5. 若涉及 packaged runtime，確認 `release\\win-unpacked\\Agent Pets.exe` 可啟動並在檢驗後關閉。
+2. `pnpm.cmd lint`（ESLint 9 flat config 加主程序 crash guard 檢查，見下方「Lint」）；
+3. `pnpm.cmd test:unit`；
+4. `pnpm.cmd build`；
+5. `git diff --check`、`git status --short`，確認沒有 lockfile、生成物或 `.claude/` 的非預期變更；
+6. 若涉及 packaged runtime，確認 `release\\win-unpacked\\Agent Pets.exe` 可啟動並在檢驗後關閉。
 
 Phase report 必須記錄每個 gate 的實際結果、未測平台與殘餘風險。不得把「HTTP 204」、「靜態設定」或單純 type-check 當成實際桌面流程證據。
+
+## Lint
+
+`pnpm lint` = `eslint .`（快取在 `node_modules/.cache/eslint/`）接 `node scripts/lint-main-process.mjs`（只剩主程序 crash guard 契約檢查）。設定在 `eslint.config.mjs`，只開 correctness 規則，不含 stylistic／Prettier。
+
+- `src/**` 禁止 `./`、`../` 的 import，一律 `@/`（`../../electron/*` 例外，沒有別名可用）。
+- 會被 Node 測試直接載入的 src 檔案（閉包由 `scripts/node-test-closure.mjs` 在 lint 時從 `tests/*.test.mts` 即時計算）相反：值 import 只能用相對路徑，`@/` 只允許 `import type`。測試若 import `tests/support/src-alias.mts`，該測試的閉包不受限制。新增被測試載入的檔案時不用維護任何清單。
+- `electron/**` 開 type-aware 的 `@typescript-eslint/no-floating-promises`（取代舊的 `loadURL` 字串比對）；其他目錄不跑 type-aware 規則以保持速度。
+- `@typescript-eslint/no-explicit-any` 為 warning（存量見 `docs/phase-reports/phase-packaging-ci-lint-backlog.md`），其餘為 error。
 
 ## 自動發版
 

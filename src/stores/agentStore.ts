@@ -296,7 +296,6 @@ export const useAgentStore = defineStore('agent', () => {
   const displayPreferences = usePetDisplayPreferences()
   const { multiPetEnabled, petScale, reactionsEnabled, bubbleEnabled, ambientEnabled, activityBubbleEnabled } = displayPreferences
   const panelNavigation = usePanelNavigation()
-  const { showWizard, showProjectMcpPanel } = panelNavigation
 
   // 主程序的偏好設定送到之前先用 localStorage 快取；只有 '1' 算開，沒有快取時跟 SOUND_DEFAULTS.soundEnabled 一樣是關。
   const soundEnabled = ref(readStored(STORAGE_KEYS.sound))

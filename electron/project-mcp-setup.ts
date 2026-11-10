@@ -705,7 +705,7 @@ export function installProjectMcp(
       const excludable = relativePaths.filter(relative => !tracked?.has(relative))
       try {
         summary.excluded = addLocalExcludes(location, excludable)
-      } catch (error) {
+      } catch {
         summary.warnings = ['exclude_write_failed']
       }
       if (trackedFiles.length > 0) summary.trackedFiles = trackedFiles

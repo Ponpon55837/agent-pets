@@ -128,7 +128,7 @@ export function readConfigText(filePath: string): string | null {
 export function readJsonObjectConfig(filePath: string): { exists: boolean, root: JsonObject, raw: string | null } {
   const raw = readConfigText(filePath)
   if (raw === null) return { exists: false, root: {}, raw: null }
-  const text = raw.replace(/^﻿/, '')
+  const text = raw.replace(/^\uFEFF/, '')
   if (text.trim() === '') return { exists: true, root: {}, raw }
   let parsed: unknown
   try {

@@ -125,5 +125,5 @@ test('only the status pill reads --pet-status-*; bubbles, permission UI, dots an
   const pet = readFileSync('src/components/DesktopPet.vue', 'utf8')
   assert.match(pet, /usePetTheme\(\)/)
   assert.doesNotMatch(pet, /usePanelTheme\b/)
-  assert.match(readFileSync('src/components/DesktopPet.css', 'utf8'), /\.status-line\[data-quota-tier='low'\] \{\n  --quota-color: var\(--organic-quota-error\);/)
+  assert.match(readFileSync('src/components/DesktopPet.css', 'utf8'), /\.status-line\[data-quota-tier='low'\] \{\n {2}--quota-color: var\(--organic-quota-error\);/)
 })

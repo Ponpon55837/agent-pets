@@ -208,7 +208,7 @@ pnpm dev
 | `pnpm dev` / `pnpm dev:safe` | Vite + Electron dev run; `dev:safe` uses software rendering on Windows when the GPU process crashes |
 | `pnpm test:unit` / `pnpm test:unit:watch` | Node built-in tests in `tests/` (no Electron launched) |
 | `pnpm test:coverage` | Unit tests with an 85% line floor on main-process modules |
-| `pnpm lint` | Main-process guard (unhandled `loadURL`, global error handlers) |
+| `pnpm lint` | ESLint (Vue/TypeScript, `@/` import rule, floating promises in `electron/`) plus the main-process crash-guard check |
 | `pnpm exec vue-tsc --noEmit` | Type check |
 | `pnpm check:bundle-size` | Fails if a renderer chunk exceeds 250 KB (run after `vite build`) |
 | `pnpm check:bundle` | Verifies the plugin panel tokens bundle |
