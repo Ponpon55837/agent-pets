@@ -161,6 +161,7 @@ const INSTALL_ERROR_KEYS: Record<InstallErrorCode, TranslationKey> = {
   config_unparseable: 'onboarding.errorConfigUnparseable',
   config_unsafe: 'onboarding.errorConfigUnsafe',
   config_too_large: 'onboarding.errorConfigTooLarge',
+  config_changed: 'onboarding.errorConfigChanged',
   permission_denied: 'onboarding.errorPermissionDenied',
   file_busy: 'onboarding.errorFileBusy',
   read_only: 'onboarding.errorReadOnly',

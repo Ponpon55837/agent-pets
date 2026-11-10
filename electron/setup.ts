@@ -6,8 +6,10 @@ import { randomBytes } from 'crypto'
 import { setupEnvironment } from './setup-environment.ts'
 import { createNodeResolver, NodeNotFoundError, NodeUnsupportedError, type NodeInfo } from './node-resolver.ts'
 import type { PetEdge, PetWindowMode } from '../src/types/pet-window'
+import { writeFileAtomic, writeFileAtomicSync } from './atomic-file-write.ts'
 import {
   readConfigTextAsync,
+  withConfigConflictRetry,
   writeConfigSafelyAsync,
   writeTextAtomic,
   writeTextAtomicAsync,
@@ -38,7 +40,6 @@ import {
   escapeCmdQuotedPath,
   disableCodexHooksFeatureText,
   enableCodexHooksFeatureText,
-  fileHasAgentPetsHooks,
   fileHasAgentPetsHooksAsync,
   isAgentPetsHook,
   isLegacyElectronHook,
@@ -314,6 +315,15 @@ function assertRegularTokenFile(stat: fs.Stats, label: string): void {
   }
 }
 
+// 隨機後綴：同一毫秒內兩次寫入（同步＋非同步、或兩個 label）也不會撞到 `wx` 的 EEXIST。
+function tokenTemporaryPath(tokenPath: string): string {
+  return path.join(path.dirname(tokenPath), `.${path.basename(tokenPath)}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`)
+}
+
+// token 一律走「暫存檔 + rename」：直接以 'w' 開啟會先截斷成空檔，hook 恰好在這時讀到空 token
+// 就會靜默略過事件；rename 也一併取代了 lstat → open 之間的 symlink 空窗（取代的是連結本身）。
+const TOKEN_WRITE_OPTIONS = { mode: 0o600, enforceMode: true, fsync: true } as const
+
 // 啟動時要同步拿到 token（事件 server 立刻要用），所以同步版留著；面板安裝走 ensureTokenAsync。
 function ensureToken(tokenPath: string, label: string): string {
   const dir = hookScriptDeployPath()
@@ -322,8 +332,14 @@ function ensureToken(tokenPath: string, label: string): string {
     try { fs.chmodSync(dir, 0o700) } catch {}
   }
 
+  let stat: fs.Stats | null = null
   try {
-    assertRegularTokenFile(fs.lstatSync(tokenPath), label)
+    stat = fs.lstatSync(tokenPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  if (stat) {
+    assertRegularTokenFile(stat, label)
     const existing = fs.readFileSync(tokenPath, 'utf8').trim()
     if (TOKEN_PATTERN.test(existing)) {
       if (!IS_WIN) {
@@ -332,22 +348,10 @@ function ensureToken(tokenPath: string, label: string): string {
       tokenCache.set(tokenPath, existing)
       return existing
     }
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code && code !== 'ENOENT') throw error
   }
 
   const token = tokenCache.get(tokenPath) ?? randomBytes(32).toString('hex')
-  const descriptor = fs.openSync(tokenPath, 'w', 0o600)
-  try {
-    fs.writeFileSync(descriptor, `${token}\n`, 'utf8')
-    fs.fsyncSync(descriptor)
-  } finally {
-    fs.closeSync(descriptor)
-  }
-  if (!IS_WIN) {
-    try { fs.chmodSync(tokenPath, 0o600) } catch {}
-  }
+  writeFileAtomicSync(tokenPath, `${token}\n`, { temporaryPath: tokenTemporaryPath(tokenPath), ...TOKEN_WRITE_OPTIONS })
   tokenCache.set(tokenPath, token)
   return token
 }
@@ -359,8 +363,14 @@ async function ensureTokenAsync(tokenPath: string, label: string): Promise<strin
     try { await fsp.chmod(dir, 0o700) } catch {}
   }
 
+  let stat: fs.Stats | null = null
   try {
-    assertRegularTokenFile(await fsp.lstat(tokenPath), label)
+    stat = await fsp.lstat(tokenPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  if (stat) {
+    assertRegularTokenFile(stat, label)
     const existing = (await fsp.readFile(tokenPath, 'utf8')).trim()
     if (TOKEN_PATTERN.test(existing)) {
       if (!IS_WIN) {
@@ -369,22 +379,10 @@ async function ensureTokenAsync(tokenPath: string, label: string): Promise<strin
       tokenCache.set(tokenPath, existing)
       return existing
     }
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code && code !== 'ENOENT') throw error
   }
 
   const token = tokenCache.get(tokenPath) ?? randomBytes(32).toString('hex')
-  const handle = await fsp.open(tokenPath, 'w', 0o600)
-  try {
-    await handle.writeFile(`${token}\n`, 'utf8')
-    await handle.sync()
-  } finally {
-    await handle.close()
-  }
-  if (!IS_WIN) {
-    try { await fsp.chmod(tokenPath, 0o600) } catch {}
-  }
+  await writeFileAtomic(tokenPath, `${token}\n`, { temporaryPath: tokenTemporaryPath(tokenPath), ...TOKEN_WRITE_OPTIONS })
   tokenCache.set(tokenPath, token)
   return token
 }
@@ -509,9 +507,11 @@ function codexFeatureMarkerPath(): string {
 }
 
 async function enableCodexHooksFeature(filePath: string): Promise<ConfigWriteResult> {
-  const existing = await readConfigTextAsync(filePath) ?? ''
-  const { content, added } = enableCodexHooksFeatureText(existing)
-  const result = await writeConfigSafelyAsync(filePath, content)
+  const { result, added } = await withConfigConflictRetry(filePath, async () => {
+    const raw = await readConfigTextAsync(filePath)
+    const { content, added } = enableCodexHooksFeatureText(raw ?? '')
+    return { result: await writeConfigSafelyAsync(filePath, content, raw), added }
+  })
   if (added) {
     try { await writeTextAtomicAsync(codexFeatureMarkerPath(), '1\n') } catch { /* marker is best effort */ }
   }
@@ -519,10 +519,6 @@ async function enableCodexHooksFeature(filePath: string): Promise<ConfigWriteRes
 }
 
 // --- Hook script content (bundled via extraResources) ---
-function hookScriptContent(): string {
-  return fs.readFileSync(path.join(integrationsDir(), 'agent-hook.mjs'), 'utf-8')
-}
-
 async function hookScriptContentAsync(): Promise<string> {
   return fsp.readFile(path.join(integrationsDir(), 'agent-hook.mjs'), 'utf-8')
 }
@@ -921,14 +917,15 @@ async function uninstallCodex(): Promise<void> {
   for (const stale of staleHomes) await removeAgentPetsHooksFile(codexHooksPathIn(stale), CODEX_HOOKS_OWNED_TOP_LEVEL)
   const configFile = codexConfigPathIn(codexHome)
   if (await fileExistsAsync(codexFeatureMarkerPath())) {
-    const existing = await readConfigTextAsync(configFile)
-    if (existing !== null) {
+    await withConfigConflictRetry(configFile, async () => {
+      const existing = await readConfigTextAsync(configFile)
+      if (existing === null) return
       const next = disableCodexHooksFeatureText(existing)
       if (next !== existing) {
-        await writeConfigSafelyAsync(configFile, next)
+        await writeConfigSafelyAsync(configFile, next, existing)
         if (next === '') await removeFile(configFile)
       }
-    }
+    })
   }
   await removeFile(codexFeatureMarkerPath())
   await releaseSharedHookScript()
@@ -1146,42 +1143,45 @@ async function refreshAgentConfigIntegrationsUnlocked(appVersion?: string): Prom
 }
 
 // --- Health helpers used by the adapter diagnostics ---
+// 面板每次開啟都會跑這些檢查，全部用非同步 I/O，不在主程序同步讀檔。
 /** The bundled hook script matches what is deployed (a stale copy keeps old behaviour). */
-function hookScriptIsCurrent(): boolean {
+async function hookScriptIsCurrent(): Promise<boolean> {
   try {
-    const deployed = readFile(hookScriptPath())
-    return deployed !== null && deployed === hookScriptContent()
+    const [deployed, bundled] = await Promise.all([readFileAsync(hookScriptPath()), hookScriptContentAsync()])
+    return deployed !== null && deployed === bundled
   } catch {
     return true // bundle unreadable: do not raise a false alarm
   }
 }
 
-function openCodePluginIsCurrent(kind: 'cli' | 'desktop'): boolean {
+async function openCodePluginIsCurrent(kind: 'cli' | 'desktop'): Promise<boolean> {
   const target = kind === 'cli' ? openCodeCliPluginPath() : openCodeDesktopPluginPath()
-  const deployed = readFile(target)
+  const deployed = await readFileAsync(target)
   return deployed !== null
     && deployed === openCodePluginContent(kind === 'cli' ? 'opencode-cli' : 'opencode-desktop')
 }
 
 /** Whether each agent's own config directory exists (the tool has been used on this machine). */
-function agentPresence(): { codex: boolean, claude: boolean, opencode: boolean } {
+async function agentPresence(): Promise<{ codex: boolean, claude: boolean, opencode: boolean }> {
   const dirs = currentAgentConfigDirs()
-  return {
-    codex: fs.existsSync(dirs.codex.path),
-    claude: fs.existsSync(dirs.claude.path),
-    opencode: fs.existsSync(path.dirname(openCodeCliPluginPathIn(dirs.opencode.path))) || fs.existsSync(path.dirname(openCodeDesktopPluginPath())),
-  }
+  const [codex, claude, opencodeCli, opencodeDesktop] = await Promise.all([
+    fileExistsAsync(dirs.codex.path),
+    fileExistsAsync(dirs.claude.path),
+    fileExistsAsync(path.dirname(openCodeCliPluginPathIn(dirs.opencode.path))),
+    fileExistsAsync(path.dirname(openCodeDesktopPluginPath())),
+  ])
+  return { codex, claude, opencode: opencodeCli || opencodeDesktop }
 }
 
 // The file in a config folder that shows an Agent Pets install was made there.
 const AGENT_PETS_INSTALL_FILE = {
-  claude: { in: claudeCodeSettingsPathIn, installed: fileHasAgentPetsHooks },
-  codex: { in: codexHooksPathIn, installed: fileHasAgentPetsHooks },
-  opencode: { in: openCodeCliPluginPathIn, installed: fileExists },
-} as const satisfies Record<AgentConfigDirKind, { in(dir: string): string, installed(file: string): boolean }>
+  claude: { in: claudeCodeSettingsPathIn, installed: fileHasAgentPetsHooksAsync },
+  codex: { in: codexHooksPathIn, installed: fileHasAgentPetsHooksAsync },
+  opencode: { in: openCodeCliPluginPathIn, installed: fileExistsAsync },
+} as const satisfies Record<AgentConfigDirKind, { in(dir: string): string, installed(file: string): Promise<boolean> }>
 
 /** Where the agent's config folder is, why, and whether the default folder still holds our files. */
-function agentConfigDirStatus(kind: AgentConfigDirKind): AdapterConfigDirStatus {
+async function agentConfigDirStatus(kind: AgentConfigDirKind): Promise<AdapterConfigDirStatus> {
   const dir = currentAgentConfigDirs()[kind]
   const [, staleDir] = configDirLocations(dir)
   const { in: fileIn, installed } = AGENT_PETS_INSTALL_FILE[kind]
@@ -1191,7 +1191,7 @@ function agentConfigDirStatus(kind: AgentConfigDirKind): AdapterConfigDirStatus 
     path: dir.path,
     source: dir.source,
     ...(dir.ignored ? { ignored: dir.ignored } : {}),
-    ...(staleFile !== undefined && installed(staleFile) ? { staleLocation: staleFile } : {}),
+    ...(staleFile !== undefined && await installed(staleFile) ? { staleLocation: staleFile } : {}),
   }
 }
 
@@ -1260,7 +1260,8 @@ async function uninstallIntegrationUnlocked(target?: IntegrationTarget | 'all'):
 let installerQueue: Promise<unknown> = Promise.resolve()
 
 function serializeInstaller<T>(task: () => Promise<T>): Promise<T> {
-  const run = installerQueue.then(task, task)
+  // 不能寫成 then(task, task)：那會把前一個任務的結果／錯誤當成參數傳進這個任務。
+  const run = installerQueue.then(() => task(), () => task())
   installerQueue = run.catch(() => {})
   return run
 }
@@ -1293,6 +1294,7 @@ export {
   CLAUDE_CODE_HOOK_EVENTS,
   CLAUDE_CODE_UPGRADE_EVENTS,
   CODEX_HOOK_EVENTS,
+  serializeInstaller,
   refreshInstalledIntegrationFiles as refreshInstalledIntegrationScriptsAsync,
   hookScriptIsCurrent,
   openCodePluginIsCurrent,
@@ -1325,7 +1327,9 @@ export {
   ensureDir,
   writeFileEnsured,
   fileExists,
+  fileExistsAsync,
   readFile,
+  readFileAsync,
   appendToFile,
   removeFromFile,
   installIntegration,

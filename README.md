@@ -185,6 +185,7 @@ The main-process log is `logs/main.log` inside the app's userData folder (`~/Lib
 | Codex hooks not enabled | **Repair** adds `hooks = true` under `[features]` in `config.toml` inside `CODEX_HOME` (default `~/.codex`). |
 | Card: config folder cannot be used | `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `XDG_CONFIG_HOME` is relative, starts with `~`, or points to a missing folder. Fix it and restart Agent Pets. |
 | Install refused: not valid JSON | `settings.json` / `hooks.json` has comments or a syntax error. Agent Pets leaves it untouched; fix or move the file, then install again. |
+| Install refused: changed by another program | Claude Code or Codex rewrote the file while Agent Pets was updating it, twice in a row. Nothing was changed; try again. |
 | Banner: event receiver offline | A local port (17373–17375) is held by another program or an older Agent Pets. Close it; the app retries automatically, or press **Retry now**. |
 | Hook script out of date | **Repair** redeploys it. |
 | Claude Code does not show the project MCP | Approve `agent-pets` in `/mcp`. Codex needs the project to be trusted. |

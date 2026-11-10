@@ -8,7 +8,7 @@ import {
   disableCodexHooksFeatureText,
   ensureAgentPetsHookEntries,
   enableCodexHooksFeatureText,
-  fileHasAgentPetsHooks,
+  fileHasAgentPetsHooksAsync,
   isAgentPetsHook,
   isLegacyElectronHook,
   mergeAgentPetsHooksFile,
@@ -97,7 +97,7 @@ test('merge creates a missing file from defaults without a backup', async () => 
     assert.equal(result.backupPath, null)
     const written = JSON.parse(fs.readFileSync(file, 'utf8'))
     assert.equal(written.description, 'Agent Pets')
-    assert.ok(fileHasAgentPetsHooks(file))
+    assert.ok(await fileHasAgentPetsHooksAsync(file))
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
@@ -107,7 +107,7 @@ test('merge treats an empty file as an empty object', async () => {
     const file = path.join(dir, 'settings.json')
     fs.writeFileSync(file, '')
     await mergeAgentPetsHooksFile(file, desired())
-    assert.ok(fileHasAgentPetsHooks(file))
+    assert.ok(await fileHasAgentPetsHooksAsync(file))
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
@@ -133,7 +133,7 @@ test('writes go through a symlink to the real target and preserve file mode', { 
     fs.symlinkSync(real, link)
     await mergeAgentPetsHooksFile(link, desired())
     assert.ok(fs.lstatSync(link).isSymbolicLink())
-    assert.ok(fileHasAgentPetsHooks(real))
+    assert.ok(await fileHasAgentPetsHooksAsync(real))
     assert.equal(fs.statSync(real).mode & 0o777, 0o640)
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
@@ -225,14 +225,14 @@ test('removing Codex hooks leaves Claude Code hooks (shared script) intact', asy
     await mergeAgentPetsHooksFile(codex, desired())
     await mergeAgentPetsHooksFile(claude, desired())
     await removeAgentPetsHooksFile(codex, { description: 'Agent Pets lifecycle hooks for Codex CLI.' })
-    assert.equal(fileHasAgentPetsHooks(codex), false)
-    assert.equal(fileHasAgentPetsHooks(claude), true)
+    assert.equal(await fileHasAgentPetsHooksAsync(codex), false)
+    assert.equal(await fileHasAgentPetsHooksAsync(claude), true)
     const kept = JSON.parse(fs.readFileSync(codex, 'utf8'))
     assert.equal(kept.hooks.Stop[0].hooks[0].command, 'echo mine')
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
-import { configuredHookExecutable, isCodexHooksFeatureEnabled, leadingExecutable } from '../electron/hook-config.ts'
+import { configuredHookExecutableFromRoot, isCodexHooksFeatureEnabled, leadingExecutable } from '../electron/hook-config.ts'
 
 test('codex hooks feature requires an explicit hooks = true under [features]', () => {
   assert.equal(isCodexHooksFeatureEnabled(null), false)
@@ -244,17 +244,10 @@ test('codex hooks feature requires an explicit hooks = true under [features]', (
 })
 
 test('configured hook executable is read from exec-form and shell-form hooks', () => {
-  const dir = tempDir()
-  try {
-    const exec = path.join(dir, 'a.json')
-    fs.writeFileSync(exec, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '/opt/node', args: [HOOK, 'claude'] }] }] } }))
-    assert.equal(configuredHookExecutable(exec), '/opt/node')
-    const shell = path.join(dir, 'b.json')
-    fs.writeFileSync(shell, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: `"/opt/my node/node" "${HOOK}" codex` }] }] } }))
-    assert.equal(configuredHookExecutable(shell), '/opt/my node/node')
-    assert.equal(configuredHookExecutable(path.join(dir, 'missing.json')), null)
-    assert.equal(leadingExecutable('node /x/.desktop-pet/agent-hook.mjs codex'), 'node')
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  assert.equal(configuredHookExecutableFromRoot({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '/opt/node', args: [HOOK, 'claude'] }] }] } }), '/opt/node')
+  assert.equal(configuredHookExecutableFromRoot({ hooks: { Stop: [{ hooks: [{ type: 'command', command: `"/opt/my node/node" "${HOOK}" codex` }] }] } }), '/opt/my node/node')
+  assert.equal(configuredHookExecutableFromRoot({}), null)
+  assert.equal(leadingExecutable('node /x/.desktop-pet/agent-hook.mjs codex'), 'node')
 })
 
 import { codexHookCommand, escapeCmdQuotedPath } from '../electron/hook-config.ts'

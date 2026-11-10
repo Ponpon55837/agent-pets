@@ -66,6 +66,7 @@
   "onboarding.errorConfigUnparseable": "{path} 不是有效的 JSON（不支援註解或結尾逗號），所以 Agent Pets 沒有修改它。請修正後再試。",
   "onboarding.errorConfigUnsafe": "{path} 不是一般檔案，所以沒有修改。",
   "onboarding.errorConfigTooLarge": "{path} 太大，所以沒有修改。",
+  "onboarding.errorConfigChanged": "{path} 在寫入時被其他程式修改，所以 Agent Pets 沒有改動它。請稍後再試。",
   "onboarding.errorPermissionDenied": "沒有寫入權限{path}。請檢查檔案或資料夾權限。",
   "onboarding.errorFileBusy": "檔案正被其他程式使用{path}。請關閉該工具後重試。",
   "onboarding.errorReadOnly": "磁碟或資料夾是唯讀的{path}，無法寫入設定。",

@@ -5,9 +5,9 @@ import {
   type JsonObject,
   type ParsedJsonConfig,
   isJsonObject,
-  readJsonObjectConfig,
   readJsonObjectConfigAsync,
   serializeJson,
+  withConfigConflictRetry,
   writeConfigSafelyAsync,
 } from './safe-config-write.ts'
 
@@ -115,15 +115,17 @@ export async function mergeAgentPetsHooksFile(
   desired: Record<string, unknown[]>,
   defaults: JsonObject = {},
 ): Promise<ConfigWriteResult> {
-  const { exists, root } = await readJsonObjectConfigAsync(filePath)
-  const base: JsonObject = exists ? root : { ...defaults }
-  const hooks = requireHooksObject(filePath, base)
-  for (const [event, handlers] of Object.entries(desired)) {
-    const kept = removeAgentPetsHooks(requireEventArray(filePath, event, hooks[event]))
-    hooks[event] = [...kept, handlers[0]]
-  }
-  base.hooks = hooks
-  return writeConfigSafelyAsync(filePath, serializeJson(base))
+  return withConfigConflictRetry(filePath, async () => {
+    const { exists, root, raw } = await readJsonObjectConfigAsync(filePath)
+    const base: JsonObject = exists ? root : { ...defaults }
+    const hooks = requireHooksObject(filePath, base)
+    for (const [event, handlers] of Object.entries(desired)) {
+      const kept = removeAgentPetsHooks(requireEventArray(filePath, event, hooks[event]))
+      hooks[event] = [...kept, handlers[0]]
+    }
+    base.hooks = hooks
+    return writeConfigSafelyAsync(filePath, serializeJson(base), raw)
+  })
 }
 
 export interface HookRemovalResult {
@@ -140,7 +142,14 @@ export async function removeAgentPetsHooksFile(
   filePath: string,
   ownedTopLevel: Record<string, unknown> = {},
 ): Promise<HookRemovalResult> {
-  const { exists, root } = await readJsonObjectConfigAsync(filePath)
+  return withConfigConflictRetry(filePath, () => removeAgentPetsHooksFileOnce(filePath, ownedTopLevel))
+}
+
+async function removeAgentPetsHooksFileOnce(
+  filePath: string,
+  ownedTopLevel: Record<string, unknown>,
+): Promise<HookRemovalResult> {
+  const { exists, root, raw } = await readJsonObjectConfigAsync(filePath)
   if (!exists) return { status: 'absent', path: filePath, backupPath: null }
   if (!isJsonObject(root.hooks)) return { status: 'absent', path: filePath, backupPath: null }
   const hooks = root.hooks
@@ -162,7 +171,7 @@ export async function removeAgentPetsHooksFile(
 
   if (Object.keys(root).length === 0) {
     // Everything left was written by Agent Pets: keep a backup, then remove the empty shell.
-    const write = await writeConfigSafelyAsync(filePath, serializeJson(root))
+    const write = await writeConfigSafelyAsync(filePath, serializeJson(root), raw)
     // A symlinked dotfile was rewritten at its real target; deleting only the link would leave
     // the target as `{}` and break the link, so a symlink is kept as an empty config instead.
     let isLink = false
@@ -171,20 +180,11 @@ export async function removeAgentPetsHooksFile(
     await fsp.rm(filePath, { force: true })
     return { status: 'deleted_file', path: filePath, backupPath: write.backupPath }
   }
-  const write = await writeConfigSafelyAsync(filePath, serializeJson(root))
+  const write = await writeConfigSafelyAsync(filePath, serializeJson(root), raw)
   return { status: 'removed', path: filePath, backupPath: write.backupPath }
 }
 
 /** True if the file contains at least one Agent Pets hook. Unreadable or invalid files report false. */
-export function fileHasAgentPetsHooks(filePath: string): boolean {
-  try {
-    return rootHasAgentPetsHooks(readJsonObjectConfig(filePath).root)
-  } catch {
-    return false
-  }
-}
-
-/** Same check without blocking the main process; used on the uninstall path. */
 export async function fileHasAgentPetsHooksAsync(filePath: string): Promise<boolean> {
   try {
     return rootHasAgentPetsHooks((await readJsonObjectConfigAsync(filePath)).root)
@@ -210,6 +210,13 @@ export async function rewriteAgentPetsHookCommands(
   filePath: string,
   rewrite: (hook: HookEntry) => boolean,
 ): Promise<boolean> {
+  return withConfigConflictRetry(filePath, () => rewriteAgentPetsHookCommandsOnce(filePath, rewrite))
+}
+
+async function rewriteAgentPetsHookCommandsOnce(
+  filePath: string,
+  rewrite: (hook: HookEntry) => boolean,
+): Promise<boolean> {
   let parsed: ParsedJsonConfig
   try {
     parsed = await readJsonObjectConfigAsync(filePath)
@@ -227,7 +234,7 @@ export async function rewriteAgentPetsHookCommands(
       }
     }
   }
-  if (changed) await writeConfigSafelyAsync(filePath, serializeJson(parsed.root))
+  if (changed) await writeConfigSafelyAsync(filePath, serializeJson(parsed.root), parsed.raw)
   return changed
 }
 
@@ -244,7 +251,11 @@ export interface RequiredHookEntry {
  * to rewrite). Other handlers are left exactly as they are. Returns null when the file has no
  * Agent Pets hook (not installed) or cannot be parsed; nothing is written when nothing differs.
  */
-export async function ensureAgentPetsHookEntries(filePath: string, required: readonly RequiredHookEntry[]): Promise<ConfigWriteResult | null> {
+export function ensureAgentPetsHookEntries(filePath: string, required: readonly RequiredHookEntry[]): Promise<ConfigWriteResult | null> {
+  return withConfigConflictRetry(filePath, () => ensureAgentPetsHookEntriesOnce(filePath, required))
+}
+
+async function ensureAgentPetsHookEntriesOnce(filePath: string, required: readonly RequiredHookEntry[]): Promise<ConfigWriteResult | null> {
   let parsed: ParsedJsonConfig
   try {
     parsed = await readJsonObjectConfigAsync(filePath)
@@ -290,29 +301,33 @@ export async function ensureAgentPetsHookEntries(filePath: string, required: rea
     }
   }
   if (!changed) return { status: 'unchanged', path: filePath, backupPath: null }
-  return writeConfigSafelyAsync(filePath, serializeJson(parsed.root))
+  return writeConfigSafelyAsync(filePath, serializeJson(parsed.root), parsed.raw)
 }
 
 // ---- Claude Desktop config: single top-level key ----
 
-export async function setJsonKeyFile(filePath: string, key: string, value: unknown): Promise<ConfigWriteResult> {
-  const { root } = await readJsonObjectConfigAsync(filePath)
-  if (JSON.stringify(root[key]) === JSON.stringify(value) && key in root) {
-    return { status: 'unchanged', path: filePath, backupPath: null }
-  }
-  root[key] = value
-  return writeConfigSafelyAsync(filePath, serializeJson(root))
+export function setJsonKeyFile(filePath: string, key: string, value: unknown): Promise<ConfigWriteResult> {
+  return withConfigConflictRetry(filePath, async () => {
+    const { root, raw } = await readJsonObjectConfigAsync(filePath)
+    if (JSON.stringify(root[key]) === JSON.stringify(value) && key in root) {
+      return { status: 'unchanged', path: filePath, backupPath: null }
+    }
+    root[key] = value
+    return writeConfigSafelyAsync(filePath, serializeJson(root), raw)
+  })
 }
 
 /** Removes `key` only if its current value equals `expected` (i.e. we wrote it). */
-export async function removeJsonKeyFile(filePath: string, key: string, expected: unknown): Promise<HookRemovalResult> {
-  const { exists, root } = await readJsonObjectConfigAsync(filePath)
-  if (!exists || !(key in root) || JSON.stringify(root[key]) !== JSON.stringify(expected)) {
-    return { status: 'absent', path: filePath, backupPath: null }
-  }
-  delete root[key]
-  const write = await writeConfigSafelyAsync(filePath, serializeJson(root))
-  return { status: 'removed', path: filePath, backupPath: write.backupPath }
+export function removeJsonKeyFile(filePath: string, key: string, expected: unknown): Promise<HookRemovalResult> {
+  return withConfigConflictRetry(filePath, async () => {
+    const { exists, root, raw } = await readJsonObjectConfigAsync(filePath)
+    if (!exists || !(key in root) || JSON.stringify(root[key]) !== JSON.stringify(expected)) {
+      return { status: 'absent', path: filePath, backupPath: null }
+    }
+    delete root[key]
+    const write = await writeConfigSafelyAsync(filePath, serializeJson(root), raw)
+    return { status: 'removed', path: filePath, backupPath: write.backupPath }
+  })
 }
 
 // ---- Codex config.toml [features].hooks ----
@@ -396,15 +411,7 @@ export function leadingExecutable(command: string): string {
   return (marker > 0 ? trimmed.slice(0, marker) : trimmed.split(/\s+/)[0] ?? '').trim()
 }
 
-/** The executable Agent Pets' hooks in this file would launch (exec-form `command` or shell-form leader). */
-export function configuredHookExecutable(filePath: string): string | null {
-  try {
-    return configuredHookExecutableFromRoot(readJsonObjectConfig(filePath).root)
-  } catch { /* unreadable config: no executable to report */ }
-  return null
-}
-
-/** 已解析過設定檔的呼叫端（健康檢查）直接傳 root，避免同一個檔案讀兩次、parse 兩次。 */
+/** Agent Pets 的 hook 會啟動哪個執行檔（exec 形式的 `command` 或 shell 形式的開頭）；健康檢查傳入已解析的 root，不重複讀檔。 */
 export function configuredHookExecutableFromRoot(root: JsonObject): string | null {
   if (!isJsonObject(root.hooks)) return null
   for (const groups of Object.values(root.hooks)) {

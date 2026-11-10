@@ -20,6 +20,9 @@ import {
   claudeHooksUpgradeMarkerPath,
   codexConfigPath,
   codexHooksPath,
+  ensureEventToken,
+  eventTokenPath,
+  serializeInstaller,
   CLAUDE_CODE_HOOK_EVENTS,
   CLAUDE_CODE_UPGRADE_EVENTS,
   CODEX_HOOK_EVENTS,
@@ -29,7 +32,7 @@ import {
   refreshInstalledIntegrationScriptsAsync,
   uninstallIntegration,
 } from '../electron/setup.ts'
-import { fileHasAgentPetsHooks, isCodexHooksFeatureEnabled } from '../electron/hook-config.ts'
+import { fileHasAgentPetsHooksAsync, isCodexHooksFeatureEnabled } from '../electron/hook-config.ts'
 import { ConfigRefusedError } from '../electron/safe-config-write.ts'
 
 // Integration tests for the real installer against a throw-away HOME. Nothing here touches the
@@ -62,10 +65,10 @@ test('fresh install writes hooks, the hook script and the Codex feature flag', a
     const results = await installIntegration('claudeCode')
     assert.ok(results.some(result => result.status === 'written'))
     assert.ok(fs.existsSync(hookScriptPath()))
-    assert.equal(fileHasAgentPetsHooks(claudeCodeSettingsPath()), true)
+    assert.equal(await fileHasAgentPetsHooksAsync(claudeCodeSettingsPath()), true)
 
     await installIntegration('codex')
-    assert.equal(fileHasAgentPetsHooks(codexHooksPath()), true)
+    assert.equal(await fileHasAgentPetsHooksAsync(codexHooksPath()), true)
     assert.equal(isCodexHooksFeatureEnabled(fs.readFileSync(codexConfigPath(), 'utf8')), true)
   })
 })
@@ -104,8 +107,8 @@ test('removing Codex keeps Claude Code working (shared hook script survives)', a
     await installIntegration('codex')
     await installIntegration('claudeCode')
     await uninstallIntegration('codex')
-    assert.equal(fileHasAgentPetsHooks(codexHooksPath()), false)
-    assert.equal(fileHasAgentPetsHooks(claudeCodeSettingsPath()), true)
+    assert.equal(await fileHasAgentPetsHooksAsync(codexHooksPath()), false)
+    assert.equal(await fileHasAgentPetsHooksAsync(claudeCodeSettingsPath()), true)
     assert.ok(fs.existsSync(hookScriptPath()), 'shared script must remain while Claude Code uses it')
     assert.equal(fs.existsSync(codexHooksPath()), false, 'a hooks.json holding only our entries is removed')
     assert.equal(fs.existsSync(codexConfigPath()), false, 'config.toml we created only for hooks = true is removed')
@@ -294,7 +297,7 @@ test('overlapping install and uninstall requests are serialized and never interl
     assert.deepEqual(order, order.map((_entry, index) => (index % 2 === 0 ? 'rename:start' : 'rename:end')))
     assert.ok(order.length >= 4)
     // 排隊順序即結果順序：最後一個請求是 install，所以最終是已安裝。
-    assert.equal(fileHasAgentPetsHooks(settings), true)
+    assert.equal(await fileHasAgentPetsHooksAsync(settings), true)
     const hooks = JSON.parse(fs.readFileSync(settings, 'utf8')).hooks
     for (const event of CLAUDE_CODE_HOOK_EVENTS) assert.equal(hooks[event].length, 1, `${event} has exactly one Agent Pets entry`)
   })
@@ -388,7 +391,7 @@ test('without the variables every path and status is the 1.12.5 default', async 
     assert.equal(openCodeCliPluginPath(), path.join(home, '.config', 'opencode', 'plugin', 'desktop-pet.js'))
     await installIntegration()
     for (const kind of ['claude', 'codex', 'opencode'] as const) {
-      const status = agentConfigDirStatus(kind)
+      const status = await agentConfigDirStatus(kind)
       assert.equal(status.source, 'default')
       assert.equal(status.ignored, undefined)
       assert.equal(status.staleLocation, undefined)
@@ -402,13 +405,13 @@ test('CLAUDE_CONFIG_DIR and CODEX_HOME receive the hooks; the default folders st
     await installIntegration('codex')
     const claudeDir = path.join(home, 'work', 'claude')
     const codexHome = path.join(home, 'work', 'codex')
-    assert.equal(fileHasAgentPetsHooks(path.join(claudeDir, 'settings.json')), true)
-    assert.equal(fileHasAgentPetsHooks(path.join(codexHome, 'hooks.json')), true)
+    assert.equal(await fileHasAgentPetsHooksAsync(path.join(claudeDir, 'settings.json')), true)
+    assert.equal(await fileHasAgentPetsHooksAsync(path.join(codexHome, 'hooks.json')), true)
     assert.equal(isCodexHooksFeatureEnabled(fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8')), true)
     assert.equal(fs.existsSync(path.join(home, '.claude')), false)
     assert.equal(fs.existsSync(path.join(home, '.codex')), false)
-    assert.deepEqual({ ...agentPresence(), opencode: false }, { claude: true, codex: true, opencode: false })
-    const status = agentConfigDirStatus('claude')
+    assert.deepEqual({ ...await agentPresence(), opencode: false }, { claude: true, codex: true, opencode: false })
+    const status = await agentConfigDirStatus('claude')
     assert.deepEqual(status, { variable: 'CLAUDE_CONFIG_DIR', path: claudeDir, source: 'env' })
   }, home => ({
     CLAUDE_CONFIG_DIR: made(path.join(home, 'work', 'claude')),
@@ -442,7 +445,7 @@ test('an unusable variable refuses the install and writes nothing anywhere', asy
 
 test('an ignored variable is reported without its value, and reads fall back to the default', async () => {
   await withHome(async (home) => {
-    const status = agentConfigDirStatus('codex')
+    const status = await agentConfigDirStatus('codex')
     assert.deepEqual(status, { variable: 'CODEX_HOME', path: path.join(home, '.codex'), source: 'default', ignored: 'missing' })
   }, () => ({ CODEX_HOME: path.join(os.tmpdir(), 'agent-pets-missing-codex-home-x9') }))
 })
@@ -459,19 +462,19 @@ test('setting the variables after installing reports the old location and uninst
       XDG_CONFIG_HOME: path.join(home, 'moved', 'xdg'),
     }
     await withHomeAt(home, moved, async () => {
-      assert.equal(agentConfigDirStatus('claude').staleLocation, path.join(home, '.claude', 'settings.json'))
-      assert.equal(agentConfigDirStatus('codex').staleLocation, path.join(home, '.codex', 'hooks.json'))
-      assert.equal(agentConfigDirStatus('opencode').staleLocation, path.join(home, '.config', 'opencode', 'plugin', 'desktop-pet.js'))
+      assert.equal((await agentConfigDirStatus('claude')).staleLocation, path.join(home, '.claude', 'settings.json'))
+      assert.equal((await agentConfigDirStatus('codex')).staleLocation, path.join(home, '.codex', 'hooks.json'))
+      assert.equal((await agentConfigDirStatus('opencode')).staleLocation, path.join(home, '.config', 'opencode', 'plugin', 'desktop-pet.js'))
       await installIntegration()
       await uninstallIntegration()
       for (const file of [
         path.join(home, '.claude', 'settings.json'), path.join(moved.CLAUDE_CONFIG_DIR, 'settings.json'),
         path.join(home, '.codex', 'hooks.json'), path.join(moved.CODEX_HOME, 'hooks.json'),
-      ]) assert.equal(fileHasAgentPetsHooks(file), false, file)
+      ]) assert.equal(await fileHasAgentPetsHooksAsync(file), false, file)
       assert.equal(fs.existsSync(path.join(home, '.config', 'opencode', 'plugin', 'desktop-pet.js')), false)
       assert.equal(fs.existsSync(path.join(moved.XDG_CONFIG_HOME, 'opencode', 'plugin', 'desktop-pet.js')), false)
       assert.equal(fs.existsSync(hookScriptPath()), false, 'no remaining config refers to the shared script')
-      for (const kind of ['claude', 'codex', 'opencode'] as const) assert.equal(agentConfigDirStatus(kind).staleLocation, undefined)
+      for (const kind of ['claude', 'codex', 'opencode'] as const) assert.equal((await agentConfigDirStatus(kind)).staleLocation, undefined)
     })
   } finally {
     fs.rmSync(home, { recursive: true, force: true })
@@ -503,3 +506,80 @@ async function withHomeAt(home: string, env: AgentConfigEnv, work: () => void | 
   })
   await work()
 }
+
+const VALID_TOKEN = /^[a-f0-9]{64}\n$/
+
+test('regenerating an invalid token replaces the file instead of truncating it in place (sync)', async () => {
+  await withHome(async () => {
+    fs.mkdirSync(path.dirname(eventTokenPath()), { recursive: true })
+    fs.writeFileSync(eventTokenPath(), 'garbage\n', { mode: 0o600 })
+    const before = fs.statSync(eventTokenPath()).ino
+    const token = ensureEventToken()
+    assert.match(fs.readFileSync(eventTokenPath(), 'utf8'), VALID_TOKEN)
+    assert.equal(fs.readFileSync(eventTokenPath(), 'utf8').trim(), token)
+    // 新 inode = 暫存檔 + rename；原地以 'w' 截斷會沿用同一個 inode，讀取端就可能看到空檔。
+    assert.notEqual(fs.statSync(eventTokenPath()).ino, before)
+    assert.deepEqual(fs.readdirSync(path.dirname(eventTokenPath())).filter(name => name.endsWith('.tmp')), [])
+    assert.equal(ensureEventToken(), token, 'a valid token is reused')
+  })
+})
+
+test('a reader never sees an empty or partial token while the async install regenerates it', async () => {
+  await withHome(async () => {
+    fs.mkdirSync(path.dirname(eventTokenPath()), { recursive: true })
+    fs.writeFileSync(eventTokenPath(), 'garbage\n', { mode: 0o600 })
+    const before = fs.statSync(eventTokenPath()).ino
+    let done = false
+    const observed = new Set<string>()
+    const reader = (async () => {
+      while (!done) {
+        try { observed.add(fs.readFileSync(eventTokenPath(), 'utf8')) } catch { observed.add('<missing>') }
+        await new Promise(resolve => setImmediate(resolve))
+      }
+    })()
+    await installIntegration('claudeCode')
+    done = true
+    await reader
+    for (const value of observed) assert.ok(value === 'garbage\n' || VALID_TOKEN.test(value), `unexpected token content ${JSON.stringify(value)}`)
+    assert.match(fs.readFileSync(eventTokenPath(), 'utf8'), VALID_TOKEN)
+    assert.notEqual(fs.statSync(eventTokenPath()).ino, before)
+  })
+})
+
+test('a symlinked token path is refused and its target is not written', async () => {
+  await withHome(async (home) => {
+    const victim = path.join(home, 'victim')
+    fs.writeFileSync(victim, 'keep')
+    fs.mkdirSync(path.dirname(eventTokenPath()), { recursive: true })
+    try { fs.symlinkSync(victim, eventTokenPath()) } catch { return }
+    assert.throws(() => ensureEventToken(), /not a regular file/)
+    await assert.rejects(installIntegration('claudeCode'), /not a regular file/)
+    assert.equal(fs.readFileSync(victim, 'utf8'), 'keep')
+  })
+})
+
+test('the installer queue runs tasks one at a time without handing them the previous result or error', async () => {
+  const received: unknown[][] = []
+  const order: string[] = []
+  const failing = serializeInstaller(async (...args: unknown[]) => {
+    received.push(args)
+    order.push('fail-start')
+    await new Promise(resolve => setTimeout(resolve, 5))
+    order.push('fail-end')
+    throw new Error('previous failure')
+  })
+  const next = serializeInstaller(async (...args: unknown[]) => {
+    received.push(args)
+    order.push('next')
+    return 'ok'
+  })
+  const after = serializeInstaller(async (...args: unknown[]) => {
+    received.push(args)
+    return 'after'
+  })
+  await assert.rejects(failing, /previous failure/)
+  assert.equal(await next, 'ok')
+  assert.equal(await after, 'after')
+  assert.deepEqual(order, ['fail-start', 'fail-end', 'next'])
+  assert.deepEqual(received, [[], [], []])
+})

@@ -185,6 +185,7 @@ Hook 會附上每次安裝專屬的 `X-Agent-Pets-Token` 標頭（讀自 `~/.des
 | Codex hooks 未啟用 | **修復**會在 `CODEX_HOME`（預設 `~/.codex`）內 `config.toml` 的 `[features]` 加入 `hooks = true`。 |
 | 卡片：設定目錄無法使用 | `CLAUDE_CONFIG_DIR`、`CODEX_HOME` 或 `XDG_CONFIG_HOME` 是相對路徑、以 `~` 開頭，或指向不存在的資料夾。修正後重新啟動 Agent Pets。 |
 | 安裝被拒：不是有效的 JSON | `settings.json`／`hooks.json` 含註解或語法錯誤。Agent Pets 不會動它；請修正或移開該檔案後再安裝。 |
+| 安裝被拒：檔案被其他程式修改 | Agent Pets 更新時，Claude Code 或 Codex 連續兩次改寫了同一個檔案。沒有改動任何內容，請再試一次。 |
 | 橫幅：事件接收器離線 | 本機埠（17373–17375）被其他程式或舊的 Agent Pets 占用。關閉它；App 會自動重試，也可按**立即重試**。 |
 | Hook 腳本過期 | **修復**會重新部署。 |
 | Claude Code 看不到專案 MCP | 在 `/mcp` 核准 `agent-pets`。Codex 需要先信任該專案。 |

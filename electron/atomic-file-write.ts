@@ -21,6 +21,14 @@ export interface AtomicFileWriteOptions {
   fsync?: boolean
 }
 
+export interface AsyncAtomicFileWriteOptions extends AtomicFileWriteOptions {
+  /**
+   * 暫存檔已寫好、rename 之前呼叫；拋出就放棄這次寫入並移除暫存檔。
+   * 給「讀到寫之間檔案被別人改過就不覆蓋」這類檢查用，讓檢查離 rename 越近越好。
+   */
+  beforeRename?: () => Promise<void>
+}
+
 /** `.<檔名>.<pid>.<毫秒時間>.tmp`：多數 store 共用的暫存檔名稱。 */
 export function pidTimestampTemporaryPath(targetPath: string): string {
   return path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.tmp`)
@@ -59,7 +67,7 @@ export function writeFileAtomicSync(targetPath: string, data: string | Uint8Arra
 }
 
 /** 與 writeFileAtomicSync 規則完全相同的非同步版，給主程序不能被磁碟 I/O 卡住的路徑使用。 */
-export async function writeFileAtomic(targetPath: string, data: string | Uint8Array, options: AtomicFileWriteOptions): Promise<void> {
+export async function writeFileAtomic(targetPath: string, data: string | Uint8Array, options: AsyncAtomicFileWriteOptions): Promise<void> {
   const { temporaryPath, mode } = options
   assertSameDirectory(targetPath, temporaryPath)
   let created = false
@@ -72,6 +80,7 @@ export async function writeFileAtomic(targetPath: string, data: string | Uint8Ar
     } finally {
       await handle.close()
     }
+    await options.beforeRename?.()
     await renameWithRetry(temporaryPath, targetPath)
   } catch (error) {
     if (created) {

@@ -66,6 +66,7 @@
   "onboarding.errorConfigUnparseable": "{path} is not valid JSON (comments and trailing commas are not supported), so Agent Pets did not change it. Fix it and try again.",
   "onboarding.errorConfigUnsafe": "{path} is not a regular file, so it was not changed.",
   "onboarding.errorConfigTooLarge": "{path} is too large, so it was not changed.",
+  "onboarding.errorConfigChanged": "{path} was changed by another program while it was being written, so Agent Pets did not modify it. Please try again.",
   "onboarding.errorPermissionDenied": "No permission to write{path}. Check the file or folder permissions.",
   "onboarding.errorFileBusy": "The file is in use by another program{path}. Close that tool and retry.",
   "onboarding.errorReadOnly": "The disk or folder is read-only{path}, so settings cannot be written.",
