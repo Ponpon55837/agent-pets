@@ -8,6 +8,7 @@ import { createEventRateLimiter } from './event-rate-limit.ts'
 import { eventPipelineStats } from './event-stats.ts'
 import { listenOnLocalPort, type LocalServerListenHandle, type LocalServerListenOptions } from './local-server-listen.ts'
 import { AGENT_PETS_SERVER_HEADER } from './main/server-health.ts'
+import { DEFAULT_LOCAL_PORTS, LOCAL_WIRE_HEADERS, LOCAL_WIRE_HOST, LOCAL_WIRE_PATHS } from '../src/types/local-wire.ts'
 import { normalizeAgentStatusEvent, type EventNormalizationResult } from './event-normalizer'
 export type { AgentStatusEvent } from '../src/types/agent'
 
@@ -61,7 +62,7 @@ export function createEventServer(
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     // Lets a second Agent Pets instance recognise this port owner without a token.
     response.setHeader(AGENT_PETS_SERVER_HEADER, 'event')
-    if (request.method !== 'POST' || request.url !== '/v1/events') {
+    if (request.method !== 'POST' || request.url !== LOCAL_WIRE_PATHS.events) {
       response.writeHead(404)
       response.end()
       return
@@ -75,7 +76,7 @@ export function createEventServer(
       return
     }
 
-    const suppliedToken = request.headers['x-agent-pets-token']
+    const suppliedToken = request.headers[LOCAL_WIRE_HEADERS.eventToken]
     const supplied = typeof suppliedToken === 'string' ? Buffer.from(suppliedToken) : Buffer.alloc(0)
     const expected = Buffer.from(eventToken)
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
@@ -173,13 +174,13 @@ export function createEventServer(
   server.headersTimeout = 10_000
   server.requestTimeout = 15_000
 
-  const port = listenHooks.port ?? 17373
+  const port = listenHooks.port ?? DEFAULT_LOCAL_PORTS.event
   const handle = listenOnLocalPort(server, port, {
     label: 'Event',
     onStatus: listenHooks.onStatus,
     onPersistentFailure: listenHooks.onPersistentFailure,
     onListening: () => {
-      if (!app.isPackaged) console.log(`Event server listening on http://127.0.0.1:${port}/v1/events`)
+      if (!app.isPackaged) console.log(`Event server listening on http://${LOCAL_WIRE_HOST}:${port}${LOCAL_WIRE_PATHS.events}`)
     },
   })
 

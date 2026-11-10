@@ -4,6 +4,7 @@ import { reportFromWrites } from './install-outcome.ts'
 import { projectAdapterCapabilities, type AgentAdapterOperations, type AdapterInspection } from './agent-adapter.ts'
 import { configuredHookExecutable, isCodexHooksFeatureEnabled } from './hook-config.ts'
 import { agentConfigEnvReady } from './agent-config-dirs.ts'
+import { LOCAL_WIRE_PATHS } from '../src/types/local-wire.ts'
 import {
   agentConfigDirStatus,
   agentPresence,
@@ -165,7 +166,7 @@ export function createAgentAdapterOperations(options: AgentAdapterOperationsOpti
           return {
             installed: true,
             health: 'ready',
-            message: 'The local /v1/events ingress is available through the authenticated receiver.',
+            message: `The local ${LOCAL_WIRE_PATHS.events} ingress is available through the authenticated receiver.`,
             checks: [
               check('loopback', 'pass', 'The receiver binds to loopback only.'),
               check('token', 'pass', 'Requests need the token created at install time.'),

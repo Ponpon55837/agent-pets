@@ -8,6 +8,7 @@ import { logMain, mainLogger } from '../diagnostics/main-log'
 import { buildDiagnosticsReport, registerDiagnosticsSection } from '../diagnostics/report'
 import { eventPipelineStats } from '../event-stats'
 import { resolveLocalPorts } from './ports'
+import { LOCAL_WIRE_HEADERS, LOCAL_WIRE_HOST, LOCAL_WIRE_PATHS } from '../../src/types/local-wire.ts'
 import { openWithCorruptionRecovery } from './db-recovery'
 import { localUsageCatchUpDelayMs, LOCAL_USAGE_TICK_MS, shouldRunLocalUsageTick } from './scan-schedule'
 import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
@@ -156,15 +157,15 @@ export function sendIntegrationTestEvent(
 
   return new Promise((resolvePromise, reject) => {
     const request = httpRequest({
-      hostname: '127.0.0.1',
+      hostname: LOCAL_WIRE_HOST,
       // 與事件伺服器實際監聽的埠相同（開發或 e2e 執行可能不是 17373）。
       port: localPorts().event,
-      path: '/v1/events',
+      path: LOCAL_WIRE_PATHS.events,
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         'content-length': Buffer.byteLength(body),
-        'x-agent-pets-token': mainState.eventToken,
+        [LOCAL_WIRE_HEADERS.eventToken]: mainState.eventToken,
       },
     }, (response) => {
       response.resume()

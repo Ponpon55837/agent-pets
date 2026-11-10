@@ -1,6 +1,7 @@
 import { GENERIC_HTTP_CAPABILITIES, type AgentCapabilities } from './capabilities.ts'
 import type { AgentFamilyKey, AgentSource, AgentStatusEvent } from './agent'
 import { AGENT_FAMILY_REGISTRY, FAMILY_SOURCES, SOURCE_LABELS } from './agent.ts'
+import { LOCAL_WIRE_PATHS } from './local-wire.ts'
 
 export type AdapterInstallTarget = 'opencode' | 'codex' | 'claudeCode'
 
@@ -58,7 +59,7 @@ export const AGENT_ADAPTER_REGISTRY = Object.freeze([
     capabilities: CLAUDE_CAPABILITIES, installTarget: 'claudeCode', installable: true, testSource: 'claude',
   },
   {
-    id: 'generic-http', displayName: 'Generic HTTP', family: null, sources: Object.freeze([]), sourceLabels: Object.freeze(['/v1/events']),
+    id: 'generic-http', displayName: 'Generic HTTP', family: null, sources: Object.freeze([]), sourceLabels: Object.freeze([LOCAL_WIRE_PATHS.events]),
     capabilities: GENERIC_HTTP_CAPABILITIES, installable: false,
   },
 ] as const satisfies ReadonlyArray<AgentAdapterRegistryEntry>)

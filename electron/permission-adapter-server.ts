@@ -5,6 +5,7 @@ import * as path from 'node:path'
 import type { PermissionDecisionValue, PermissionRisk } from '../src/types/permission'
 import { FAMILY_SOURCES, familySourceSet, type SourceOfFamily } from '../src/types/agent.ts'
 import { isOpaqueId128 as isIdentifier } from '../src/types/id-patterns.ts'
+import { LOCAL_WIRE_HEADERS, LOCAL_WIRE_PATHS } from '../src/types/local-wire.ts'
 import {
   PermissionBroker,
   type AdapterPermissionDecision,
@@ -20,7 +21,12 @@ import {
   isNetworkPermission,
 } from './permission-risk.ts'
 
-export const PERMISSION_ADAPTER_PORT = 17_374
+// 與請求的 `${method} ${pathname}` 比對的路由 key；在載入時從契約組好一次。
+const ROUTE_REQUEST = `POST ${LOCAL_WIRE_PATHS.permissionRequest}`
+const ROUTE_DECISION = `POST ${LOCAL_WIRE_PATHS.permissionDecision}`
+const ROUTE_RESULT = `POST ${LOCAL_WIRE_PATHS.permissionResult}`
+const ROUTE_RESOLVED = `POST ${LOCAL_WIRE_PATHS.permissionResolved}`
+const ROUTE_RESOLVED_SESSION = `POST ${LOCAL_WIRE_PATHS.permissionResolvedSession}`
 
 const MAX_BODY_BYTES = 16 * 1024
 // Per plugin instance (source + instanceId), so one noisy instance cannot use up
@@ -204,7 +210,7 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
     }
 
     const route = `${request.method ?? ''} ${request.url?.split('?')[0] ?? ''}`
-    if (route === 'POST /v1/permission/request') {
+    if (route === ROUTE_REQUEST) {
       if (!consumeCreateBudget(createWindows, `host:${request.socket.remoteAddress ?? 'loopback'}`, now(), MAX_CREATE_REQUESTS_PER_MINUTE_PER_HOST)) {
         sendJson(response, 429, { error: 'rate_limited' })
         return
@@ -286,7 +292,7 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
       return
     }
 
-    if (route === 'POST /v1/permission/decision') {
+    if (route === ROUTE_DECISION) {
       const lookup = normalizeLookupPayload(await readJsonBody(request))
       if (!lookup) {
         sendJson(response, 400, { error: 'invalid_request' })
@@ -315,7 +321,7 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
       return
     }
 
-    if (route === 'POST /v1/permission/result') {
+    if (route === ROUTE_RESULT) {
       const result = normalizeResultPayload(await readJsonBody(request))
       if (!result) {
         sendJson(response, 400, { error: 'invalid_request' })
@@ -335,7 +341,7 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
       return
     }
 
-    if (route === 'POST /v1/permission/resolved') {
+    if (route === ROUTE_RESOLVED) {
       const lookup = normalizeLookupPayload(await readJsonBody(request))
       if (!lookup) {
         sendJson(response, 400, { error: 'invalid_request' })
@@ -355,7 +361,7 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
 
     // Claude has no per-request "answered in the terminal" event; when a turn
     // or session ends, everything still pending for that session is settled.
-    if (route === 'POST /v1/permission/resolved-session') {
+    if (route === ROUTE_RESOLVED_SESSION) {
       const lookup = normalizeSessionLookupPayload(await readJsonBody(request))
       if (!lookup) {
         sendJson(response, 400, { error: 'invalid_request' })
@@ -549,7 +555,7 @@ function isLoopback(address: string | undefined): boolean {
 }
 
 function hasValidToken(request: IncomingMessage, expected: string): boolean {
-  const value = request.headers['x-agent-pets-permission-token']
+  const value = request.headers[LOCAL_WIRE_HEADERS.permissionToken]
   if (typeof value !== 'string') return false
   const actualBuffer = Buffer.from(value)
   const expectedBuffer = Buffer.from(expected)

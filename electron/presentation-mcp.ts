@@ -1,10 +1,14 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
 import type { PresentationController } from './presentation-controller.ts'
+import { LOCAL_WIRE_HEADERS, LOCAL_WIRE_PATHS } from '../src/types/local-wire.ts'
 
-export const PRESENTATION_MCP_PORT = 17_375
-export const PRESENTATION_TOKEN_HEADER = 'x-agent-pets-presentation-token'
-export const PRESENTATION_CLIENT_HEADER = 'x-agent-pets-client'
+export const PRESENTATION_TOKEN_HEADER = LOCAL_WIRE_HEADERS.presentationToken
+export const PRESENTATION_CLIENT_HEADER = LOCAL_WIRE_HEADERS.presentationClient
+const STATUS_PATH = LOCAL_WIRE_PATHS.presentationStatus
+const INTENTS_PATH = LOCAL_WIRE_PATHS.presentationIntents
+const DISCONNECT_PATH = LOCAL_WIRE_PATHS.presentationDisconnect
+const ALLOWED_PATHS: ReadonlySet<string> = new Set([STATUS_PATH, INTENTS_PATH, DISCONNECT_PATH])
 const MAX_BODY_BYTES = 16 * 1024
 const MAX_REQUESTS_PER_WINDOW = 60
 const RATE_WINDOW_MS = 10_000
@@ -41,9 +45,7 @@ function isAuthorized(request: IncomingMessage, expectedToken: Buffer): boolean 
 }
 
 function isAllowedPath(request: IncomingMessage): boolean {
-  return request.url === '/v1/presentation/status'
-    || request.url === '/v1/presentation/intents'
-    || request.url === '/v1/presentation/disconnect'
+  return request.url !== undefined && ALLOWED_PATHS.has(request.url)
 }
 
 export function createPresentationMcpServer(options: PresentationMcpServerOptions): Server {
@@ -79,7 +81,7 @@ export function createPresentationMcpServer(options: PresentationMcpServerOption
       return
     }
 
-    if (request.method === 'GET' && request.url === '/v1/presentation/status') {
+    if (request.method === 'GET' && request.url === STATUS_PATH) {
       writeJson(response, 200, {
         ...options.controller.getStatus(),
         queueDepth: options.controller.getQueueDepth(),
@@ -87,7 +89,7 @@ export function createPresentationMcpServer(options: PresentationMcpServerOption
       return
     }
 
-    if (request.url === '/v1/presentation/status') {
+    if (request.url === STATUS_PATH) {
       response.setHeader('allow', 'GET')
       writeJson(response, 405, { error: 'method_not_allowed' })
       request.resume()
@@ -95,7 +97,7 @@ export function createPresentationMcpServer(options: PresentationMcpServerOption
     }
 
     if (request.method !== 'POST') {
-      response.setHeader('allow', request.url === '/v1/presentation/status' ? 'GET' : 'POST')
+      response.setHeader('allow', request.url === STATUS_PATH ? 'GET' : 'POST')
       writeJson(response, 405, { error: 'method_not_allowed' })
       return
     }
@@ -132,13 +134,13 @@ export function createPresentationMcpServer(options: PresentationMcpServerOption
       }
 
       const clientId = readClientId(request)
-      if (request.url === '/v1/presentation/disconnect') {
+      if (request.url === DISCONNECT_PATH) {
         writeJson(response, 200, {
           removed: clientId ? options.controller.disconnectClient(clientId) : 0,
         })
         return
       }
-      if (request.url !== '/v1/presentation/intents' || !clientId) {
+      if (request.url !== INTENTS_PATH || !clientId) {
         writeJson(response, 400, { error: 'client_id_required' })
         return
       }

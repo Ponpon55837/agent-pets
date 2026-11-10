@@ -14,7 +14,7 @@
 - `src/types/agent.ts`：`ALL_SOURCES`、`AGENT_FAMILY_KEYS`、`SOURCE_LABELS`、`FAMILY_SOURCES`、`SOURCE_FAMILIES`、`QUOTA_FAMILY_KEYS`（型別 `QuotaFamilyKey`）、`FAMILY_ADAPTER_IDS`（型別 `AgentFamilyAdapterId`）、`LOCAL_USAGE_SOURCE_BY_ADAPTER`、`LOCAL_USAGE_ADAPTER_IDS`、`LOCAL_USAGE_SOURCES`、`SourceOfFamily<F>`。驗證函式：`isAgentSource`、`isAgentFamilyKey`、`isQuotaFamilyKey`、`familyOfSource`、`isDesktopSource`、`isQuotaCapableSource`、`familySourceSet`。這些驗證都用 Set 查，`constructor` 這類原型鏈上的名稱不會被當成合法值。
 - `src/types/agent-adapter.ts`：每個 adapter 的 `family`、`sources`、`sourceLabels`，以及 `capabilities.quota`。
 - 主行程：事件來源白名單（`event-normalizer.ts`，另外接受舊版 OpenCode 插件送的 `opencode`）、測試事件 IPC 與跳回 session IPC 的來源檢查、權限來源（`permission-adapter-server.ts` 的 `PERMISSION_ADAPTER_SOURCES`）、Claude 權限來源（`claude-permission-notice.ts`、`main/runtime.ts`）、通知標題上的名稱、本機紀錄 token 的 adapter 與來源（`achievements.ts`、`history-sessions.ts`）、插件不能使用的家族名稱（`plugin-event-source.ts`）、插件 `agentFamily` 的檢查（`presentation-controller.ts`），以及 quota provider id 的型別。
-- renderer：狀態列分行與 CLI／Desktop 標示、每家族的寵物、quota 條與 provider 過濾、面板的家族篩選、權限提示上的名稱、用量頁 quota 卡片與 5 小時區塊的對應。
+- renderer：狀態列分行與 CLI／Desktop 標示、每家族的寵物、quota 條與 provider 過濾、面板的家族篩選、權限提示上的名稱、用量頁 quota 卡片與 5 小時區塊的對應、History 的 agent 名稱（`src/utils/agent-label.ts`：adapter id 經 `AGENT_ADAPTER_REGISTRY` 對到家族，再查既有的 i18n key；沒有家族的 `generic-http` 與未知 id 原樣顯示）。
 
 ## 值不能改名
 
@@ -35,7 +35,10 @@
    - `src/components/SetupWizard.vue` 的 `RESTART_KEYS`
    - 家族有訂閱額度時，`src/components/DesktopPet.vue` 的 `QUOTA_FAMILY_TIER`
    - `electron/presentation-controller.ts`：插件 `agentFamily` 的字面型別要先擴充，這裡才會編譯通過。擴充那個型別等於改了公開契約，要同步更新 `docs/plugins/`。
-4. hook 這一側要另外改，它們不讀 registry（使用者層設定目錄的位置與環境變數則集中在 `electron/agent-config-dirs.ts` 的 `AGENT_CONFIG_DIR_SPECS`，新家族若有可搬移的設定目錄要加在那裡）：`integrations/agent-hook.mjs`、`integrations/install.mjs`、`electron/setup.ts`（含 `IntegrationTarget`）、`electron/hook-config.ts`。`integrations/*.mjs` 安裝後是在 app 之外由 Node 單獨執行，不能 import `src/`；`setup.ts` 與 `hook-config.ts` 負責寫入使用者的設定檔，這一輪由 hook 強化線負責，所以沒有改成讀 registry。
+4. hook 這一側要另外改，它們不讀 registry（使用者層設定目錄的位置與環境變數則集中在 `electron/agent-config-dirs.ts` 的 `AGENT_CONFIG_DIR_SPECS`，新家族若有可搬移的設定目錄要加在那裡）：
+   - `integrations/agent-hook.mjs` 的 `validSources`：新家族若走這支 hook，把它的來源加進去。`integrations/*.mjs` 安裝後是在 app 之外由 Node 單獨執行，不能 import `src/`，所以保留字面值；`tests/agent-source-registry.test.mts` 要求 `validSources` 正好等於經過 hook 的家族（目前是 Codex 與 Claude）在 registry 裡的來源，漏加或多加都會失敗，新家族走 hook 時也要更新那個測試裡的家族清單。
+   - `integrations/install.mjs`、`electron/setup.ts`（含 `IntegrationTarget`）、`electron/hook-config.ts`：負責寫入使用者的設定檔，這一輪由 hook 強化線負責，沒有改成讀 registry。
+   - 連線用的 port、`~/.desktop-pet` 與 token 檔名、header、`/v1/...` 路徑不用另外改：它們只寫在 `src/types/local-wire.ts`，`setup.ts` 的 OpenCode plugin 模板以插值取用，hook 與 presentation MCP 腳本的字面值由 `tests/local-wire-contract.test.mts` 比對。
 5. 更新 `tests/agent-source-registry.test.mts` 裡固定的值。
 
 ## 刻意沒有併進來的對照

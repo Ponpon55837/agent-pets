@@ -18,6 +18,7 @@ import { normalizeAgentStatusEvent } from './event-normalizer.ts'
 import { buildOutcome, failedOutcome } from './install-outcome.ts'
 import { AGENT_ADAPTER_REGISTRY } from '../src/types/agent-adapter.ts'
 import { familyOfSource } from '../src/types/agent.ts'
+import { LOCAL_WIRE_PATHS } from '../src/types/local-wire.ts'
 
 const ADAPTER_VERSION = '1.0.0'
 const ADAPTER_IDS: ReadonlySet<string> = new Set(AGENT_ADAPTER_REGISTRY.map(definition => definition.id))
@@ -53,7 +54,7 @@ function inspectGenericHttp(): AdapterInspection {
   return {
     installed: true,
     health: 'ready',
-    message: 'The local /v1/events ingress is available through the authenticated receiver.',
+    message: `The local ${LOCAL_WIRE_PATHS.events} ingress is available through the authenticated receiver.`,
     checks: [
       check('loopback', 'pass', 'The receiver binds to loopback only.'),
       check('token', 'pass', 'Requests need the token created at install time.'),
@@ -167,7 +168,7 @@ const DEFAULT_OPERATIONS: AgentAdapterOperations = {
   inspect: id => ({
     installed: id === 'generic-http',
     health: id === 'generic-http' ? 'ready' : 'needs_install',
-    message: id === 'generic-http' ? 'The local /v1/events ingress is available.' : 'The adapter is not installed.',
+    message: id === 'generic-http' ? `The local ${LOCAL_WIRE_PATHS.events} ingress is available.` : 'The adapter is not installed.',
     checks: id === 'generic-http'
       ? inspectGenericHttp().checks
       : [check('runtime', 'warn', 'Setup operations are unavailable in this runtime.')],

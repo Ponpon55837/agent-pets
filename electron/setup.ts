@@ -18,6 +18,14 @@ import {
   clampClaudePermissionWaitSeconds,
 } from '../src/types/permission.ts'
 import {
+  DEFAULT_LOCAL_PORTS,
+  DEPLOY_DIR_NAME,
+  DEPLOY_FILES,
+  LOCAL_WIRE_HEADERS,
+  LOCAL_WIRE_HOST,
+  LOCAL_WIRE_PATHS,
+} from '../src/types/local-wire.ts'
+import {
   codexHookCommand,
   ensureAgentPetsHookEntries,
   escapeCmdQuotedPath,
@@ -240,34 +248,34 @@ function writeWindowState(state: Partial<PetWindowState>): void {
 
 // --- Hook script path ---
 function hookScriptPath(): string {
-  return path.join(homeDir(), '.desktop-pet', 'agent-hook.mjs')
+  return path.join(hookScriptDeployPath(), DEPLOY_FILES.hookScript)
 }
 
 function hookWrapperPath(): string {
-  return path.join(homeDir(), '.desktop-pet', 'agent-hook.cmd')
+  return path.join(hookScriptDeployPath(), DEPLOY_FILES.hookWrapper)
 }
 
 function hookScriptDeployPath(): string {
-  return path.join(homeDir(), '.desktop-pet')
+  return path.join(homeDir(), DEPLOY_DIR_NAME)
 }
 
 function eventTokenPath(): string {
-  return path.join(hookScriptDeployPath(), 'event-token')
+  return path.join(hookScriptDeployPath(), DEPLOY_FILES.eventToken)
 }
 
 function permissionTokenPath(): string {
-  return path.join(hookScriptDeployPath(), 'permission-token')
+  return path.join(hookScriptDeployPath(), DEPLOY_FILES.permissionToken)
 }
 
 function presentationTokenPath(): string {
-  return path.join(hookScriptDeployPath(), 'presentation-token')
+  return path.join(hookScriptDeployPath(), DEPLOY_FILES.presentationToken)
 }
 
 // Opt-in marker read by agent-hook.mjs. Present only while the user has turned on
 // answering Claude Code permissions from the pet; the main process still checks
 // its own persisted preference before accepting any request.
 function claudePermissionRespondPath(): string {
-  return path.join(hookScriptDeployPath(), 'claude-permission-respond')
+  return path.join(hookScriptDeployPath(), DEPLOY_FILES.claudePermissionRespond)
 }
 
 /** Writes (enabled) or removes (null) the hook's opt-in file. */
@@ -363,7 +371,7 @@ function ensurePresentationMcpScript(): void {
 }
 
 function presentationMcpScriptPath(): string {
-  return path.join(hookScriptDeployPath(), 'presentation-mcp.mjs')
+  return path.join(hookScriptDeployPath(), DEPLOY_FILES.presentationMcpScript)
 }
 
 // --- Write helpers ---
@@ -457,11 +465,17 @@ function installHookScript(): ConfigWriteResult[] {
 }
 
 // --- OpenCode plugin content ---
+// plugin 一直送 X-Agent-Pets-Token 這種大小寫；HTTP header 不分大小寫，但維持既有送出的寫法。
+function headerCase(name: string): string {
+  return name.replace(/(^|-)([a-z])/g, (_match, dash: string, letter: string) => dash + letter.toUpperCase())
+}
+
 // OpenCode's real plugin shape: an (async) function that receives a context
 // object and returns a hooks object. Tool lifecycle hooks are direct keys;
 // session lifecycle notifications arrive through the generic `event` hook.
 // There's no direct "user prompt submitted" hook exposed, so the pet won't
 // show "thinking" until the first tool call — a known gap, not a bug.
+// 連線用的值都從 src/types/local-wire.ts 插值；plugin 跑在 OpenCode 裡、一律連預設埠（與改用契約前相同）。
 function openCodePluginContent(source: 'opencode-desktop' | 'opencode-cli'): string {
   return `import http from 'http';
 import fs from 'fs';
@@ -471,8 +485,8 @@ import { randomBytes } from 'crypto';
 
 const SOURCE = '${source}';
 const instanceId = 'opencode-' + process.pid + '-' + Date.now() + '-' + randomBytes(6).toString('hex');
-const eventTokenPath = path.join(os.homedir(), '.desktop-pet', 'event-token');
-const permissionTokenPath = path.join(os.homedir(), '.desktop-pet', 'permission-token');
+const eventTokenPath = path.join(os.homedir(), '${DEPLOY_DIR_NAME}', '${DEPLOY_FILES.eventToken}');
+const permissionTokenPath = path.join(os.homedir(), '${DEPLOY_DIR_NAME}', '${DEPLOY_FILES.permissionToken}');
 let currentState = null;
 let stateTimer = null;
 const activePermissions = new Map();
@@ -487,7 +501,7 @@ function postJson(port, pathname, tokenHeader, token, value) {
     if (!token) { resolve({ status: 0, body: null }); return; }
     const payload = JSON.stringify(value);
     const req = http.request({
-      hostname: '127.0.0.1',
+      hostname: '${LOCAL_WIRE_HOST}',
       port,
       path: pathname,
       method: 'POST',
@@ -536,7 +550,7 @@ function hostHints() {
 const HOST_HINTS = hostHints();
 
 function sendEvent(sessionId, state, toolName, originalEvent, projectPath) {
-  void postJson(17373, '/v1/events', 'X-Agent-Pets-Token', readToken(eventTokenPath), {
+  void postJson(${DEFAULT_LOCAL_PORTS.event}, '${LOCAL_WIRE_PATHS.events}', '${headerCase(LOCAL_WIRE_HEADERS.eventToken)}', readToken(eventTokenPath), {
     source: SOURCE,
     sessionId: sessionId || 'unknown',
     state,
@@ -560,9 +574,9 @@ function setState(sessionId, state, toolName, originalEvent, projectPath) {
 
 function permissionPost(pathname, value) {
   return postJson(
-    17374,
+    ${DEFAULT_LOCAL_PORTS.permission},
     pathname,
-    'X-Agent-Pets-Permission-Token',
+    '${headerCase(LOCAL_WIRE_HEADERS.permissionToken)}',
     readToken(permissionTokenPath),
     value,
   );
@@ -626,7 +640,7 @@ async function replyOpenCode(client, input, decision, directory) {
 async function pollPermission(client, input, directory) {
   const startedAt = Date.now();
   while (activePermissions.has(input.permissionId) && Date.now() - startedAt < 90000) {
-    const response = await permissionPost('/v1/permission/decision', input);
+    const response = await permissionPost('${LOCAL_WIRE_PATHS.permissionDecision}', input);
     if (response.status === 410 || response.status === 404) break;
     if (response.status !== 200 || !response.body || !response.body.decisionId) {
       await new Promise((resolve) => setTimeout(resolve, 450));
@@ -639,7 +653,7 @@ async function pollPermission(client, input, directory) {
       result = await replyOpenCode(client, input, response.body.decision, directory);
       decisionResults.set(decisionId, result);
     }
-    const acknowledged = await permissionPost('/v1/permission/result', {
+    const acknowledged = await permissionPost('${LOCAL_WIRE_PATHS.permissionResult}', {
       ...input,
       decisionId,
       result,
@@ -658,7 +672,7 @@ async function registerPermission(client, properties, projectPath, directory) {
   const input = normalizePermission(properties, projectPath);
   if (!input || activePermissions.has(input.permissionId)) return;
   activePermissions.set(input.permissionId, input);
-  const response = await permissionPost('/v1/permission/request', input);
+  const response = await permissionPost('${LOCAL_WIRE_PATHS.permissionRequest}', input);
   if (response.status !== 200 && response.status !== 201) {
     activePermissions.delete(input.permissionId);
     return;
@@ -675,7 +689,7 @@ async function resolvePermission(properties) {
     instanceId,
     permissionId: String(permissionId),
   };
-  await permissionPost('/v1/permission/resolved', input);
+  await permissionPost('${LOCAL_WIRE_PATHS.permissionResolved}', input);
   activePermissions.delete(input.permissionId);
 }
 
@@ -714,7 +728,7 @@ const DesktopPetPlugin = async ({ client, project, directory }) => {
   },
   dispose: async () => {
     await Promise.all([...activePermissions.values()].map((input) => (
-      permissionPost('/v1/permission/resolved', input)
+      permissionPost('${LOCAL_WIRE_PATHS.permissionResolved}', input)
     )));
     activePermissions.clear();
     decisionResults.clear();
