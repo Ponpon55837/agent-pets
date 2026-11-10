@@ -42,24 +42,8 @@ test('teardown releases services in the established order', () => {
     'runMarker.clear()',
     'hookStartupMarker.clear()',
     'flushMainLog()',
-    'mainState.pluginPanelViewController?.close()',
-    'mainState.pluginPanelViewController = null',
-    'mainState.pluginDeveloperModeWatcher?.destroy()',
-    'mainState.pluginDeveloperModeWatcher = null',
-    'mainState.pluginBroker?.destroy()',
-    'mainState.pluginBroker = null',
-    'mainState.pluginFeedController = null',
-    'mainState.pluginAgentStatusController?.destroy()',
-    'mainState.pluginAgentStatusController = null',
-    'mainState.pluginSecretsStore = null',
-    'mainState.pluginSecretConsentStore = null',
-    'mainState.pluginSettingsStore = null',
-    'mainState.pluginRuntimeContexts.clear()',
-    'mainState.pluginPreferencesSnapshot = null',
-    'mainState.pluginHostWindow?.close()',
-    'mainState.pluginHostWindow = null',
-    'mainState.pluginEventSourceController?.destroy()',
-    'mainState.pluginEventSourceController = null',
+    // 階段 11 後續：plugin 服務的釋放順序移進 pluginRuntime.dispose()，順序由下一個測試固定。
+    'pluginRuntime.dispose()',
     'mainState.windowsFullscreenDetector?.stop()',
     'mainState.windowsFullscreenDetector = null',
     'if (mainState.panelBlurHideHandle) clearTimeout(mainState.panelBlurHideHandle)',
@@ -68,8 +52,7 @@ test('teardown releases services in the established order', () => {
     'mainState.windowsFullscreenAutoHiddenPanel = false',
     // 階段 11：History runtime 服務另外停止本機用量補掃與清除計時器，改前沒有任何清理步驟會停它們。
     'historyRuntime.dispose()',
-    'if (mainState.pluginCatalogAutoCheckTimer) clearInterval(mainState.pluginCatalogAutoCheckTimer)',
-    'mainState.pluginCatalogAutoCheckTimer = null',
+    'pluginCatalogRuntime.dispose()',
     'if (mainState.localUsageScanTimer) clearInterval(mainState.localUsageScanTimer)',
     'mainState.localUsageScanTimer = null',
     'mainState.localUsageReader = null',
@@ -89,6 +72,37 @@ test('teardown releases services in the established order', () => {
     // 階段 11：寵物視窗模式服務另外停止重新貼邊輪詢；改前它是模組變數，沒有任何清理步驟會停。
     'petWindowModes.dispose()',
     'disposeMainTimers(mainState)',
+  ])
+})
+
+test('the plugin runtime releases its services in the established order', () => {
+  // 改前這些行逐字是 teardownMainServices 的 plugin 段；搬進 dispose() 後順序不可改變。
+  assert.deepEqual(blockLines(readFileSync('electron/main/plugin-runtime.ts', 'utf8'), /function dispose\(\): void \{/), [
+    'mainState.pluginPanelViewController?.close()',
+    'mainState.pluginPanelViewController = null',
+    'mainState.pluginDeveloperModeWatcher?.destroy()',
+    'mainState.pluginDeveloperModeWatcher = null',
+    'mainState.pluginBroker?.destroy()',
+    'mainState.pluginBroker = null',
+    'mainState.pluginFeedController = null',
+    'mainState.pluginAgentStatusController?.destroy()',
+    'mainState.pluginAgentStatusController = null',
+    'mainState.pluginSecretsStore = null',
+    'mainState.pluginSecretConsentStore = null',
+    'mainState.pluginSettingsStore = null',
+    'mainState.pluginRuntimeContexts.clear()',
+    'mainState.pluginPreferencesSnapshot = null',
+    'mainState.pluginHostWindow?.close()',
+    'mainState.pluginHostWindow = null',
+    'mainState.pluginEventSourceController?.destroy()',
+    'mainState.pluginEventSourceController = null',
+  ])
+})
+
+test('the plugin catalog runtime clears its hourly timer on dispose', () => {
+  assert.deepEqual(blockLines(readFileSync('electron/main/plugin-catalog-runtime.ts', 'utf8'), /function dispose\(\): void \{/), [
+    'if (mainState.pluginCatalogAutoCheckTimer) clearInterval(mainState.pluginCatalogAutoCheckTimer)',
+    'mainState.pluginCatalogAutoCheckTimer = null',
   ])
 })
 

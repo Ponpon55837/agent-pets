@@ -115,7 +115,7 @@ import { acquireRunMarker } from './diagnostics/session-marker'
 import { writeHookStartupMarker } from './main/hook-startup-marker'
 import type { LocalServerListenStatus } from './local-server-listen'
 import { installChildProcessGoneLogger, installCrashGuard, runStartupStep, type StartupStepResult } from './main/crash-guard'
-import { setPluginPanelWindowBounds, MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, broadcastProgressionIfChanged, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, isClaudePermissionRespondEnabled, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, historyRuntime, localPorts, petWindowModes, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode, requestPanelMinimum, resetPanelSize } from './main/runtime'
+import { setPluginPanelWindowBounds, MAX_PET_IMAGE_BYTES, MAX_PET_JSON_BYTES, MAX_PET_UNCOMPRESSED_BYTES, MAX_PET_ZIP_BYTES, MAX_PET_ZIP_ENTRIES, animateBounds, applyNormalPetBounds, assertTrustedIpcSender, availablePetIds, broadcastAchievementUnlock, broadcastDesktopPreferences, broadcastHistoryUpdated, broadcastPowerSaveState, broadcastProgression, broadcastProgressionIfChanged, clearEdgeDwell, computePanelBounds, configureSecureProtocol, createAchievementServices, createDesktopServices, createHistoryServices, createPanelWindow, createPermissionServices, isClaudePermissionRespondEnabled, createPetWindow, createPluginServices, createPresentationServices, createProgressionServices, createProjectRoutingServices, createWindowsFullscreenServices, currentDesktopPreferences, currentHistorySummary, currentPowerSaveState, displayForBounds, enabledPluginRoot, finiteNumber, getPetsJsonPath, hidePetWindow, initializePluginCatalogAutoCheck, isProgressionPetId, isTrustedIpcSender, logAchievementDiagnostic, normalizeIngressEvent, persistCurrentPetWindowState, persistPetBounds, petModeState, readRegularFileWithin, refreshLocalUsage, rehomePetWindowForDisplayChange, repositionVisiblePanel, safeJoin, sanitizePetId, scheduleEdgeDwell, scheduleShimejiPositionPersist, sendIntegrationTestEvent, setActiveProgressionPet, historyRuntime, localPorts, petWindowModes, pluginCatalogRuntime, pluginRuntime, reloadPetRenderers, registerRuntimeDiagnostics, exportDiagnostics, serverHealthTracker, setPetWindowMode, showPanelWindow, showPetWindow, syncPluginHost, syncWindowsFullscreenTargets, unregisterPermissionHotkeys, updateDesktopPreferences, waitForIntegrationTestReceipt, scheduleEdgeRedock, broadcastProgressionAwards, listPermissionAuditEntries, clearPermissionAuditLog, toggleMiniMode, requestPanelMinimum, resetPanelSize } from './main/runtime'
 
 
 
@@ -839,24 +839,7 @@ function teardownMainServices(): void {
   runMarker.clear()
   hookStartupMarker.clear()
   flushMainLog()
-  mainState.pluginPanelViewController?.close()
-  mainState.pluginPanelViewController = null
-  mainState.pluginDeveloperModeWatcher?.destroy()
-  mainState.pluginDeveloperModeWatcher = null
-  mainState.pluginBroker?.destroy()
-  mainState.pluginBroker = null
-  mainState.pluginFeedController = null
-  mainState.pluginAgentStatusController?.destroy()
-  mainState.pluginAgentStatusController = null
-  mainState.pluginSecretsStore = null
-  mainState.pluginSecretConsentStore = null
-  mainState.pluginSettingsStore = null
-  mainState.pluginRuntimeContexts.clear()
-  mainState.pluginPreferencesSnapshot = null
-  mainState.pluginHostWindow?.close()
-  mainState.pluginHostWindow = null
-  mainState.pluginEventSourceController?.destroy()
-  mainState.pluginEventSourceController = null
+  pluginRuntime.dispose()
   mainState.windowsFullscreenDetector?.stop()
   mainState.windowsFullscreenDetector = null
   if (mainState.panelBlurHideHandle) clearTimeout(mainState.panelBlurHideHandle)
@@ -864,8 +847,7 @@ function teardownMainServices(): void {
   mainState.windowsFullscreenAutoHiddenPet = false
   mainState.windowsFullscreenAutoHiddenPanel = false
   historyRuntime.dispose()
-  if (mainState.pluginCatalogAutoCheckTimer) clearInterval(mainState.pluginCatalogAutoCheckTimer)
-  mainState.pluginCatalogAutoCheckTimer = null
+  pluginCatalogRuntime.dispose()
   if (mainState.localUsageScanTimer) clearInterval(mainState.localUsageScanTimer)
   mainState.localUsageScanTimer = null
   mainState.localUsageReader = null

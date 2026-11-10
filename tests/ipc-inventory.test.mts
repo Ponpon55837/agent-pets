@@ -7,6 +7,7 @@ import { analyzeIpcInventory, renderIpcInventory } from '../scripts/generate-ipc
 
 const mainSource = readFileSync(path.resolve('electron/main.ts'), 'utf8')
 const runtimeSource = readFileSync(path.resolve('electron/main/runtime.ts'), 'utf8')
+const pluginRuntimeSource = readFileSync(path.resolve('electron/main/plugin-runtime.ts'), 'utf8')
 const hostSource = readFileSync(path.resolve('electron/plugin-host-window.ts'), 'utf8')
 const panelViewSource = readFileSync(path.resolve('electron/plugin-panel-view.ts'), 'utf8')
 const pluginUiPreloadSource = readFileSync(path.resolve('electron/plugin-ui-preload.ts'), 'utf8')
@@ -69,13 +70,14 @@ test('renderer windows and plugin views explicitly retain Electron security defa
 })
 
 test('plugin panel views keep a transparent native background so plugins can round their own corners', () => {
-  assert.match(runtimeSource, /createView: options => \{\s+const view = new WebContentsView\(options\)[\s\S]{0,200}view\.setBackgroundColor\('#00000000'\)/)
+  assert.match(pluginRuntimeSource, /createView: options => \{\s+const view = deps\.createWebContentsView\(options\)[\s\S]{0,200}view\.setBackgroundColor\('#00000000'\)/)
+  assert.match(runtimeSource, /createWebContentsView: options => new WebContentsView\(options\)/)
 })
 
 test('every non-default Electron session rejects permission requests and checks', () => {
-  const networkSessionStart = runtimeSource.indexOf("const pluginNetworkSession = session.fromPartition('plugin-network')")
+  const networkSessionStart = pluginRuntimeSource.indexOf("const pluginNetworkSession = session.fromPartition('plugin-network')")
   assert.notEqual(networkSessionStart, -1)
-  const networkSession = runtimeSource.slice(networkSessionStart, networkSessionStart + 1_200)
+  const networkSession = pluginRuntimeSource.slice(networkSessionStart, networkSessionStart + 1_200)
   assert.match(networkSession, /setPermissionRequestHandler\([^\n]+callback\(false\)/)
   assert.match(networkSession, /setPermissionCheckHandler\(\(\) => false\)/)
 

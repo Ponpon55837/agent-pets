@@ -12,7 +12,6 @@ import { LOCAL_WIRE_HEADERS, LOCAL_WIRE_HOST, LOCAL_WIRE_PATHS } from '../../src
 import { createServerHealthTracker, type ServerHealthTracker } from './server-health'
 import { createSessionJumpService, withSessionJumpContext } from './session-jump-runtime'
 import { join, resolve } from 'path'
-import { randomUUID } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
 import { Readable } from 'node:stream'
 import * as fs from 'fs'
@@ -38,33 +37,16 @@ import { listenOnLocalPort } from '../local-server-listen'
 import { normalizePresentationStatus, PresentationController } from '../presentation-controller'
 
 import { ProjectRoutingStore } from '../project-routing'
-import { PluginRegistry, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES, PLUGIN_ARCHIVE_SKIN_MAX_BYTES } from '../plugin-registry'
+import { PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES } from '../plugin-registry'
 import { PanelSizeStore } from '../panel-size-store'
-import { PluginPreferencesStore, pluginHostMemoryBudgetMb } from '../plugin-preferences'
+import { PluginPreferencesStore } from '../plugin-preferences'
 import { PluginHostWindowController, type PluginHostDescriptor } from '../plugin-host-window'
 import { selectEnabledPluginDescriptors } from '../plugin-host-selection'
-import { PluginBroker, type PluginBrokerContext, type PluginReactionRequest } from '../plugin-broker.ts'
-import { PluginCommandController } from '../plugin-commands.ts'
-import { PluginBadgeController } from '../plugin-badges.ts'
-import { PluginFeedController } from '../plugin-feed.ts'
-import { filterPluginRequestHeaders, PluginNetworkClient, stripPluginSetCookieHeaders } from '../plugin-net.ts'
-import { isPublicPluginNetworkHost } from '../plugin-net.ts'
-import { PluginHostGrantController, sanitizePluginHostRequestReason } from '../plugin-host-grants.ts'
-import { PluginSecretsStore } from '../plugin-secrets.ts'
-import { PluginSecretConsentStore } from '../plugin-secret-consent.ts'
-import { PluginSettingsStore } from '../plugin-settings.ts'
-import { PluginAgentStatusController } from '../plugin-agent-status.ts'
-import { PluginEventSourceController } from '../plugin-event-source.ts'
-import { PluginExternalLinkController } from '../plugin-external-links.ts'
-import { DEFAULT_PLUGIN_ISSUE_REPORT_URL } from '../plugin-report.ts'
+import type { PluginBrokerContext } from '../plugin-broker.ts'
 import { effectivePluginScheduleMinimum } from '../plugin-schedule.ts'
 
-import { PluginDeveloperModeWatcher } from '../plugin-developer-mode.ts'
-import { catalogFingerprintMatches, createPluginCatalogGateway, isPluginCatalogUrl, PLUGIN_CATALOG_ALLOWED_HOSTS, PLUGIN_CATALOG_MAX_PACKAGE_BYTES, selectLatestCompatiblePluginVersion } from '../plugin-catalog.ts'
-import { buildPluginCatalogPanelItems, PluginCatalogAutoCheckSchedule } from '../plugin-catalog-updates.ts'
-import { PluginPanelViewController, type PluginPanelNativeView, type PluginPanelViewSession } from '../plugin-panel-view.ts'
-import { PROGRAMMATIC_PANEL_RESIZE_WINDOW_MS, shouldRecordUserPanelSize, validatePluginPanelViewBounds, type PluginPanelRect } from '../plugin-panel-window.ts'
-import { isPluginPanelInstallConfirmation, isPluginPanelPluginId, isPluginPanelPreferencePatch, pluginPanelErrorCode } from '../plugin-panel-validation.ts'
+import { shouldRecordUserPanelSize, validatePluginPanelViewBounds, type PluginPanelRect } from '../plugin-panel-window.ts'
+import { isPluginPanelPluginId, pluginPanelErrorCode } from '../plugin-panel-validation.ts'
 import { handlePluginProtocolRequest } from '../plugin-protocol'
 import { pluginHostAssets } from '../plugin-host-assets'
 import { parsePluginManifest } from '../plugin-manifest'
@@ -80,41 +62,30 @@ import type { PresentationIntent } from '../../src/types/presentation'
 import type { PluginEventSourceStatusView, PluginPanelPlugin, PluginPanelResult, PluginPanelSnapshot } from '../../src/types/plugin'
 import type { IpcErrorCode } from '../../src/types/ipc'
 
-import { createPluginSkinPetId, isPluginSkinPetId, isValidPetId, isValidRegularPetId } from '../../src/utils/pet-id.ts'
+import { createPluginSkinPetId, isValidPetId, isValidRegularPetId } from '../../src/utils/pet-id.ts'
 import { availablePluginSkinPetIds } from '../plugin-skins.ts'
-import { EDGE_TRIGGER_DISTANCE_PX, clampWindowBounds, edgeWindowBounds, miniWindowBounds, nearestEdge } from '../pet-window-mode'
 import { IS_MAC, hookScriptDeployPath, readWindowState, syncClaudePermissionRespondOptIn, writeWindowState } from '../setup'
 
 import { createWindowsFullscreenDetector, nativeWindowHandleToPointer, type WindowsFullscreenState } from '../windows-fullscreen-detector'
 
-import { registerPluginFeedIpc } from '../ipc/plugin-feed'
 import { createLatestValueCoalescer } from '../ipc/broadcast-coalescer.ts'
 import { createProgressionChangeGate, createVisibleSender } from '../ipc/progression-broadcast-gate.ts'
 
 import { type IntegrationTestSource } from '../ipc/integrations'
 
-import { registerPluginPanelUiIpc } from '../ipc/plugin-panel-ui'
 
-import { registerPluginSettingsIpc } from '../ipc/plugin-settings'
-import { registerPluginPreferencesIpc } from '../ipc/plugin-preferences'
-import { registerPluginCatalogIpc } from '../ipc/plugin-catalog'
-import { registerPluginInstallIpc } from '../ipc/plugin-install'
-import { registerPanelThemeIpc } from '../ipc/panel-theme'
-import { registerUserPanelThemeIpc } from '../ipc/panel-theme-user'
-import { readUserPanelThemeImportFile, writeUserPanelThemeExportFile } from '../panel-theme-user-store'
-import { PanelThemeRuntime } from './panel-theme-runtime'
-import { emptyPanelThemeState } from '../plugin-panel-themes'
-import { deleteUserImage, prepareUserImage, readUserImageSource, storeUserImage } from '../panel-theme-images'
 import { mainState, type PluginSkinFallbackInfo } from './state'
 import { appUserDataPaths } from './app-user-data'
+import { createPanelGeometry } from './panel-geometry'
 import { createPetWindowModeService } from './pet-window-mode-service'
 import { createHistoryRuntimeService } from './history-runtime-service'
+import { createPluginCatalogRuntime, decodeCatalogBase64 } from './plugin-catalog-runtime'
+import { createPluginRuntime } from './plugin-runtime'
 import { EMPTY_ATTENTION } from '../attention-tracker'
 import { attachHotkeyInfo, PermissionHotkeys } from '../permission-hotkeys'
 import { clamp } from '../../src/utils/number'
-import { QUOTA_TOOLTIP_HEADROOM_H, clampPetWindowDimension, initialPetWindowSize } from '../../src/utils/pet-window-size'
-import { PANEL_GAP, PANEL_WIDTH, PANEL_BLUR_HIDE_DELAY_MS, clampPanelSize, clampRectToWorkArea, computePanelPlacement, effectivePanelSize, panelMaxSize, panelMinSize, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
-import { isRecord } from '../value-guards.ts'
+import { initialPetWindowSize } from '../../src/utils/pet-window-size'
+import { PANEL_GAP, PANEL_WIDTH, PANEL_BLUR_HIDE_DELAY_MS, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
 import { currentAgentConfigDirs } from '../agent-config-dirs.ts'
 
 let permissionHotkeys: PermissionHotkeys | null = null
@@ -837,631 +808,56 @@ export function requestPluginNetwork(
   })
 }
 
-export function decodeCatalogBase64(value: unknown): Uint8Array {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 36_000_000
-    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
-    throw new Error('Invalid catalog base64')
-  }
-  const bytes = Buffer.from(value, 'base64')
-  if (bytes.toString('base64') !== value) throw new Error('Invalid catalog base64')
-  return bytes
-}
+// Plugin catalog（閘道與每日自動檢查）由獨立服務負責；保留這些匯出名稱，IPC registrar 與 main.ts 的接線不變。
+export const pluginCatalogRuntime = createPluginCatalogRuntime({
+  state: mainState,
+  appVersion: () => app.getVersion(),
+  translate: (key, params) => t(key, params),
+})
+export const createMainPluginCatalogGateway = pluginCatalogRuntime.gateway
+export const checkPluginCatalogUpdates = pluginCatalogRuntime.checkUpdates
+export const initializePluginCatalogAutoCheck = pluginCatalogRuntime.initializeAutoCheck
+export { decodeCatalogBase64 }
 
-export function createMainPluginCatalogGateway() {
-  return createPluginCatalogGateway({
-    fetchRegistry: async (url, maxBytes) => {
-      const e2eMode = Object.prototype.hasOwnProperty.call(globalThis, '__agentPetsE2E')
-      const e2e = (globalThis as typeof globalThis & { __agentPetsE2E?: unknown }).__agentPetsE2E
-      if (e2eMode) {
-        if (!isRecord(e2e)) throw new Error('Catalog fixture unavailable')
-        const fixture = e2e.catalogFixture
-        if (!isRecord(fixture) || fixture.registry === undefined) throw new Error('Catalog fixture unavailable')
-        return fixture.registry
-      }
-      if (!mainState.pluginNetworkClient) throw new Error('Plugin network unavailable')
-      const result = await mainState.pluginNetworkClient.fetch('agent-pets-catalog', url, undefined,
-        PLUGIN_CATALOG_ALLOWED_HOSTS, { maxResponseBytes: maxBytes, timeoutMs: 15_000, requestsPerMinute: 10 })
-      if (!result.ok) throw Object.assign(new Error('Catalog unavailable'), { code: result.error })
-      if (result.value.status === 404) throw Object.assign(new Error('Catalog not found'), { code: 'catalog_not_found' })
-      if (result.value.status < 200 || result.value.status >= 300) throw new Error('Catalog unavailable')
-      return result.value.isBase64Encoded
-        ? Buffer.from(decodeCatalogBase64(result.value.body)).toString('utf8')
-        : result.value.body
-    },
-    downloadArchive: async (url, maxBytes) => {
-      const e2eMode = Object.prototype.hasOwnProperty.call(globalThis, '__agentPetsE2E')
-      const e2e = (globalThis as typeof globalThis & { __agentPetsE2E?: unknown }).__agentPetsE2E
-      if (e2eMode) {
-        if (!isRecord(e2e)) throw new Error('Catalog fixture unavailable')
-        const fixture = e2e.catalogFixture
-        const downloads = isRecord(fixture) && isRecord(fixture.downloads) ? fixture.downloads : null
-        if (!downloads || !Object.prototype.hasOwnProperty.call(downloads, url)) throw new Error('Catalog fixture download unavailable')
-        return decodeCatalogBase64(downloads[url])
-      }
-      if (!mainState.pluginNetworkClient) throw new Error('Plugin network unavailable')
-      const result = await mainState.pluginNetworkClient.fetch('agent-pets-catalog', url, undefined,
-        PLUGIN_CATALOG_ALLOWED_HOSTS, { maxResponseBytes: Math.min(maxBytes, PLUGIN_CATALOG_MAX_PACKAGE_BYTES), timeoutMs: 15_000, requestsPerMinute: 10 })
-      if (!result.ok) throw Object.assign(new Error('Package unavailable'), { code: result.error })
-      if (result.value.status < 200 || result.value.status >= 300) throw new Error('Package unavailable')
-      return result.value.isBase64Encoded
-        ? decodeCatalogBase64(result.value.body)
-        : Buffer.from(result.value.body, 'utf8')
-    },
-  })
-}
-
-export function checkPluginCatalogUpdates(): Promise<number> {
-  return (async () => {
-    if (!mainState.pluginRegistry || !mainState.pluginPreferences) throw new Error('Plugin catalog services unavailable')
-    const preferences = mainState.pluginPreferences.get()
-    if (!preferences.onlineCatalogEnabled || !preferences.dailyUpdateCheck
-      || !isPluginCatalogUrl(preferences.catalogUrl)) throw new Error('Plugin catalog auto-check disabled')
-    const result = await createMainPluginCatalogGateway().load(preferences.catalogUrl)
-    if (!result.ok) throw new Error('Plugin catalog check failed')
-    const items = buildPluginCatalogPanelItems(result.value, mainState.pluginRegistry.list(), app.getVersion())
-    return items.filter(item => item.updateAvailable).length
-  })()
-}
-
-export function initializePluginCatalogAutoCheck(): void {
-  if (!mainState.pluginPreferences || !mainState.pluginRegistry || mainState.pluginCatalogAutoCheckSchedule) return
-  mainState.pluginCatalogAutoCheckSchedule = new PluginCatalogAutoCheckSchedule({
-    isEnabled: () => {
-      try {
-        const preferences = mainState.pluginPreferences?.get()
-        return preferences?.onlineCatalogEnabled === true && preferences.dailyUpdateCheck
-          && isPluginCatalogUrl(preferences.catalogUrl)
-      } catch { return false }
-    },
-    getLastCheckedDay: () => mainState.pluginPreferences?.getLastCatalogAutoCheckDay() ?? null,
-    setLastCheckedDay: day => {
-      if (!mainState.pluginPreferences) throw new Error('Plugin preferences unavailable')
-      mainState.pluginPreferences.setLastCatalogAutoCheckDay(day)
-    },
-    check: checkPluginCatalogUpdates,
-    notify: updateCount => {
-      mainState.pluginFeedController?.addSystemNotification(
-        'agent-pets-catalog',
-        { 'zh-TW': 'Agent Pets', 'en-US': 'Agent Pets' },
-        t('pluginCatalogAutoCheckTitle'),
-        updateCount > 0
-          ? t('pluginCatalogAutoCheckFound', { count: String(updateCount) })
-          : t('pluginCatalogAutoCheckNone'),
-      )
-    },
-  })
-  void mainState.pluginCatalogAutoCheckSchedule.checkIfDue()
-  if (mainState.pluginCatalogAutoCheckTimer) clearInterval(mainState.pluginCatalogAutoCheckTimer)
-  mainState.pluginCatalogAutoCheckTimer = setInterval(() => {
-    void mainState.pluginCatalogAutoCheckSchedule?.checkIfDue()
-  }, 60 * 60 * 1_000)
-  mainState.pluginCatalogAutoCheckTimer.unref?.()
-}
-
-export async function createPluginServices(): Promise<void> {
-  if (mainState.pluginRegistry || mainState.pluginPreferences || mainState.pluginHostWindow) return
-  const userDataDirectory = appUserDataPaths().root
-  mainState.pluginRegistry = new PluginRegistry(userDataDirectory)
-  mainState.pluginDeveloperModeWatcher = new PluginDeveloperModeWatcher(500, pluginId => {
-    // Surfaces in the plugin's diagnostics in the manager instead of vanishing.
-    mainState.pluginBroker?.recordSystemDiagnostic(pluginId, 'invalid_request', 'developer.reload')
-  })
-  mainState.pluginPreferences = new PluginPreferencesStore(userDataDirectory)
-  mainState.pluginSecretsStore = new PluginSecretsStore(userDataDirectory, safeStorage)
-  mainState.pluginSecretConsentStore = new PluginSecretConsentStore(userDataDirectory)
-  mainState.pluginSettingsStore = new PluginSettingsStore(userDataDirectory)
-  mainState.pluginHostGrantController = new PluginHostGrantController()
-  mainState.pluginBadgeController = new PluginBadgeController({
-    getContext: pluginId => {
-      const context = mainState.pluginRuntimeContexts.get(pluginId)
-      return context ? {
-        enabled: context.enabled,
-        pluginsEnabled: context.pluginsEnabled,
-        contributesBadge: context.manifest.contributes.badge === true,
-        pluginName: context.manifest.name,
-        targetPetId: context.targetPetId,
-      } : null
-    },
-    onChanged: badges => broadcastPluginBadges(badges),
-  })
-  mainState.pluginAgentStatusController = new PluginAgentStatusController({
-    emit: change => {
-      for (const [pluginId, context] of mainState.pluginRuntimeContexts) {
-        if (context.enabled && context.pluginsEnabled && context.manifest.permissions.agentStatus) {
-          mainState.pluginHostWindow?.notifyStatusChanged(pluginId, [change])
-        }
-      }
-    },
-  })
-  mainState.pluginEventSourceController = new PluginEventSourceController({
-    getContext: pluginId => {
-      const context = mainState.pluginRuntimeContexts.get(pluginId)
-      const contribution = context?.manifest.contributes.eventSource
-      return context && contribution ? {
-        enabled: context.enabled,
-        pluginsEnabled: context.pluginsEnabled,
-        pluginName: context.manifest.name,
-        family: contribution.family,
-        displayName: contribution.displayName,
-      } : null
-    },
-    onChanged: statuses => {
-      queuePluginEventSourceBroadcast(statuses)
-    },
-  })
-  await refreshPluginRuntimeContexts()
-  mainState.panelThemeRuntime = new PanelThemeRuntime({
-    userDataDirectory,
-    pluginRoot: (pluginId, version) => appUserDataPaths().pluginVersionRoot(pluginId, version),
-    readRegularFileWithin,
-    send: state => {
-      const window = mainState.panelWindow
-      if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.panelThemeChanged, state)
-    },
-    rendererOrigin: panelRendererOrigin,
-    sendPetStatus: state => {
-      const window = mainState.petWindow
-      if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.panelThemePetStatusChanged, state)
-    },
-    sendPluginTheme: snapshot => {
-      mainState.pluginHostWindow?.notifyThemeChanged(snapshot)
-      mainState.pluginPanelViewController?.notifyThemeChanged(snapshot)
-    },
-    initialMode: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
-  })
-  try { mainState.panelThemeRuntime.sweep() } catch {}
-  syncPanelThemes()
-  mainState.pluginFeedController = new PluginFeedController({
-    emit: item => {
-      if (mainState.petWindow && !mainState.petWindow.isDestroyed()) {
-        const panelViewAvailable = Boolean(mainState.pluginRuntimeContexts.get(item.pluginId)?.manifest.contributes.panelView)
-        mainState.petWindow.webContents.send(IPC_CHANNELS.pluginFeedItem, { ...item, ...(panelViewAvailable ? { panelViewAvailable: true } : {}) })
-      }
-    },
-    onNotificationsChanged: count => broadcastPluginFeedUnreadCount(count),
-    isPetVisible: isPluginFeedVisible,
-    getGlobalState: () => ({
-      pluginsEnabled: mainState.pluginPreferencesSnapshot?.pluginsEnabled === true,
-      dndEnabled: currentDesktopPreferences().dndEnabled,
-      rateLimitPer10Min: mainState.pluginPreferencesSnapshot?.resources.globalFeedPer10Min,
-    }),
-    getPluginState: pluginId => {
-      const context = mainState.pluginRuntimeContexts.get(pluginId)
-      if (!context) return null
-      return {
-        enabled: context.enabled,
-        muted: context.muted,
-        targetPetId: context.targetPetId,
-        rateLimitPer10Min: context.rateLimitPer10Min,
-        name: context.manifest.name,
-      }
-    },
-    isLinkHostAllowed: isPluginLinkHostAllowed,
-    resolveIconUrl: (pluginId, relativePath) => (
-      mainState.pluginRuntimeContexts.has(pluginId) ? `agent-pets://plugin/${pluginId}/${relativePath}` : null
-    ),
-  })
-  const pluginNetworkSession = session.fromPartition('plugin-network')
-  pluginNetworkSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
-  pluginNetworkSession.setPermissionCheckHandler(() => false)
-  pluginNetworkSession.webRequest.onBeforeSendHeaders((details, callback) => {
-    callback({ requestHeaders: filterPluginRequestHeaders(details.requestHeaders) })
-  })
-  pluginNetworkSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({ responseHeaders: stripPluginSetCookieHeaders(details.responseHeaders) })
-  })
-  mainState.pluginBroker = new PluginBroker({
-    userDataDirectory,
-    onLog: (pluginId, entry) => logMain(entry.level === 'info' ? 'info' : entry.level === 'warn' ? 'warn' : 'error', `plugin:${pluginId}`, String(entry.message).slice(0, 300)),
-    getContext: pluginId => {
-      const context = mainState.pluginRuntimeContexts.get(pluginId)
-      return context ? { ...context, dndEnabled: currentDesktopPreferences().dndEnabled } : null
-    },
-    feed: mainState.pluginFeedController,
-    network: mainState.pluginNetworkClient ??= new PluginNetworkClient({
-      request: (url, init) => requestPluginNetwork(pluginNetworkSession, url, init),
-    }),
-    onRequestHost: async (pluginId, rawHost, rawReason) => {
-      const context = mainState.pluginRuntimeContexts.get(pluginId)
-      const reason = sanitizePluginHostRequestReason(rawReason)
-      if (!context || !context.manifest.permissions.network?.userGranted || !reason || !mainState.pluginHostGrantController || !mainState.pluginPreferences) {
-        return { ok: false, error: context?.manifest.permissions.network?.userGranted ? 'invalid_request' : 'not_permitted' }
-      }
-      const decision = mainState.pluginHostGrantController.begin(pluginId, rawHost, reason, context.grantedHosts)
-      if (!decision.ok) return decision
-      if (decision.alreadyGranted) return { granted: true, host: decision.host }
-      if (!await isPublicPluginNetworkHost(decision.host)) {
-        mainState.pluginHostGrantController.finish(pluginId, decision.host, true)
-        return { ok: false, error: 'host_not_allowed' }
-      }
-      try {
-        const name = context.manifest.name[locale.value]
-        const options = {
-          type: 'question' as const,
-          title: t('pluginNetworkRequestTitle'),
-          message: t('pluginNetworkRequestMessage', { name, host: decision.host, reason }),
-          buttons: [t('pluginNetworkAllow'), t('pluginNetworkDeny')],
-          defaultId: 1,
-          cancelId: 1,
-          noLink: true,
-        }
-        const parent = mainState.panelWindow && !mainState.panelWindow.isDestroyed() ? mainState.panelWindow
-          : mainState.petWindow && !mainState.petWindow.isDestroyed() ? mainState.petWindow : undefined
-        const response = parent
-          ? await dialog.showMessageBox(parent, options)
-          : await dialog.showMessageBox(options)
-        if (response.response !== 0) {
-          mainState.pluginHostGrantController.finish(pluginId, decision.host, false)
-          return { ok: false, error: 'denied' }
-        }
-        const storedHosts = mainState.pluginPreferences.getPlugin(pluginId).grantedHosts
-        const grantedHosts = [...new Set([...storedHosts, decision.host])]
-        mainState.pluginPreferences.updatePlugin(pluginId, { grantedHosts })
-        mainState.pluginHostGrantController.finish(pluginId, decision.host, true)
-        await syncPluginHost()
-        return { granted: true, host: decision.host }
-      } catch {
-        mainState.pluginHostGrantController.finish(pluginId, decision.host, true)
-        return { ok: false, error: 'disabled' }
-      }
-    },
-    onSecretGet: (pluginId, key) => {
-      const context = mainState.pluginRuntimeContexts.get(pluginId)
-      if (!context || !mainState.pluginSecretsStore) return { ok: false, error: 'disabled' }
-      try {
-        return mainState.pluginSecretsStore.get(pluginId, key, context.manifest.permissions.secrets ?? [])
-      } catch (error) {
-        const code = error && typeof error === 'object' && 'code' in error ? error.code : null
-        return { ok: false, error: code === 'secret_unavailable' || code === 'secret_not_found' || code === 'not_permitted'
-          ? code : 'secret_unavailable' }
-      }
-    },
-    onSettingsGet: pluginId => {
-      const context = mainState.pluginRuntimeContexts.get(pluginId)
-      if (!context || !mainState.pluginSettingsStore) return { ok: false, error: 'disabled' }
-      try { return mainState.pluginSettingsStore.get(pluginId, context.manifest) } catch {
-        return { ok: false, error: 'settings_invalid' }
-      }
-    },
-    onAgentStatusGet: pluginId => {
-      const context = mainState.pluginRuntimeContexts.get(pluginId)
-      if (!context?.manifest.permissions.agentStatus) return { ok: false, error: 'not_permitted' }
-      return mainState.pluginAgentStatusController?.getStatus() ?? { ok: false, error: 'agent_status_unavailable' }
-    },
-    onAgentEmit: (pluginId, event) => mainState.pluginEventSourceController?.emit(pluginId, event) ?? { ok: false, error: 'disabled' },
-    onThemeGet: () => mainState.panelThemeRuntime?.getPluginTheme() ?? null,
-    onBadgeSet: (pluginId, badge) => {
-      const result = mainState.pluginBadgeController?.set(pluginId, badge)
-      return result?.ok ? result.value : { ok: false, error: result?.error ?? 'disabled' }
-    },
-    onReaction: (pluginId, request: PluginReactionRequest) => {
-      const result = mainState.presentationController?.submitPluginReaction(pluginId, request)
-      if (result?.accepted) return { ok: true }
-      const error = result?.error
-      return {
-        ok: false,
-        error: error === 'invalid_request' || error === 'queue_full' || error === 'rate_limited'
-          || error === 'not_found' ? error : 'disabled',
-      }
-    },
-  })
-  mainState.pluginHostWindow = new PluginHostWindowController({
-    onRpc: (pluginId, request) => {
-      const data = request && typeof request === 'object' && !Array.isArray(request)
-        ? request as Record<string, unknown>
-        : {}
-      if (data.method === 'ui.postMessage') {
-        if (!Array.isArray(data.args) || data.args.length !== 1) return { ok: false, error: 'invalid_request' }
-        if (typeof data.id !== 'string') return { ok: false, error: 'invalid_request' }
-        const response = mainState.pluginPanelViewController?.postMessage(pluginId, data.args[0])
-          ?? { ok: true as const, value: { delivered: false } }
-        return { id: data.id, ...response }
-      }
-      return mainState.pluginBroker?.handle(pluginId, request) ?? { ok: false, error: 'disabled' }
-    },
-    createPluginToken: pluginId => {
-      const root = enabledPluginRoot(pluginId)
-      if (!root) throw new Error('Plugin is unavailable')
-      const token = randomUUID()
-      mainState.pluginRootsByToken.set(token, root)
-      return token
-    },
-    revokePluginToken: (_pluginId, token) => {
-      mainState.pluginRootsByToken.delete(token)
-    },
-    pluginRootForToken: token => mainState.pluginRootsByToken.get(token) ?? null,
-    messageGuard: mainState.pluginUiMessageGuard,
-    onPluginCrash: (pluginId, consecutiveCrashes, reason) => {
-      logMain('warn', 'plugin-host', `plugin crash reason=${reason} consecutive=${consecutiveCrashes}`, { pluginId })
-      mainState.pluginBadgeController?.clearPlugin(pluginId)
-      mainState.pluginEventSourceController?.clearPlugin(pluginId)
-      if (consecutiveCrashes >= 3) {
-        const name = mainState.pluginRuntimeContexts.get(pluginId)?.manifest.name ?? { 'zh-TW': pluginId, 'en-US': pluginId }
-        if (reason === 'host') mainState.pluginBroker?.recordHostUnavailable(pluginId)
-        mainState.pluginFeedController?.addSystemNotification(
-          pluginId,
-          name,
-          reason === 'host' ? t('pluginHostUnavailableTitle') : t('pluginCrashDisabledTitle'),
-          reason === 'host'
-            ? t('pluginHostUnavailableBody', { name: name[locale.value] })
-            : t('pluginCrashDisabledBody', { name: name[locale.value] }),
-        )
-        try { mainState.pluginRegistry?.setStatus(pluginId, 'disabled_crashed') } catch {}
-        try { mainState.pluginPreferences?.updatePlugin(pluginId, { enabled: false }) } catch {}
-        mainState.pluginEnableOrder.delete(pluginId)
-        setTimeout(() => { void syncPluginHost() }, 0)
-      }
-    },
-    onPluginReset: pluginId => mainState.pluginEventSourceController?.clearPlugin(pluginId),
-    getMemoryBudgetMb: activePluginCount => {
-      const perPlugin = mainState.pluginPreferencesSnapshot?.resources.memoryMbPerPlugin ?? 0
-      return pluginHostMemoryBudgetMb(perPlugin, activePluginCount)
-    },
-  })
-  mainState.pluginCommandController = new PluginCommandController({
-    getContext: pluginId => {
-      const context = mainState.pluginRuntimeContexts.get(pluginId)
-      return context ? {
-        enabled: context.enabled,
-        pluginsEnabled: context.pluginsEnabled,
-        commandIds: (context.manifest.contributes.commands ?? []).map(command => command.id),
-      } : null
-    },
-    dispatch: (pluginId, commandId) => mainState.pluginHostWindow?.invokeCommand(pluginId, commandId) ?? false,
-  })
-  mainState.pluginPanelViewController = new PluginPanelViewController({
-    preloadPath: join(__dirname, 'plugin-ui-preload.js'),
-    tokensCss,
-    getThemeSnapshot: () => mainState.panelThemeRuntime?.getPluginTheme() ?? null,
-    getParentWindow: () => {
-      const parent = mainState.panelWindow
-      if (!parent || parent.isDestroyed()) return null
-      return {
-        isDestroyed: () => parent.isDestroyed(),
-        isVisible: () => parent.isVisible(),
-        // The controller exposes a structural test seam; this adapter only receives the WebContentsView it creates.
-        // This asserted boundary is limited to the real WebContentsView created below; the controller interface stays structural for unit tests.
-        addChildView: view => parent.contentView.addChildView(view as unknown as WebContentsView),
-        // The controller exposes a structural test seam; this adapter only receives the WebContentsView it creates.
-        // This asserted boundary is limited to the real WebContentsView created below; the controller interface stays structural for unit tests.
-        removeChildView: view => parent.contentView.removeChildView(view as unknown as WebContentsView),
-      }
-    },
-    // Electron's concrete Session satisfies the narrower controller seam; keep the seam independently mockable in tests.
-    createSession: partition => session.fromPartition(partition) as PluginPanelViewSession,
-    // The structural controller seam intentionally omits Electron's full event surface; the factory always creates the native type.
-    createView: options => {
-      const view = new WebContentsView(options)
-      // 原生 view 不受網頁 overflow 裁切；底色透明，插件才能自己畫出與外框一致的圓角。
-      view.setBackgroundColor('#00000000')
-      // The structural controller seam intentionally omits Electron's full event surface; the factory always creates the native type.
-      return view as unknown as PluginPanelNativeView
-    },
-    createToken: pluginId => {
-      const root = enabledPluginRoot(pluginId)
-      if (!root) throw new Error('Plugin is unavailable')
-      const token = randomUUID()
-      mainState.pluginRootsByToken.set(token, root)
-      return token
-    },
-    revokeToken: (_pluginId, token) => { mainState.pluginRootsByToken.delete(token) },
-    pluginRootForToken: token => mainState.pluginRootsByToken.get(token) ?? null,
-    messageGuard: mainState.pluginUiMessageGuard,
-    onApiRequest: (pluginId, request) => {
-      if (request.method === 'ui.postMessage') {
-        if (request.args.length !== 1) return { ok: false, error: 'invalid_request' }
-        const response = mainState.pluginHostWindow?.postUiMessageToWorker(pluginId, request.args[0])
-          ?? { ok: false as const, error: 'disabled' }
-        return { id: request.id, ...response }
-      }
-      if (request.method === 'links.openExternal') {
-        if (request.args.length !== 2) return { ok: false, error: 'invalid_request' }
-        return mainState.pluginExternalLinkController?.open(pluginId, request.args[0], request.args[1])
-          ?? { ok: false, error: 'disabled' }
-      }
-      return mainState.pluginBroker?.handle(pluginId, request) ?? { ok: false, error: 'disabled' }
-    },
-    onClosed: event => {
-      if (mainState.panelWindow && !mainState.panelWindow.isDestroyed()) {
-        mainState.panelWindow.webContents.send(IPC_CHANNELS.pluginPanelViewClosed, event)
-      }
-    },
-    onBlockedRequest: () => {
-      const e2e = (globalThis as typeof globalThis & {
-        __agentPetsE2E?: { panelViewBlockedRequests?: number }
-      }).__agentPetsE2E
-      if (e2e) e2e.panelViewBlockedRequests = (e2e.panelViewBlockedRequests ?? 0) + 1
-    },
-  })
-
-  mainState.pluginExternalLinkController = new PluginExternalLinkController({
-    getContext: pluginId => {
-      const context = mainState.pluginRuntimeContexts.get(pluginId)
-      return context ? {
-        enabled: context.enabled,
-        pluginsEnabled: context.pluginsEnabled,
-        hosts: context.manifest.permissions.links?.hosts ?? [],
-      } : null
-    },
-    openExternal: url => shell.openExternal(url),
-  })
-
-  registerPluginFeedIpc({
-    ipcMain,
-    assertTrustedIpcSender,
-    assertPluginPanelSender,
-    getPetWindow: () => mainState.petWindow,
-    getPanelWindow: () => mainState.panelWindow,
-    getPluginFeedController: () => mainState.pluginFeedController,
-    getPluginBadgeController: () => mainState.pluginBadgeController,
-    getPluginEventSourceController: () => mainState.pluginEventSourceController,
-    isPluginPanelPluginId,
-    isPluginSkinPetId,
-    getPendingSkinFallbacks: () => mainState.pendingPluginSkinFallbacks,
-    getEnabledPluginSkinIds: () => new Set(enabledPluginSkinRecords().keys()),
-    fallbackCopy: info => ({
-      title: t('pluginSkinFallbackTitle'),
-      body: t('pluginSkinFallbackBody', {
-        plugin: info.pluginName[locale.value],
-        skin: info.skinName[locale.value],
-      }),
-    }),
-    addSystemNotification: (pluginId, pluginName, title, body) => (
-      mainState.pluginFeedController?.addSystemNotification(pluginId, pluginName, title, body) ?? false
-    ),
-    broadcastUnreadCount: () => broadcastPluginFeedUnreadCount(),
-    hasPluginContext: pluginId => mainState.pluginRuntimeContexts.has(pluginId),
-    isPluginLinkHostAllowed,
-    openExternal: url => shell.openExternal(url),
-  })
-
-  registerPluginPanelUiIpc({
-    ipcMain,
-    assertPluginPanelSender,
-    isTrustedIpcSender,
-    isPluginPanelPluginId,
-    getPluginPanelSnapshot: pluginPanelSnapshot,
-    invokePluginCommand: (pluginId, commandId) => mainState.pluginCommandController?.invoke(pluginId, commandId),
-    openSequence: {
-      get value() { return mainState.pluginPanelViewOpenSequence },
-      set value(value: number) { mainState.pluginPanelViewOpenSequence = value },
-    },
-    openPluginPanelView: openPluginPanelViewForPlugin,
-    getPetWindow: () => mainState.petWindow,
-    getPluginPanelContext: pluginId => mainState.pluginRuntimeContexts.get(pluginId) ?? null,
-    enabledPluginRoot,
-    showPanelWindow: (view, pluginViewPluginId) => showPanelWindow(view, pluginViewPluginId),
-    getPanelWindow: () => mainState.panelWindow,
-    getPluginPanelViewController: () => mainState.pluginPanelViewController,
-    finiteNumber,
-    readPluginPanelRect,
-    validateBounds: validatePluginPanelViewBounds,
-  })
-
-  registerPluginSettingsIpc({
-    ipcMain,
-    assertPluginPanelSender,
-    isPluginPanelPluginId,
-    getPluginContext: pluginId => mainState.pluginRuntimeContexts.get(pluginId) ?? null,
-    getSettingsStore: () => mainState.pluginSettingsStore,
-    getSecretsStore: () => mainState.pluginSecretsStore,
-    getSecretConsentStore: () => mainState.pluginSecretConsentStore,
-    notifySettingsChanged: (pluginId, values) => mainState.pluginHostWindow?.notifySettingsChanged(pluginId, values),
-    pluginPanelError,
-  })
-
-  registerPluginPreferencesIpc({
-    ipcMain,
-    assertPluginPanelSender,
-    isPluginPanelPluginId,
-    isPluginPanelPreferencePatch,
-    getPreferencesStore: () => mainState.pluginPreferences,
-    getRegistry: () => mainState.pluginRegistry,
-    enabledPluginContext: pluginId => mainState.pluginRuntimeContexts.get(pluginId)?.enabled === true,
-    enabledPluginCount: () => [...mainState.pluginRuntimeContexts.values()].filter(context => context.enabled).length,
-    maxEnabledPlugins: () => mainState.pluginPreferencesSnapshot?.resources.maxEnabledPlugins ?? 0,
-    pluginEnableOrder: mainState.pluginEnableOrder,
-    nextPluginEnableOrder: {
-      get value() { return mainState.nextPluginEnableOrder },
-      set value(value: number) { mainState.nextPluginEnableOrder = value },
-    },
-    onCatalogPreferencesChanged: (previous, next) => {
-      if (!next.onlineCatalogEnabled || next.catalogUrl !== previous.catalogUrl) mainState.pluginCatalogCache = null
-    },
-    checkCatalogIfDue: () => {
-      if (mainState.pluginCatalogAutoCheckSchedule) void mainState.pluginCatalogAutoCheckSchedule.checkIfDue()
-    },
-    syncPluginHost,
-    pluginPanelError,
-  })
-
-  registerPluginCatalogIpc({
-    ipcMain,
-    assertPluginPanelSender,
-    getRegistry: () => mainState.pluginRegistry,
-    getPreferencesStore: () => mainState.pluginPreferences,
-    getCatalogCache: () => mainState.pluginCatalogCache,
-    setCatalogCache: value => { mainState.pluginCatalogCache = value },
-    createCatalogGateway: createMainPluginCatalogGateway,
-    buildCatalogItems: (document, installed) => buildPluginCatalogPanelItems(document, installed, app.getVersion()),
-    isPluginCatalogUrl,
-    selectLatestVersion: (plugin, apiVersion) => selectLatestCompatiblePluginVersion(plugin, apiVersion, app.getVersion()),
-    catalogFingerprintMatches,
-    pendingPlanIds: mainState.pendingPluginPlanIds,
-    pendingDeveloperFolders: mainState.pendingDeveloperFolders,
-    issueReportBaseUrl: () => {
-      const e2e = (globalThis as typeof globalThis & { __agentPetsE2E?: { pluginIssueReportBaseUrl?: string } }).__agentPetsE2E
-      return typeof e2e?.pluginIssueReportBaseUrl === 'string' ? e2e.pluginIssueReportBaseUrl : DEFAULT_PLUGIN_ISSUE_REPORT_URL
-    },
-    openExternal: url => shell.openExternal(url),
-  })
-
-  registerPluginInstallIpc({
-    ipcMain,
-    assertPluginPanelSender,
-    getRegistry: () => mainState.pluginRegistry,
-    getPreferencesStore: () => mainState.pluginPreferences,
-    getPanelWindow: () => mainState.panelWindow,
-    isDialogOpen: () => mainState.dialogOpen,
-    setDialogOpen: value => { mainState.dialogOpen = value },
-    showOpenDialog: (window, options) => dialog.showOpenDialog(window, options),
-    translate: key => t(key),
-    fs: fs.promises,
-    maxArchiveBytes: PLUGIN_ARCHIVE_SKIN_MAX_BYTES,
-    pendingPlanIds: mainState.pendingPluginPlanIds,
-    pendingDeveloperFolders: mainState.pendingDeveloperFolders,
-    developerSourceFolders: mainState.developerSourceFolders,
-    getDeveloperModeWatcher: () => mainState.pluginDeveloperModeWatcher,
-    getSecretsStore: () => mainState.pluginSecretsStore,
-    getPluginBroker: () => mainState.pluginBroker,
-    getPluginHostGrantController: () => mainState.pluginHostGrantController,
-    getPluginFeedController: () => mainState.pluginFeedController,
-    isInstallConfirmation: isPluginPanelInstallConfirmation,
-    isPluginPanelPluginId,
-    pluginPanelError,
-    syncPluginHost,
-    pluginPanelSnapshot,
-    onPluginRemoved: pluginId => mainState.panelThemeRuntime?.removePlugin(pluginId),
-  })
-
-  registerPanelThemeIpc({
-    ipcMain,
-    assertPluginPanelSender,
-    assertPetSender: event => assertTrustedIpcSender(event, mainState.petWindow),
-    setPanelAppearance: appearance => mainState.panelThemeRuntime?.setPanelAppearance(appearance),
-    getPetStatus: () => mainState.panelThemeRuntime?.getPetStatus() ?? { light: null, dark: null },
-    getStore: () => mainState.panelThemeRuntime?.store ?? null,
-    getSources: () => mainState.panelThemeRuntime?.getSources() ?? [],
-    getState: () => mainState.panelThemeRuntime?.getState() ?? emptyPanelThemeState(),
-    publish: () => mainState.panelThemeRuntime?.publish(),
-    getPanelWindow: () => mainState.panelWindow,
-    isDialogOpen: () => mainState.dialogOpen,
-    setDialogOpen: value => { mainState.dialogOpen = value },
-    showOpenDialog: (window, options) => dialog.showOpenDialog(window, options),
-    translate: key => t(key),
-    readUserImage: readUserImageSource,
-    prepareUserImage,
-    storeUserImage: (pluginId, prepared) => storeUserImage(appUserDataPaths().root, pluginId, prepared),
-    deleteUserImage: (pluginId, file) => deleteUserImage(appUserDataPaths().root, pluginId, file),
-    pluginPanelError,
-    now: Date.now,
-  })
-
-  registerUserPanelThemeIpc({
-    ipcMain,
-    assertPluginPanelSender,
-    getRuntime: () => mainState.panelThemeRuntime,
-    getPanelWindow: () => mainState.panelWindow,
-    isDialogOpen: () => mainState.dialogOpen,
-    setDialogOpen: value => { mainState.dialogOpen = value },
-    showOpenDialog: (window, options) => dialog.showOpenDialog(window, options),
-    showSaveDialog: (window, options) => dialog.showSaveDialog(window, options),
-    translate: key => t(key),
-    readImportFile: readUserPanelThemeImportFile,
-    writeExportFile: writeUserPanelThemeExportFile,
-  })
-
-}
+// Plugin runtime 組裝由獨立服務負責：`start()` 建立所有 plugin 服務，`dispose()` 依固定順序釋放。
+// 保留 `createPluginServices` 這個匯出名稱，main.ts 的啟動步驟不變。
+export const pluginRuntime = createPluginRuntime({
+  state: mainState,
+  userDataPaths: appUserDataPaths,
+  pluginUiPreloadPath: join(__dirname, 'plugin-ui-preload.js'),
+  tokensCss,
+  electron: { ipcMain, session, safeStorage, nativeTheme, dialog, shell, app },
+  createWebContentsView: options => new WebContentsView(options),
+  createPluginHostWindow: options => new PluginHostWindowController(options),
+  translate: (key, params) => t(key, params),
+  locale,
+  logMain,
+  createMainPluginCatalogGateway,
+  refreshPluginRuntimeContexts: () => refreshPluginRuntimeContexts(),
+  syncPluginHost: () => syncPluginHost(),
+  syncPanelThemes: () => syncPanelThemes(),
+  enabledPluginRoot: pluginId => enabledPluginRoot(pluginId),
+  enabledPluginSkinRecords: () => enabledPluginSkinRecords(),
+  currentDesktopPreferences: () => currentDesktopPreferences(),
+  isPluginFeedVisible: () => isPluginFeedVisible(),
+  isPluginLinkHostAllowed: (pluginId, host) => isPluginLinkHostAllowed(pluginId, host),
+  broadcastPluginBadges: badges => broadcastPluginBadges(badges),
+  broadcastPluginFeedUnreadCount: count => broadcastPluginFeedUnreadCount(count),
+  queuePluginEventSourceBroadcast: statuses => queuePluginEventSourceBroadcast(statuses),
+  requestPluginNetwork: (networkSession, url, init) => requestPluginNetwork(networkSession, url, init),
+  readRegularFileWithin: (root, relativePath, maxBytes) => readRegularFileWithin(root, relativePath, maxBytes),
+  panelRendererOrigin: () => panelRendererOrigin(),
+  assertTrustedIpcSender: (event, requiredWindow) => assertTrustedIpcSender(event, requiredWindow),
+  assertPluginPanelSender: event => assertPluginPanelSender(event),
+  isTrustedIpcSender: (event, requiredWindow) => isTrustedIpcSender(event, requiredWindow),
+  pluginPanelError: error => pluginPanelError(error),
+  pluginPanelSnapshot: () => pluginPanelSnapshot(),
+  openPluginPanelViewForPlugin: (pluginId, openToken, frame, content) => openPluginPanelViewForPlugin(pluginId, openToken, frame, content),
+  showPanelWindow: (view, pluginViewPluginId) => showPanelWindow(view, pluginViewPluginId),
+  finiteNumber: value => finiteNumber(value),
+  readPluginPanelRect: value => readPluginPanelRect(value),
+})
+export const createPluginServices = pluginRuntime.start
 
 // 寵物視窗模式由獨立服務負責；保留這些匯出名稱，IPC registrar、托盤與建立視窗的接線不變。
 export const petWindowModes = createPetWindowModeService({
@@ -1627,47 +1023,12 @@ export function createPetWindow() {
   const scale = clamp(isNaN(rawScale) ? 1 : rawScale, 0.3, 5)
 
   // Restore wherever the user last dragged it to, rather than always
-  // snapping back to the bottom-right default on every relaunch. Re-clamped
-  // to the current work area in case it was saved on a monitor that's no
-  // longer connected.
+  // snapping back to the bottom-right default on every relaunch.
   const saved = readWindowState()
-
-  // The pet size lives in the renderer's localStorage, which the main process
-  // can't read, so the last size the renderer asked for is persisted with the
-  // position and reused here. Without it the window would always be born at
-  // the 1x (L) size and only shrink once the store hydrates — long enough for
-  // the panel to open against L-sized bounds, and, because the window is
-  // bottom-anchored, enough to walk the pet down the screen every launch.
-  const fallback = initialPetWindowSize(scale)
-  const w = saved?.width !== undefined ? clampPetWindowDimension(saved.width) : fallback.width
-  const h = saved?.height !== undefined ? clampPetWindowDimension(saved.height) : fallback.height
-
-  const savedDisplay = displayForSavedState(saved)
-  const savedNormal = saved?.normalBounds ?? (
-    saved
-      ? { x: saved.x, y: saved.y, width: saved.width ?? w, height: saved.height ?? h }
-      : {
-          x: primaryWorkArea.x + primaryWorkArea.width - w - 30,
-          y: primaryWorkArea.y + primaryWorkArea.height - h - 30,
-          width: w,
-          height: h,
-        }
-  )
-  mainState.normalPetBounds = clampWindowBounds(savedNormal, savedDisplay.workArea)
-  const edgeModeEnabled = currentDesktopPreferences().edgeModeEnabled
-  const attachedEdge = nearestEdge(mainState.normalPetBounds, savedDisplay.workArea, EDGE_TRIGGER_DISTANCE_PX)
-  const canRestoreEdge = saved?.mode === 'edge'
-    && edgeModeEnabled
-    && attachedEdge !== null
-    && (saved.edge === undefined || saved.edge === attachedEdge)
-  mainState.petWindowMode = saved?.mode === 'mini' ? 'mini' : canRestoreEdge ? 'edge' : 'normal'
-  mainState.petWindowEdge = canRestoreEdge ? (saved.edge ?? attachedEdge) : null
-  mainState.edgeRestoreBounds = canRestoreEdge ? { ...mainState.normalPetBounds } : null
-  const initialBounds = mainState.petWindowMode === 'mini'
-    ? miniWindowBounds(mainState.normalPetBounds, savedDisplay.workArea)
-    : mainState.petWindowMode === 'edge' && mainState.petWindowEdge
-      ? edgeWindowBounds(mainState.normalPetBounds, savedDisplay.workArea, mainState.petWindowEdge)
-      : mainState.normalPetBounds
+  const initialBounds = petWindowModes.restore(saved, {
+    fallbackSize: initialPetWindowSize(scale),
+    primaryWorkArea,
+  })
 
   mainState.petWindow = new BrowserWindow({
     width: initialBounds.width,
@@ -1853,116 +1214,31 @@ export function createPanelWindow() {
   syncWindowsFullscreenTargets()
 }
 
-export function computePanelBounds(height: number, width = PANEL_WIDTH) {
-  if (!mainState.petWindow) {
-    const { workArea } = screen.getPrimaryDisplay()
-    return { x: workArea.x, y: workArea.y, ...clampPanelSize({ width, height }, workArea) }
-  }
-  const petBounds = mainState.petWindow.getBounds()
-  // The window's horizontal center still matches the visible sprite's (the
-  // headroom band is only added above, not to the sides). Prefer the height
-  // the pet renderer measured for its own content: it depends on pet size AND
-  // status-line count, which the headroom constant cannot express.
-  // The fixed, unscaled headroom is only the fallback: the panel must anchor
-  // off the visible pet, not the raw window bounds, or it opens with a big gap
-  // floating above the pet — worst at small pet sizes, where that band is a
-  // large fraction of the window's total (scaled) height.
-  return computePanelPlacement({
-    petBounds,
-    petContentHeight: mainState.petContentHeight,
-    petHeadroom: QUOTA_TOOLTIP_HEADROOM_H,
-    workArea: screen.getDisplayMatching(petBounds).workArea,
-    width,
-    height,
-  })
-}
-
 // ── Panel size: one user-owned size for every view ───────────────────────────
-// The window is always resizable. Its size is the user's own (persisted) size, or the
-// first-run default; the route (dashboard / Settings / plugin tabs) never changes it.
-// Wizard / MCP pages may raise it temporarily, which is never saved.
-
-function panelSizeStore(): PanelSizeStore {
-  if (!mainState.panelSizeStore) {
+// 尺寸與定位邏輯在 panel-geometry.ts；這裡只綁定 Electron 的 screen、尺寸檔與結束時 flush。
+const panelGeometry = createPanelGeometry({
+  state: mainState,
+  screen: {
+    getDisplayMatching: rect => screen.getDisplayMatching(rect),
+    getPrimaryDisplay: () => screen.getPrimaryDisplay(),
+  },
+  createSizeStore: () => {
     const store = new PanelSizeStore(appUserDataPaths().panelSize)
-    mainState.panelUserSize = store.load()
     app.once('before-quit', () => store.flush())
-    mainState.panelSizeStore = store
-  }
-  return mainState.panelSizeStore
-}
+    return store
+  },
+})
 
-export function currentPanelSize(): { width: number; height: number } {
-  panelSizeStore()
-  return effectivePanelSize(mainState.panelUserSize, mainState.panelMinimumSize)
-}
-
-function panelWorkArea(bounds?: Electron.Rectangle) {
-  if (bounds) return screen.getDisplayMatching(bounds).workArea
-  if (mainState.petWindow && !mainState.petWindow.isDestroyed()) return screen.getDisplayMatching(mainState.petWindow.getBounds()).workArea
-  return screen.getPrimaryDisplay().workArea
-}
-
-// Min / max follow the display the panel sits on: the user can drag up to the work
-// area minus the gap, and never below the readable minimum.
-export function applyPanelWindowLimits(workArea = panelWorkArea()): void {
-  const panel = mainState.panelWindow
-  if (!panel || panel.isDestroyed()) return
-  const min = panelMinSize(workArea)
-  const max = panelMaxSize(workArea)
-  panel.setResizable(true)
-  panel.setMinimumSize(min.width, min.height)
-  panel.setMaximumSize(max.width, max.height)
-}
-
-export function setPluginPanelWindowBounds(bounds: ReturnType<typeof computePanelBounds>): void {
-  if (!mainState.panelWindow || mainState.panelWindow.isDestroyed()) return
-  applyPanelWindowLimits(panelWorkArea(bounds))
-  mainState.programmaticPluginPanelUntil = Date.now() + PROGRAMMATIC_PANEL_RESIZE_WINDOW_MS
-  mainState.panelWindow.setBounds(bounds)
-}
-
-function applyCurrentPanelSize(): void {
-  const { width, height } = currentPanelSize()
-  setPluginPanelWindowBounds(computePanelBounds(height, width))
-}
-
-// A drag by the user: remember it (debounced on disk), drop any wizard minimum, and
-// once the drag settles slide the window back inside the work area.
-function recordUserPanelSize(size: { width: number; height: number }): void {
-  const panel = mainState.panelWindow
-  if (!panel || panel.isDestroyed()) return
-  const clamped = clampPanelSize(size, panelWorkArea(panel.getBounds()))
-  mainState.panelUserSize = clamped
-  mainState.panelMinimumSize = null
-  panelSizeStore().save(clamped)
-  if (mainState.panelSettleTimer) clearTimeout(mainState.panelSettleTimer)
-  mainState.panelSettleTimer = setTimeout(() => {
-    mainState.panelSettleTimer = null
-    const window = mainState.panelWindow
-    if (!window || window.isDestroyed() || !window.isVisible()) return
-    const bounds = window.getBounds()
-    const inside = clampRectToWorkArea(bounds, screen.getDisplayMatching(bounds).workArea)
-    if (inside.x !== bounds.x || inside.y !== bounds.y || inside.width !== bounds.width || inside.height !== bounds.height) {
-      setPluginPanelWindowBounds(inside)
-    }
-  }, 250)
-}
-
-// Wizard / MCP pages ask for a minimum size (null releases it). It never changes or
-// persists the user's own size.
-export function requestPanelMinimum(size: { width: number; height: number } | null): void {
-  panelSizeStore()
-  mainState.panelMinimumSize = size && size.height > 0 ? { width: size.width, height: size.height } : null
-  if (mainState.panelWindow?.isVisible()) applyCurrentPanelSize()
-}
-
-export function resetPanelSize(): void {
-  panelSizeStore().save(null)
-  mainState.panelUserSize = null
-  mainState.panelMinimumSize = null
-  if (mainState.panelWindow?.isVisible()) applyCurrentPanelSize()
-}
+export const {
+  computePanelBounds,
+  currentPanelSize,
+  applyPanelWindowLimits,
+  setPluginPanelWindowBounds,
+  requestPanelMinimum,
+  resetPanelSize,
+  repositionVisiblePanel,
+} = panelGeometry
+const { applyCurrentPanelSize, recordUserPanelSize } = panelGeometry
 
 export async function openPluginPanelViewForPlugin(
   pluginId: string,
@@ -2000,11 +1276,6 @@ export function persistPetBounds(x: number, y: number, width: number, height: nu
     if (mainState.petWindowMode === 'normal') mainState.normalPetBounds = current
     persistCurrentPetWindowState()
   }, 1_000)
-}
-
-export function repositionVisiblePanel() {
-  if (!mainState.panelWindow?.isVisible()) return
-  applyCurrentPanelSize()
 }
 
 export function ensureDesktopWindows(): boolean {
