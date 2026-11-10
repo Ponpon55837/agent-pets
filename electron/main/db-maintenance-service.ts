@@ -6,6 +6,8 @@ import { SqliteBusyError, sqliteFootprintBytes } from '../sqlite-maintenance.ts'
 // 啟動流程不呼叫它，所以不會拖慢開機。
 
 const DAY_MS = 24 * 60 * 60 * 1000
+// 明確傳入批次大小，迴圈的結束條件才不會依賴 pruneStaleActivity 的預設值。
+const PROGRESSION_PRUNE_BATCH = 5_000
 
 interface HistoryMaintenanceStore {
   getRetentionDays(): number
@@ -64,9 +66,9 @@ export function createDbMaintenanceService(deps: DbMaintenanceDeps): DbMaintenan
         }
         if (progression) {
           for (;;) {
-            const step = progression.pruneStaleActivity()
+            const step = progression.pruneStaleActivity(undefined, PROGRESSION_PRUNE_BATCH)
             prunedRows += step
-            if (step < 5000) break
+            if (step < PROGRESSION_PRUNE_BATCH) break
           }
         }
         if (achievements) {
