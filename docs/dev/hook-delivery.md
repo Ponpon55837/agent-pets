@@ -68,7 +68,7 @@ app 啟動後要先建好寵物視窗、插件、權限等服務，最後才綁�
 
 ### 做法
 
-- `electron/main/hook-startup-marker.ts`：`electron/main.ts` 的第一個 import（`electron/main/early-hook-startup-marker.ts`，1.13.2 起）就寫 `~/.desktop-pet/event-port-<事件埠>.starting`，內容是 pid。事件埠開始監聽 2 秒後移除，多留 2 秒是為了蓋過「hook 剛被拒、還沒來得及看標記」的空檔。埠一直綁不上、啟動失敗、第二個實例或 app 結束時立刻移除。移除前會核對 pid，所以 `--relaunch` 的新實例寫的標記不會被舊實例刪掉。
+- `electron/main/hook-startup-marker.ts`：`electron/main.ts` 的第一個 import（`electron/main/early-hook-startup-marker.ts`，1.13.2 起）就寫 `~/.desktop-pet/event-port-<事件埠>.starting`，內容是 pid。事件埠開始監聽 2 秒後移除，多留 2 秒是為了蓋過「hook 剛被拒、還沒來得及看標記」的空檔。埠一直綁不上、啟動失敗、第二個實例或 app 結束時立刻移除。移除前會核對 pid，所以 `--relaunch` 的新實例寫的標記不會被舊實例刪掉。寫入發生在單一實例鎖之前，所以若已有「比 20 秒新、擁有者 pid 還活著」的標記就不覆寫（`process.kill(pid, 0)`，ESRCH 才算已結束），否則第二個啟動的程序會蓋掉第一個實例的標記、再因拿不到鎖而清掉它。`--relaunch` 時舊實例可能還沒結束，新實例因此沒寫標記；`main.ts` 在取得單一實例鎖之後呼叫 `claim()`，此時只剩本程序，直接接手標記（埠已在監聽則不寫）。
 - 先刪再用 `wx` 建立，被換成 symlink 的路徑不會被跟著寫入。
 - 檔名帶埠，開發版或 e2e 改用 27373 時不影響送往 17373 的 hook。
 - hook 只有在連線被拒時才看標記：標記存在且不到 20 秒，就每 100 ms 重試，最多 5 秒。權限呼叫只有建立請求（`request`）會重試，見下方「權限請求的啟動期重試」。
@@ -160,4 +160,4 @@ app 啟動後要先建好寵物視窗、插件、權限等服務，最後才綁�
 - 標記存在但埠一直沒開時，hook 最多等約 5 秒。
 - 權限請求送出時 hook 被卡住 1.1 秒：修正前退回終端機，修正後照常輸出 deny，而且回覆內容逐字相同。
 
-`tests/hook-startup-marker.test.mts` 檢查標記的檔名、權限、pid 核對、延遲移除與 symlink。
+`tests/hook-startup-marker.test.mts` 檢查標記的檔名、權限、pid 核對、延遲移除與 symlink，以及擁有權：新鮮且擁有者還活著的標記不被第二個程序覆寫或清掉、過期或擁有者已結束的標記會被取代、`claim()` 接手後舊實例的 `clear()` 不會刪掉新標記。`tests/agent-hook-delivery.test.mts` 的耗時判斷都相對於「空 node 程序的啟動時間」，機器忙時不會誤判。

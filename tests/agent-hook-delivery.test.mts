@@ -76,6 +76,21 @@ function runHook(hookPath: string, home: string, payload: Record<string, unknown
   })
 }
 
+/**
+ * 空的 node 程序（和 hook 相同的啟動旗標與環境）要多久。機器忙時 node 光是啟動就可能超過一秒，
+ * 所以耗時判斷一律是「相對於這個基準線」：基準線吸收負載，加上的餘裕才是要擋的行為（重試等待、等 app 回答）。
+ * 取兩次的最大值，避免剛好遇到一次比較快的啟動。
+ */
+async function startupBaselineMs(home: string): Promise<number> {
+  const once = () => new Promise<number>((resolve, reject) => {
+    const startedAt = Date.now()
+    const child = spawn(process.execPath, ['-e', ''], { env: { PATH: process.env.PATH ?? '', HOME: home, USERPROFILE: home }, stdio: 'ignore' })
+    child.on('error', reject)
+    child.on('exit', () => resolve(Date.now() - startedAt))
+  })
+  return Math.max(await once(), await once())
+}
+
 const STOP = { hook_event_name: 'Stop', session_id: 'delivery-session', cwd: '/tmp/delivery-project' }
 
 test('a status event still arrives when the hook process is stalled before it can send', async () => {
@@ -96,11 +111,13 @@ test('a busy app still gets the event, and the hook does not wait for its answer
   const { server, received } = await eventServer(3_000)
   const { home, hookPath } = hookHome(server)
   try {
+    const baseline = await startupBaselineMs(home)
     const result = await runHook(hookPath, home, STOP)
     assert.equal(result.code, 0)
     assert.equal(received.length, 1)
-    // 送出後只等一小段時間：agent 不會被 app 的 3 秒拖住。
-    assert.ok(result.ms < 2_000, `hook took ${result.ms} ms`)
+    // 送出後只等一小段時間（送出時限 1.5 秒 + 回應寬限 0.25 秒）：agent 不會被 app 的 3 秒拖住。
+    // 餘裕 2 秒小於 app 的 3 秒延遲，所以若回到「等 app 回答」仍會失敗。
+    assert.ok(result.ms < baseline + 2_000, `hook took ${result.ms} ms (node startup ${baseline} ms)`)
   } finally {
     await close(server)
     fs.rmSync(home, { recursive: true, force: true })
@@ -122,11 +139,13 @@ test('an answer that is cut off or never finishes does not crash or hold the hoo
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     const { home, hookPath } = hookHome(server)
     try {
+      const baseline = await startupBaselineMs(home)
       // stderr 有任何輸出 runHook 就會 reject，所以崩潰會在這裡失敗。
       const result = await runHook(hookPath, home, STOP)
       assert.equal(result.code, 0, mode)
       assert.equal(reached, 1, mode)
-      assert.ok(result.ms < 2_000, `${mode}: hook took ${result.ms} ms`)
+      // 答案永遠不完整時 hook 仍在送出時限 + 寬限（約 1.75 秒）內結束，不會一直等；餘裕 2 秒（相對於 node 啟動時間）。
+      assert.ok(result.ms < baseline + 2_000, `${mode}: hook took ${result.ms} ms (node startup ${baseline} ms)`)
     } finally {
       await close(server)
       fs.rmSync(home, { recursive: true, force: true })
@@ -235,10 +254,11 @@ test('with the pet closed the hook does not wait, even if a crash left an old ma
       fs.utimesSync(markerPath, old, old)
     }
     try {
+      const baseline = await startupBaselineMs(home)
       const result = await runHook(hookPath, home, STOP)
       assert.equal(result.code, 0, marker)
-      // 只多一次 lstat；這裡的上限只是擋住「誤把重試打開」，耗時量測見 docs/dev/hook-delivery.md。
-      assert.ok(result.ms < 1_000, `${marker}: hook took ${result.ms} ms`)
+      // 只多一次 lstat；誤把重試打開會多等 STARTUP_WAIT_MS（5 秒），餘裕 1.5 秒遠小於它，所以仍能抓到。耗時量測見 docs/dev/hook-delivery.md。
+      assert.ok(result.ms < baseline + 1_500, `${marker}: hook took ${result.ms} ms (node startup ${baseline} ms)`)
     } finally {
       fs.rmSync(home, { recursive: true, force: true })
     }
@@ -250,9 +270,11 @@ test('a starting app that never opens its port holds the hook for a bounded time
   const { home, hookPath, marker } = hookHomeForPort(port)
   fs.writeFileSync(marker, '1\n')
   try {
+    const baseline = await startupBaselineMs(home)
     const result = await runHook(hookPath, home, STOP)
     assert.equal(result.code, 0)
-    assert.ok(result.ms < 6_500, `hook took ${result.ms} ms`)
+    // 重試上限是 STARTUP_WAIT_MS（5 秒）；相對於 node 啟動時間再留 1.5 秒。
+    assert.ok(result.ms < baseline + 6_500, `hook took ${result.ms} ms (node startup ${baseline} ms)`)
   } finally {
     fs.rmSync(home, { recursive: true, force: true })
   }

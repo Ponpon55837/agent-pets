@@ -86,6 +86,17 @@
 - 測試的假權限伺服器關閉時，一併關閉連線，避免晚開的伺服器讓測試卡住。
 - `scripts/e2e-real-hook.mts`（線 4 範圍）：改成 `await` 安裝程式，並加入新事件。`docs/dev/e2e-without-keychain.md` 也跟著更新。
 
+## 複審修正（總控複審 38a75fa..88a9676）
+
+1. 設定檔讀改寫：`writeConfigSafelyAsync` 收呼叫端最初讀到的原文。「未變更」的判斷與備份內容都用這份原文；暫存檔寫好後、rename 前，再讀一次目標檔逐字比對，不同就丟掉暫存檔並重跑一次讀 → 合併 → 寫（`withConfigConflictRetry`）。第二次仍不同，就以 `changed_during_write` 拒絕（面板顯示 `config_changed`），檔案不動，也不留備份。`hook-config.ts` 所有讀改寫函式，以及 Codex `config.toml` 的開啟與移除，都走這個流程。比對到 rename 之間仍有極小的空窗：rename 是原子操作，但不是 compare-and-swap。
+2. 啟動標記：已有夠新（20 秒內）而且擁有者 pid 還活著的標記時，不覆蓋。取得單一實例鎖之後呼叫 `claim()` 接手，處理 `--relaunch` 時舊實例還活著的情況。`clear()` 只會刪除自己的標記。
+3. token 改走 `writeFileAtomic`／`writeFileAtomicSync`（0600、暫存檔＋rename、fsync），hook 不會再讀到被截斷的空 token。順手修正：token 路徑是 symlink 或不是一般檔案時，檢查的錯誤原本會被吞掉，造成寫入穿過 symlink；現在會拒絕。
+4. `serializeInstaller` 改成 `then(() => task(), () => task())`，前一個結果或錯誤不會傳進下一個工作。
+5. 健康檢查（`inspect*`、`hookScriptIsCurrent`、`openCodePluginIsCurrent`、`agentPresence`、`agentConfigDirStatus`）改成非同步，各自獨立的讀取平行進行。只剩測試在用的同步 `fileHasAgentPetsHooks`、`configuredHookExecutable` 已移除。
+6. `agent-hook-delivery` 的時限測試改成相對判斷：同一個測試內先量空 node 程序的啟動時間當基準，再加上不足以容納被排除行為（5 秒重試、3 秒回應）的餘裕。
+
+複審後驗證：`vue-tsc`、`lint`、`check:design:strict`、`git diff --check` 都通過。`pnpm test:unit` 共 1620 個：1619 通過、1 略過、0 失敗（load average 約 44–126）。CLI 13 種情境的輸出與基準逐字相同。跨線改動：`src/locales/onboarding/*.json` 新增一個 key `onboarding.errorConfigChanged`，`src/components/SetupWizard.vue` 加一行錯誤碼對照，`src/types/agent-adapter.ts` 加 `config_changed`。
+
 ## 殘餘風險
 
 - Electron 程序建立到 main.js 開始執行之間（一般負載約 0.4 秒）送出的事件仍會遺失；不同 hook 程序之間的順序也可能顛倒。
@@ -93,7 +104,6 @@
 - Claude Code 舊版不認得 `PostCompact` 時會怎麼處理，沒有實測（`StopFailure` 先前也是同樣情況加入）。真實 `claude` CLI 沒有在本線執行。
 - Codex 的新事件沒有接，Codex 壓縮與中斷期間的寵物狀態不變。
 - Windows 的非同步 repair（`rewriteInstalledAgentPetsHooks` 改用 `nodeResolver.resolve()`）與 rename 退避沒有在 Windows 實測。
-- 機器高負載時，`agent-hook-delivery` 既有的 1–2 秒時限測試偶爾會失敗；單獨重跑可以通過，時限沒有更動。
 
 ## 版本
 

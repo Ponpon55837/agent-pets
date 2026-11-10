@@ -283,6 +283,8 @@ const singleInstanceLock: Promise<boolean> = acquireSingleInstanceLock(
     hookStartupMarker.clear()
     app.quit()
   } else {
+    // 拿到鎖就只剩本程序：接手 --relaunch 時舊實例（可能還活著）留下或沒寫的標記。
+    hookStartupMarker.claim()
     app.on('second-instance', () => {
       showPetWindow()
     })
