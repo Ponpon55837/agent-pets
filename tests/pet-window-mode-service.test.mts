@@ -229,3 +229,86 @@ test('saved window state prefers its display id, then its bounds, then the prima
   assert.equal(service.displayForSavedState({ x: 0, y: 0, displayId: 7 } as never).id, 7)
   assert.equal(service.displayForSavedState(null).id, 7)
 })
+
+// restore()：建立視窗前還原上次模式（原 createPetWindow 內的行為）。
+const restoreOptions = { fallbackSize: { width: 250, height: 232 }, primaryWorkArea: { ...workArea } }
+
+test('restore without a saved state docks the default size at the primary bottom-right', t => {
+  const { service, state } = setup(t)
+  const bounds = service.restore(null, restoreOptions)
+  assert.deepEqual(bounds, { x: 1920 - 250 - 30, y: 1080 - 232 - 30, width: 250, height: 232 })
+  assert.deepEqual(state.normalPetBounds, bounds)
+  assert.equal(state.petWindowMode, 'normal')
+  assert.equal(state.petWindowEdge, null)
+  assert.equal(state.edgeRestoreBounds, null)
+})
+
+test('restore uses the persisted size and falls back per missing dimension', t => {
+  const { service } = setup(t)
+  // 存檔缺寬度：寬度取預設，高度取存檔值（經 clampPetWindowDimension）。
+  const bounds = service.restore({ x: 400, y: 300, height: 300 } as never, restoreOptions)
+  assert.equal(bounds.x, 400)
+  assert.equal(bounds.y, 300)
+  assert.equal(bounds.width, 250)
+  assert.equal(bounds.height, 300)
+})
+
+test('restore prefers the saved normal bounds and clamps them into the work area', t => {
+  const { service, state } = setup(t)
+  const bounds = service.restore({ x: 0, y: 0, normalBounds: { x: 5000, y: 5000, width: 260, height: 350 } } as never, restoreOptions)
+  assert.equal(bounds.x + bounds.width <= 1920, true)
+  assert.equal(bounds.y + bounds.height <= 1080, true)
+  assert.deepEqual(state.normalPetBounds, bounds)
+})
+
+test('restore brings back mini mode with the mini bounds and keeps the normal bounds', t => {
+  const { service, state } = setup(t)
+  const bounds = service.restore({ x: 0, y: 0, mode: 'mini', normalBounds: centre } as never, restoreOptions)
+  assert.equal(state.petWindowMode, 'mini')
+  assert.equal(state.petWindowEdge, null)
+  assert.equal(state.edgeRestoreBounds, null)
+  assert.deepEqual(state.normalPetBounds, centre)
+  assert.deepEqual(bounds, miniWindowBounds(centre, workArea))
+})
+
+test('restore brings back edge mode when still attached to the saved edge', t => {
+  const { service, state } = setup(t)
+  const bounds = service.restore({ x: 0, y: 500, mode: 'edge', edge: 'left', normalBounds: leftEdge } as never, restoreOptions)
+  assert.equal(state.petWindowMode, 'edge')
+  assert.equal(state.petWindowEdge, 'left')
+  assert.deepEqual(state.edgeRestoreBounds, leftEdge)
+  assert.deepEqual(bounds, edgeWindowBounds(leftEdge, workArea, 'left'))
+})
+
+test('restore infers the edge when the saved state has none', t => {
+  const { service, state } = setup(t)
+  service.restore({ x: 0, y: 500, mode: 'edge', normalBounds: leftEdge } as never, restoreOptions)
+  assert.equal(state.petWindowMode, 'edge')
+  assert.equal(state.petWindowEdge, 'left')
+})
+
+test('restore falls back to normal when the saved edge no longer matches', t => {
+  const { service, state } = setup(t)
+  const bounds = service.restore({ x: 0, y: 500, mode: 'edge', edge: 'right', normalBounds: leftEdge } as never, restoreOptions)
+  assert.equal(state.petWindowMode, 'normal')
+  assert.equal(state.petWindowEdge, null)
+  assert.equal(state.edgeRestoreBounds, null)
+  assert.deepEqual(bounds, leftEdge)
+})
+
+test('restore falls back to normal when the pet is no longer near an edge', t => {
+  const { service, state } = setup(t)
+  const bounds = service.restore({ x: 800, y: 500, mode: 'edge', edge: 'left', normalBounds: centre } as never, restoreOptions)
+  assert.equal(state.petWindowMode, 'normal')
+  assert.equal(state.petWindowEdge, null)
+  assert.deepEqual(bounds, centre)
+})
+
+test('restore ignores a saved edge mode when the edge preference is off', t => {
+  const { service, state } = setup(t, { edgeModeEnabled: false })
+  const bounds = service.restore({ x: 0, y: 500, mode: 'edge', edge: 'left', normalBounds: leftEdge } as never, restoreOptions)
+  assert.equal(state.petWindowMode, 'normal')
+  assert.equal(state.petWindowEdge, null)
+  assert.equal(state.edgeRestoreBounds, null)
+  assert.deepEqual(bounds, leftEdge)
+})

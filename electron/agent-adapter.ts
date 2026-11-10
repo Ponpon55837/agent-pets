@@ -32,13 +32,13 @@ export interface AdapterInspection {
 }
 
 export interface AgentAdapterOperations {
-  inspect(id: AgentAdapterId): AdapterInspection
+  inspect(id: AgentAdapterId): Promise<AdapterInspection>
   /** Resolves once the agents' config folders are known (login-shell lookup); install and uninstall wait for it. */
   ready?(): Promise<void>
   /** Async preconditions (e.g. resolving Node.js) that must pass before install writes anything. */
   prepare?(target: AdapterInstallTarget): Promise<void>
-  install(target: AdapterInstallTarget): InstallReport | void
-  uninstall(target: AdapterInstallTarget): void
+  install(target: AdapterInstallTarget): InstallReport | void | Promise<InstallReport | void>
+  uninstall(target: AdapterInstallTarget): void | Promise<void>
   /**
    * Runtime capability projection. Claude Code answers permissions only while the user has
    * turned that on, so its reported capability follows the main-process preference.
@@ -75,7 +75,7 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
     sources: definition.sources,
     capabilities: definition.capabilities,
     detect: async () => {
-      const inspection = definition.id === 'generic-http' ? inspectGenericHttp() : operations.inspect(definition.id)
+      const inspection = definition.id === 'generic-http' ? inspectGenericHttp() : await operations.inspect(definition.id)
       return {
         installed: inspection.installed,
         health: inspection.health,
@@ -98,7 +98,7 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
       try {
         if (definition.installTarget) {
           await operations.prepare?.(definition.installTarget)
-          report = operations.install(definition.installTarget) ?? report
+          report = await operations.install(definition.installTarget) ?? report
         }
       } catch (error) {
         // Keep the failure structured; the IPC layer turns this into a per-adapter result.
@@ -111,12 +111,12 @@ function createAdapter(definition: AgentAdapterDefinition, operations: AgentAdap
     uninstall: async () => {
       if (definition.installTarget) {
         await operations.ready?.()
-        operations.uninstall(definition.installTarget)
+        await operations.uninstall(definition.installTarget)
       }
       return (await createAdapter(definition, operations).detect(context()))
     },
     diagnose: async ctx => {
-      const inspection = definition.id === 'generic-http' ? inspectGenericHttp() : operations.inspect(definition.id)
+      const inspection = definition.id === 'generic-http' ? inspectGenericHttp() : await operations.inspect(definition.id)
       return {
         adapterId: definition.id,
         health: inspection.health,
@@ -165,7 +165,7 @@ export function isAgentAdapterId(value: unknown): value is AgentAdapterId {
 }
 
 const DEFAULT_OPERATIONS: AgentAdapterOperations = {
-  inspect: id => ({
+  inspect: async id => ({
     installed: id === 'generic-http',
     health: id === 'generic-http' ? 'ready' : 'needs_install',
     message: id === 'generic-http' ? `The local ${LOCAL_WIRE_PATHS.events} ingress is available.` : 'The adapter is not installed.',

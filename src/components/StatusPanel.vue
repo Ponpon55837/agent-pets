@@ -101,13 +101,13 @@ const dashboardTabs = computed(() => [
 ])
 const activePluginTab = computed(() => pluginTabs.tabs.value.find(tab => tab.value === dashboardTab.value) ?? null)
 const pluginTabIds = computed(() => pluginTabs.tabs.value.map(tab => tab.pluginId))
-const attentionCount = computed(() => countByBucket(store.sessionList).attention)
 const activePetName = computed(() => store.pets.find(pet => pet.id === store.activePetId)?.displayName ?? t('appName'))
 const { evolutionLabel } = useProgressionLabels()
 // Give up on "loading" after a while so the header never spins forever.
 const progressionTimedOut = ref(false)
 let progressionTimeout: ReturnType<typeof setTimeout> | null = null
 const sessionCounts = computed(() => countByBucket(store.sessionList))
+const attentionCount = computed(() => sessionCounts.value.attention)
 const panelPetSubtitle = computed(() => {
   const { running, attention } = sessionCounts.value
   if (running + attention > 0) return t('panel.subtitleActive', { running, attention })

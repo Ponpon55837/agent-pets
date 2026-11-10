@@ -42,6 +42,56 @@ test('teardown releases services in the established order', () => {
     'runMarker.clear()',
     'hookStartupMarker.clear()',
     'flushMainLog()',
+    // 階段 11 後續：plugin 服務的釋放順序移進 pluginRuntime.dispose()，順序由下一個測試固定。
+    'pluginRuntime.dispose()',
+    'mainState.windowsFullscreenDetector?.stop()',
+    'mainState.windowsFullscreenDetector = null',
+    'if (mainState.panelBlurHideHandle) clearTimeout(mainState.panelBlurHideHandle)',
+    'mainState.panelBlurHideHandle = null',
+    'mainState.windowsFullscreenAutoHiddenPet = false',
+    'mainState.windowsFullscreenAutoHiddenPanel = false',
+    // 階段 11：History runtime 服務另外停止本機用量補掃與清除計時器，改前沒有任何清理步驟會停它們。
+    'historyRuntime.dispose()',
+    'pluginCatalogRuntime.dispose()',
+    // 週期二：App 新版檢查服務另外清除每小時喚醒計時器。
+    'appUpdateRuntime.dispose()',
+    'if (mainState.localUsageScanTimer) clearInterval(mainState.localUsageScanTimer)',
+    'mainState.localUsageScanTimer = null',
+    'mainState.localUsageReader = null',
+    'mainState.localUsageScanPromise = null',
+    'mainState.presentationController?.clear()',
+    'mainState.permissionBroker?.shutdown()',
+    // 階段 11 後續：progression／achievement 的釋放順序移進 growth.dispose()，順序由下一個測試固定。
+    // 刻意差異：achievementProgressTimer（進度廣播去抖）改由 dispose() 清除；改前沒有任何清理步驟會停它。
+    'growth.dispose()',
+    'mainState.historyStore?.close()',
+    'mainState.historyStore = null',
+    'mainState.projectRoutingStore?.close()',
+    'mainState.projectRoutingStore = null',
+    // 階段 11：寵物視窗模式服務另外停止重新貼邊輪詢；改前它是模組變數，沒有任何清理步驟會停。
+    'petWindowModes.dispose()',
+    'disposeMainTimers(mainState)',
+  ])
+})
+
+test('the growth service releases its stores in the established order', () => {
+  // 改前這些行逐字是 teardownMainServices 的 progression／achievement 段；去抖計時器是唯一新增的清理步驟。
+  assert.deepEqual(blockLines(readFileSync('electron/main/growth-service.ts', 'utf8'), /function dispose\(\): void \{/), [
+    'state.progressionStore?.close()',
+    'state.progressionStore = null',
+    'if (state.achievementStoreRetryTimer) cancel(state.achievementStoreRetryTimer)',
+    'state.achievementStoreRetryTimer = null',
+    // 刻意差異：改前沒有任何清理步驟會清掉這個去抖計時器。
+    'if (achievementProgressTimer) cancel(achievementProgressTimer)',
+    'achievementProgressTimer = null',
+    'state.achievementStore?.close()',
+    'state.achievementStore = null',
+  ])
+})
+
+test('the plugin runtime releases its services in the established order', () => {
+  // 改前這些行逐字是 teardownMainServices 的 plugin 段；搬進 dispose() 後順序不可改變。
+  assert.deepEqual(blockLines(readFileSync('electron/main/plugin-runtime.ts', 'utf8'), /function dispose\(\): void \{/), [
     'mainState.pluginPanelViewController?.close()',
     'mainState.pluginPanelViewController = null',
     'mainState.pluginDeveloperModeWatcher?.destroy()',
@@ -60,35 +110,13 @@ test('teardown releases services in the established order', () => {
     'mainState.pluginHostWindow = null',
     'mainState.pluginEventSourceController?.destroy()',
     'mainState.pluginEventSourceController = null',
-    'mainState.windowsFullscreenDetector?.stop()',
-    'mainState.windowsFullscreenDetector = null',
-    'if (mainState.panelBlurHideHandle) clearTimeout(mainState.panelBlurHideHandle)',
-    'mainState.panelBlurHideHandle = null',
-    'mainState.windowsFullscreenAutoHiddenPet = false',
-    'mainState.windowsFullscreenAutoHiddenPanel = false',
-    // 階段 11：History runtime 服務另外停止本機用量補掃與清除計時器，改前沒有任何清理步驟會停它們。
-    'historyRuntime.dispose()',
+  ])
+})
+
+test('the plugin catalog runtime clears its hourly timer on dispose', () => {
+  assert.deepEqual(blockLines(readFileSync('electron/main/plugin-catalog-runtime.ts', 'utf8'), /function dispose\(\): void \{/), [
     'if (mainState.pluginCatalogAutoCheckTimer) clearInterval(mainState.pluginCatalogAutoCheckTimer)',
     'mainState.pluginCatalogAutoCheckTimer = null',
-    'if (mainState.localUsageScanTimer) clearInterval(mainState.localUsageScanTimer)',
-    'mainState.localUsageScanTimer = null',
-    'mainState.localUsageReader = null',
-    'mainState.localUsageScanPromise = null',
-    'mainState.presentationController?.clear()',
-    'mainState.permissionBroker?.shutdown()',
-    'mainState.progressionStore?.close()',
-    'mainState.progressionStore = null',
-    'if (mainState.achievementStoreRetryTimer) clearTimeout(mainState.achievementStoreRetryTimer)',
-    'mainState.achievementStoreRetryTimer = null',
-    'mainState.achievementStore?.close()',
-    'mainState.achievementStore = null',
-    'mainState.historyStore?.close()',
-    'mainState.historyStore = null',
-    'mainState.projectRoutingStore?.close()',
-    'mainState.projectRoutingStore = null',
-    // 階段 11：寵物視窗模式服務另外停止重新貼邊輪詢；改前它是模組變數，沒有任何清理步驟會停。
-    'petWindowModes.dispose()',
-    'disposeMainTimers(mainState)',
   ])
 })
 

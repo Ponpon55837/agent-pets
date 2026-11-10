@@ -849,7 +849,7 @@ App 1.12.0 changes:
 - `src/types/plugin.ts`: registry, value map
 - `src/types/ipc.ts`: error codes `invalid_panel_theme`, `theme_unavailable`, `image_invalid`, `image_too_large`, `image_not_allowed`
 - `src/types/electron-api.ts`, `electron/preload.ts`, `electron/ipc/channels.ts`
-- `electron/main/runtime.ts`: protocol host, sync hook, broadcast, registrar wiring, startup sweep
+- `electron/main/runtime.ts`: protocol host, sync hook, broadcast, startup sweep; registrar wiring now lives in `electron/main/plugin-runtime.ts`
 - `electron/plugin-manifest.ts`: parse, workerless rule, error code
 - `electron/plugin-registry.ts`: extensions, asset limits, units, checks, diagnostic
 - `electron/ipc/plugin-install.ts`: remove cleanup

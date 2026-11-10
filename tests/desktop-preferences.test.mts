@@ -189,6 +189,17 @@ test('uses only the original regular portable executable for Windows startup', (
   assert.equal(resolveLoginItemExecutable('win32', false, portablePath, portablePath), null)
 })
 
+test('NSIS installs (no portable variable) register the installed exe for Windows startup', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-nsis-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const installed = path.join(directory, 'Agent Pets.exe')
+  fs.writeFileSync(installed, 'installed app')
+
+  assert.equal(resolveLoginItemExecutable('win32', true, installed, undefined), installed)
+  assert.equal(resolveLoginItemExecutable('win32', true, path.join(directory, 'missing.exe'), undefined), null)
+  assert.equal(resolveLoginItemExecutable('win32', false, installed, undefined), null)
+})
+
 test('dndUntil is validated, bounded, and cleared when DND is off', async () => {
   const { parseDesktopPreferencesPatch } = await import('../electron/desktop-preferences.ts')
   assert.deepEqual(parseDesktopPreferencesPatch({ dndUntil: null }), { dndUntil: null })
@@ -287,7 +298,8 @@ test('completion markers default on, persist, and only accept booleans', (t) => 
 })
 
 test('the pet only renders completion markers while the preference is on', () => {
-  const source = fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'components', 'DesktopPet.vue'), 'utf8')
+  const read = (...parts: string[]) => fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'components', ...parts), 'utf8')
+  const source = [read('DesktopPet.vue'), read('desktop-pet', 'PetEdgePeekHandle.vue')].join('\n')
   assert.match(source, /<span v-if="store\.completionMarkersEnabled && store\.unreadResults\.count > 0" class="mini-status-count">/)
   assert.match(source, /v-if="store\.completionMarkersEnabled && store\.unreadResults\.count > 0"\s+class="unread-badge"/)
   assert.match(source, /v-if="store\.completionMarkersEnabled && store\.unreadResults\.count > 0"\s+class="edge-peek-result-badge"/)
@@ -304,8 +316,10 @@ test('results are not counted while completion markers are off', async () => {
   assert.equal(noteUnread({ count: UNREAD_RESULTS_MAX, hasError: false }, 'success', true, true).count, UNREAD_RESULTS_MAX)
 
   // Switching markers off (locally or from another window's broadcast) drops what was counted.
-  const store = fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'stores', 'agentStore.ts'), 'utf8')
-  assert.match(store, /function setCompletionMarkersEnabled\(enabled: boolean\) \{\s+completionMarkersEnabled\.value = enabled\s+if \(!enabled\) clearUnreadResults\(\)/)
-  assert.match(store, /completionMarkersEnabled\.value = preferences\.completionMarkersEnabled !== false\s+if \(!completionMarkersEnabled\.value\) clearUnreadResults\(\)/)
-  assert.match(store, /noteUnread\(unreadResults\.value, tone, completionMarkersEnabled\.value, away\)/)
+  const storeDir = path.join(import.meta.dirname, '..', 'src', 'stores', 'agent')
+  const store = fs.readFileSync(path.join(storeDir, 'desktop-preferences.ts'), 'utf8')
+  const unread = fs.readFileSync(path.join(storeDir, 'unread-alerts.ts'), 'utf8')
+  assert.match(store, /function setCompletionMarkersEnabled\(enabled: boolean\) \{\s+completionMarkersEnabled\.value = enabled\s+if \(!enabled\) deps\.clearUnreadResults\(\)/)
+  assert.match(store, /completionMarkersEnabled\.value = preferences\.completionMarkersEnabled !== false\s+if \(!completionMarkersEnabled\.value\) deps\.clearUnreadResults\(\)/)
+  assert.match(unread, /noteUnread\(unreadResults\.value, tone, deps\.completionMarkersEnabled\(\), away\)/)
 })

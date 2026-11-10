@@ -62,7 +62,10 @@ export function resolveLoginItemExecutable(
   portableExecutableFile?: string,
 ): string | null {
   if (!isPackaged) return null
-  const candidate = platform === 'win32' ? portableExecutableFile : execPath
+  // Windows portable runs from a temporary extraction directory, so it must use the
+  // original launcher (PORTABLE_EXECUTABLE_FILE). The NSIS installer build has no such
+  // variable and its process.execPath is the real installed exe, so fall back to it.
+  const candidate = platform === 'win32' ? (portableExecutableFile ?? execPath) : execPath
   if (!candidate || !path.isAbsolute(candidate)) return null
   if (platform === 'win32' && path.extname(candidate).toLowerCase() !== '.exe') return null
 

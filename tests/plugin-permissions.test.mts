@@ -80,7 +80,7 @@ test('every unit a manifest can produce is a known permission with copy in both 
     for (const key of [
       'pluginPermissionNetwork', 'pluginPermissionLinks', 'pluginPermissionStorage', 'pluginPermissionAgentStatus', 'pluginPermissionSchedule',
       'pluginPermissionSecret', 'pluginPermissionFeed', 'pluginPermissionReaction', 'pluginPermissionPanel', 'pluginPermissionCommands',
-      'pluginPermissionTray', 'pluginPermissionBadge', 'pluginPermissionSkins', 'pluginPermissionEventSource',
+      'pluginPermissionTray', 'pluginPermissionBadge', 'pluginPermissionSkins.other', 'pluginPermissionEventSource',
     ]) assert.equal(typeof catalog[key], 'string', `${locale} is missing ${key}`)
   }
 })

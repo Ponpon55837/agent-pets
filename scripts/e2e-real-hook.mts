@@ -6,7 +6,7 @@
 //   node --experimental-strip-types scripts/e2e-real-hook.mts --home <啟動日誌的 home> [--debug-port 9348]
 //        [--hook-port-base 27373] [--pet-pack] [--rounds 1] [--agent-config-dirs]
 // --agent-config-dirs 對應啟動器的同名旗標：hook 裝到 <home>/moved/claude/settings.json（CLAUDE_CONFIG_DIR）。
-// --rounds N 把整組 8 個事件重複 N 輪（每輪換新 session），用來大量確認每個事件都畫到寵物上。
+// --rounds N 把整組 14 個事件重複 N 輪（每輪換新 session），用來大量確認每個事件都畫到寵物上。
 // 冷啟動模式（先結束隔離 app，HOME 要是跑過一次這支腳本的）：
 //   node --experimental-strip-types scripts/e2e-real-hook.mts --home <home> --cold-start 150 [--interval 40]
 // 以 --reuse-root 重新啟動隔離 app，從啟動那一刻起每 --interval ms 對一個新 session 送一個 Stop，
@@ -59,7 +59,7 @@ const hookPath: string = setup.hookScriptPath()
 for (const target of [settingsPath, hookPath]) {
   assert.ok(target.startsWith(home + path.sep), `refusing to write outside the isolated HOME: ${target}`)
 }
-setup.installIntegration('claudeCode')
+await setup.installIntegration('claudeCode')
 
 // 已安裝的腳本寫死 17373/17374；隔離 app 聽在 portBase，只改這兩個網址。
 const deployed = fs.readFileSync(hookPath, 'utf8')
@@ -267,6 +267,13 @@ const stepsFor = (base: Record<string, unknown>): Step[] => [
   ['PreToolUse', { ...base, tool_name: 'Bash', tool_input: { command: 'ls' } }, 'tool-running', 'running@7', 'running@7'],
   ['PostToolUse', { ...base, tool_name: 'Bash', tool_input: { command: 'ls' } }, 'thinking', 'review@8', 'review@10'],
   ['Notification', { ...base, message: 'Claude is waiting for your input' }, 'waiting-input', 'waiting@6', 'waiting@6'],
+  // 新版 Claude Code 帶 notification_type；文字刻意不含 permission，確認是依類型判斷。
+  ['Notification', { ...base, notification_type: 'permission_prompt', message: 'Claude needs your attention' }, 'waiting-permission', 'waiting@6', 'waiting@6'],
+  ['PreCompact', { ...base, trigger: 'auto' }, 'thinking', 'review@8', 'review@10'],
+  ['PostCompact', { ...base, trigger: 'auto' }, 'thinking', 'review@8', 'review@10'],
+  ['Notification', { ...base, notification_type: 'idle_prompt', message: 'Claude is waiting for your input' }, 'waiting-input', 'waiting@6', 'waiting@6'],
+  ['PreCompact', { ...base, trigger: 'manual' }, 'thinking', 'review@8', 'review@10'],
+  ['PostCompact', { ...base, trigger: 'manual' }, 'idle', 'idle@0', 'idle@9'],
   ['StopFailure', base, 'error', 'failed@5', 'failed@5'],
   ['Stop', base, 'success', 'jumping@4', 'jumping@4'],
   ['SessionEnd', base, 'offline', 'idle@0', 'idle@9'],

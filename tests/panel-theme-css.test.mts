@@ -127,7 +127,7 @@ test('no protected regions: every surface reads the semantic layer derived from 
     assert.match(tokens, new RegExp(`^  ${property}: (?:var\\(--ap-[a-z0-9-]+, )?var\\(--builtin${property.slice(1)}\\)\\)?;`, 'm'), `${property} aliases the frozen copy`)
   }
   // 語意層在 :root 衍生，並在預覽上重新解析（預覽帶入另一組色盤）。
-  assert.match(tokens, /^:root,\n\.panel-theme-preview \{\n  --color-bg: var\(--organic-bg\);/m)
+  assert.match(tokens, /^:root,\n\.panel-theme-preview \{\n {2}--color-bg: var\(--organic-bg\);/m)
   assert.doesNotMatch(readFileSync('src/components/StatusPanel.css', 'utf8'), /--surface-panel:/)
   // 面板主題套在面板視窗的 <html>；寵物視窗不使用這個 composable。
   assert.match(readFileSync('src/composables/usePanelTheme.ts', 'utf8'), /const element = document\.documentElement/)

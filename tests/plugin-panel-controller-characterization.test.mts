@@ -15,7 +15,7 @@ import {
   unmountLeftover,
   type PluginPanelHarness,
 } from './support/plugin-panel-harness.mts'
-import { t, type TranslationKey } from '../src/i18n.ts'
+import { t, tPlural, type TranslationKey } from '../src/i18n.ts'
 
 afterEach(() => unmountLeftover())
 
@@ -737,7 +737,11 @@ const PERMISSION_COPY: Array<[string, TranslationKey, Record<string, string> | u
 test('permission units map to the same label and hint copy', async () => {
   const harness = await mountPluginPanel()
   for (const [unit, labelKey, params, hintKey] of PERMISSION_COPY) {
-    assert.equal(harness.controller.permissionLabel(unit), t(labelKey, params), unit)
+    // 帶數量的貢獻點標籤以 `.one`/`.other` 存放，依 count 走 tPlural。
+    const expectedLabel = labelKey === 'pluginPermissionSkins' || labelKey === 'pluginPermissionPanelThemes'
+      ? tPlural(labelKey, Number(params?.count) || 0, params)
+      : t(labelKey, params)
+    assert.equal(harness.controller.permissionLabel(unit), expectedLabel, unit)
     assert.equal(harness.controller.permissionHint(unit), t(hintKey), unit)
   }
 })

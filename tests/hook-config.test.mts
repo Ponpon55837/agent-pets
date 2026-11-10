@@ -8,7 +8,7 @@ import {
   disableCodexHooksFeatureText,
   ensureAgentPetsHookEntries,
   enableCodexHooksFeatureText,
-  fileHasAgentPetsHooks,
+  fileHasAgentPetsHooksAsync,
   isAgentPetsHook,
   isLegacyElectronHook,
   mergeAgentPetsHooksFile,
@@ -36,13 +36,13 @@ function desired() {
   return { SessionStart: [ours()], Stop: [ours()] }
 }
 
-test('merge refuses unparseable JSON and leaves the file untouched', () => {
+test('merge refuses unparseable JSON and leaves the file untouched', async () => {
   const dir = tempDir()
   try {
     const file = path.join(dir, 'settings.json')
     const original = '{ "model": "opus", // comment\n "permissions": {} }'
     fs.writeFileSync(file, original)
-    assert.throws(() => mergeAgentPetsHooksFile(file, desired()), (error: unknown) => (
+    await assert.rejects(() => mergeAgentPetsHooksFile(file, desired()), (error: unknown) => (
       error instanceof ConfigRefusedError && error.code === 'unparseable' && error.message.includes(file)
     ))
     assert.equal(fs.readFileSync(file, 'utf8'), original)
@@ -50,28 +50,28 @@ test('merge refuses unparseable JSON and leaves the file untouched', () => {
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('merge refuses non-object roots and malformed hooks values', () => {
+test('merge refuses non-object roots and malformed hooks values', async () => {
   const dir = tempDir()
   try {
     const file = path.join(dir, 'settings.json')
     fs.writeFileSync(file, '[1,2]')
-    assert.throws(() => mergeAgentPetsHooksFile(file, desired()), ConfigRefusedError)
+    await assert.rejects(() => mergeAgentPetsHooksFile(file, desired()), ConfigRefusedError)
     fs.writeFileSync(file, '{"hooks": "nope"}')
-    assert.throws(() => mergeAgentPetsHooksFile(file, desired()), ConfigRefusedError)
+    await assert.rejects(() => mergeAgentPetsHooksFile(file, desired()), ConfigRefusedError)
     fs.writeFileSync(file, '{"hooks": {"Stop": "nope"}}')
-    assert.throws(() => mergeAgentPetsHooksFile(file, desired()), ConfigRefusedError)
+    await assert.rejects(() => mergeAgentPetsHooksFile(file, desired()), ConfigRefusedError)
     assert.equal(fs.readFileSync(file, 'utf8'), '{"hooks": {"Stop": "nope"}}')
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('merge keeps user keys and hooks, backs up, and is idempotent', () => {
+test('merge keeps user keys and hooks, backs up, and is idempotent', async () => {
   const dir = tempDir()
   try {
     const file = path.join(dir, 'settings.json')
     const user = { model: 'opus', permissions: { allow: ['Bash(ls)'] }, hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo hi' }] }] } }
     fs.writeFileSync(file, JSON.stringify(user))
 
-    const first = mergeAgentPetsHooksFile(file, desired())
+    const first = await mergeAgentPetsHooksFile(file, desired())
     assert.equal(first.status, 'written')
     assert.ok(first.backupPath && fs.existsSync(first.backupPath))
     assert.equal(first.backupPath && JSON.parse(fs.readFileSync(first.backupPath, 'utf8')).model, 'opus')
@@ -82,32 +82,32 @@ test('merge keeps user keys and hooks, backs up, and is idempotent', () => {
     assert.equal(merged.hooks.Stop[0].hooks[0].command, 'echo hi')
     assert.equal(merged.hooks.SessionStart.length, 1)
 
-    const second = mergeAgentPetsHooksFile(file, desired())
+    const second = await mergeAgentPetsHooksFile(file, desired())
     assert.equal(second.status, 'unchanged')
     assert.equal(second.backupPath, null)
     assert.equal(listBackups(file).length, 1)
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('merge creates a missing file from defaults without a backup', () => {
+test('merge creates a missing file from defaults without a backup', async () => {
   const dir = tempDir()
   try {
     const file = path.join(dir, 'nested', 'hooks.json')
-    const result = mergeAgentPetsHooksFile(file, desired(), { description: 'Agent Pets' })
+    const result = await mergeAgentPetsHooksFile(file, desired(), { description: 'Agent Pets' })
     assert.equal(result.backupPath, null)
     const written = JSON.parse(fs.readFileSync(file, 'utf8'))
     assert.equal(written.description, 'Agent Pets')
-    assert.ok(fileHasAgentPetsHooks(file))
+    assert.ok(await fileHasAgentPetsHooksAsync(file))
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('merge treats an empty file as an empty object', () => {
+test('merge treats an empty file as an empty object', async () => {
   const dir = tempDir()
   try {
     const file = path.join(dir, 'settings.json')
     fs.writeFileSync(file, '')
-    mergeAgentPetsHooksFile(file, desired())
-    assert.ok(fileHasAgentPetsHooks(file))
+    await mergeAgentPetsHooksFile(file, desired())
+    assert.ok(await fileHasAgentPetsHooksAsync(file))
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
@@ -123,7 +123,7 @@ test('backups are pruned to the most recent entries', () => {
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('writes go through a symlink to the real target and preserve file mode', { skip: process.platform === 'win32' }, () => {
+test('writes go through a symlink to the real target and preserve file mode', { skip: process.platform === 'win32' }, async () => {
   const dir = tempDir()
   try {
     const real = path.join(dir, 'real.json')
@@ -131,9 +131,9 @@ test('writes go through a symlink to the real target and preserve file mode', { 
     fs.writeFileSync(real, '{}', { mode: 0o640 })
     fs.chmodSync(real, 0o640)
     fs.symlinkSync(real, link)
-    mergeAgentPetsHooksFile(link, desired())
+    await mergeAgentPetsHooksFile(link, desired())
     assert.ok(fs.lstatSync(link).isSymbolicLink())
-    assert.ok(fileHasAgentPetsHooks(real))
+    assert.ok(await fileHasAgentPetsHooksAsync(real))
     assert.equal(fs.statSync(real).mode & 0o777, 0o640)
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
@@ -148,52 +148,52 @@ test('concurrent atomic writers never leave a partial file', () => {
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('remove only strips Agent Pets hooks and keeps user hooks and keys', () => {
+test('remove only strips Agent Pets hooks and keeps user hooks and keys', async () => {
   const dir = tempDir()
   try {
     const file = path.join(dir, 'settings.json')
     fs.writeFileSync(file, JSON.stringify({ model: 'opus', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo hi' }] }] } }))
-    mergeAgentPetsHooksFile(file, desired())
-    const result = removeAgentPetsHooksFile(file)
+    await mergeAgentPetsHooksFile(file, desired())
+    const result = await removeAgentPetsHooksFile(file)
     assert.equal(result.status, 'removed')
     const after = JSON.parse(fs.readFileSync(file, 'utf8'))
     assert.equal(after.model, 'opus')
     assert.deepEqual(Object.keys(after.hooks), ['Stop'])
     assert.equal(after.hooks.Stop[0].hooks[0].command, 'echo hi')
-    assert.equal(removeAgentPetsHooksFile(file).status, 'absent')
+    assert.equal((await removeAgentPetsHooksFile(file)).status, 'absent')
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('remove deletes a hooks file that only contained Agent Pets content', () => {
+test('remove deletes a hooks file that only contained Agent Pets content', async () => {
   const dir = tempDir()
   try {
     const file = path.join(dir, 'hooks.json')
-    mergeAgentPetsHooksFile(file, desired(), { description: 'Agent Pets' })
-    const result = removeAgentPetsHooksFile(file, { description: 'Agent Pets' })
+    await mergeAgentPetsHooksFile(file, desired(), { description: 'Agent Pets' })
+    const result = await removeAgentPetsHooksFile(file, { description: 'Agent Pets' })
     assert.equal(result.status, 'deleted_file')
     assert.equal(fs.existsSync(file), false)
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('remove refuses to touch an unparseable file', () => {
+test('remove refuses to touch an unparseable file', async () => {
   const dir = tempDir()
   try {
     const file = path.join(dir, 'settings.json')
     fs.writeFileSync(file, '{ broken')
-    assert.throws(() => removeAgentPetsHooksFile(file), ConfigRefusedError)
+    await assert.rejects(() => removeAgentPetsHooksFile(file), ConfigRefusedError)
     assert.equal(fs.readFileSync(file, 'utf8'), '{ broken')
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('single-key helpers only remove a value Agent Pets wrote', () => {
+test('single-key helpers only remove a value Agent Pets wrote', async () => {
   const dir = tempDir()
   try {
     const file = path.join(dir, 'claude_desktop_config.json')
     fs.writeFileSync(file, JSON.stringify({ mcpServers: { a: 1 } }))
-    assert.equal(setJsonKeyFile(file, 'agent', HOOK).status, 'written')
-    assert.equal(setJsonKeyFile(file, 'agent', HOOK).status, 'unchanged')
-    assert.equal(removeJsonKeyFile(file, 'agent', '/something/else').status, 'absent')
-    assert.equal(removeJsonKeyFile(file, 'agent', HOOK).status, 'removed')
+    assert.equal((await setJsonKeyFile(file, 'agent', HOOK)).status, 'written')
+    assert.equal((await setJsonKeyFile(file, 'agent', HOOK)).status, 'unchanged')
+    assert.equal((await removeJsonKeyFile(file, 'agent', '/something/else')).status, 'absent')
+    assert.equal((await removeJsonKeyFile(file, 'agent', HOOK)).status, 'removed')
     assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { mcpServers: { a: 1 } })
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
@@ -216,23 +216,23 @@ test('codex feature text: enable adds once, disable reverts only that line', () 
   assert.equal(already.content, '[features]\nhooks = true\n')
 })
 
-test('removing Codex hooks leaves Claude Code hooks (shared script) intact', () => {
+test('removing Codex hooks leaves Claude Code hooks (shared script) intact', async () => {
   const dir = tempDir()
   try {
     const codex = path.join(dir, 'hooks.json')
     const claude = path.join(dir, 'settings.json')
     fs.writeFileSync(codex, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo mine' }] }] } }))
-    mergeAgentPetsHooksFile(codex, desired())
-    mergeAgentPetsHooksFile(claude, desired())
-    removeAgentPetsHooksFile(codex, { description: 'Agent Pets lifecycle hooks for Codex CLI.' })
-    assert.equal(fileHasAgentPetsHooks(codex), false)
-    assert.equal(fileHasAgentPetsHooks(claude), true)
+    await mergeAgentPetsHooksFile(codex, desired())
+    await mergeAgentPetsHooksFile(claude, desired())
+    await removeAgentPetsHooksFile(codex, { description: 'Agent Pets lifecycle hooks for Codex CLI.' })
+    assert.equal(await fileHasAgentPetsHooksAsync(codex), false)
+    assert.equal(await fileHasAgentPetsHooksAsync(claude), true)
     const kept = JSON.parse(fs.readFileSync(codex, 'utf8'))
     assert.equal(kept.hooks.Stop[0].hooks[0].command, 'echo mine')
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
-import { configuredHookExecutable, isCodexHooksFeatureEnabled, leadingExecutable } from '../electron/hook-config.ts'
+import { configuredHookExecutableFromRoot, isCodexHooksFeatureEnabled, leadingExecutable } from '../electron/hook-config.ts'
 
 test('codex hooks feature requires an explicit hooks = true under [features]', () => {
   assert.equal(isCodexHooksFeatureEnabled(null), false)
@@ -244,17 +244,10 @@ test('codex hooks feature requires an explicit hooks = true under [features]', (
 })
 
 test('configured hook executable is read from exec-form and shell-form hooks', () => {
-  const dir = tempDir()
-  try {
-    const exec = path.join(dir, 'a.json')
-    fs.writeFileSync(exec, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '/opt/node', args: [HOOK, 'claude'] }] }] } }))
-    assert.equal(configuredHookExecutable(exec), '/opt/node')
-    const shell = path.join(dir, 'b.json')
-    fs.writeFileSync(shell, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: `"/opt/my node/node" "${HOOK}" codex` }] }] } }))
-    assert.equal(configuredHookExecutable(shell), '/opt/my node/node')
-    assert.equal(configuredHookExecutable(path.join(dir, 'missing.json')), null)
-    assert.equal(leadingExecutable('node /x/.desktop-pet/agent-hook.mjs codex'), 'node')
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  assert.equal(configuredHookExecutableFromRoot({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '/opt/node', args: [HOOK, 'claude'] }] }] } }), '/opt/node')
+  assert.equal(configuredHookExecutableFromRoot({ hooks: { Stop: [{ hooks: [{ type: 'command', command: `"/opt/my node/node" "${HOOK}" codex` }] }] } }), '/opt/my node/node')
+  assert.equal(configuredHookExecutableFromRoot({}), null)
+  assert.equal(leadingExecutable('node /x/.desktop-pet/agent-hook.mjs codex'), 'node')
 })
 
 import { codexHookCommand, escapeCmdQuotedPath } from '../electron/hook-config.ts'
@@ -313,14 +306,14 @@ test('legacy Electron hooks are detected, a different Node install is not', () =
   assert.equal(isLegacyElectronHook({ command: '/usr/local/bin/node' }), false)
 })
 
-test('removing hooks from a symlinked dotfile keeps the link and its target', () => {
+test('removing hooks from a symlinked dotfile keeps the link and its target', async () => {
   const dir = tempDir()
   try {
     const target = path.join(dir, 'real.json')
     const link = path.join(dir, 'settings.json')
     fs.writeFileSync(target, JSON.stringify({ hooks: { Stop: [ours()] } }))
     fs.symlinkSync(target, link)
-    removeAgentPetsHooksFile(link)
+    await removeAgentPetsHooksFile(link)
     assert.ok(fs.lstatSync(link).isSymbolicLink())
     assert.deepEqual(JSON.parse(fs.readFileSync(target, 'utf8')), {})
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
@@ -334,7 +327,7 @@ test('batch wrapper path escaping doubles percent signs and rejects quotes', () 
   assert.equal('X __N__ Y'.replace('__N__', () => escapeCmdQuotedPath('C:\\a$&b\\node.exe')), 'X C:\\a$&b\\node.exe Y')
 })
 
-test('ensureAgentPetsHookEntries adds missing handlers and timeouts without touching user handlers', () => {
+test('ensureAgentPetsHookEntries adds missing handlers and timeouts without touching user handlers', async () => {
   const dir = tempDir()
   try {
     const file = path.join(dir, 'settings.json')
@@ -355,7 +348,7 @@ test('ensureAgentPetsHookEntries adds missing handlers and timeouts without touc
       { event: 'PermissionRequest', matcher: '*', timeout: 135 },
       { event: 'PostToolUseFailure', matcher: '*' },
     ]
-    const result = ensureAgentPetsHookEntries(file, required)
+    const result = await ensureAgentPetsHookEntries(file, required)
     assert.equal(result?.status, 'written')
     assert.ok(result?.backupPath && fs.existsSync(result.backupPath))
     const after = JSON.parse(fs.readFileSync(file, 'utf8'))
@@ -371,12 +364,12 @@ test('ensureAgentPetsHookEntries adds missing handlers and timeouts without touc
     assert.ok(fs.readFileSync(file, 'utf8').includes(userText), 'user handlers keep their exact text')
 
     // Idempotent: a second run writes nothing.
-    assert.equal(ensureAgentPetsHookEntries(file, required)?.status, 'unchanged')
+    assert.equal((await ensureAgentPetsHookEntries(file, required))?.status, 'unchanged')
 
     // A wrong timeout on our own handler is corrected; the other tool's timeout is not.
     after.hooks.PermissionRequest[1].hooks[0].timeout = 20
     fs.writeFileSync(file, `${JSON.stringify(after, null, 2)}\n`)
-    assert.equal(ensureAgentPetsHookEntries(file, required)?.status, 'written')
+    assert.equal((await ensureAgentPetsHookEntries(file, required))?.status, 'written')
     const fixed = JSON.parse(fs.readFileSync(file, 'utf8'))
     assert.equal(fixed.hooks.PermissionRequest[1].hooks[0].timeout, 135)
     assert.equal(fixed.hooks.PermissionRequest[0].hooks[0].timeout, 30)
@@ -385,17 +378,17 @@ test('ensureAgentPetsHookEntries adds missing handlers and timeouts without touc
   }
 })
 
-test('ensureAgentPetsHookEntries leaves files without Agent Pets hooks or with invalid JSON alone', () => {
+test('ensureAgentPetsHookEntries leaves files without Agent Pets hooks or with invalid JSON alone', async () => {
   const dir = tempDir()
   try {
     const file = path.join(dir, 'settings.json')
-    assert.equal(ensureAgentPetsHookEntries(file, [{ event: 'PermissionRequest' }]), null)
+    assert.equal(await ensureAgentPetsHookEntries(file, [{ event: 'PermissionRequest' }]), null)
     const userOnly = '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo mine"}]}]}}'
     fs.writeFileSync(file, userOnly)
-    assert.equal(ensureAgentPetsHookEntries(file, [{ event: 'PermissionRequest' }]), null)
+    assert.equal(await ensureAgentPetsHookEntries(file, [{ event: 'PermissionRequest' }]), null)
     assert.equal(fs.readFileSync(file, 'utf8'), userOnly)
     fs.writeFileSync(file, '{ "hooks": // broken')
-    assert.equal(ensureAgentPetsHookEntries(file, [{ event: 'PermissionRequest' }]), null)
+    assert.equal(await ensureAgentPetsHookEntries(file, [{ event: 'PermissionRequest' }]), null)
     assert.equal(fs.readFileSync(file, 'utf8'), '{ "hooks": // broken')
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })

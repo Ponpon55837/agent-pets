@@ -1,11 +1,19 @@
 import * as fs from 'fs'
+import * as fsp from 'fs/promises'
 import * as path from 'path'
-import * as os from 'os'
 import { randomBytes } from 'crypto'
 import { setupEnvironment } from './setup-environment.ts'
 import { createNodeResolver, NodeNotFoundError, NodeUnsupportedError, type NodeInfo } from './node-resolver.ts'
 import type { PetEdge, PetWindowMode } from '../src/types/pet-window'
-import { readConfigText, writeConfigSafely, writeTextAtomic, type ConfigWriteResult } from './safe-config-write.ts'
+import { writeFileAtomic, writeFileAtomicSync } from './atomic-file-write.ts'
+import {
+  readConfigTextAsync,
+  withConfigConflictRetry,
+  writeConfigSafelyAsync,
+  writeTextAtomic,
+  writeTextAtomicAsync,
+  type ConfigWriteResult,
+} from './safe-config-write.ts'
 import {
   currentAgentConfigDirs,
   writableAgentConfigDir,
@@ -31,8 +39,7 @@ import {
   escapeCmdQuotedPath,
   disableCodexHooksFeatureText,
   enableCodexHooksFeatureText,
-  fileHasAgentPetsHooks,
-  isAgentPetsHook,
+  fileHasAgentPetsHooksAsync,
   isLegacyElectronHook,
   mergeAgentPetsHooksFile,
   removeAgentPetsHooksFile,
@@ -298,6 +305,24 @@ function syncClaudePermissionRespondOptIn(waitSeconds: number | null): void {
 // reinstall in the same session re-uses the value the running event/permission servers already hold.
 const tokenCache = new Map<string, string>()
 
+const TOKEN_PATTERN = /^[a-f0-9]{64}$/i
+
+function assertRegularTokenFile(stat: fs.Stats, label: string): void {
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error(`Agent Pets ${label} token path is not a regular file`)
+  }
+}
+
+// 隨機後綴：同一毫秒內兩次寫入（同步＋非同步、或兩個 label）也不會撞到 `wx` 的 EEXIST。
+function tokenTemporaryPath(tokenPath: string): string {
+  return path.join(path.dirname(tokenPath), `.${path.basename(tokenPath)}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`)
+}
+
+// token 一律走「暫存檔 + rename」：直接以 'w' 開啟會先截斷成空檔，hook 恰好在這時讀到空 token
+// 就會靜默略過事件；rename 也一併取代了 lstat → open 之間的 symlink 空窗（取代的是連結本身）。
+const TOKEN_WRITE_OPTIONS = { mode: 0o600, enforceMode: true, fsync: true } as const
+
+// 啟動時要同步拿到 token（事件 server 立刻要用），所以同步版留著；面板安裝走 ensureTokenAsync。
 function ensureToken(tokenPath: string, label: string): string {
   const dir = hookScriptDeployPath()
   ensureDir(dir)
@@ -305,35 +330,57 @@ function ensureToken(tokenPath: string, label: string): string {
     try { fs.chmodSync(dir, 0o700) } catch {}
   }
 
+  let stat: fs.Stats | null = null
   try {
-    const stat = fs.lstatSync(tokenPath)
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-      throw new Error(`Agent Pets ${label} token path is not a regular file`)
-    }
+    stat = fs.lstatSync(tokenPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  if (stat) {
+    assertRegularTokenFile(stat, label)
     const existing = fs.readFileSync(tokenPath, 'utf8').trim()
-    if (/^[a-f0-9]{64}$/i.test(existing)) {
+    if (TOKEN_PATTERN.test(existing)) {
       if (!IS_WIN) {
         try { fs.chmodSync(tokenPath, 0o600) } catch {}
       }
       tokenCache.set(tokenPath, existing)
       return existing
     }
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code && code !== 'ENOENT') throw error
   }
 
   const token = tokenCache.get(tokenPath) ?? randomBytes(32).toString('hex')
-  const descriptor = fs.openSync(tokenPath, 'w', 0o600)
-  try {
-    fs.writeFileSync(descriptor, `${token}\n`, 'utf8')
-    fs.fsyncSync(descriptor)
-  } finally {
-    fs.closeSync(descriptor)
-  }
+  writeFileAtomicSync(tokenPath, `${token}\n`, { temporaryPath: tokenTemporaryPath(tokenPath), ...TOKEN_WRITE_OPTIONS })
+  tokenCache.set(tokenPath, token)
+  return token
+}
+
+async function ensureTokenAsync(tokenPath: string, label: string): Promise<string> {
+  const dir = hookScriptDeployPath()
+  await fsp.mkdir(dir, { recursive: true })
   if (!IS_WIN) {
-    try { fs.chmodSync(tokenPath, 0o600) } catch {}
+    try { await fsp.chmod(dir, 0o700) } catch {}
   }
+
+  let stat: fs.Stats | null = null
+  try {
+    stat = await fsp.lstat(tokenPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  if (stat) {
+    assertRegularTokenFile(stat, label)
+    const existing = (await fsp.readFile(tokenPath, 'utf8')).trim()
+    if (TOKEN_PATTERN.test(existing)) {
+      if (!IS_WIN) {
+        try { await fsp.chmod(tokenPath, 0o600) } catch {}
+      }
+      tokenCache.set(tokenPath, existing)
+      return existing
+    }
+  }
+
+  const token = tokenCache.get(tokenPath) ?? randomBytes(32).toString('hex')
+  await writeFileAtomic(tokenPath, `${token}\n`, { temporaryPath: tokenTemporaryPath(tokenPath), ...TOKEN_WRITE_OPTIONS })
   tokenCache.set(tokenPath, token)
   return token
 }
@@ -370,6 +417,11 @@ function ensurePresentationMcpScript(): void {
   if (source !== null) writeFileEnsured(presentationMcpScriptPath(), source)
 }
 
+async function ensurePresentationMcpScriptAsync(): Promise<void> {
+  const source = await readFileAsync(path.join(integrationsDir(), 'presentation-mcp.mjs'))
+  if (source !== null) await writeTextAtomicAsync(presentationMcpScriptPath(), source)
+}
+
 function presentationMcpScriptPath(): string {
   return path.join(hookScriptDeployPath(), DEPLOY_FILES.presentationMcpScript)
 }
@@ -387,10 +439,9 @@ function writeFileEnsured(filePath: string, content: string): void {
 
 // Files Agent Pets fully owns (hook script, plugins): rewritten only when the content differs, so
 // the install outcome can report "unchanged" honestly. No backup is needed for our own files.
-function writeManaged(filePath: string, content: string): ConfigWriteResult {
-  const existing = readFile(filePath)
-  if (existing === content) return { status: 'unchanged', path: filePath, backupPath: null }
-  writeTextAtomic(filePath, content)
+async function writeManagedAsync(filePath: string, content: string): Promise<ConfigWriteResult> {
+  if ((await readFileAsync(filePath)) === content) return { status: 'unchanged', path: filePath, backupPath: null }
+  await writeTextAtomicAsync(filePath, content)
   return { status: 'written', path: filePath, backupPath: null }
 }
 
@@ -398,9 +449,28 @@ function fileExists(filePath: string): boolean {
   return fs.existsSync(filePath)
 }
 
+async function fileExistsAsync(filePath: string): Promise<boolean> {
+  try {
+    await fsp.access(filePath)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function readFile(filePath: string): string | null {
   if (!fs.existsSync(filePath)) return null
   return fs.readFileSync(filePath, 'utf-8')
+}
+
+async function readFileAsync(filePath: string): Promise<string | null> {
+  try {
+    return await fsp.readFile(filePath, 'utf-8')
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null
+    throw error
+  }
 }
 
 function appendToFile(filePath: string, line: string): void {
@@ -417,10 +487,8 @@ function removeFromFile(filePath: string, line: string): void {
   fs.writeFileSync(filePath, lines.join('\n'), 'utf-8')
 }
 
-function removeFile(filePath: string): void {
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath)
-  }
+async function removeFile(filePath: string): Promise<void> {
+  await fsp.rm(filePath, { force: true })
 }
 
 // Marker recording that Agent Pets (not the user) added `hooks = true`, so uninstall only
@@ -429,37 +497,37 @@ function codexFeatureMarkerPath(): string {
   return path.join(hookScriptDeployPath(), 'codex-hooks-feature-added')
 }
 
-function enableCodexHooksFeature(filePath: string): ConfigWriteResult {
-  const existing = readConfigText(filePath) ?? ''
-  const { content, added } = enableCodexHooksFeatureText(existing)
-  const result = writeConfigSafely(filePath, content)
+async function enableCodexHooksFeature(filePath: string): Promise<ConfigWriteResult> {
+  const { result, added } = await withConfigConflictRetry(filePath, async () => {
+    const raw = await readConfigTextAsync(filePath)
+    const { content, added } = enableCodexHooksFeatureText(raw ?? '')
+    return { result: await writeConfigSafelyAsync(filePath, content, raw), added }
+  })
   if (added) {
-    try { writeFileEnsured(codexFeatureMarkerPath(), '1\n') } catch { /* marker is best effort */ }
+    try { await writeTextAtomicAsync(codexFeatureMarkerPath(), '1\n') } catch { /* marker is best effort */ }
   }
   return result
 }
 
 // --- Hook script content (bundled via extraResources) ---
-function hookScriptContent(): string {
-  return fs.readFileSync(path.join(integrationsDir(), 'agent-hook.mjs'), 'utf-8')
+async function hookScriptContentAsync(): Promise<string> {
+  return fsp.readFile(path.join(integrationsDir(), 'agent-hook.mjs'), 'utf-8')
 }
 
-function hookWrapperContent(): string {
-  return fs
-    .readFileSync(path.join(integrationsDir(), 'agent-hook.cmd'), 'utf-8')
+async function hookWrapperContentAsync(): Promise<string> {
+  return (await fsp.readFile(path.join(integrationsDir(), 'agent-hook.cmd'), 'utf-8'))
     .replace('__NODE_EXECUTABLE__', () => escapeCmdQuotedPath(requireNodeBin()))
 }
 
-function installHookScript(): ConfigWriteResult[] {
-  ensureEventToken()
-  const dir = hookScriptDeployPath()
-  ensureDir(dir)
-  const results = [writeManaged(hookScriptPath(), hookScriptContent())]
+async function installHookScript(): Promise<ConfigWriteResult[]> {
+  await ensureTokenAsync(eventTokenPath(), 'event')
+  await fsp.mkdir(hookScriptDeployPath(), { recursive: true })
+  const results = [await writeManagedAsync(hookScriptPath(), await hookScriptContentAsync())]
   if (IS_WIN) {
-    results.push(writeManaged(hookWrapperPath(), hookWrapperContent()))
+    results.push(await writeManagedAsync(hookWrapperPath(), await hookWrapperContentAsync()))
   }
   if (!IS_WIN) {
-    try { fs.chmodSync(hookScriptPath(), 0o700) } catch {}
+    try { await fsp.chmod(hookScriptPath(), 0o700) } catch {}
   }
   return results
 }
@@ -741,20 +809,20 @@ export { DesktopPetPlugin };
 `
 }
 
-function installOpenCode(): ConfigWriteResult[] {
+async function installOpenCode(): Promise<ConfigWriteResult[]> {
   // Checked before anything is written, so an unusable XDG_CONFIG_HOME leaves no half install.
   const cliPlugin = openCodeCliPluginPathIn(writableAgentConfigDir(currentAgentConfigDirs().opencode))
-  ensureEventToken()
-  ensurePermissionToken()
+  await ensureTokenAsync(eventTokenPath(), 'event')
+  await ensureTokenAsync(permissionTokenPath(), 'permission')
   return [
-    writeManaged(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop')),
-    writeManaged(cliPlugin, openCodePluginContent('opencode-cli')),
+    await writeManagedAsync(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop')),
+    await writeManagedAsync(cliPlugin, openCodePluginContent('opencode-cli')),
   ]
 }
 
-function uninstallOpenCode(): void {
-  removeFile(openCodeDesktopPluginPath())
-  for (const dir of configDirLocations(currentAgentConfigDirs().opencode)) removeFile(openCodeCliPluginPathIn(dir))
+async function uninstallOpenCode(): Promise<void> {
+  await removeFile(openCodeDesktopPluginPath())
+  for (const dir of configDirLocations(currentAgentConfigDirs().opencode)) await removeFile(openCodeCliPluginPathIn(dir))
 }
 
 // --- Codex hooks ---
@@ -788,16 +856,16 @@ function codexHooksJson(): any {
   }
 }
 
-function installCodex(): ConfigWriteResult[] {
+async function installCodex(): Promise<ConfigWriteResult[]> {
   const codexHome = writableAgentConfigDir(currentAgentConfigDirs().codex)
-  const results: ConfigWriteResult[] = installHookScript()
+  const results: ConfigWriteResult[] = await installHookScript()
 
   // Throws ConfigRefusedError (and writes nothing) if hooks.json exists but is not valid JSON.
   const newHooks = codexHooksJson()
   const { hooks, ...defaults } = newHooks
-  results.push(mergeAgentPetsHooksFile(codexHooksPathIn(codexHome), hooks, defaults))
+  results.push(await mergeAgentPetsHooksFile(codexHooksPathIn(codexHome), hooks, defaults))
 
-  results.push(enableCodexHooksFeature(codexConfigPathIn(codexHome)))
+  results.push(await enableCodexHooksFeature(codexConfigPathIn(codexHome)))
   return results
 }
 
@@ -805,55 +873,67 @@ const CODEX_HOOKS_OWNED_TOP_LEVEL = { description: 'Agent Pets lifecycle hooks f
 
 // The hook script (and Windows wrapper) is shared by Codex, Claude Code and Claude Desktop.
 // Remove it only when no remaining config still points at it.
-function isHookScriptReferenced(): boolean {
-  const dirs = currentAgentConfigDirs()
-  if (configDirLocations(dirs.codex).some(dir => fileHasAgentPetsHooks(codexHooksPathIn(dir)))) return true
-  if (configDirLocations(dirs.claude).some(dir => fileHasAgentPetsHooks(claudeCodeSettingsPathIn(dir)))) return true
+async function claudeDesktopPointsAtHookScript(): Promise<boolean> {
   try {
-    const desktop = readConfigText(claudeDesktopConfigPath())
-    if (desktop && JSON.parse(desktop)?.agent === hookScriptPath()) return true
-  } catch {}
-  return false
+    const desktop = await readConfigTextAsync(claudeDesktopConfigPath())
+    return Boolean(desktop) && JSON.parse(desktop!)?.agent === hookScriptPath()
+  } catch {
+    return false
+  }
 }
 
-function releaseSharedHookScript(): void {
-  if (isHookScriptReferenced()) return
-  removeFile(hookScriptPath())
-  removeFile(hookWrapperPath())
+async function isHookScriptReferenced(): Promise<boolean> {
+  const dirs = currentAgentConfigDirs()
+  // 三處檢查互不相依，一起讀；任何一處命中就代表腳本還在用。
+  const checks = [
+    ...configDirLocations(dirs.codex).map(dir => fileHasAgentPetsHooksAsync(codexHooksPathIn(dir))),
+    ...configDirLocations(dirs.claude).map(dir => fileHasAgentPetsHooksAsync(claudeCodeSettingsPathIn(dir))),
+    claudeDesktopPointsAtHookScript(),
+  ]
+  return (await Promise.all(checks)).some(Boolean)
 }
 
-function uninstallCodex(): void {
+async function releaseSharedHookScript(): Promise<void> {
+  if (await isHookScriptReferenced()) return
+  await removeFile(hookScriptPath())
+  await removeFile(hookWrapperPath())
+}
+
+async function uninstallCodex(): Promise<void> {
   const [codexHome, ...staleHomes] = configDirLocations(currentAgentConfigDirs().codex)
   // Throws ConfigRefusedError for an unparseable file, leaving it untouched.
-  removeAgentPetsHooksFile(codexHooksPathIn(codexHome), CODEX_HOOKS_OWNED_TOP_LEVEL)
+  await removeAgentPetsHooksFile(codexHooksPathIn(codexHome), CODEX_HOOKS_OWNED_TOP_LEVEL)
   // The old location keeps its config.toml: the marker cannot tell which folder we enabled
   // `hooks = true` in, and a leftover feature flag without our hooks changes nothing.
-  for (const stale of staleHomes) removeAgentPetsHooksFile(codexHooksPathIn(stale), CODEX_HOOKS_OWNED_TOP_LEVEL)
+  for (const stale of staleHomes) await removeAgentPetsHooksFile(codexHooksPathIn(stale), CODEX_HOOKS_OWNED_TOP_LEVEL)
   const configFile = codexConfigPathIn(codexHome)
-  if (fileExists(configFile) && fileExists(codexFeatureMarkerPath())) {
-    const existing = readConfigText(configFile) ?? ''
-    const next = disableCodexHooksFeatureText(existing)
-    if (next !== existing) {
-      writeConfigSafely(configFile, next)
-      if (next === '') removeFile(configFile)
-    }
+  if (await fileExistsAsync(codexFeatureMarkerPath())) {
+    await withConfigConflictRetry(configFile, async () => {
+      const existing = await readConfigTextAsync(configFile)
+      if (existing === null) return
+      const next = disableCodexHooksFeatureText(existing)
+      if (next !== existing) {
+        await writeConfigSafelyAsync(configFile, next, existing)
+        if (next === '') await removeFile(configFile)
+      }
+    })
   }
-  removeFile(codexFeatureMarkerPath())
-  releaseSharedHookScript()
+  await removeFile(codexFeatureMarkerPath())
+  await releaseSharedHookScript()
 }
 
 // --- Claude Desktop ---
-function installClaude(): ConfigWriteResult[] {
-  const scripts = installHookScript()
-  return [...scripts, setJsonKeyFile(claudeDesktopConfigPath(), 'agent', hookScriptPath())]
+async function installClaude(): Promise<ConfigWriteResult[]> {
+  const scripts = await installHookScript()
+  return [...scripts, await setJsonKeyFile(claudeDesktopConfigPath(), 'agent', hookScriptPath())]
 }
 
-function uninstallClaude(): void {
+async function uninstallClaude(): Promise<void> {
   const configFile = claudeDesktopConfigPath()
-  if (fileExists(configFile)) {
-    removeJsonKeyFile(configFile, 'agent', hookScriptPath())
+  if (await fileExistsAsync(configFile)) {
+    await removeJsonKeyFile(configFile, 'agent', hookScriptPath())
   }
-  releaseSharedHookScript()
+  await releaseSharedHookScript()
 }
 
 // --- Claude Code (CLI & Desktop share settings.json) ---
@@ -867,8 +947,20 @@ const CLAUDE_CODE_HOOK_EVENTS = [
   'Notification',
   'Stop',
   'StopFailure',
+  'PreCompact',
+  'PostCompact',
   'SessionEnd',
 ]
+// 第一版就安裝的事件；其餘都是之後才加的，舊安裝要靠啟動升級補上。
+const CLAUDE_CODE_ORIGINAL_EVENTS: ReadonlySet<string> = new Set([
+  'SessionStart',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'Notification',
+  'Stop',
+  'SessionEnd',
+])
 const CLAUDE_CODE_TOOL_EVENTS = new Set(['PreToolUse', 'PermissionRequest', 'PostToolUse', 'PostToolUseFailure'])
 // Only the PermissionRequest handler may wait (for a pet answer); every other
 // event keeps Claude Code's default timeout.
@@ -891,23 +983,23 @@ function claudeCodeHooksJson(): any {
   }
 }
 
-function installClaudeCode(): ConfigWriteResult[] {
+async function installClaudeCode(): Promise<ConfigWriteResult[]> {
   const configDir = writableAgentConfigDir(currentAgentConfigDirs().claude)
-  const scripts = installHookScript()
+  const scripts = await installHookScript()
   // Throws ConfigRefusedError (and writes nothing) if settings.json is not valid JSON.
-  return [...scripts, mergeAgentPetsHooksFile(claudeCodeSettingsPathIn(configDir), claudeCodeHooksJson().hooks)]
+  return [...scripts, await mergeAgentPetsHooksFile(claudeCodeSettingsPathIn(configDir), claudeCodeHooksJson().hooks)]
 }
 
-// Events added after the first Claude Code release; older installs are upgraded on startup.
-const CLAUDE_CODE_UPGRADE_EVENTS = ['PermissionRequest', 'PostToolUseFailure']
+// 從安裝清單推導而非另外手寫：新增事件時不可能漏掉升級（StopFailure 曾因此從未補給舊安裝）。
+const CLAUDE_CODE_UPGRADE_EVENTS: readonly string[] = CLAUDE_CODE_HOOK_EVENTS.filter(event => !CLAUDE_CODE_ORIGINAL_EVENTS.has(event))
 
 /**
- * Brings an install made by an older version up to date (adds the PermissionRequest /
- * PostToolUseFailure handlers and the PermissionRequest timeout). Touches only Agent Pets'
+ * Brings an install made by an older version up to date (adds the handlers for events added
+ * after the first release and the PermissionRequest timeout). Touches only Agent Pets'
  * own handlers and keeps a backup; a missing, unparseable or not-installed settings.json is
  * left alone, and handlers for the original events are never re-added.
  */
-function upgradeClaudeCodeHooks(): ConfigWriteResult | null {
+async function upgradeClaudeCodeHooksUnlocked(): Promise<ConfigWriteResult | null> {
   return ensureAgentPetsHookEntries(claudeCodeSettingsPath(), CLAUDE_CODE_UPGRADE_EVENTS.map(event => ({
     event,
     ...(CLAUDE_CODE_TOOL_EVENTS.has(event) ? { matcher: '*' } : {}),
@@ -924,31 +1016,31 @@ function claudeHooksUpgradeMarkerPath(): string {
  * purpose is not added back on every launch. Settings without any Agent Pets hook are never
  * changed (ensureAgentPetsHookEntries returns null for them).
  */
-function upgradeClaudeCodeHooksOnce(appVersion: string): ConfigWriteResult | null {
+async function upgradeClaudeCodeHooksOnceUnlocked(appVersion: string): Promise<ConfigWriteResult | null> {
   const marker = claudeHooksUpgradeMarkerPath()
-  if ((readFile(marker) ?? '').trim() === appVersion) return null
-  const result = upgradeClaudeCodeHooks()
-  writeFileEnsured(marker, `${appVersion}\n`)
+  if (((await readFileAsync(marker)) ?? '').trim() === appVersion) return null
+  const result = await upgradeClaudeCodeHooksUnlocked()
+  await writeTextAtomicAsync(marker, `${appVersion}\n`)
   return result
 }
 
-function uninstallClaudeCode(): void {
-  const settingsFiles = configDirLocations(currentAgentConfigDirs().claude)
-    .map(claudeCodeSettingsPathIn)
-    .filter(fileExists)
+async function uninstallClaudeCode(): Promise<void> {
+  const candidates = configDirLocations(currentAgentConfigDirs().claude).map(claudeCodeSettingsPathIn)
+  const present = await Promise.all(candidates.map(fileExistsAsync))
+  const settingsFiles = candidates.filter((_file, index) => present[index])
   if (settingsFiles.length === 0) return
   // Throws ConfigRefusedError for an unparseable settings.json, leaving it untouched.
-  for (const settingsFile of settingsFiles) removeAgentPetsHooksFile(settingsFile)
-  releaseSharedHookScript()
+  for (const settingsFile of settingsFiles) await removeAgentPetsHooksFile(settingsFile)
+  await releaseSharedHookScript()
 }
 
 // Repair hooks written by older Windows builds. Those builds used Electron's
 // process.execPath as the hook runtime, so their hooks point back to
 // Agent Pets.exe and recursively launch the desktop app on every event.
-function rewriteInstalledAgentPetsHooks(filePath: string, target: 'codex' | 'claude'): boolean {
+async function rewriteInstalledAgentPetsHooks(filePath: string, target: 'codex' | 'claude'): Promise<boolean> {
   const hookPath = hookScriptPath()
   const codexCommand = codexHookCommand({ isWindows: true, nodeBin: '', hookScript: hookPath, wrapper: hookWrapperPath() })
-  const nodeBin = target === 'claude' ? (nodeResolver.resolveSync()?.path ?? '') : ''
+  const nodeBin = target === 'claude' ? ((nodeResolver.peek() ?? await nodeResolver.resolve())?.path ?? '') : ''
   if (target === 'claude' && !nodeBin) return false // cannot repair without a real Node path
   return rewriteAgentPetsHookCommands(filePath, (hook) => {
     // Never rewrite user config just because the Node path changed: only repair the known-bad
@@ -976,37 +1068,47 @@ function rewriteInstalledAgentPetsHooks(filePath: string, target: 'codex' | 'cla
   })
 }
 
-function repairWindowsInstalledHooks(): void {
+async function repairWindowsInstalledHooksUnlocked(): Promise<void> {
   if (!IS_WIN) return
 
-  const codexChanged = rewriteInstalledAgentPetsHooks(codexHooksPath(), 'codex')
-  const claudeChanged = rewriteInstalledAgentPetsHooks(claudeCodeSettingsPath(), 'claude')
+  const codexChanged = await rewriteInstalledAgentPetsHooks(codexHooksPath(), 'codex')
+  const claudeChanged = await rewriteInstalledAgentPetsHooks(claudeCodeSettingsPath(), 'claude')
 
-  if (codexChanged || claudeChanged) installHookScript()
+  if (codexChanged || claudeChanged) await installHookScript()
 }
 
+/**
+ * Token 要在啟動當下同步拿到（事件／權限 server 立刻要用），其餘檔案改寫丟到安裝佇列背景執行，
+ * 不阻塞啟動。需要等它完成的呼叫端（測試）用 refreshInstalledIntegrationScriptsAsync。
+ */
 function refreshInstalledIntegrationScripts(appVersion?: string, options: { deferAgentConfig?: boolean } = {}): string {
   const token = ensureEventToken()
   ensurePermissionToken()
   ensurePresentationToken()
-  // A read-only home directory should not prevent the desktop pet from
-  // starting. The presentation bridge can be repaired from Setup later; the
-  // event receiver, permissions, and core UI remain available meanwhile.
-  try {
-    ensurePresentationMcpScript()
-  } catch (error) {
-    console.error('Presentation MCP script refresh skipped', error)
-  }
-  try {
-    if (fileExists(hookScriptPath())) installHookScript()
-    if (fileExists(openCodeDesktopPluginPath())) {
-      writeFileEnsured(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop'))
-    }
-  } catch (error) {
-    console.error('Installed integration refresh skipped', error)
-  }
-  if (!options.deferAgentConfig) refreshAgentConfigIntegrations(appVersion)
+  void refreshInstalledIntegrationFiles(appVersion, options)
   return token
+}
+
+function refreshInstalledIntegrationFiles(appVersion?: string, options: { deferAgentConfig?: boolean } = {}): Promise<void> {
+  return serializeInstaller(async () => {
+    // A read-only home directory should not prevent the desktop pet from
+    // starting. The presentation bridge can be repaired from Setup later; the
+    // event receiver, permissions, and core UI remain available meanwhile.
+    try {
+      await ensurePresentationMcpScriptAsync()
+    } catch (error) {
+      console.error('Presentation MCP script refresh skipped', error)
+    }
+    try {
+      if (await fileExistsAsync(hookScriptPath())) await installHookScript()
+      if (await fileExistsAsync(openCodeDesktopPluginPath())) {
+        await writeTextAtomicAsync(openCodeDesktopPluginPath(), openCodePluginContent('opencode-desktop'))
+      }
+    } catch (error) {
+      console.error('Installed integration refresh skipped', error)
+    }
+    if (!options.deferAgentConfig) await refreshAgentConfigIntegrationsUnlocked(appVersion)
+  })
 }
 
 /**
@@ -1015,59 +1117,62 @@ function refreshInstalledIntegrationScripts(appVersion?: string, options: { defe
  * default location first. Only the resolved location is touched: leftovers in the default one are
  * reported by agentConfigDirStatus() and never rewritten unasked.
  */
-function refreshAgentConfigIntegrations(appVersion?: string): void {
+async function refreshAgentConfigIntegrationsUnlocked(appVersion?: string): Promise<void> {
   try {
-    if (fileExists(openCodeCliPluginPath())) {
-      writeFileEnsured(openCodeCliPluginPath(), openCodePluginContent('opencode-cli'))
+    if (await fileExistsAsync(openCodeCliPluginPath())) {
+      await writeTextAtomicAsync(openCodeCliPluginPath(), openCodePluginContent('opencode-cli'))
     }
-    repairWindowsInstalledHooks()
+    await repairWindowsInstalledHooksUnlocked()
   } catch (error) {
     console.error('Installed integration refresh skipped', error)
   }
   try {
-    if (appVersion) upgradeClaudeCodeHooksOnce(appVersion)
+    if (appVersion) await upgradeClaudeCodeHooksOnceUnlocked(appVersion)
   } catch (error) {
     console.error('Claude Code hook upgrade skipped', error)
   }
 }
 
 // --- Health helpers used by the adapter diagnostics ---
+// 面板每次開啟都會跑這些檢查，全部用非同步 I/O，不在主程序同步讀檔。
 /** The bundled hook script matches what is deployed (a stale copy keeps old behaviour). */
-function hookScriptIsCurrent(): boolean {
+async function hookScriptIsCurrent(): Promise<boolean> {
   try {
-    const deployed = readFile(hookScriptPath())
-    return deployed !== null && deployed === hookScriptContent()
+    const [deployed, bundled] = await Promise.all([readFileAsync(hookScriptPath()), hookScriptContentAsync()])
+    return deployed !== null && deployed === bundled
   } catch {
     return true // bundle unreadable: do not raise a false alarm
   }
 }
 
-function openCodePluginIsCurrent(kind: 'cli' | 'desktop'): boolean {
+async function openCodePluginIsCurrent(kind: 'cli' | 'desktop'): Promise<boolean> {
   const target = kind === 'cli' ? openCodeCliPluginPath() : openCodeDesktopPluginPath()
-  const deployed = readFile(target)
+  const deployed = await readFileAsync(target)
   return deployed !== null
     && deployed === openCodePluginContent(kind === 'cli' ? 'opencode-cli' : 'opencode-desktop')
 }
 
 /** Whether each agent's own config directory exists (the tool has been used on this machine). */
-function agentPresence(): { codex: boolean, claude: boolean, opencode: boolean } {
+async function agentPresence(): Promise<{ codex: boolean, claude: boolean, opencode: boolean }> {
   const dirs = currentAgentConfigDirs()
-  return {
-    codex: fs.existsSync(dirs.codex.path),
-    claude: fs.existsSync(dirs.claude.path),
-    opencode: fs.existsSync(path.dirname(openCodeCliPluginPathIn(dirs.opencode.path))) || fs.existsSync(path.dirname(openCodeDesktopPluginPath())),
-  }
+  const [codex, claude, opencodeCli, opencodeDesktop] = await Promise.all([
+    fileExistsAsync(dirs.codex.path),
+    fileExistsAsync(dirs.claude.path),
+    fileExistsAsync(path.dirname(openCodeCliPluginPathIn(dirs.opencode.path))),
+    fileExistsAsync(path.dirname(openCodeDesktopPluginPath())),
+  ])
+  return { codex, claude, opencode: opencodeCli || opencodeDesktop }
 }
 
 // The file in a config folder that shows an Agent Pets install was made there.
 const AGENT_PETS_INSTALL_FILE = {
-  claude: { in: claudeCodeSettingsPathIn, installed: fileHasAgentPetsHooks },
-  codex: { in: codexHooksPathIn, installed: fileHasAgentPetsHooks },
-  opencode: { in: openCodeCliPluginPathIn, installed: fileExists },
-} as const satisfies Record<AgentConfigDirKind, { in(dir: string): string, installed(file: string): boolean }>
+  claude: { in: claudeCodeSettingsPathIn, installed: fileHasAgentPetsHooksAsync },
+  codex: { in: codexHooksPathIn, installed: fileHasAgentPetsHooksAsync },
+  opencode: { in: openCodeCliPluginPathIn, installed: fileExistsAsync },
+} as const satisfies Record<AgentConfigDirKind, { in(dir: string): string, installed(file: string): Promise<boolean> }>
 
 /** Where the agent's config folder is, why, and whether the default folder still holds our files. */
-function agentConfigDirStatus(kind: AgentConfigDirKind): AdapterConfigDirStatus {
+async function agentConfigDirStatus(kind: AgentConfigDirKind): Promise<AdapterConfigDirStatus> {
   const dir = currentAgentConfigDirs()[kind]
   const [, staleDir] = configDirLocations(dir)
   const { in: fileIn, installed } = AGENT_PETS_INSTALL_FILE[kind]
@@ -1077,13 +1182,13 @@ function agentConfigDirStatus(kind: AgentConfigDirKind): AdapterConfigDirStatus 
     path: dir.path,
     source: dir.source,
     ...(dir.ignored ? { ignored: dir.ignored } : {}),
-    ...(staleFile !== undefined && installed(staleFile) ? { staleLocation: staleFile } : {}),
+    ...(staleFile !== undefined && await installed(staleFile) ? { staleLocation: staleFile } : {}),
   }
 }
 
 export type IntegrationTarget = 'opencode' | 'codex' | 'claude' | 'claudeCode'
 
-function installIntegration(target?: IntegrationTarget): ConfigWriteResult[] {
+async function installIntegrationUnlocked(target?: IntegrationTarget): Promise<ConfigWriteResult[]> {
   switch (target) {
     case 'opencode': return installOpenCode()
     case 'codex': return installCodex()
@@ -1092,12 +1197,12 @@ function installIntegration(target?: IntegrationTarget): ConfigWriteResult[] {
     default:
       // Claude Desktop's `agent` key is not a documented setting, so it is no longer written by default
       // (it is still removed on uninstall for older installs). Claude Code covers CLI and Desktop.
-      return [...installOpenCode(), ...installCodex(), ...installClaudeCode()]
+      return [...await installOpenCode(), ...await installCodex(), ...await installClaudeCode()]
   }
 }
 
-function cleanupDeployDirectory(): void {
-  for (const filePath of [
+async function cleanupDeployDirectory(): Promise<void> {
+  await Promise.all([
     eventTokenPath(),
     permissionTokenPath(),
     presentationTokenPath(),
@@ -1107,10 +1212,8 @@ function cleanupDeployDirectory(): void {
     codexFeatureMarkerPath(),
     claudePermissionRespondPath(),
     claudeHooksUpgradeMarkerPath(),
-  ]) {
-    removeFile(filePath)
-  }
-  try { fs.rmdirSync(hookScriptDeployPath()) } catch { /* not empty: user files stay */ }
+  ].map(removeFile))
+  try { await fsp.rmdir(hookScriptDeployPath()) } catch { /* not empty: user files stay */ }
 }
 
 /**
@@ -1118,32 +1221,72 @@ function cleanupDeployDirectory(): void {
  * tokens and bridge scripts under the deploy directory are removed too. Every step runs even if an
  * earlier one is refused; failures are reported together afterwards.
  */
-function uninstallIntegration(target?: IntegrationTarget | 'all'): void {
+async function uninstallIntegrationUnlocked(target?: IntegrationTarget | 'all'): Promise<void> {
   switch (target) {
-    case 'opencode': uninstallOpenCode(); return
-    case 'codex': uninstallCodex(); return
-    case 'claude': uninstallClaude(); return
-    case 'claudeCode': uninstallClaudeCode(); return
+    case 'opencode': return uninstallOpenCode()
+    case 'codex': return uninstallCodex()
+    case 'claude': return uninstallClaude()
+    case 'claudeCode': return uninstallClaudeCode()
     default: {
       const failures: string[] = []
-      const steps: Array<[IntegrationTarget, () => void]> = [
+      const steps: Array<[IntegrationTarget, () => Promise<void>]> = [
         ['opencode', uninstallOpenCode],
         ['codex', uninstallCodex],
         ['claude', uninstallClaude],
         ['claudeCode', uninstallClaudeCode],
       ]
       for (const [name, run] of steps) {
-        try { run() } catch (error) {
+        try { await run() } catch (error) {
           failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
-      if (target === 'all' && failures.length === 0) cleanupDeployDirectory()
+      if (target === 'all' && failures.length === 0) await cleanupDeployDirectory()
       if (failures.length > 0) throw new Error(failures.join('\n'))
     }
   }
 }
 
+// 面板的安裝／移除／修復都會改同幾個設定檔；非同步之後兩個請求可能交錯（讀 → 讀 → 寫 → 寫會互相蓋掉），
+// 所以全部排進同一條佇列，一次只跑一個。前一個失敗不影響下一個。
+let installerQueue: Promise<unknown> = Promise.resolve()
+
+function serializeInstaller<T>(task: () => Promise<T>): Promise<T> {
+  // 不能寫成 then(task, task)：那會把前一個任務的結果／錯誤當成參數傳進這個任務。
+  const run = installerQueue.then(() => task(), () => task())
+  installerQueue = run.catch(() => {})
+  return run
+}
+
+function installIntegration(target?: IntegrationTarget): Promise<ConfigWriteResult[]> {
+  return serializeInstaller(() => installIntegrationUnlocked(target))
+}
+
+function uninstallIntegration(target?: IntegrationTarget | 'all'): Promise<void> {
+  return serializeInstaller(() => uninstallIntegrationUnlocked(target))
+}
+
+function upgradeClaudeCodeHooks(): Promise<ConfigWriteResult | null> {
+  return serializeInstaller(upgradeClaudeCodeHooksUnlocked)
+}
+
+function upgradeClaudeCodeHooksOnce(appVersion: string): Promise<ConfigWriteResult | null> {
+  return serializeInstaller(() => upgradeClaudeCodeHooksOnceUnlocked(appVersion))
+}
+
+function repairWindowsInstalledHooks(): Promise<void> {
+  return serializeInstaller(repairWindowsInstalledHooksUnlocked)
+}
+
+function refreshAgentConfigIntegrations(appVersion?: string): Promise<void> {
+  return serializeInstaller(() => refreshAgentConfigIntegrationsUnlocked(appVersion))
+}
+
 export {
+  CLAUDE_CODE_HOOK_EVENTS,
+  CLAUDE_CODE_UPGRADE_EVENTS,
+  CODEX_HOOK_EVENTS,
+  serializeInstaller,
+  refreshInstalledIntegrationFiles as refreshInstalledIntegrationScriptsAsync,
   hookScriptIsCurrent,
   openCodePluginIsCurrent,
   agentPresence,
@@ -1175,7 +1318,9 @@ export {
   ensureDir,
   writeFileEnsured,
   fileExists,
+  fileExistsAsync,
   readFile,
+  readFileAsync,
   appendToFile,
   removeFromFile,
   installIntegration,

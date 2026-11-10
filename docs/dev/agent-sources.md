@@ -32,14 +32,35 @@
 1. 在 `AgentSource`（或 `AgentFamilyKey`）的 union 加上新值，再到表裡補一列。漏填的話型別檢查會失敗。
 2. 新家族要在 `AGENT_ADAPTER_REGISTRY` 加一個 adapter。`family` 指向新家族；`sources` 由家族推導，不要手寫。
 3. 下列地方會因型別檢查失敗而提醒你補上：
-   - `src/components/SetupWizard.vue` 的 `RESTART_KEYS`
-   - 家族有訂閱額度時，`src/components/DesktopPet.vue` 的 `QUOTA_FAMILY_TIER`
+   - `src/components/setup-wizard/setup-wizard-text.ts` 的 `RESTART_KEYS`
+   - 家族有訂閱額度時，`src/composables/usePetStatusLines.ts` 的 `QUOTA_FAMILY_TIER`
    - `electron/presentation-controller.ts`：插件 `agentFamily` 的字面型別要先擴充，這裡才會編譯通過。擴充那個型別等於改了公開契約，要同步更新 `docs/plugins/`。
 4. hook 這一側要另外改，它們不讀 registry（使用者層設定目錄的位置與環境變數則集中在 `electron/agent-config-dirs.ts` 的 `AGENT_CONFIG_DIR_SPECS`，新家族若有可搬移的設定目錄要加在那裡）：
    - `integrations/agent-hook.mjs` 的 `validSources`：新家族若走這支 hook，把它的來源加進去。`integrations/*.mjs` 安裝後是在 app 之外由 Node 單獨執行，不能 import `src/`，所以保留字面值；`tests/agent-source-registry.test.mts` 要求 `validSources` 正好等於經過 hook 的家族（目前是 Codex 與 Claude）在 registry 裡的來源，漏加或多加都會失敗，新家族走 hook 時也要更新那個測試裡的家族清單。
    - `integrations/install.mjs`、`electron/setup.ts`（含 `IntegrationTarget`）、`electron/hook-config.ts`：負責寫入使用者的設定檔，這一輪由 hook 強化線負責，沒有改成讀 registry。
    - 連線用的 port、`~/.desktop-pet` 與 token 檔名、header、`/v1/...` 路徑不用另外改：它們只寫在 `src/types/local-wire.ts`，`setup.ts` 的 OpenCode plugin 模板以插值取用，hook 與 presentation MCP 腳本的字面值由 `tests/local-wire-contract.test.mts` 比對。
 5. 更新 `tests/agent-source-registry.test.mts` 裡固定的值。
+
+## hook 與 plugin 的手動同步字面值
+
+`integrations/*.mjs` 與 `setup.ts` 裡的 OpenCode plugin 模板安裝後在 app 之外執行，不能 import TS，所以下列值是手寫的，各由一個測試比對原始碼文字（不在 vm 裡執行：`agent-hook.mjs` 一載入就會 `main()` 並結束程序）。新增或改名時，測試失敗就是同步提醒。
+
+| 字面值 | 來源 | 守護測試 |
+|---|---|---|
+| `validSources` | `AGENT_SOURCE_REGISTRY`（Codex＋Claude 家族） | `agent-source-registry.test.mts` |
+| 預設來源 `codex`、`claude-desktop` 對應、plugin 的 `SOURCE` | `AGENT_SOURCE_REGISTRY`、`FAMILY_SOURCES` | `hook-literal-contract.test.mts` |
+| `mapClaudeEvent`／`mapCodexEvent`／plugin `setState` 回傳的狀態 | `AGENT_STATES`（並要求每個狀態都有路徑送出） | `hook-literal-contract.test.mts` |
+| `case` 事件名稱 | `setup.ts` 的 `CLAUDE_CODE_HOOK_EVENTS`／`CODEX_HOOK_EVENTS`（已安裝必須有 `case`，有 `case` 必須已安裝） | `hook-literal-contract.test.mts` |
+| `RESOLVING_EVENTS` | 必須是已對應且已安裝的 Claude 事件 | `hook-literal-contract.test.mts` |
+| `MIN_WAIT_SECONDS`／`MAX_WAIT_SECONDS` | `src/types/permission.ts` | `hook-literal-contract.test.mts` |
+| `claude-permission-respond` 內容的 `enabled`／`waitSeconds` | `setup.ts` 的 `syncClaudePermissionRespondOptIn` | `hook-literal-contract.test.mts` |
+| host 提示的 `termProgram`／`entrypoint`／`bundleId` 格式與送出的 key | `electron/host-app.ts`（plugin 與 hook 兩份互相比對） | `hook-literal-contract.test.mts` |
+| `presentation-mcp.mjs` 的 reaction、ttl、訊息長度、`petId` 格式 | `PRESENTATION_REACTIONS`、`PRESENTATION_*_TTL_MS`、`PRESENTATION_MAX_MESSAGE_LENGTH`、`isValidPetId` | `hook-literal-contract.test.mts` |
+| `agent-hook.cmd` 的檔名與 `__NODE_EXECUTABLE__` | `DEPLOY_FILES.hookScript`、`setup.ts` 的替換 | `hook-literal-contract.test.mts` |
+| `PET_URL`、`PERMISSION_URL`、`DEPLOY_DIR`、token 檔名、header、權限 route、啟動標記檔名 | `src/types/local-wire.ts`、`hookStartupMarkerName` | `local-wire-contract.test.mts` |
+| `IDENTIFIER_PATTERN` | `OPAQUE_ID_128_PATTERN` | `id-patterns.test.mts` |
+
+沒有 TS 對照的值（`DENY_MESSAGE`、輪詢與重試間隔、`STARTUP_MARKER_MAX_AGE_MS`）由行為測試固定（`claude-permission-hook`、`agent-hook-delivery`）。
 
 ## 刻意沒有併進來的對照
 

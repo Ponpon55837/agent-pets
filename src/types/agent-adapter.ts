@@ -145,6 +145,7 @@ export type InstallErrorCode =
   | 'config_unparseable'
   | 'config_unsafe'
   | 'config_too_large'
+  | 'config_changed'
   | 'permission_denied'
   | 'file_busy'
   | 'read_only'

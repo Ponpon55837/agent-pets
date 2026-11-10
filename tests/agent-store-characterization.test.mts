@@ -106,7 +106,7 @@ const EXPECTED_ACTIONS = [
   'handleProgressionAwarded', 'handleSuccessTimeout', 'initializeAchievements', 'initializeDesktopPreferences',
   'initializePermissionRequests', 'initializePetWindowMode', 'initializeProgression', 'loadPets', 'markPetInteraction',
   'openLoginItemsSettings', 'openPluginFeedLink', 'openProjectMcpPanel', 'openSettings', 'openSetupWizard', 'patPet',
-  'pauseToast', 'refreshProjectPets', 'refreshQuota', 'removePet', 'removeProjectPet', 'removeSession', 'renamePet',
+  'pauseToast', 'quotaForecast', 'refreshProjectPets', 'refreshQuota', 'removePet', 'removeProjectPet', 'removeSession', 'renamePet',
   'resetMood', 'resizePetWindow', 'restoreSessionSnapshot', 'resumeToast', 'runSessionJump', 'sessionByKey',
   'setAchievementsEnabled', 'setAchievementsSnapshot', 'setActivityBubbleEnabled', 'setAmbientEnabled',
   'setBubbleEnabled', 'setCaptureExclusionEnabled', 'setClaudePermissionRespondEnabled',

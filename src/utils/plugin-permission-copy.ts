@@ -1,6 +1,6 @@
 // 權限單位 → 畫面文字（標籤與說明）。分組與風險等級仍由 plugin-permissions.ts 決定；
 // 授權與重新同意一律由主程序判定，這裡只負責顯示。
-import { t, type TranslationKey, type TranslationParams } from '@/i18n'
+import { t, tPlural, type TranslationKey, type TranslationParams } from '@/i18n'
 import { groupPermissionUnits, parsePermissionUnit, type PermissionGroupId, type PermissionRisk } from '@/utils/plugin-permissions'
 import { lookupOwn } from '@/utils/own-lookup'
 
@@ -18,11 +18,14 @@ export interface PermissionGroupView {
   entries: PermissionEntryView[]
 }
 
-interface PermissionCopy {
-  label: TranslationKey
+type PermissionCopy = {
   hint: TranslationKey
   params?: (detail: string, unit: string) => TranslationParams
-}
+} & (
+  | { label: TranslationKey; plural?: false }
+  // 複數標籤以 `<label>.one`/`.other` 存放，不是 TranslationKey，由 tPlural 依 count 取用。
+  | { label: string; plural: true }
+)
 
 // 依權限種類（`kind:detail` 的 kind）。
 const KIND_COPY = {
@@ -50,8 +53,8 @@ const CONTRIBUTION_COPY = {
 
 // 帶數量的貢獻點（`skins:3`、`panelThemes:2`）。
 const COUNTED_CONTRIBUTION_COPY = [
-  ['skins:', { label: 'pluginPermissionSkins', hint: 'plugins.hintSkins' }],
-  ['panelThemes:', { label: 'pluginPermissionPanelThemes', hint: 'plugins.hintPanelThemes' }],
+  ['skins:', { label: 'pluginPermissionSkins', hint: 'plugins.hintSkins', plural: true }],
+  ['panelThemes:', { label: 'pluginPermissionPanelThemes', hint: 'plugins.hintPanelThemes', plural: true }],
 ] as const satisfies ReadonlyArray<readonly [string, PermissionCopy]>
 
 const UNKNOWN_COPY: PermissionCopy = { label: 'plugins.permUnknown', hint: 'plugins.hintUnknown', params: (_detail, unit) => ({ unit }) }
@@ -68,6 +71,7 @@ function resolveCopy(unit: string): { copy: PermissionCopy; params: TranslationP
 
 export function permissionLabel(unit: string): string {
   const { copy, params } = resolveCopy(unit)
+  if (copy.plural) return tPlural(copy.label, Number(params?.count) || 0, params)
   return t(copy.label, params)
 }
 

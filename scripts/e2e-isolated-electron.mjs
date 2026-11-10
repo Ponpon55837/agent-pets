@@ -6,6 +6,7 @@
 //   node scripts/e2e-isolated-electron.mjs [--inspect-port 9349] [--debug-port 9348] [--app-root <dir>]
 //                                          [--hook-port-base 27373 | --real-hook-ports]（說明見下）
 //                                          [--reuse-root <上次啟動日誌的 root>]
+//                                          [--app-update-fixture newer|current|failed]（App 新版檢查的假 GitHub release 回應；預設 current）
 // --reuse-root 沿用上一次的暫時 HOME 與 userData 重新啟動（token 與已安裝的 hook 都還在），用來量測 app 冷啟動。
 // --agent-config-dirs 帶上指向隔離 HOME 內 moved/ 的 CLAUDE_CONFIG_DIR／CODEX_HOME／XDG_CONFIG_HOME，
 // 驗證 app 讀寫搬走的 agent 設定目錄；搭配 scripts/e2e-real-hook.mts --agent-config-dirs。
@@ -21,10 +22,11 @@
 // 請看啟動日誌的「listening on」確認。--real-hook-ports 刻意使用預設埠，給需要真實 hook 的測試；這類測試請盡量縮短。
 import { spawn } from 'node:child_process'
 import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import { createServer } from 'node:net'
 import { zipSync } from 'fflate'
 
 const repoRoot = resolve(import.meta.dirname, '..')
@@ -173,6 +175,24 @@ const agentConfigEnv = process.argv.includes('--agent-config-dirs')
 for (const dir of [agentConfigEnv.CLAUDE_CONFIG_DIR, agentConfigEnv.CODEX_HOME]) if (dir) mkdirSync(dir, { recursive: true })
 const { catalogFixture, tamperedArchivePath } = createCatalogFixture(root)
 const offscreen = process.argv.includes('--offscreen')
+// App 新版檢查在 e2e 只讀這份假回應，不會連網；newer 的版本號刻意遠高於任何真實版本。
+const appUpdateFixtureMode = argString('--app-update-fixture') ?? 'current'
+if (!['newer', 'current', 'failed'].includes(appUpdateFixtureMode)) {
+  console.error('--app-update-fixture must be newer, current or failed')
+  process.exit(1)
+}
+const appVersion = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8')).version
+const appUpdateFixture = appUpdateFixtureMode === 'failed'
+  ? { status: 500, body: '{}' }
+  : {
+      status: 200,
+      body: JSON.stringify({
+        tag_name: appUpdateFixtureMode === 'newer' ? 'v999.0.0' : `v${appVersion}`,
+        html_url: `https://github.com/Ponpon55837/agent-pets/releases/tag/${appUpdateFixtureMode === 'newer' ? 'v999.0.0' : `v${appVersion}`}`,
+        draft: false,
+        prerelease: false,
+      }),
+    }
 const bootstrap = join(root, 'bootstrap.cjs')
 writeFileSync(bootstrap, `
 const path = require('node:path')
@@ -266,9 +286,14 @@ safeStorage.decryptString = (value) => {
 // The app reads Claude/Codex credentials through /usr/bin/security (the real login
 // Keychain, which HOME isolation does not cover) and runs the claude/codex CLIs.
 // Redirect those to /usr/bin/false so test runs can never read the user's Keychain
-// or act with their accounts.
+// or act with their accounts. Windows has no /usr/bin/false (spawn would raise an
+// unhandled ENOENT 'error' event), so it uses cmd.exe with an immediate "exit 1" instead.
 const childProcess = require('node:child_process')
 const blockedExecs = []
+const isWindows = process.platform === 'win32'
+const denyFile = isWindows ? path.join(process.env.SYSTEMROOT || process.env.WINDIR || 'C:/Windows', 'System32', 'cmd.exe') : '/usr/bin/false'
+const denyArgs = isWindows ? ['/d', '/c', 'exit 1'] : []
+const denyShellCommand = isWindows ? 'exit 1' : '/usr/bin/false'
 const isBlockedCommand = (file) => typeof file === 'string'
   && (/(^|\\/)security$/.test(file) || /(^|[\\/\\\\])(claude|codex)(\\.exe|\\.cmd)?$/i.test(file))
 const isBlockedShell = (command) => typeof command === 'string' && /(^|[\\s/])(security|claude|codex)(\\s|$)/.test(command)
@@ -277,8 +302,8 @@ for (const method of ['execFile', 'execFileSync', 'spawn', 'spawnSync']) {
   childProcess[method] = function (file, ...rest) {
     if (!isBlockedCommand(file)) return original.call(this, file, ...rest)
     blockedExecs.push(path.basename(String(file)))
-    const args = Array.isArray(rest[0]) ? [[], ...rest.slice(1)] : rest
-    return original.call(this, '/usr/bin/false', ...args)
+    const args = Array.isArray(rest[0]) ? [denyArgs, ...rest.slice(1)] : [denyArgs, ...rest]
+    return original.call(this, denyFile, ...args)
   }
 }
 for (const method of ['exec', 'execSync']) {
@@ -286,7 +311,7 @@ for (const method of ['exec', 'execSync']) {
   childProcess[method] = function (command, ...rest) {
     if (!isBlockedShell(command)) return original.call(this, command, ...rest)
     blockedExecs.push(String(command).trim().split(/\\s+/)[0])
-    return original.call(this, '/usr/bin/false', ...rest)
+    return original.call(this, denyShellCommand, ...rest)
   }
 }
 const fake = safeStorage.encryptString.toString().includes('agent-pets-e2e')
@@ -306,6 +331,7 @@ globalThis.__agentPetsE2E = {
   blockedExecs,
   createdWindows,
   catalogFixture: ${JSON.stringify(catalogFixture)},
+  appUpdateFixture: ${JSON.stringify(appUpdateFixture)},
   tamperedArchivePath: ${JSON.stringify(tamperedArchivePath)},
   pluginIssueReportBaseUrl: 'https://github.com/example/agent-pets-plugins/issues/new',
   shellOpenExternalCalls,
@@ -317,6 +343,22 @@ console.log('AGENT_PETS_E2E_READY ' + JSON.stringify({ root, userData: app.getPa
 require(${JSON.stringify(mainBundle)})
 `)
 
+// inspector／devtools 埠被佔用時 Electron 只印一行錯誤仍照常啟動，測試腳本就會連到別人的程序
+// （例如另一個工作樹的隔離 App）去操作它；所以先確認兩個埠都空著，否則中止。
+const portIsFree = port => new Promise(resolvePort => {
+  const probe = createServer()
+  probe.once('error', () => resolvePort(false))
+  probe.listen(port, '127.0.0.1', () => probe.close(() => resolvePort(true)))
+})
+for (const [label, port] of [['--inspect-port', inspectPort], ['--debug-port', debugPort]]) {
+  if (!await portIsFree(port)) {
+    console.error(`AGENT_PETS_E2E_ABORT ${label} ${port} is already in use; pick a free port`)
+    // 這次才建立的暫存根目錄不留下；--reuse-root 是呼叫端的資料，不動。
+    if (!reuseRoot) rmSync(root, { recursive: true, force: true })
+    process.exit(1)
+  }
+}
+
 const electronBinary = createRequire(import.meta.url)('electron')
 const child = spawn(electronBinary, [
   `--inspect=${inspectPort}`,
@@ -326,7 +368,11 @@ const child = spawn(electronBinary, [
   cwd: repoRoot,
   // Only pass what Electron needs; never the user's tokens, account ids or agent settings.
   env: {
-    ...Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'USER', 'LOGNAME', 'SHELL', 'DISPLAY', 'XDG_RUNTIME_DIR', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP',
+    ...Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'USER', 'LOGNAME', 'SHELL', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP',
+      // Linux 顯示連線：HOME 換成暫存目錄後，Electron 找不到 ~/.Xauthority，必須沿用呼叫端的設定。
+      // xvfb-run -a 會用 -auth 檔並匯出 XAUTHORITY（只是 X cookie 檔的路徑，不含憑證內容）；
+      // Wayland 桌面則靠 WAYLAND_DISPLAY 與 XDG_RUNTIME_DIR 找到 compositor 的 socket。
+      'DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR',
       // 連接埠覆寫（僅限 dev build），讓已安裝的 Agent Pets 能保有 17373–17375。
       'AGENT_PETS_EVENT_PORT', 'AGENT_PETS_PERMISSION_PORT', 'AGENT_PETS_PRESENTATION_PORT',
       // 寵物冷啟動倍率（dev 用的 createPetWindow() 預設值）。
