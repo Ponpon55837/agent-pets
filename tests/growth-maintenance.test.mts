@@ -206,11 +206,15 @@ test('the reset cutoff survives a restart of the achievement store', t => {
   h.achievements.resetGrowth(BASE + 7000)
   h.achievements.close()
   const reopened = new AchievementStore(h.paths.achievements, { now: () => BASE, localDate })
-  t.after(() => reopened.close())
-  assert.equal(reopened.getGrowthResetAt(), BASE + 7000)
-  const fact = { petId: 'pet-a', source: 'codex', sessionId: 'x', projectId: '', adapterId: 'codex', completedAt: BASE }
-  reopened.reconcileCompletedSessions([fact])
-  assert.equal(count(reopened, 'completed_sessions'), 0)
+  // 在測試本體內關閉：t.after 依註冊順序執行，harness 的刪目錄會先跑，Windows 上資料庫還開著就刪會 EPERM。
+  try {
+    assert.equal(reopened.getGrowthResetAt(), BASE + 7000)
+    const fact = { petId: 'pet-a', source: 'codex', sessionId: 'x', projectId: '', adapterId: 'codex', completedAt: BASE }
+    reopened.reconcileCompletedSessions([fact])
+    assert.equal(count(reopened, 'completed_sessions'), 0)
+  } finally {
+    reopened.close()
+  }
 })
 
 test('optimizeAndVacuum refuses while a transaction is open', t => {

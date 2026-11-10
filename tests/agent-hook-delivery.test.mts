@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { hookStartupMarkerName } from '../electron/main/hook-startup-marker.ts'
 
 // 測試真正的 integrations/agent-hook.mjs 送出狀態事件的行為。執行的是只改了事件網址的副本，
@@ -52,10 +52,11 @@ function hookHome(server: Server): { home: string; hookPath: string } {
 }
 
 // hook 讀完 payload 後把它的 event loop 卡住一次，模擬機器忙時 CPU 被搶走；只改時序，不替換 hook 的任何程式。
+// 回傳 file:// URL：--import 在 Windows 不接受 C:\\ 開頭的絕對路徑（會被當成 c: 協定）。
 function stallPreload(home: string, ms: number): string {
   const file = path.join(home, 'stall.mjs')
   fs.writeFileSync(file, `process.stdin.once('end', () => setImmediate(() => { const until = Date.now() + ${ms}; while (Date.now() < until) {} }))\n`)
-  return file
+  return pathToFileURL(file).href
 }
 
 function runHook(hookPath: string, home: string, payload: Record<string, unknown>, preload?: string): Promise<{ code: number | null; ms: number }> {
