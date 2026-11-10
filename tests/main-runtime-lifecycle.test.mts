@@ -53,6 +53,8 @@ test('teardown releases services in the established order', () => {
     // 階段 11：History runtime 服務另外停止本機用量補掃與清除計時器，改前沒有任何清理步驟會停它們。
     'historyRuntime.dispose()',
     'pluginCatalogRuntime.dispose()',
+    // 週期二：App 新版檢查服務另外清除每小時喚醒計時器。
+    'appUpdateRuntime.dispose()',
     'if (mainState.localUsageScanTimer) clearInterval(mainState.localUsageScanTimer)',
     'mainState.localUsageScanTimer = null',
     'mainState.localUsageReader = null',

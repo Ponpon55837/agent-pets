@@ -17,6 +17,8 @@ import designZhTW from './locales/design/zh-TW.json' with { type: 'json' }
 import designEnUS from './locales/design/en-US.json' with { type: 'json' }
 import reliabilityZhTW from './locales/reliability/zh-TW.json' with { type: 'json' }
 import reliabilityEnUS from './locales/reliability/en-US.json' with { type: 'json' }
+import updateZhTW from './locales/update/zh-TW.json' with { type: 'json' }
+import updateEnUS from './locales/update/en-US.json' with { type: 'json' }
 import zhTWErrors from './locales/errors.zh-TW.json' with { type: 'json' }
 import { DEFAULT_LOCALE, isAppLocale, type AppLocale } from './types/locale.ts'
 import { STORAGE_KEYS } from './utils/storage-keys.ts'
@@ -36,6 +38,7 @@ const messages = {
   ...growthZhTW,
   ...designZhTW,
   ...reliabilityZhTW,
+  ...updateZhTW,
 }
 
 export type TranslationKey = keyof typeof messages
@@ -51,6 +54,7 @@ const englishMessages: Record<TranslationKey, string> = {
   ...growthEnUS,
   ...designEnUS,
   ...reliabilityEnUS,
+  ...updateEnUS,
 }
 
 export const locale = ref<AppLocale>(readStored(STORAGE_KEYS.locale))

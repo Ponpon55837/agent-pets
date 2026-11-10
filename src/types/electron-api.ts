@@ -2,10 +2,12 @@
 
 import type { OnboardingAction, OnboardingState } from '@/types/onboarding'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '@/types/desktop'
+import type { AppUpdateCheckResponse, AppUpdateState } from '@/types/app-update'
 import type { SessionJumpRequest, SessionJumpResult } from '@/types/session-jump'
 import type { PermissionDecisionValue, PermissionRequestStatus, PermissionRequestView, PermissionAuditEntry } from '@/types/permission'
 import type { ProgressionAwardEvent, ProgressionInsights, ProgressionSnapshot } from '@/types/progression'
 import type { AchievementSnapshot, AchievementUnlock } from '@/types/achievement'
+import type { DbMaintenanceResult, GrowthResetResult } from '@/types/growth-maintenance'
 import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, HistorySessionDetail, HistorySessionPage, HistorySessionQuery, HistorySummary, HistoryUsageBlock } from '@/types/history'
 import type { PetWindowMode, PetWindowModeState } from '@/types/pet-window'
 import type { PetBehaviorManifest, PluginSkinPetSource } from '@/types/pet'
@@ -142,6 +144,10 @@ export interface ElectronAPI {
       onPanelOpenPluginView: (callback: (pluginId: string) => void) => () => void
       initializeDesktopPreferences: (legacySoundEnabled: boolean) => Promise<DesktopPreferences>
       openLoginItemsSettings: () => Promise<boolean>
+      getAppUpdateState: () => Promise<AppUpdateState>
+      setAppUpdateEnabled: (enabled: boolean) => Promise<AppUpdateState>
+      checkAppUpdate: () => Promise<AppUpdateCheckResponse>
+      openAppUpdateRelease: () => Promise<boolean>
       setDesktopPreferences: (patch: DesktopPreferencesPatch) => Promise<DesktopPreferences>
       getPowerSaveState: () => Promise<boolean>
       onPowerSaveStateUpdated: (callback: (powerSave: boolean) => void) => () => void
@@ -204,6 +210,8 @@ export interface ElectronAPI {
       archiveProjectPet: (projectId: string) => Promise<ProjectPetArchiveResult>
       getProjectPetsEnabled: () => Promise<boolean>
       setProjectPetsEnabled: (enabled: boolean) => Promise<boolean>
+      resetGrowth: () => Promise<GrowthResetResult>
+      runDbMaintenance: () => Promise<DbMaintenanceResult>
       clearHistory: () => Promise<HistoryClearResult>
       exportHistory: (request?: HistoryExportRequest) => Promise<HistoryCommandResult>
       revealHistoryExport: () => Promise<boolean>

@@ -1,6 +1,6 @@
 # IPC 安全清單
 
-由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 124 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
+由 `node scripts/generate-ipc-inventory.mjs --write` 從 `electron/ipc/channels.ts`、主程序與 preload 產生；目前 130 個 handler。每列列出 sender guard、handler 中的輸入檢查概況、preload 對應與測試。新增 IPC 頻道若未同步 preload 或 sender 驗證，`tests/ipc-inventory.test.mts` 會失敗。
 
 | 頻道 | 類型 | 允許的寄件者 | 輸入驗證概況 | Preload API | 對應測試 |
 | --- | --- | --- | --- | --- | --- |
@@ -8,12 +8,18 @@
 | `adapter-diagnose` | `handle` | 設定面板 main frame | isAgentAdapterId；無效輸入回安全預設或錯誤 | diagnoseAdapter (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `adapter-install` | `handle` | 設定面板 main frame | isAgentAdapterId；無效輸入回安全預設或錯誤 | installAdapter (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `adapter-uninstall` | `handle` | 設定面板 main frame | isAgentAdapterId；無效輸入回安全預設或錯誤 | uninstallAdapter (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `app-update-get` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | getAppUpdateState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `app-update-set-enabled` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；無效輸入回安全預設或錯誤 | setAppUpdateEnabled (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `app-update-check` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | checkAppUpdate (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `app-update-open-release` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | openAppUpdateRelease (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `pet-window-mode-set` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | setPetWindowMode (invoke) | `tests/agent-store-characterization.test.mts`<br>`tests/ipc-desktop.test.mts` |
 | `pet-window-mode-init` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | initializePetWindowMode (invoke) | `tests/agent-store-characterization.test.mts` |
 | `desktop-preferences-init` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | initializeDesktopPreferences (invoke) | `tests/agent-store-characterization.test.mts` |
 | `desktop-preferences-set` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | setDesktopPreferences (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `desktop-open-login-items-settings` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | openLoginItemsSettings (invoke) | `tests/agent-store-characterization.test.mts`<br>`tests/ipc-desktop.test.mts` |
 | `power-save-state` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getPowerSaveState (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
+| `growth-reset` | `handle` | 設定面板 main frame（共用 sender guard） | handler／controller 驗證 payload；拒絕無效輸入 | resetGrowth (invoke) | `tests/growth-maintenance.test.mts` |
+| `db-maintenance-run` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | runDbMaintenance (invoke) | `tests/growth-maintenance.test.mts` |
 | `history-summary` | `handle` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | getHistorySummary (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `history-usage-blocks` | `handle` | 設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getUsageBlocks (invoke) | `tests/ipc-history.test.mts` |
 | `history-sessions` | `handle` | 設定面板 main frame | normalizeSessionQuery；無效輸入回安全預設或錯誤 | listHistorySessions (invoke) | `tests/agent-source-registry.test.mts`<br>`tests/agent-state-registry.test.mts`<br>`tests/history-sessions.test.mts` |
@@ -85,7 +91,7 @@
 | `plugin-panel-view-bounds` | `on` | 設定面板 main frame（共用 sender guard） | 型別；數值範圍；validateBounds；無效輸入回安全預設或錯誤 | setPluginPanelViewBounds (send) | `tests/ipc-plugin-panel-ui.test.mts`<br>`tests/plugin-panel-controller-characterization.test.mts` |
 | `plugin-panel-view-close` | `on` | 設定面板 main frame（共用 sender guard） | 型別；數值範圍；無效輸入回安全預設或錯誤 | closePluginPanelView (send) | `tests/ipc-plugin-panel-ui.test.mts`<br>`tests/plugin-panel-controller-characterization.test.mts` |
 | `plugin-panel-theme-initial` | `on` | 受信任的主 frame（再由 controller 驗證 active WebContents） | 無 payload；檢查 sender 並回傳受限狀態 | pluginPanelThemeInitial (sendSync, plugin-ui-preload) | `tests/ipc-plugin-panel-ui.test.mts` |
-| `plugin-panel-api` | `handle` | panelView 主 frame；active WebContents 二次比對 | handler／controller 驗證 payload；拒絕無效輸入 | agentPets (createPluginPanelPublicApi) | `tests/ipc-inventory.test.mts`<br>`tests/ipc-plugin-panel-ui.test.mts`<br>`tests/plugin-catalog-runtime.test.mts` |
+| `plugin-panel-api` | `handle` | panelView 主 frame；active WebContents 二次比對 | handler／controller 驗證 payload；拒絕無效輸入 | agentPets (createPluginPanelPublicApi) | `tests/app-update-runtime.test.mts`<br>`tests/ipc-inventory.test.mts`<br>`tests/ipc-plugin-panel-ui.test.mts`<br>`tests/plugin-catalog-runtime.test.mts` |
 | `plugin-preferences-global-set` | `handle` | 設定面板 main frame（共用 sender guard） | isPluginPanelPreferencePatch；無效輸入回安全預設或錯誤 | setPluginGlobalPreferences (invoke) | `tests/ipc-plugin-preferences.test.mts`<br>`tests/plugin-panel-controller-characterization.test.mts` |
 | `plugin-preferences-instance-set` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；isPluginPanelPluginId, isPluginPanelPreferencePatch；無效輸入回安全預設或錯誤 | setPluginInstancePreferences (invoke) | `tests/ipc-plugin-preferences.test.mts` |
 | `plugin-settings-get` | `handle` | 設定面板 main frame（共用 sender guard） | isPluginPanelPluginId, isUnsafePluginDataError；無效輸入回安全預設或錯誤 | getPluginSettings (invoke) | `tests/ipc-plugin-settings.test.mts`<br>`tests/plugin-panel-controller-characterization.test.mts` |

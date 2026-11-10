@@ -6,6 +6,7 @@
 //   node scripts/e2e-isolated-electron.mjs [--inspect-port 9349] [--debug-port 9348] [--app-root <dir>]
 //                                          [--hook-port-base 27373 | --real-hook-ports]（說明見下）
 //                                          [--reuse-root <上次啟動日誌的 root>]
+//                                          [--app-update-fixture newer|current|failed]（App 新版檢查的假 GitHub release 回應；預設 current）
 // --reuse-root 沿用上一次的暫時 HOME 與 userData 重新啟動（token 與已安裝的 hook 都還在），用來量測 app 冷啟動。
 // --agent-config-dirs 帶上指向隔離 HOME 內 moved/ 的 CLAUDE_CONFIG_DIR／CODEX_HOME／XDG_CONFIG_HOME，
 // 驗證 app 讀寫搬走的 agent 設定目錄；搭配 scripts/e2e-real-hook.mts --agent-config-dirs。
@@ -174,6 +175,24 @@ const agentConfigEnv = process.argv.includes('--agent-config-dirs')
 for (const dir of [agentConfigEnv.CLAUDE_CONFIG_DIR, agentConfigEnv.CODEX_HOME]) if (dir) mkdirSync(dir, { recursive: true })
 const { catalogFixture, tamperedArchivePath } = createCatalogFixture(root)
 const offscreen = process.argv.includes('--offscreen')
+// App 新版檢查在 e2e 只讀這份假回應，不會連網；newer 的版本號刻意遠高於任何真實版本。
+const appUpdateFixtureMode = argString('--app-update-fixture') ?? 'current'
+if (!['newer', 'current', 'failed'].includes(appUpdateFixtureMode)) {
+  console.error('--app-update-fixture must be newer, current or failed')
+  process.exit(1)
+}
+const appVersion = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8')).version
+const appUpdateFixture = appUpdateFixtureMode === 'failed'
+  ? { status: 500, body: '{}' }
+  : {
+      status: 200,
+      body: JSON.stringify({
+        tag_name: appUpdateFixtureMode === 'newer' ? 'v999.0.0' : `v${appVersion}`,
+        html_url: `https://github.com/Ponpon55837/agent-pets/releases/tag/${appUpdateFixtureMode === 'newer' ? 'v999.0.0' : `v${appVersion}`}`,
+        draft: false,
+        prerelease: false,
+      }),
+    }
 const bootstrap = join(root, 'bootstrap.cjs')
 writeFileSync(bootstrap, `
 const path = require('node:path')
@@ -312,6 +331,7 @@ globalThis.__agentPetsE2E = {
   blockedExecs,
   createdWindows,
   catalogFixture: ${JSON.stringify(catalogFixture)},
+  appUpdateFixture: ${JSON.stringify(appUpdateFixture)},
   tamperedArchivePath: ${JSON.stringify(tamperedArchivePath)},
   pluginIssueReportBaseUrl: 'https://github.com/example/agent-pets-plugins/issues/new',
   shellOpenExternalCalls,

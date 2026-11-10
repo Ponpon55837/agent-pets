@@ -6,6 +6,7 @@ import type { HistoryTokenUsageRecord } from '../../src/types/history'
 import type { AchievementUnlock } from '../../src/types/achievement'
 import type { AgentStatusEvent } from '../../src/types/agent'
 import type { ProgressionAwardEvent, ProgressionEventResult, ProgressionSnapshot } from '../../src/types/progression'
+import type { GrowthResetResult } from '../../src/types/growth-maintenance.ts'
 import type { MainState } from './state.ts'
 
 // Growth 服務：XP／進化的 progression store、成就 store（含初始化失敗的退避重試）、
@@ -57,6 +58,8 @@ export interface GrowthService {
   syncLocalTokenUsage(records: readonly HistoryTokenUsageRecord[], retentionDays: number): void
   evaluateLocalTokens(): void
   reconcileFromHistory(): void
+  /** 清掉 XP／成就並廣播；詳見實作註解（雙資料庫原子性與重設時間）。 */
+  resetGrowth(): GrowthResetResult
   broadcastProgression(snapshot?: ProgressionSnapshot): void
   broadcastProgressionIfChanged(snapshot: ProgressionSnapshot): void
   broadcastProgressionAwards(result: ProgressionEventResult): void
@@ -304,8 +307,10 @@ export function createGrowthService(deps: GrowthServiceDeps): GrowthService {
       // overlap for late-arriving events) instead of the whole history.
       const startedAt = now()
       const previous = state.historyStore.getAchievementReconciledAt()
+      // 重設成長資料之後只看重設時間以後的 session，否則歷史會把剛清掉的成就補回來。
+      const since = Math.max(previous > 0 ? previous - DAY_MS : 0, state.achievementStore.getGrowthResetAt())
       const unlocks = state.achievementStore.reconcileCompletedSessions(
-        state.historyStore.getAchievementCompletedSessions(previous > 0 ? previous - DAY_MS : 0),
+        state.historyStore.getAchievementCompletedSessions(since),
         petId => state.progressionStore?.getSnapshot(petId),
       )
       state.historyStore.setAchievementReconciledAt(startedAt)
@@ -314,6 +319,39 @@ export function createGrowthService(deps: GrowthServiceDeps): GrowthService {
       deps.logError('Achievement history reconciliation failed', error)
       logAchievementDiagnostic('history-reconcile', error)
     }
+  }
+
+  /**
+   * 重設成長資料（XP、連續天數、成就、本機 token 帳本）。保留寵物清單與目前選擇的寵物。
+   *
+   * 原子性：進度（progression.sqlite）與成就（achievements.sqlite）是兩個檔案，SQLite 沒有跨檔
+   * 交易（ATTACH 需要同一個連線，這兩個 store 各自持有連線）。做法是成就端先 BEGIN IMMEDIATE 並刪完，
+   * 在「提交前」呼叫進度端的重設（自成一個交易並先提交）；進度端丟錯就讓成就端回復，所以兩邊
+   * 一起成功或一起不變。唯一剩下的縫隙是進度端提交後成就端 COMMIT 才失敗（磁碟錯誤），此時
+   * 回報 failed，使用者再按一次即可（重設可重複執行，結果相同）。
+   * 重設時間寫在成就資料庫內，同一個交易提交，之後 reconcile／本機 token 同步都以它為下限。
+   */
+  function resetGrowth(): GrowthResetResult {
+    const progression = state.progressionStore
+    const achievements = state.achievementStore
+    // 成就資料庫暫時開不起來時不做半套：重設時間存在那裡，缺它就補不了防回灌保護。
+    if (!progression || !achievements) return { ok: false, error: 'unavailable' }
+    const cutoff = now()
+    try {
+      achievements.resetGrowth(cutoff, () => { progression.resetGrowth() })
+    } catch (error) {
+      deps.logError('Growth reset failed', error)
+      logAchievementDiagnostic('growth-reset', error)
+      return { ok: false, error: 'failed' }
+    }
+    // 記憶體狀態：待評估旗標與進度廣播去抖計時器都屬於已清掉的資料。
+    localTokenLedgerChanged = false
+    if (achievementProgressTimer) cancel(achievementProgressTimer)
+    achievementProgressTimer = null
+    try { state.historyStore?.setAchievementReconciledAt(cutoff) } catch (error) { deps.logError('Growth reset marker failed', error) }
+    broadcastProgression()
+    broadcastAchievements()
+    return { ok: true }
   }
 
   function dispose(): void {
@@ -337,6 +375,7 @@ export function createGrowthService(deps: GrowthServiceDeps): GrowthService {
     syncLocalTokenUsage,
     evaluateLocalTokens,
     reconcileFromHistory,
+    resetGrowth,
     broadcastProgression,
     broadcastProgressionIfChanged,
     broadcastProgressionAwards,

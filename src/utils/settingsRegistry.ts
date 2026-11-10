@@ -81,6 +81,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   { id: 'claudePermissionRespond', section: 'desktop', labelKey: 'permission.claudeRespond', helpKey: 'permission.claudeRespondHelp', keywords: ['claude', 'permission', 'approve', 'terminal', '權限', '核准', '終端機', '回覆'] },
   { id: 'presentationMcp', section: 'desktop', labelKey: 'presentationMcp', helpKey: 'presentationMcpHelp', keywords: ['mcp', '簡報', 'presentation'] },
   { id: 'launchAtStartup', section: 'desktop', labelKey: 'launchAtStartup', keywords: ['startup', 'login', 'autostart', '開機', '登入', '自動啟動'] },
+  { id: 'appUpdate', section: 'advanced', labelKey: 'update.autoCheck', helpKey: 'update.autoCheckHelp', keywords: ['update', 'version', 'upgrade', 'release', '更新', '新版', '版本'] },
   { id: 'projectMcp', section: 'advanced', labelKey: 'projectMcpPanelTitle', helpKey: 'presentationMcpSetupHelp', keywords: ['mcp', '專案', 'project'] },
   { id: 'setupWizard', section: 'advanced', labelKey: 'setupWizard', keywords: ['wizard', 'onboarding', 'hook', '精靈', '安裝', '引導'] },
   { id: 'restart', section: 'advanced', labelKey: 'restartPet', keywords: ['relaunch', 'reboot', '重啟', '重新啟動'] },
