@@ -5,6 +5,7 @@ import { renameSyncWithRetry } from './fs-rename.ts'
 import { zipSync } from 'fflate'
 import { guardArchive } from './archive-guard.ts'
 import { parsePluginManifest } from './plugin-manifest.ts'
+import { rasterImageTypeIn, type RasterImageType } from './raster-image.ts'
 import { checkPanelThemePackagedImage, isWoff2, panelThemeAssetPaths, PANEL_THEME_FONT_MAX_BYTES, PANEL_THEME_IMAGE_MAX_BYTES } from './plugin-panel-themes.ts'
 import { verifyPluginSignature } from './plugin-signature.ts'
 import type { PluginManifest, PluginRuntimeState } from '../src/types/plugin.ts'
@@ -78,14 +79,11 @@ function compareVersions(left: string, right: string): number {
   return 0
 }
 
+// 套件內的 icon 與 skin spritesheet 只接受 PNG、WebP（比寵物 spritesheet 的白名單窄，不含 JPEG）。
+const PLUGIN_ARCHIVE_RASTER_TYPES: ReadonlySet<RasterImageType> = new Set(['image/png', 'image/webp'])
+
 function hasRasterSignature(data: Uint8Array): boolean {
-  const png = data.length >= 8
-    && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47
-    && data[4] === 0x0d && data[5] === 0x0a && data[6] === 0x1a && data[7] === 0x0a
-  const webp = data.length >= 12
-    && Buffer.from(data.subarray(0, 4)).toString('ascii') === 'RIFF'
-    && Buffer.from(data.subarray(8, 12)).toString('ascii') === 'WEBP'
-  return png || webp
+  return rasterImageTypeIn(data, PLUGIN_ARCHIVE_RASTER_TYPES) !== null
 }
 
 function regularDirectory(directory: string): boolean {

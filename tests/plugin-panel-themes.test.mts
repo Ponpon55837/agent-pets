@@ -308,7 +308,7 @@ test('packaged and user image header checks reject bombs, animation, wrong magic
 })
 
 test('the module stays free of Electron and Node imports so the catalog validator can vendor it', () => {
-  for (const file of ['electron/plugin-panel-themes.ts', 'electron/panel-theme-color.ts', 'electron/pet-sprite-validation.ts']) {
+  for (const file of ['electron/plugin-panel-themes.ts', 'electron/panel-theme-color.ts', 'electron/pet-sprite-validation.ts', 'electron/raster-image.ts']) {
     const source = readFileSync(file, 'utf8')
     assert.doesNotMatch(source, /from 'electron'|require\('electron'\)|from 'node:/, file)
     for (const match of source.matchAll(/^import (?!type).* from '([^']+)'/gm)) assert.match(match[1]!, /^\.\//, `${file} imports only sibling pure modules`)

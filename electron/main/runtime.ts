@@ -1,5 +1,6 @@
 import { IPC_CHANNELS } from '../ipc/channels'
 import { sanitizePetId } from '../pet-id.ts'
+import { rasterContentType } from '../pet-sprite-validation.ts'
 import { app, BrowserWindow, WebContentsView, screen, ipcMain, dialog, net, session, protocol, globalShortcut, powerMonitor, shell, safeStorage, Notification, nativeTheme } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { attachRendererRecovery, type RendererRecovery } from './renderer-recovery'
@@ -363,17 +364,6 @@ export function safeJoin(base: string, ...parts: string[]): string | null {
   return resolvedPath
 }
 
-export function isSupportedRasterImage(data: Uint8Array): boolean {
-  const png = data.length >= 8
-    && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47
-    && data[4] === 0x0d && data[5] === 0x0a && data[6] === 0x1a && data[7] === 0x0a
-  const jpeg = data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff
-  const webp = data.length >= 12
-    && Buffer.from(data.subarray(0, 4)).toString('ascii') === 'RIFF'
-    && Buffer.from(data.subarray(8, 12)).toString('ascii') === 'WEBP'
-  return png || jpeg || webp
-}
-
 export function contentTypeFor(filePath: string): string {
   switch (path.extname(filePath).toLowerCase()) {
     case '.html': return 'text/html; charset=utf-8'
@@ -387,17 +377,6 @@ export function contentTypeFor(filePath: string): string {
     case '.woff2': return 'font/woff2'
     default: return 'application/octet-stream'
   }
-}
-
-export function rasterContentType(data: Uint8Array): string | null {
-  if (data.length >= 8
-    && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47
-    && data[4] === 0x0d && data[5] === 0x0a && data[6] === 0x1a && data[7] === 0x0a) return 'image/png'
-  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'image/jpeg'
-  if (data.length >= 12
-    && Buffer.from(data.subarray(0, 4)).toString('ascii') === 'RIFF'
-    && Buffer.from(data.subarray(8, 12)).toString('ascii') === 'WEBP') return 'image/webp'
-  return null
 }
 
 export async function readRegularFileWithin(root: string, relativePath: string, maxBytes: number): Promise<Buffer | null> {
