@@ -85,7 +85,7 @@
 | `plugin-panel-view-bounds` | `on` | 設定面板 main frame（共用 sender guard） | 型別；數值範圍；validateBounds；無效輸入回安全預設或錯誤 | setPluginPanelViewBounds (send) | `tests/ipc-plugin-panel-ui.test.mts`<br>`tests/plugin-panel-controller-characterization.test.mts` |
 | `plugin-panel-view-close` | `on` | 設定面板 main frame（共用 sender guard） | 型別；數值範圍；無效輸入回安全預設或錯誤 | closePluginPanelView (send) | `tests/ipc-plugin-panel-ui.test.mts`<br>`tests/plugin-panel-controller-characterization.test.mts` |
 | `plugin-panel-theme-initial` | `on` | 受信任的主 frame（再由 controller 驗證 active WebContents） | 無 payload；檢查 sender 並回傳受限狀態 | pluginPanelThemeInitial (sendSync, plugin-ui-preload) | `tests/ipc-plugin-panel-ui.test.mts` |
-| `plugin-panel-api` | `handle` | panelView 主 frame；active WebContents 二次比對 | handler／controller 驗證 payload；拒絕無效輸入 | agentPets (createPluginPanelPublicApi) | `tests/ipc-inventory.test.mts`<br>`tests/ipc-plugin-panel-ui.test.mts` |
+| `plugin-panel-api` | `handle` | panelView 主 frame；active WebContents 二次比對 | handler／controller 驗證 payload；拒絕無效輸入 | agentPets (createPluginPanelPublicApi) | `tests/ipc-inventory.test.mts`<br>`tests/ipc-plugin-panel-ui.test.mts`<br>`tests/plugin-catalog-runtime.test.mts` |
 | `plugin-preferences-global-set` | `handle` | 設定面板 main frame（共用 sender guard） | isPluginPanelPreferencePatch；無效輸入回安全預設或錯誤 | setPluginGlobalPreferences (invoke) | `tests/ipc-plugin-preferences.test.mts`<br>`tests/plugin-panel-controller-characterization.test.mts` |
 | `plugin-preferences-instance-set` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；isPluginPanelPluginId, isPluginPanelPreferencePatch；無效輸入回安全預設或錯誤 | setPluginInstancePreferences (invoke) | `tests/ipc-plugin-preferences.test.mts` |
 | `plugin-settings-get` | `handle` | 設定面板 main frame（共用 sender guard） | isPluginPanelPluginId, isUnsafePluginDataError；無效輸入回安全預設或錯誤 | getPluginSettings (invoke) | `tests/ipc-plugin-settings.test.mts`<br>`tests/plugin-panel-controller-characterization.test.mts` |
@@ -120,7 +120,7 @@
 | `pet-hide-request` | `on` | 寵物視窗 main frame | handler／controller 驗證 payload；拒絕無效輸入 | requestPetHide (send) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `panel-toggle` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | togglePanel (send) | `tests/agent-store-characterization.test.mts` |
 | `panel-resize` | `on` | 設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | resizePanel (send) | `tests/agent-store-characterization.test.mts`<br>`tests/plugin-panel-controller-characterization.test.mts` |
-| `panel-reset-size` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | resetPanelSize (send) | `tests/ipc-window-controls.test.mts` |
+| `panel-reset-size` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | resetPanelSize (send) | `tests/ipc-window-controls.test.mts`<br>`tests/panel-geometry.test.mts` |
 | `panel-blur-lock` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | 型別；長度／數量上限；無效輸入回安全預設或錯誤 | setPanelBlurLock (send) | `tests/agent-store-characterization.test.mts`<br>`tests/ipc-window-controls.test.mts` |
 | `panel-hide` | `on` | 受信任 main frame；handler 以 isTrustedIpcSender 驗證 | handler／controller 驗證 payload；拒絕無效輸入 | hidePanel (send) | `tests/agent-store-characterization.test.mts`<br>`tests/ipc-window-controls.test.mts` |
 | `pet-resize` | `on` | 寵物視窗 main frame | 型別；無效輸入回安全預設或錯誤 | resizeWindow (send) | `tests/pet-window-size.test.mts` |

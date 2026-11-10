@@ -25,6 +25,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, readFil
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import { createServer } from 'node:net'
 import { zipSync } from 'fflate'
 
 const repoRoot = resolve(import.meta.dirname, '..')
@@ -316,6 +317,20 @@ globalThis.__agentPetsE2E = {
 console.log('AGENT_PETS_E2E_READY ' + JSON.stringify({ root, userData: app.getPath('userData'), home: require('node:os').homedir(), fakeSafeStorage: fake }))
 require(${JSON.stringify(mainBundle)})
 `)
+
+// inspector／devtools 埠被佔用時 Electron 只印一行錯誤仍照常啟動，測試腳本就會連到別人的程序
+// （例如另一個工作樹的隔離 App）去操作它；所以先確認兩個埠都空著，否則中止。
+const portIsFree = port => new Promise(resolvePort => {
+  const probe = createServer()
+  probe.once('error', () => resolvePort(false))
+  probe.listen(port, '127.0.0.1', () => probe.close(() => resolvePort(true)))
+})
+for (const [label, port] of [['--inspect-port', inspectPort], ['--debug-port', debugPort]]) {
+  if (!await portIsFree(port)) {
+    console.error(`AGENT_PETS_E2E_ABORT ${label} ${port} is already in use; pick a free port`)
+    process.exit(1)
+  }
+}
 
 const electronBinary = createRequire(import.meta.url)('electron')
 const child = spawn(electronBinary, [

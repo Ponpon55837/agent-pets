@@ -12,6 +12,7 @@ import {
 } from '../pet-window-mode.ts'
 import type { readWindowState, writeWindowState } from '../setup.ts'
 import type { PetEdge, PetWindowMode, PetWindowModeState } from '../../src/types/pet-window'
+import { clampPetWindowDimension } from '../../src/utils/pet-window-size.ts'
 import type { MainState } from './state.ts'
 
 // 寵物視窗模式（normal／mini／edge）：各模式的 bounds、貼邊停留與重新貼邊的計時器、
@@ -51,11 +52,23 @@ export interface PetWindowModeDeps {
   now?: () => number
 }
 
+export interface PetWindowRestoreOptions {
+  /** 沒有存檔尺寸時的冷啟動預設尺寸（`initialPetWindowSize(scale)`）。 */
+  fallbackSize: { width: number; height: number }
+  /** 沒有存檔時預設放在主螢幕工作區右下角。 */
+  primaryWorkArea: Rectangle
+}
+
 export interface PetWindowModeService {
   modeState(): PetWindowModeState
   broadcastMode(): void
   displayForBounds(bounds: WindowBounds): Display
   displayForSavedState(saved: ReturnType<typeof readWindowState>): Display
+  /**
+   * 建立視窗前還原上次的模式：寫入 normalPetBounds、petWindowMode、petWindowEdge、
+   * edgeRestoreBounds，並回傳視窗的初始 bounds。
+   */
+  restore(saved: ReturnType<typeof readWindowState>, options: PetWindowRestoreOptions): WindowBounds
   persistCurrentState(): void
   scheduleShimejiPositionPersist(): void
   applyNormalBounds(): void
@@ -115,6 +128,41 @@ export function createPetWindowModeService(deps: PetWindowModeDeps): PetWindowMo
         : null
     )
     return savedBounds ? displayForBounds(savedBounds) : screen.getPrimaryDisplay()
+  }
+
+  function restore(saved: ReturnType<typeof readWindowState>, options: PetWindowRestoreOptions): WindowBounds {
+    // 寵物尺寸存在 renderer 的 localStorage，主行程讀不到，所以沿用上次 renderer 要求並隨位置
+    // 一起存檔的尺寸；否則視窗一律以 1x（L）誕生，面板會對著 L 尺寸的 bounds 開啟。
+    const { fallbackSize, primaryWorkArea } = options
+    const w = saved?.width !== undefined ? clampPetWindowDimension(saved.width) : fallbackSize.width
+    const h = saved?.height !== undefined ? clampPetWindowDimension(saved.height) : fallbackSize.height
+
+    const savedDisplay = displayForSavedState(saved)
+    const savedNormal = saved?.normalBounds ?? (
+      saved
+        ? { x: saved.x, y: saved.y, width: saved.width ?? w, height: saved.height ?? h }
+        : {
+            x: primaryWorkArea.x + primaryWorkArea.width - w - 30,
+            y: primaryWorkArea.y + primaryWorkArea.height - h - 30,
+            width: w,
+            height: h,
+          }
+    )
+    // 重新夾進目前工作區，避免存檔時的螢幕已經拔掉。
+    state.normalPetBounds = clampWindowBounds(savedNormal, savedDisplay.workArea)
+    const attachedEdge = nearestEdge(state.normalPetBounds, savedDisplay.workArea, EDGE_TRIGGER_DISTANCE_PX)
+    const canRestoreEdge = saved?.mode === 'edge'
+      && deps.edgeModeEnabled()
+      && attachedEdge !== null
+      && (saved.edge === undefined || saved.edge === attachedEdge)
+    state.petWindowMode = saved?.mode === 'mini' ? 'mini' : canRestoreEdge ? 'edge' : 'normal'
+    state.petWindowEdge = canRestoreEdge ? (saved.edge ?? attachedEdge) : null
+    state.edgeRestoreBounds = canRestoreEdge ? { ...state.normalPetBounds } : null
+    return state.petWindowMode === 'mini'
+      ? miniWindowBounds(state.normalPetBounds, savedDisplay.workArea)
+      : state.petWindowMode === 'edge' && state.petWindowEdge
+        ? edgeWindowBounds(state.normalPetBounds, savedDisplay.workArea, state.petWindowEdge)
+        : state.normalPetBounds
   }
 
   function persistCurrentState(): void {
@@ -325,6 +373,7 @@ export function createPetWindowModeService(deps: PetWindowModeDeps): PetWindowMo
     broadcastMode,
     displayForBounds,
     displayForSavedState,
+    restore,
     persistCurrentState,
     scheduleShimejiPositionPersist,
     applyNormalBounds,

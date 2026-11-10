@@ -129,6 +129,8 @@ Electron 二進位檔在這個 worktree 的 offline install 中沒有下載，�
 
 ## 未拆的部分與建議
 
+> 後續（1.13.2 整合輪線 2）：Plugin runtime、plugin catalog、成就與成長廣播、初始模式還原與面板幾何都已抽出，見 [phase-main-runtime-split.md](phase-main-runtime-split.md)。以下保留為本階段當時的紀錄。
+
 - **Plugin runtime 組裝（`createPluginServices()` 約 520 行）**：在單一函式內建立 20 多個 controller，彼此以 `mainState.pluginRuntimeContexts` 等共用 Map 互相查詢，且 teardown 順序（panel view → developer watcher → broker → … → host window）有依賴。建議下一步先抽 `plugin-catalog`（`createMainPluginCatalogGateway`、自動檢查排程，計時器在 `disposeMainTimers`）這種邊界清楚的子集，再把 controller 建立改成 `createPluginRuntime(deps)` 回傳 `{ start, dispose }`，以 teardown 快照固定順序。
 - **成就服務**：retry、token 帳本、history 補算都與事件伺服器熱路徑（`main.ts` 的 `onEvent`）及成長廣播交錯；`achievementProgressTimer` 也沒有被 teardown 清除（已 `unref`，影響小）。建議與成長廣播一起抽成 growth 服務。
 - **視窗建立與面板尺寸**：`createPetWindow()` 仍直接寫入模式欄位初值，面板尺寸／定位與 plugin panel view 的 bounds 交錯；建議下一輪把「初始模式還原」移進模式服務的 `restore(saved)`，再抽面板幾何。
