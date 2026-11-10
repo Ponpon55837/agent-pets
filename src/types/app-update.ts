@@ -5,8 +5,9 @@ export interface AppUpdateState {
   currentVersion: string
   enabled: boolean
   lastCheckedAt: number | null
+  /** 最近一次檢查的結果；可能是 failed 但 latestVersion 仍有值。 */
   lastResult: AppUpdateResult | null
-  /** 只在 lastResult 為 update_available 時有值。 */
+  /** 已知且仍比目前版本新的版本；檢查失敗不會清掉，up_to_date 才會清掉。 */
   latestVersion: string | null
 }
 

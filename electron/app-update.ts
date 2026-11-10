@@ -58,8 +58,9 @@ export function isAppReleaseUrl(value: unknown): value is string {
   }
 }
 
-function fallbackReleaseUrl(tag: string): string {
-  return `${APP_UPDATE_RELEASES_PREFIX}tag/${encodeURIComponent(tag)}`
+// 本專案的 tag 一律是 `v<version>`（見 release.yml）；由驗證後的版本推回 tag，不採用原始 tag_name。
+function fallbackReleaseUrl(version: string): string {
+  return `${APP_UPDATE_RELEASES_PREFIX}tag/${encodeURIComponent(`v${version}`)}`
 }
 
 /** 解析 GitHub `releases/latest` 回應，只取 tag_name、html_url、draft、prerelease。 */
@@ -75,6 +76,6 @@ export function parseLatestRelease(body: unknown): AppReleaseParseResult {
   if (version.includes('-')) return { kind: 'ignored' }
   return {
     kind: 'release',
-    release: { version, url: isAppReleaseUrl(parsed.html_url) ? parsed.html_url : fallbackReleaseUrl(parsed.tag_name as string) },
+    release: { version, url: isAppReleaseUrl(parsed.html_url) ? parsed.html_url : fallbackReleaseUrl(version) },
   }
 }

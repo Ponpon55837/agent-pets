@@ -9,6 +9,7 @@
   "update.checking": "Checking…",
   "update.upToDate": "You are on the latest version",
   "update.available": "New version {version} available",
+  "update.availableCheckFailed": "New version {version} available; the latest check failed",
   "update.failed": "The check failed. Please try again later.",
   "update.rateLimited": "Checking too often. Please try again shortly.",
   "update.viewRelease": "View release",

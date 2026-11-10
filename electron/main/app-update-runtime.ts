@@ -1,6 +1,6 @@
 import {
   APP_UPDATE_ALLOWED_HOSTS, APP_UPDATE_API_URL, APP_UPDATE_MAX_RESPONSE_BYTES, APP_UPDATE_REQUESTS_PER_MINUTE,
-  APP_UPDATE_TIMEOUT_MS, isAppReleaseUrl, isNewerAppVersion, parseLatestRelease,
+  APP_UPDATE_TIMEOUT_MS, isAppReleaseUrl, isNewerAppVersion, isValidAppVersion, parseLatestRelease,
 } from '../app-update.ts'
 import { AppUpdateStore, type AppUpdateStored } from '../app-update-store.ts'
 import { DailyCheckSchedule } from '../daily-check-schedule.ts'
@@ -70,6 +70,16 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps): AppUpdateRun
     try { readStore().update(patch) } catch { /* silent */ }
   }
 
+  /**
+   * 「已知可用更新」與最近一次檢查結果分開：檢查失敗不會抹掉先前確認過的新版；
+   * 但每次讀取都重新驗證，使用者已升級到該版（或更新版）後就不再顯示。
+   */
+  function knownUpdate(value: AppUpdateStored): { version: string; url: string } | null {
+    if (!isValidAppVersion(value.latestVersion) || !isAppReleaseUrl(value.latestUrl)) return null
+    if (!isNewerAppVersion(deps.appVersion(), value.latestVersion)) return null
+    return { version: value.latestVersion, url: value.latestUrl }
+  }
+
   function snapshot(): AppUpdateState {
     const value = stored()
     return {
@@ -77,7 +87,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps): AppUpdateRun
       enabled: value.enabled,
       lastCheckedAt: value.lastCheckedAt,
       lastResult: value.lastResult,
-      latestVersion: value.lastResult === 'update_available' ? value.latestVersion : null,
+      latestVersion: knownUpdate(value)?.version ?? null,
     }
   }
 
@@ -117,11 +127,11 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps): AppUpdateRun
     if (inFlight) return inFlight
     inFlight = (async () => {
       const { result, latest } = await evaluate()
-      persist({
-        lastCheckedAt: now(),
-        lastResult: result,
-        ...(latest ? { latestVersion: latest.version, latestUrl: latest.url } : {}),
-      })
+      // failed 只更新時間與最近結果，保留先前的已知新版；up_to_date 才清掉。
+      const known = latest
+        ? { latestVersion: latest.version, latestUrl: latest.url }
+        : result === 'up_to_date' ? { latestVersion: null, latestUrl: null } : {}
+      persist({ lastCheckedAt: now(), lastResult: result, ...known })
       return result
     })().finally(() => { inFlight = null })
     return inFlight
@@ -168,9 +178,10 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps): AppUpdateRun
     },
     async openRelease() {
       const value = stored()
-      if (value.lastResult !== 'update_available' || !isAppReleaseUrl(value.latestUrl)) return false
+      const known = knownUpdate(value)
+      if (!known) return false
       try {
-        await deps.openExternal(value.latestUrl)
+        await deps.openExternal(known.url)
         return true
       } catch {
         return false
