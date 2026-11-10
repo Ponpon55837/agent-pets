@@ -95,12 +95,14 @@
 5. 健康檢查（`inspect*`、`hookScriptIsCurrent`、`openCodePluginIsCurrent`、`agentPresence`、`agentConfigDirStatus`）改成非同步，各自獨立的讀取平行進行。只剩測試在用的同步 `fileHasAgentPetsHooks`、`configuredHookExecutable` 已移除。
 6. `agent-hook-delivery` 的時限測試改成相對判斷：同一個測試內先量空 node 程序的啟動時間當基準，再加上不足以容納被排除行為（5 秒重試、3 秒回應）的餘裕。
 
+複審後又在負載 16–224 時交錯量了 3 輪冷啟動：標記寫入前的空窗 510／996／828 → 412／702／379 ms，遺失 25／75／31 → 24／73／27（見開發文件）。隔離 Electron 重新建置後跑真實 hook `--rounds 2`，28 個全部畫到寵物上，埠開始監聽後標記也已移除。
+
 複審後驗證：`vue-tsc`、`lint`、`check:design:strict`、`git diff --check` 都通過。`pnpm test:unit` 共 1620 個：1619 通過、1 略過、0 失敗（load average 約 44–126）。CLI 13 種情境的輸出與基準逐字相同。跨線改動：`src/locales/onboarding/*.json` 新增一個 key `onboarding.errorConfigChanged`，`src/components/SetupWizard.vue` 加一行錯誤碼對照，`src/types/agent-adapter.ts` 加 `config_changed`。
 
 ## 殘餘風險
 
 - Electron 程序建立到 main.js 開始執行之間（一般負載約 0.4 秒）送出的事件仍會遺失；不同 hook 程序之間的順序也可能顛倒。
-- 冷啟動量測是在極高負載下做的，沒有在一般負載下重新量測。
+- 冷啟動量測時，其他工作線一直在跑測試，負載沒有回到平常的水準（最低 16）。
 - Claude Code 舊版不認得 `PostCompact` 時會怎麼處理，沒有實測（`StopFailure` 先前也是同樣情況加入）。真實 `claude` CLI 沒有在本線執行。
 - Codex 的新事件沒有接，Codex 壓縮與中斷期間的寵物狀態不變。
 - Windows 的非同步 repair（`rewriteInstalledAgentPetsHooks` 改用 `nodeResolver.resolve()`）與 rename 退避沒有在 Windows 實測。
