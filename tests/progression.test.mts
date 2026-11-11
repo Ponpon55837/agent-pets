@@ -203,7 +203,7 @@ test('integration test events from the Setup Wizard never award XP', () => {
     const result = store.handleEvent({
       ...event('success', 1_700_000_000_000, 'agent-pets-test-codex-1'),
       originalEvent: 'AgentPetsIntegrationTest',
-    } as never)
+    })
     assert.deepEqual(result.awards, [])
     assert.equal(store.getSnapshot('default').totalXp, before.totalXp)
   })

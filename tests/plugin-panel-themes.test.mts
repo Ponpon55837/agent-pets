@@ -395,7 +395,8 @@ test('deprecated borderOnAccent is accepted, checked like before and never emitt
   rejects([lightTheme({ colors: { ...LIGHT_COLORS, borderOnAccent: 'red' } })], /colors\.borderOnAccent: not an allowed colour/)
   rejects([lightTheme({ colors: { ...LIGHT_COLORS, borderOnAccent: '#ffffff' } })], /colors\.borderOnAccent: alpha must be 0\.02-0\.95/)
   // 它的屬性已從允許清單移除。
-  assert.equal(PANEL_THEME_COLOR_PROPERTIES.includes('--organic-border-on-accent' as never), false)
+  // 清單是字面值聯集，直接問被移除的名稱會被型別擋下；寬化成 string 陣列是安全的上轉。
+  assert.equal((PANEL_THEME_COLOR_PROPERTIES as readonly string[]).includes('--organic-border-on-accent'), false)
 })
 
 test('the schema fragment and the public d.ts list exactly the runtime colour keys plus the deprecated ones', () => {

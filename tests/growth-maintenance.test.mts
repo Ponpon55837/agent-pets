@@ -16,8 +16,9 @@ import { createDbMaintenanceService } from '../electron/main/db-maintenance-serv
 import { createGrowthService, type GrowthState } from '../electron/main/growth-service.ts'
 import { ProgressionStore } from '../electron/progression.ts'
 import { SqliteBusyError, optimizeAndVacuum, sqliteFootprintBytes } from '../electron/sqlite-maintenance.ts'
-import { GROWTH_RESET_TOKEN_TTL_MS } from '../src/types/growth-maintenance.ts'
+import { GROWTH_RESET_TOKEN_TTL_MS, type GrowthResetResult } from '../src/types/growth-maintenance.ts'
 import { formatBytes } from '../src/utils/bytes-format.ts'
+import { fakeBrowserWindow } from './support/fake-electron.mts'
 import { createFakeIpcMain } from './support/fake-ipc.mts'
 import { removeTempTree } from './support/temp-dir.mts'
 
@@ -87,7 +88,7 @@ function seed(h: ReturnType<typeof harness>, sessions = 3): void {
     const event = done(`s${i}`, BASE + i * 1000)
     h.progression.handleEvent(event, 'pet-a')
     h.achievements.recordEvent(event, 'pet-a')
-    h.history.recordEvent({ ...event, routedPetId: 'pet-a' } as never, 'pet-a', BASE + i * 1000)
+    h.history.recordEvent({ ...event, routedPetId: 'pet-a' }, 'pet-a', BASE + i * 1000)
   }
 }
 
@@ -197,7 +198,7 @@ test('history reconcile and local token sync do not restore data from before the
   assert.equal(count(h.achievements, 'local_token_usage'), 1)
 
   // 重設後的新完成 session 仍可被 reconcile 取得。
-  h.history.recordEvent({ ...done('after', BASE + 20 * 60 * 1000), routedPetId: 'pet-a' } as never, 'pet-a', BASE + 20 * 60 * 1000)
+  h.history.recordEvent({ ...done('after', BASE + 20 * 60 * 1000), routedPetId: 'pet-a' }, 'pet-a', BASE + 20 * 60 * 1000)
   service.reconcileFromHistory()
   assert.equal(count(h.achievements, 'completed_sessions'), 1)
 })
@@ -261,10 +262,10 @@ test('maintenance prunes only expired data, vacuums, and reports sizes', async t
   const old = BASE - 200 * DAY
   h.history.batch(() => {
     for (let i = 0; i < 400; i += 1) {
-      h.history.recordEvent({ source: 'codex', sessionId: `old-${i}`, state: 'success', timestamp: old + i, routedPetId: 'pet-a' } as never, 'pet-a', old + i)
+      h.history.recordEvent({ source: 'codex', sessionId: `old-${i}`, state: 'success', timestamp: old + i, routedPetId: 'pet-a' }, 'pet-a', old + i)
     }
     for (let i = 0; i < 20; i += 1) {
-      h.history.recordEvent({ source: 'codex', sessionId: `new-${i}`, state: 'success', timestamp: BASE - i, routedPetId: 'pet-a' } as never, 'pet-a', BASE - i)
+      h.history.recordEvent({ source: 'codex', sessionId: `new-${i}`, state: 'success', timestamp: BASE - i, routedPetId: 'pet-a' }, 'pet-a', BASE - i)
     }
   })
   const recentBefore = Number(raw(h.history).prepare(`SELECT COUNT(*) AS n FROM events WHERE occurred_at >= ${BASE - 90 * DAY}`).get().n)
@@ -381,9 +382,9 @@ test('maintenance proceeds when statfs itself fails, since VACUUM would roll bac
   assert.equal(nan.ok, true)
 })
 
-function ipcHarness(overrides: { resetResult?: unknown } = {}) {
+function ipcHarness(overrides: { resetResult?: GrowthResetResult } = {}) {
   const { ipcMain, handlers } = createFakeIpcMain()
-  const panel = { id: 'panel' }
+  const panel = fakeBrowserWindow()
   let resets = 0
   let runs = 0
   let clock = 1_000_000
@@ -392,8 +393,8 @@ function ipcHarness(overrides: { resetResult?: unknown } = {}) {
     assertTrustedIpcSender: (event, required) => {
       if ((event as unknown as { sender: unknown }).sender !== required) throw new Error('untrusted sender')
     },
-    getPanelWindow: () => panel as never,
-    resetGrowth: () => { resets += 1; return (overrides.resetResult ?? { ok: true }) as never },
+    getPanelWindow: () => panel,
+    resetGrowth: () => { resets += 1; return overrides.resetResult ?? { ok: true } },
     runDbMaintenance: async () => { runs += 1; return { ok: true, beforeBytes: 2, afterBytes: 1, freedBytes: 1, prunedRows: 0 } },
     now: () => clock,
   })

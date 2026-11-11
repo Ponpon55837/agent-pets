@@ -6,7 +6,9 @@ import test from 'node:test'
 import { APP_UPDATE_API_URL, APP_UPDATE_RELEASES_PREFIX } from '../electron/app-update.ts'
 import { AppUpdateStore, sanitizeAppUpdateStored } from '../electron/app-update-store.ts'
 import { createAppUpdateRuntime } from '../electron/main/app-update-runtime.ts'
+import type { PluginFeedController } from '../electron/plugin-feed.ts'
 import { PluginNetworkClient } from '../electron/plugin-net.ts'
+import { fakeService } from './support/fake-service.mts'
 import { removeTempTree } from './support/temp-dir.mts'
 
 const DAY = Date.UTC(2026, 10, 11, 8)
@@ -34,10 +36,10 @@ function setup(options: { body?: string; status?: number; version?: string; noti
   const runtime = createAppUpdateRuntime({
     state: {
       pluginNetworkClient: client,
-      pluginFeedController: { addSystemNotification: (_id: unknown, _name: unknown, title: unknown, text: unknown) => {
+      pluginFeedController: fakeService<PluginFeedController>({ addSystemNotification: (_id: unknown, _name: unknown, title: unknown, text: unknown) => {
         notifications.push({ title, body: text })
         return options.notificationAccepted ?? true
-      } } as never,
+      } }),
     },
     userDataDirectory: () => dir,
     appVersion: () => options.version ?? '1.13.1',

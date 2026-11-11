@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { registerReliabilityIpc, type ReliabilityIpcDependencies } from '../electron/ipc/reliability.ts'
+import { fakeBrowserWindow, fakeWebContents } from './support/fake-electron.mts'
 import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 type RendererErrorReport = Parameters<ReliabilityIpcDependencies['reportRendererError']>[0]
@@ -10,12 +11,12 @@ function setup(trusted = true) {
   const { ipcMain, handlers, listeners } = createFakeIpcMain()
   const reports: RendererErrorReport[] = []
   let reloads = 0
-  const panel = { webContents: { id: 'panel' } }
+  const panel = fakeBrowserWindow({ webContents: fakeWebContents({ id: 1 }) })
   registerReliabilityIpc({
     ipcMain,
     isTrustedIpcSender: () => trusted,
     assertTrustedIpcSender: () => { if (!trusted) throw new Error('Unauthorized IPC sender') },
-    getPanelWindow: () => panel as never,
+    getPanelWindow: () => panel,
     getServerHealth: () => ({ servers: [] }),
     retryServer: () => {},
     getSessionSnapshot: () => [],

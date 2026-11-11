@@ -3,6 +3,7 @@ import test from 'node:test'
 import { registerAppUpdateIpc } from '../electron/ipc/app-update.ts'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import type { AppUpdateState } from '../src/types/app-update.ts'
+import { fakeBrowserWindow } from './support/fake-electron.mts'
 import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 const state: AppUpdateState = { currentVersion: '1.13.1', enabled: false, lastCheckedAt: null, lastResult: null, latestVersion: null }
@@ -10,11 +11,11 @@ const state: AppUpdateState = { currentVersion: '1.13.1', enabled: false, lastCh
 function setup(allow: (event: unknown, window: unknown) => boolean = () => true) {
   const { ipcMain, handlers } = createFakeIpcMain()
   const calls: string[] = []
-  const panelWindow = { id: 'panel' }
+  const panelWindow = fakeBrowserWindow({ id: 1 })
   registerAppUpdateIpc({
     ipcMain,
     assertTrustedIpcSender: (event: unknown, requiredWindow: unknown) => { if (!allow(event, requiredWindow)) throw new Error('untrusted sender') },
-    getPanelWindow: () => panelWindow as never,
+    getPanelWindow: () => panelWindow,
     getState: () => { calls.push('get'); return state },
     setEnabled: enabled => { calls.push(`set:${enabled}`); return { ...state, enabled } },
     checkNow: async () => { calls.push('check'); return { state, outcome: 'done' } },

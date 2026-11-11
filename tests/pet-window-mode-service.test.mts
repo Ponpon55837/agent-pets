@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
+import { fakeBrowserWindow, fakeDisplay, fakeWebContents } from './support/fake-electron.mts'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { createPetWindowModeService, type PetWindowModeServiceState } from '../electron/main/pet-window-mode-service.ts'
 import { EDGE_DWELL_MS, EDGE_REDOCK_AFTER_MS, edgeWindowBounds, miniWindowBounds, type WindowBounds } from '../electron/pet-window-mode.ts'
@@ -8,7 +9,7 @@ import { EDGE_DWELL_MS, EDGE_REDOCK_AFTER_MS, edgeWindowBounds, miniWindowBounds
 // 假螢幕、假視窗與 node:test 假計時器驗證。
 
 const workArea = { x: 0, y: 0, width: 1920, height: 1080 }
-const display = { id: 7, bounds: { ...workArea }, workArea: { ...workArea } }
+const display = fakeDisplay(7, { ...workArea }, { ...workArea })
 const centre: WindowBounds = { x: 800, y: 500, width: 260, height: 350 }
 const leftEdge: WindowBounds = { x: 0, y: 500, width: 260, height: 350 }
 
@@ -25,12 +26,12 @@ function fakeWindow(label: string, log: string[], bounds: WindowBounds) {
     /** 模擬使用者拖曳：不經過服務直接改 bounds。 */
     move: (next: WindowBounds) => { current = { ...next } },
     sent,
-    webContents: {
-      send: (channel: string, payload: unknown) => {
+    webContents: fakeWebContents({
+      send: (channel: string, ...args: unknown[]) => {
         log.push(`${label}.send:${channel}`)
-        sent.push(payload)
+        sent.push(args[0])
       },
-    },
+    }),
   }
 }
 
@@ -44,8 +45,8 @@ function setup(t: TestContext, options: { bounds?: WindowBounds; edgeModeEnabled
   let cursor = { x: 5, y: 5 }
   let cursorReads = 0
   const state: PetWindowModeServiceState = {
-    petWindow: pet as never,
-    panelWindow: panel as never,
+    petWindow: fakeBrowserWindow(pet),
+    panelWindow: fakeBrowserWindow(panel),
     dragPollHandle: null,
     shimejiPersistHandle: null,
     petWindowMode: 'normal',
@@ -58,9 +59,9 @@ function setup(t: TestContext, options: { bounds?: WindowBounds; edgeModeEnabled
   const service = createPetWindowModeService({
     state,
     screen: {
-      getDisplayMatching: () => display as never,
-      getAllDisplays: () => [display as never],
-      getPrimaryDisplay: () => display as never,
+      getDisplayMatching: () => display,
+      getAllDisplays: () => [display],
+      getPrimaryDisplay: () => display,
       getCursorScreenPoint: () => { cursorReads += 1; return cursor },
     },
     writeWindowState: value => { writes.push(value); log.push('writeWindowState') },
@@ -226,7 +227,7 @@ test('a destroyed pet window is left alone', t => {
 
 test('saved window state prefers its display id, then its bounds, then the primary display', t => {
   const { service } = setup(t)
-  assert.equal(service.displayForSavedState({ x: 0, y: 0, displayId: 7 } as never).id, 7)
+  assert.equal(service.displayForSavedState({ x: 0, y: 0, displayId: 7 }).id, 7)
   assert.equal(service.displayForSavedState(null).id, 7)
 })
 
@@ -246,7 +247,7 @@ test('restore without a saved state docks the default size at the primary bottom
 test('restore uses the persisted size and falls back per missing dimension', t => {
   const { service } = setup(t)
   // 存檔缺寬度：寬度取預設，高度取存檔值（經 clampPetWindowDimension）。
-  const bounds = service.restore({ x: 400, y: 300, height: 300 } as never, restoreOptions)
+  const bounds = service.restore({ x: 400, y: 300, height: 300 }, restoreOptions)
   assert.equal(bounds.x, 400)
   assert.equal(bounds.y, 300)
   assert.equal(bounds.width, 250)
@@ -255,7 +256,7 @@ test('restore uses the persisted size and falls back per missing dimension', t =
 
 test('restore prefers the saved normal bounds and clamps them into the work area', t => {
   const { service, state } = setup(t)
-  const bounds = service.restore({ x: 0, y: 0, normalBounds: { x: 5000, y: 5000, width: 260, height: 350 } } as never, restoreOptions)
+  const bounds = service.restore({ x: 0, y: 0, normalBounds: { x: 5000, y: 5000, width: 260, height: 350 } }, restoreOptions)
   assert.equal(bounds.x + bounds.width <= 1920, true)
   assert.equal(bounds.y + bounds.height <= 1080, true)
   assert.deepEqual(state.normalPetBounds, bounds)
@@ -263,7 +264,7 @@ test('restore prefers the saved normal bounds and clamps them into the work area
 
 test('restore brings back mini mode with the mini bounds and keeps the normal bounds', t => {
   const { service, state } = setup(t)
-  const bounds = service.restore({ x: 0, y: 0, mode: 'mini', normalBounds: centre } as never, restoreOptions)
+  const bounds = service.restore({ x: 0, y: 0, mode: 'mini', normalBounds: centre }, restoreOptions)
   assert.equal(state.petWindowMode, 'mini')
   assert.equal(state.petWindowEdge, null)
   assert.equal(state.edgeRestoreBounds, null)
@@ -273,7 +274,7 @@ test('restore brings back mini mode with the mini bounds and keeps the normal bo
 
 test('restore brings back edge mode when still attached to the saved edge', t => {
   const { service, state } = setup(t)
-  const bounds = service.restore({ x: 0, y: 500, mode: 'edge', edge: 'left', normalBounds: leftEdge } as never, restoreOptions)
+  const bounds = service.restore({ x: 0, y: 500, mode: 'edge', edge: 'left', normalBounds: leftEdge }, restoreOptions)
   assert.equal(state.petWindowMode, 'edge')
   assert.equal(state.petWindowEdge, 'left')
   assert.deepEqual(state.edgeRestoreBounds, leftEdge)
@@ -282,14 +283,14 @@ test('restore brings back edge mode when still attached to the saved edge', t =>
 
 test('restore infers the edge when the saved state has none', t => {
   const { service, state } = setup(t)
-  service.restore({ x: 0, y: 500, mode: 'edge', normalBounds: leftEdge } as never, restoreOptions)
+  service.restore({ x: 0, y: 500, mode: 'edge', normalBounds: leftEdge }, restoreOptions)
   assert.equal(state.petWindowMode, 'edge')
   assert.equal(state.petWindowEdge, 'left')
 })
 
 test('restore falls back to normal when the saved edge no longer matches', t => {
   const { service, state } = setup(t)
-  const bounds = service.restore({ x: 0, y: 500, mode: 'edge', edge: 'right', normalBounds: leftEdge } as never, restoreOptions)
+  const bounds = service.restore({ x: 0, y: 500, mode: 'edge', edge: 'right', normalBounds: leftEdge }, restoreOptions)
   assert.equal(state.petWindowMode, 'normal')
   assert.equal(state.petWindowEdge, null)
   assert.equal(state.edgeRestoreBounds, null)
@@ -298,7 +299,7 @@ test('restore falls back to normal when the saved edge no longer matches', t => 
 
 test('restore falls back to normal when the pet is no longer near an edge', t => {
   const { service, state } = setup(t)
-  const bounds = service.restore({ x: 800, y: 500, mode: 'edge', edge: 'left', normalBounds: centre } as never, restoreOptions)
+  const bounds = service.restore({ x: 800, y: 500, mode: 'edge', edge: 'left', normalBounds: centre }, restoreOptions)
   assert.equal(state.petWindowMode, 'normal')
   assert.equal(state.petWindowEdge, null)
   assert.deepEqual(bounds, centre)
@@ -306,7 +307,7 @@ test('restore falls back to normal when the pet is no longer near an edge', t =>
 
 test('restore ignores a saved edge mode when the edge preference is off', t => {
   const { service, state } = setup(t, { edgeModeEnabled: false })
-  const bounds = service.restore({ x: 0, y: 500, mode: 'edge', edge: 'left', normalBounds: leftEdge } as never, restoreOptions)
+  const bounds = service.restore({ x: 0, y: 500, mode: 'edge', edge: 'left', normalBounds: leftEdge }, restoreOptions)
   assert.equal(state.petWindowMode, 'normal')
   assert.equal(state.petWindowEdge, null)
   assert.equal(state.edgeRestoreBounds, null)

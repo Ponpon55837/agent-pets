@@ -74,7 +74,7 @@ test('an interrupted turn becomes one idle event that carries the session routin
   const h = harness()
   h.sessions = [session('claude-desktop', 'sess-0001', 'tool-running', START, {
     adapterId: 'claude-code',
-    project: 'demo', projectId: 'p1', routedPetId: 'pet-1', host: { kind: 'desktop', app: 'claude-desktop', switchable: true } as never,
+    project: 'demo', projectId: 'p1', routedPetId: 'pet-1', host: { kind: 'desktop', app: 'claude-desktop', switchable: true },
   })]
   h.files.set('/config/claude/sess-0001.jsonl', { version: 1, turnEnd: interruptedAt(START + 3_000) })
   h.now = START + TURN_END_QUIET_MS
@@ -267,7 +267,7 @@ test('SessionSnapshotStore.get returns one isolated copy and uses the same expir
   const snapshot = new SessionSnapshotStore(() => now)
   snapshot.record({
     source: 'claude-desktop', sessionId: 'sess-0001', state: 'thinking', timestamp: START, originalEvent: 'UserPromptSubmit',
-    host: { kind: 'desktop', app: 'claude-desktop', switchable: true } as never,
+    host: { kind: 'desktop', app: 'claude-desktop', switchable: true },
   })
   const first = snapshot.get('claude-desktop', 'sess-0001')
   assert.ok(first?.host)

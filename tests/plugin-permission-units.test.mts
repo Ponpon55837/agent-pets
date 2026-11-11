@@ -8,8 +8,9 @@ import { PluginRegistry } from '../electron/plugin-registry.ts'
 import { grantedPermissionUnits as permissionUnits } from '../src/utils/plugin-permission-units.ts'
 import { groupPermissionUnits, permissionUnitsOfPlan } from '../src/utils/plugin-permissions.ts'
 import { PLUGIN_CONTRIBUTION_REGISTRY } from '../src/types/plugin.ts'
-import type { PluginManifest } from '../src/types/plugin.ts'
+import type { PluginManifest, PluginPanelThemeContribution, PluginPanelThemeFontFace, PluginSkinContribution } from '../src/types/plugin.ts'
 import { removeTempTree } from './support/temp-dir.mts'
+import { invalid } from './support/invalid.mts'
 
 // 這些期望值是 1.12.5 的主行程 permissionUnits() 與畫面 permissionUnitsOfPlan() 的實際輸出，
 // 在抽取共用產生器之前先執行通過。主行程的結果會寫進 registry.json 的 grantedPermissions.units，
@@ -18,6 +19,13 @@ import { removeTempTree } from './support/temp-dir.mts'
 type Source = Pick<PluginManifest, 'permissions' | 'contributes'>
 
 const title = { 'zh-TW': 'x', 'en-US': 'x' }
+
+// 權限單位只數貢獻的個數與字型，其餘欄位用最小的合法值補齊，讓 tsc 檢查形狀。
+const skin: PluginSkinContribution = { id: 's', displayName: title, spritesheet: 'skin.png', kind: 'animal' }
+const fontFace: PluginPanelThemeFontFace = { id: 'f', src: 'font.woff2', weight: 400, style: 'normal' }
+function theme(fonts: PluginPanelThemeFontFace[]): PluginPanelThemeContribution {
+  return { id: 't', displayName: title, fonts, typography: { scale: 1 }, shape: { radiusSm: 1, radiusMd: 2, radiusLg: 3 }, modes: {} }
+}
 
 const FULL: Source = {
   permissions: {
@@ -31,14 +39,14 @@ const FULL: Source = {
   contributes: {
     feed: true,
     reaction: true,
-    settings: { fields: [] } as never,
-    panelView: { entry: 'panel/index.html', title } as never,
-    commands: [{ id: 'one', title }, { id: 'two', title }] as never,
+    settings: { type: 'object', properties: {} },
+    panelView: { entry: 'panel/index.html', title },
+    commands: [{ id: 'one', title }, { id: 'two', title }],
     tray: { commands: ['one'] },
     badge: true,
-    skins: [{}, {}, {}] as never,
-    eventSource: { family: 'build', displayName: title } as never,
-    panelThemes: [{ fonts: [] }, { fonts: [{}] }] as never,
+    skins: [skin, skin, skin],
+    eventSource: { family: 'build', displayName: title },
+    panelThemes: [theme([]), theme([fontFace])],
   },
 }
 
@@ -66,7 +74,7 @@ const CASES: Array<{ name: string; source: Source; display: string[]; registry: 
       permissions: { network: { hosts: ['a.example'], userGranted: false }, storage: false, agentStatus: false, secrets: [] },
       contributes: {
         feed: false, reaction: false, badge: false, commands: [], tray: { commands: [] }, skins: [], panelThemes: [],
-        settings: { fields: [] } as never,
+        settings: { type: 'object', properties: {} },
       },
     },
     display: ['network:a.example'],
@@ -74,7 +82,7 @@ const CASES: Array<{ name: string; source: Source; display: string[]; registry: 
   },
   {
     name: 'panel themes without fonts do not ask for fonts',
-    source: { permissions: {}, contributes: { panelThemes: [{ fonts: [] }] as never } },
+    source: { permissions: {}, contributes: { panelThemes: [theme([])] } },
     display: ['contributes:panelThemes:1'],
     registry: ['contributes:panelThemes:1'],
   },
@@ -82,7 +90,7 @@ const CASES: Array<{ name: string; source: Source; display: string[]; registry: 
     name: 'manifest key order does not change the registry order',
     source: {
       permissions: { agentStatus: true, secrets: ['z'], storage: true, links: { hosts: ['l.example'] }, network: { hosts: ['n.example'] } },
-      contributes: { eventSource: { family: 'x', displayName: title } as never, feed: true },
+      contributes: { eventSource: { family: 'x', displayName: title }, feed: true },
     },
     display: ['network:n.example', 'links:l.example', 'storage', 'agentStatus', 'secrets:z', 'contributes:feed', 'contributes:eventSource'],
     registry: ['agentStatus', 'contributes:eventSource', 'contributes:feed', 'links:l.example', 'network:n.example', 'secrets:z', 'storage'],
@@ -91,13 +99,13 @@ const CASES: Array<{ name: string; source: Source; display: string[]; registry: 
 
 for (const { name, source, display, registry } of CASES) {
   test(`registry permission units: ${name}`, () => {
-    assert.deepEqual(permissionUnits(source as PluginManifest), registry)
+    assert.deepEqual(permissionUnits(source), registry)
   })
   test(`install screen permission units: ${name}`, () => {
     assert.deepEqual(permissionUnitsOfPlan(source), display)
   })
   test(`install screen shows exactly the units the registry grants: ${name}`, () => {
-    assert.deepEqual([...new Set(permissionUnitsOfPlan(source))].sort(), permissionUnits(source as PluginManifest))
+    assert.deepEqual([...new Set(permissionUnitsOfPlan(source))].sort(), permissionUnits(source))
   })
 }
 
@@ -105,14 +113,15 @@ test('the registry collapses duplicate units into one grant', () => {
   const source = {
     permissions: { network: { hosts: ['a.example', 'a.example'] }, secrets: ['t', 't'] },
     contributes: {},
-  } as Source
-  assert.deepEqual(permissionUnits(source as PluginManifest), ['network:a.example', 'secrets:t'])
+  } satisfies Source
+  assert.deepEqual(permissionUnits(source), ['network:a.example', 'secrets:t'])
 })
 
 // main 對 manifest 形狀以外的值採保守處理：任何為 true 的權限鍵都成為一個單位，讓未來新增的權限
 // 一定進入授權清單與更新差異，而不是被悄悄略過。
 test('the registry turns any other true permission key into its own unit', () => {
-  const source = { permissions: { teleport: true, network: true, quiet: false }, contributes: {} } as unknown as PluginManifest
+  // 未來新增的權限鍵不在 manifest 型別內，這是刻意的非法形狀。
+  const source = invalid<Source>({ permissions: { teleport: true, network: true, quiet: false }, contributes: {} })
   assert.deepEqual(permissionUnits(source), ['network', 'teleport'])
   // 畫面跟著列出同一批單位：未知的鍵顯示成高風險的「未知權限」，不會被略過。
   const shown = groupPermissionUnits(permissionUnitsOfPlan(source)).flatMap(group => group.entries)

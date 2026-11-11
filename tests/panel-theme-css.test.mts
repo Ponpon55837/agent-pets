@@ -54,7 +54,7 @@ test('non-allowlisted names and malformed values are dropped and reported', () =
   const entry = activePanelTheme(state(), 'light')!
   const tampered = {
     ...entry,
-    shared: { ...entry.shared, properties: { ...entry.shared.properties, '--organic-font-body': 'x;}body{color:red', '--organic-radius-sm': '8px;', color: 'red' } as never },
+    shared: { ...entry.shared, properties: { ...entry.shared.properties, '--organic-font-body': 'x;}body{color:red', '--organic-radius-sm': '8px;', color: 'red' } },
     modes: { light: { ...entry.modes.light!, properties: { ...entry.modes.light!.properties, '--organic-text': 'url(https://example.com)', '--organic-bg': 'var(--x)' } } },
   }
   const plan = panelThemeTargetProperties(tampered, 'light', { forcedColors: false, highContrast: false })

@@ -8,7 +8,11 @@ import {
   STARTUP_DEFERRED_WORK_MS,
   type HistoryRuntimeState,
 } from '../electron/main/history-runtime-service.ts'
+import type { HistoryStore } from '../electron/history.ts'
+import type { LocalUsageReader, LocalUsageReaderOptions } from '../electron/local-usage.ts'
+import type { ProgressionStore } from '../electron/progression.ts'
 import { LOCAL_USAGE_CATCH_UP_DELAY_MS, LOCAL_USAGE_TICK_MS } from '../electron/main/scan-schedule.ts'
+import { fakeService } from './support/fake-service.mts'
 
 // 階段 11 之前在 electron/main/runtime.ts 內 createHistoryServices()／refreshLocalUsage()
 // 的行為，改由抽出的服務搭配假 store 與 node:test 假計時器驗證。
@@ -20,22 +24,22 @@ function setup(t: TestContext, options: { failOpens?: number; scan?: () => ScanR
   const calls: string[] = []
   let failOpens = options.failOpens ?? 0
   let scans = 0
-  const store = {
+  const store = fakeService<HistoryStore>({
     quickCheck: () => true,
     close: () => calls.push('store.close'),
     getRetentionDays: () => 30,
     pruneInBatches: async () => { calls.push('prune') },
-  }
+  })
   const state: HistoryRuntimeState = {
     historyStore: null,
     localUsageReader: null,
     localUsageScanTimer: null,
     localUsageScanPromise: null,
-    progressionStore: { pruneStaleActivity: () => calls.push('xp-prune') } as never,
+    progressionStore: fakeService<ProgressionStore>({ pruneStaleActivity: () => calls.push('xp-prune') }),
     projectRoutingStore: null,
     isQuitting: false,
   }
-  let readerOptions: Record<string, unknown> | null = null
+  let readerOptions: LocalUsageReaderOptions | null = null
   const service = createHistoryRuntimeService({
     state,
     databasePath: () => 'history.sqlite',
@@ -45,16 +49,16 @@ function setup(t: TestContext, options: { failOpens?: number; scan?: () => ScanR
         failOpens -= 1
         throw new Error('locked')
       }
-      return store as never
+      return store
     },
     createLocalUsageReader: readerOpts => {
-      readerOptions = readerOpts as never
-      return {
+      readerOptions = readerOpts
+      return fakeService<LocalUsageReader>({
         scan: async () => {
           scans += 1
           return options.scan?.() ?? { recordsImported: 0, bytesRead: 10, pending: false }
         },
-      } as never
+      })
     },
     homeDir: () => 'home',
     configDirs: () => ({ claude: 'c', codex: 'x' }),
@@ -89,7 +93,7 @@ test('start opens the store once and wires the local usage reader', t => {
   const options = readerOptions()
   assert.equal(options?.homeDir, 'home')
   assert.equal(options?.history, state.historyStore)
-  ;(options?.onRecordsImported as (records: unknown[]) => void)([])
+  ;options?.onRecordsImported?.([])
   assert.ok(calls.includes('imported:30'))
 })
 

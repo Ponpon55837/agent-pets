@@ -1,7 +1,7 @@
 # 1.14.1 型別與風格清理
 
 - **基準 commit**：`79e3704`（`main`，版本 1.14.0）
-- **階段順序**：G0 → A → B → C → D → E → F，每階段一個分支，下一階段從上一階段切出；最後統一升 patch 版（1.14.1）。
+- **階段順序**：G0 → A → B → C → D → E → F → F2 → F3，每階段一個分支，下一階段從上一階段切出；最後統一升 patch 版（1.14.1）。
 - 本檔由各階段依序續寫，每階段一節。
 
 ## 整輪總結
@@ -17,20 +17,22 @@
 | D | `04162d1` | 42 | 分支鏈改成 `switch` 或 handler map（`ActionMenu` 改為泛型）；集中重複常數；`event-server` 改用 `IPC_CHANNELS`；`PermissionBubble` 的 CSS 抽成獨立檔 |
 | E | `416e556` | 9 | `plugin-feed` 的 `addToCenter` 改成 O(n) 原地壓縮；`SessionSnapshotStore.get` 改成 O(1)；plugin storage 寫入改成增量計算大小，順手修正 prototype key 的問題 |
 | F | `7901aa2` | 35 | 測試檔剩下的 36 個 `any` 清零，抽出 `makeAgentStatusEvent` 與 `createFakeIpcMain` 兩個共用 fixture；`no-explicit-any` 升成 error；lint 忽略 `.claude/**`、`.playwright-mcp/**` |
-| F2 | 見 F2 一節 | 106 | 修正「整個測試檔沒跑完」的根因（import 時 `rmSync` 遇到 Windows 檔案鎖）；7 個測試檔的計時斷言改成負載下穩定；新增 `tsconfig.tests.json`，`tests/` 的 178 個型別錯誤清零並接進 `pnpm lint` |
+| F2 | `35c5dd8` | 106 | 修正「整個測試檔沒跑完」的根因（import 時 `rmSync` 遇到 Windows 檔案鎖）；7 個測試檔的計時斷言改成負載下穩定；新增 `tsconfig.tests.json`，`tests/` 的 178 個型別錯誤清零並接進 `pnpm lint` |
+| F3 | 見 F3 一節 | 47 | `tests/` 的 114 處 `as never` 與 `electron/` 的 3 處清零，lint 以 `no-restricted-syntax` 禁止；新增 `invalid<T>()`、`fakeDisplay`、`makePermissionRequestView`；`CrashGuardProcess.off` 改成逐事件 overload |
 
-整輪相對基準 `79e3704`：共 122 個檔案變更（各階段有重疊的檔案只算一次）。
+整輪相對基準 `79e3704`：共 220 個檔案變更（各階段有重疊的檔案只算一次）。
 
 ### 前後對比
 
-| 項目 | 基準（`79e3704`） | 本輪結束（F） |
+| 項目 | 基準（`79e3704`） | 本輪結束（F3） |
 |---|---|---|
 | `pnpm lint` | 0 error、52 warning（全是 `no-explicit-any`） | 0 error、0 warning；`no-explicit-any` 已是 error；含 tests 型別檢查 |
 | `tests/` 型別檢查 | 沒有（`tsconfig.json` 不含 `tests/`） | `tsconfig.tests.json`，0 error |
+| `as never` | `tests/` 114 處、`electron/` 3 處，lint 不檢查 | 0 處，lint 禁止 |
 | `pnpm exec vue-tsc --noEmit` | 0 error | 0 error |
-| `pnpm test:unit` | 1811 tests、6 fail、37 skip | 1837 tests、0 fail、39 skip；連續 5 次與 3 個全量同時跑 6 次都穩定 |
+| `pnpm test:unit` | 1811 tests、6 fail、37 skip | 1837 tests、0 fail、39 skip；F2 連續 5 次與 3 個全量同時跑 6 次、F3 連續 3 次都穩定 |
 
-測試數增加 26 項：G0 拆出 1 項、B 11 項、C 2 項、D 1 項、E 11 項，都是 characterization 或回歸測試。skip 多 2 項是 G0 掛上的檔案 symlink 測試。F、F2 只重構測試，沒有增減測試數。
+測試數增加 26 項：G0 拆出 1 項、B 11 項、C 2 項、D 1 項、E 11 項，都是 characterization 或回歸測試。skip 多 2 項是 G0 掛上的檔案 symlink 測試。F、F2、F3 只重構測試，沒有增減測試數。
 
 ### 殘留風險彙總
 
@@ -38,8 +40,9 @@
 - `pnpm bench:lag:check` 在這台 Windows 機器上，E 之前就已超出門檻：mean 約 15.4–15.5 ms，門檻 12 ms。baseline 檔是在 macOS 上量的，15.5 ms 又剛好接近 Windows 預設的計時器粒度。E 前後數值相同，與本輪無關；需要在 macOS／CI 重跑，或替 Windows 另建 baseline。
 - Windows 無法建立檔案 symlink 時（沒開開發者模式），2 個測試會 skip；這兩個測試只在 macOS／Linux 或開了開發者模式的 Windows 上驗證（G0）。
 - 本輪只在 Windows 上驗證；macOS／Linux 的行為（junction 型別被忽略、macOS Keychain 憑證路徑等）依文件與既有測試推定。
-- `tests/` 已納入型別檢查（F2），但還有 117 處既有的 `as never` 會跳過檢查；`fakeService` 只檢查鍵名。編輯器開啟測試檔時會顯示推斷專案的假錯誤，實際以 `pnpm typecheck:tests` 為準。
+- `tests/` 已納入型別檢查（F2），`as never` 已清零並由 lint 禁止（F3）；但 `fakeService` 只檢查鍵名，`tests/` 仍有 62 處 `as unknown as`（多半是讀 store 私有欄位），lint 未禁止。編輯器開啟測試檔時會顯示推斷專案的假錯誤，實際以 `pnpm typecheck:tests` 為準。
 - hook 計時測試的上限是兩倍 node 啟動基準加餘裕。基準超過 3.5–5.5 秒的極端負載下仍不會誤報，但抓不到對應的退化（F2）。
+- F3 調整了 `CrashGuardProcess` 介面（主程序 crash guard 的型別），只靠型別檢查與單元測試驗證，沒有啟動 Electron。
 - **建議版號：patch 1.14.1**。本輪是型別、風格、測試與內部演算法的調整，沒有改持久化 schema、公開契約或安全邊界。
 
 ## G0：Windows 無法建立 symlink 的測試
@@ -743,7 +746,82 @@ n = center 筆數（≤ 500），k = 單一 plugin 筆數（≤ 100），S = 單
 
 - 3 倍負載下 node 啟動基準最高量到 3.2 秒。基準超過 5.5 秒時，busy app 測試的上限（`baseline * 2 + 2_500`）會超過 app 的 8 秒延遲；超過 3.5 秒時，pet closed 與不重試測試的上限會超過重試的 5 秒。這時測試不會誤報，但抓不到「改成等回答／誤開重試」的退化。
 - 編輯器（VS Code 的 TS server）只認 `tsconfig.json`，開啟 `tests/*.mts` 時會用推斷專案，顯示找不到 `node:*` 型別等假錯誤。實際檢查以 `pnpm typecheck:tests` 為準，CI 經由 `pnpm lint` 執行。
-- `tests/` 裡還有 117 處既有的 `as never`（分布在 40 個檔案，多半是假物件或故意餵入的非法值），能通過編譯，但會跳過型別檢查。全部清掉會擴大本階段範圍，所以沒動；新增的程式碼沒有 `as never`，skill 文件已寫明不要再新增。
+- （F3 已處理）`tests/` 裡還有 117 處既有的 `as never`（分布在 40 個檔案，多半是假物件或故意餵入的非法值），能通過編譯，但會跳過型別檢查。全部清掉會擴大本階段範圍，所以沒動；新增的程式碼沒有 `as never`，skill 文件已寫明不要再新增。
 - `fakeService<T>()` 只檢查鍵名，不檢查成員型別：假物件的回傳值若與真實型別不符，`tsc` 不會發現。改用 `Partial<T>` 會讓 5 個檔案出現假資料形狀不完整的錯誤，補齊屬於另一輪工作。
 - 只在 Windows 驗證。Windows 的檔案鎖是 `EPERM` 的來源；macOS／Linux 上 `removeTempTree` 的重試通常不會觸發。
 - 沒有啟動 Electron。本階段改的是測試、型別檢查設定，以及 `vite.config.mts` 的 import 位置（`vite build` 通過；`pnpm dev` 沒有實際啟動驗證）。
+
+## F3：`as never` 清零、lint 禁止 `as never`
+
+- **分支**：`claude/cleanup-f3-as-never-f013ae`
+- **開始時間**：2026-11-11 15:38（Asia/Taipei）
+- **完成時間**：2026-11-11 15:56（Asia/Taipei）
+- **狀態**：通過
+
+### 步驟狀態
+
+| # | 步驟 | 狀態 | 備註 |
+|---|---|---|---|
+| 1 | 讀規範、盤點 `as never` | 通過 | `tests/` 117 處文字命中，其中 3 處是註解或字串裡的英文 never，實際轉型 114 處；`electron/` 3 處；`src/` 只有 CSS 註解 |
+| 2 | 新增 `invalid<T>()`、lint 規則 | 通過 | 以探針檔確認選擇器抓得到 `x as never` 與 `(x as unknown) as never`，不會誤傷 `const _exhaustive: never = v`、`never` 型別別名、參數與回傳的 `never` 註記 |
+| 3 | 替換 `tests/` 的 `as never` | 通過 | 4 個子代理分組平行處理，檔案互不重疊；我逐檔複核後重做 3 處、抽出 2 個共用 fixture |
+| 4 | 更新 `build-environment.md` | 通過 | |
+| 5 | 逐檔 code review、連續 3 次全量驗證 | 通過 | 3 次全量都是 1837 tests、0 fail、39 skip |
+
+### 檔案變更
+
+| 檔案 | 變更內容 | 原因 |
+|---|---|---|
+| `eslint.config.mjs` | 對所有檔案加 `no-restricted-syntax`：`TSAsExpression > TSNeverKeyword.typeAnnotation` 與 `TSTypeAssertion > TSNeverKeyword.typeAnnotation` | 禁止再寫 `as never`／`<never>`。選擇器只比對斷言的目標型別，不影響 `const _exhaustive: never = v` 等型別註記 |
+| `electron/main/crash-guard.ts` | `CrashGuardProcess.off` 從 `(event: string, listener: (...args: never[]) => void)` 改成與 `on` 相同的逐事件 overload；`proc` 標註為 `CrashGuardProcess`，`dispose` 的 2 處 `as never` 與預設值的 `process as unknown as CrashGuardProcess` 都移除 | `never[]` 參數讓真正的 `process`／`EventEmitter` 都無法賦值，所以呼叫端與測試只能轉型。`options.proc ?? process` 推斷成聯集時，overload 無法呼叫，所以要明確標註 |
+| `electron/main/renderer-recovery.ts` | `contents.off(event, listener as never)` 移除轉型 | `RecoverableWebContents` 是 `Pick<EventEmitter, 'on' \| 'off'>`，本來就能接受 |
+| `tests/support/invalid.mts`（新增） | `invalid<T>(value: unknown): T` | 刻意餵給嚴格型別參數、執行期驗證應拒絕的非法值，轉型集中在這裡 |
+| `tests/support/fake-electron.mts` | 新增 `fakeDisplay(id, bounds, workArea)`，回傳完整的 `Display`（純資料，不轉型） | `pet-window-mode-service`、`panel-geometry` 原本各自 `as never`；子代理各寫了一份相同的 helper，我合併成一份 |
+| `tests/support/permission-request-view.mts`（新增） | `makePermissionRequestView(overrides)` | `permission-hotkeys`、`permission-view` 都需要完整的 `PermissionRequestView` |
+| 39 個 `tests/*.test.mts` | 114 處 `as never` 全部移除，寫法見下方 | |
+| `.agents/skills/pet-skill/references/build-environment.md` | Lint 一節：寫明 `as never` 由 lint 禁止且已清零，以及假物件、`invalid<T>()`、`as unknown as` 的使用規則 | |
+
+### 替換方式
+
+| 寫法 | 處數（約） | 代表檔案 |
+|---|---|---|
+| 原本就符合型別，直接拿掉 | 45 | `history`、`growth-maintenance`、`pet-window-mode-service`（`restore` 的輸入都是合法的 `PetWindowState`，選填欄位本來就可省略）、`progression`、`local-usage`、`renderer-recovery`、`turn-end-watcher`、`panel-theme-*` |
+| 補齊成完整、有型別註記的資料（`satisfies` 或明確型別） | 35 | `tray-menu`（完整 `DesktopPreferences`）、`plugin-*`（manifest、contributes、skin、panel theme、通知紀錄）、`quota`、`permission-*`、`achievements`（`ProgressionSnapshot`）、`growth-service`、`settings-registry`（`(key: TranslationKey) => string`） |
+| `fakeService<T>()` | 17 | `growth-service`、`history-runtime-service`、`plugin-catalog-runtime`、`plugin-runtime`、`app-update-runtime`、`onboarding`、`local-server-listen`（`Server`） |
+| `fakeBrowserWindow`／`fakeWebContents`／`fakeDisplay` | 13 | `pet-window-mode-service`、`panel-geometry`、`growth-maintenance`、`ipc-app-update`、`ipc-reliability` |
+| 把字面值聯集陣列寬化成 `readonly string[]` 再 `includes` | 3 | `hook-literal-contract`、`plugin-panel-themes` |
+| `invalid()` | 2 | `permission-broker`（`permissionModes: ['always']` 不是合法決策，測的就是註冊時拒絕）、`plugin-permission-units`（manifest 型別以外的未來權限鍵） |
+
+順手處理：`plugin-runtime`、`growth-service`、`plugin-state-sync`、`plugin-tabs`、`plugin-permission-units` 原有的 6 處 `as unknown as` 一併換掉（`tests/` 從 68 處降到 62 處，沒有新增）；`plugin-catalog-runtime` 的 `globalThis as unknown as Record` 改用 `Reflect`。
+
+沒有受測函式需要把參數改成 `unknown`：用到 `invalid()` 的兩處，受測端本來就在執行期驗證（`registerAdapter` 拋錯、`permissionUnits` 把未知的 true 鍵列成單位），型別保持嚴格才符合正常呼叫端。
+
+### Code review 結論
+
+4 個子代理（Sonnet）分組處理、檔案互不重疊。我逐檔讀完 diff，以下是重做或修正的地方：
+
+- **`main-error-boundary`**：子代理寫了 30 行的 `FakeProcess` class，裡面還有 `value as Error`。根因是 `CrashGuardProcess.off` 的 `never[]` 參數，改正介面後，測試直接用 `new EventEmitter()`。「escalates at most once」原本手寫的假 proc 也改用同一個 `fakeProcess()` 加 `emit`。
+- **`achievement-order`**：子代理把 `'far'`、`'near'` 這類佔位 id 包進 `invalid()`。這些 id 不是執行期會拒絕的輸入，只是不在 `AchievementId` 聯集裡。排序與 id 無關，所以改用 7 個真實的 `AchievementId`，一對一替換，斷言順序不變。
+- **`main-shutdown`**：子代理用 `fakeService` 包 timer state，但它不是服務 class。改成從 `MAIN_STATE_TIMER_KEYS` 建 `Record<TimerKey, Timeout | null>`，留一處 `Object.fromEntries` 的收斂轉型，並附中文註解。
+- **`plugin-catalog-runtime`**：`network` 原本放寬成 `Record<string, unknown>`，鍵名不受檢查；改成 `fakeService<PluginNetworkClient>` 的參數型別。
+- **重複 helper**：兩份 `fakeDisplay` 合併進 `fake-electron.mts`；兩份完整的 `PermissionRequestView` 抽成 `permission-request-view.mts`。
+- **`permission-audit`**：4 個 `as const` 改成明確型別 `PermissionAuditRecord & { description; responseHandle }`，表達「呼叫端夾帶敏感欄位」的情境；第二個測試在 `JSON.stringify` 裡加的 `as const` 沒有作用，還原。
+- **斷言沒有放寬**：39 個測試檔的 `test(` 數量與 `assert.*` 呼叫數都和 HEAD 完全相同（腳本逐檔比對）。內容有改的只有 `growth-service` 假 snapshot 的 `evolutionStage`：`0`／`1` 改成 `'egg'`／`'baby'`，期望的 `stageBefore`／`stageAfter` 同步更新。服務只是轉送這兩個值，原本的數字不是合法型別；`ipc-app-update`、`ipc-reliability` 的假視窗 id 從 `'panel'` 改成 `1`，測試只用物件身分比對。
+- 選擇器以探針檔驗證：`x as never`、`(x as unknown) as never` 會報錯；`const _exhaustive: never = v`、`type N = never`、參數與回傳的 `never`、`satisfies never[]` 不會報錯。
+
+### 驗證輸出摘要
+
+| 項目 | 結果 |
+|---|---|
+| `pnpm lint`（eslint、main-process lint、`typecheck:tests`） | 0 error、0 warning |
+| `pnpm exec vue-tsc --noEmit` | 0 error |
+| `git grep -n "as never" -- tests src electron` | 只剩 4 行英文 never：`src/styles/tokens.css:148` 的 CSS 註解、`local-usage.test.mts:215` 的測試名稱、`:242` 的註解、`plugin-theme-api.test.mts:125` 的斷言訊息，都不是轉型 |
+| `pnpm test:unit` 第 1 次 | 1837 tests、1798 pass、0 fail、39 skip（49.2 s） |
+| `pnpm test:unit` 第 2 次 | 1837 tests、1798 pass、0 fail、39 skip（51.3 s） |
+| `pnpm test:unit` 第 3 次 | 1837 tests、1798 pass、0 fail、39 skip（45.2 s） |
+
+### 殘留風險
+
+- `fakeService<T>()` 仍然只檢查鍵名，不檢查成員型別（F2 已記錄）。本階段新增 17 處用法，都用在帶私有欄位的 class，或像 `PluginRuntimeState` 這樣的 30 多欄 `Pick<MainState>`（測試只提供 `dispose` 會碰到的成員）。
+- `tests/` 仍有 62 處 `as unknown as`，多半用來讀 store 的私有欄位（`database`、`queuedEvents`）或 `assertTrustedIpcSender` 的 sender。lint 沒有禁止，本階段沒有逐一處理。
+- `CrashGuardProcess` 的介面改動影響主程序：`installCrashGuard` 的預設值不再轉型，型別檢查通過、單元測試涵蓋 `on`／`off`，但沒有啟動 Electron 實機確認。

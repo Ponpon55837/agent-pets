@@ -9,6 +9,8 @@ import {
   evaluateAchievements,
   type AchievementEvaluationContext,
 } from '../src/types/achievement.ts'
+import type { AgentStatusEvent } from '../src/types/agent.ts'
+import type { ProgressionSnapshot } from '../src/types/progression.ts'
 import { removeTempTree } from './support/temp-dir.mts'
 
 const BASE_TIME = Date.UTC(2026, 0, 1, 12)
@@ -25,10 +27,10 @@ function event(
   state: 'thinking' | 'success',
   timestamp: number,
   sessionId: string,
-  overrides: Record<string, unknown> = {},
-) {
+  overrides: Partial<AgentStatusEvent> = {},
+): AgentStatusEvent {
   return {
-    source: 'codex' as const,
+    source: 'codex',
     sessionId,
     state,
     timestamp,
@@ -222,7 +224,7 @@ test('progress comes from the same facts as the unlock rules and never exceeds t
   try {
     store.recordEvent(event('success', BASE_TIME, 'one'), 'wolf')
     store.recordEvent(event('success', BASE_TIME + 1_000, 'two'), 'wolf')
-    const snapshot = store.getSnapshot('wolf', { petId: 'wolf', level: 7 } as never)
+    const snapshot = store.getSnapshot('wolf', { petId: 'wolf', totalXp: 0, level: 7, xpIntoLevel: 0, xpToNext: 1, evolutionStage: 'baby', currentStreak: 0, longestStreak: 0, updatedAt: BASE_TIME } satisfies ProgressionSnapshot)
     const byId = new Map(snapshot.achievements.map(item => [item.id, item]))
     assert.deepEqual(byId.get('getting_serious')?.progress, { current: 2, target: 100 })
     assert.deepEqual(byId.get('sessions_10')?.progress, { current: 2, target: 10 })
@@ -248,7 +250,7 @@ test('pet counters stay equal to a full recompute and replays return early', () 
       const e = event('success', BASE_TIME + i * 1000, session, {
         ...(withTokens ? { eventId: `t${Math.floor(rand() * 80)}`, tokenUsage: { input: 10 + i, output: 5, quality: rand() < 0.5 ? 'exact' : 'estimated' } } : {}),
       })
-      store.recordEvent(e as never, pet)
+      store.recordEvent(e, pet)
     }
     for (const pet of ['aang-airbender', 'wolf']) {
       const counters = db.prepare('SELECT * FROM pet_counters WHERE pet_id = ?').get(pet)
@@ -260,7 +262,7 @@ test('pet counters stay equal to a full recompute and replays return early', () 
       assert.equal(counters.token_total, tokens.t)
     }
     // A duplicate success evaluates nothing and unlocks nothing.
-    assert.deepEqual(store.recordEvent(event('success', BASE_TIME, 's1') as never, 'aang-airbender'), [])
+    assert.deepEqual(store.recordEvent(event('success', BASE_TIME, 's1'), 'aang-airbender'), [])
   })
 })
 
@@ -269,7 +271,7 @@ test('v2 migration backfills counters and adds pet_id indexes to a v1 database',
   const path = join(directory, 'achievements.sqlite')
   try {
     const first = new AchievementStore(path, { now: () => BASE_TIME, localDate, localHour })
-    for (let i = 0; i < 5; i += 1) first.recordEvent(event('success', BASE_TIME + i, `m${i}`, { source: 'opencode-cli', tokenUsage: { input: 100, output: 20, quality: 'exact' }, eventId: `e${i}` }) as never, 'aang-airbender')
+    for (let i = 0; i < 5; i += 1) first.recordEvent(event('success', BASE_TIME + i, `m${i}`, { source: 'opencode-cli', tokenUsage: { input: 100, output: 20, quality: 'exact' }, eventId: `e${i}` }), 'aang-airbender')
     const raw = (first as unknown as { database: { exec(sql: string): void } }).database
     raw.exec('DROP TABLE pet_counters; DROP INDEX idx_token_usage_pet; DROP INDEX idx_completed_sessions_pet; DELETE FROM schema_migrations WHERE version = 2;')
     first.close()
@@ -323,7 +325,7 @@ test('live Codex and Claude event tokens are ignored so local logs stay the sing
     for (const [source, adapterId] of [['codex', 'codex'], ['claude', 'claude-code'], ['claude-desktop', undefined]] as const) {
       store.recordEvent(event('thinking', BASE_TIME, `s-${source}`, {
         source, ...(adapterId ? { adapterId } : {}), eventId: `e-${source}`, tokenUsage: { input: 2_000_000, output: 0, quality: 'exact' },
-      }) as never, 'wolf')
+      }), 'wolf')
     }
     assert.equal(store.getSnapshot('wolf').achievements.find(item => item.id === 'one_million')?.progress?.current, 0)
   })

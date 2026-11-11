@@ -5,7 +5,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import test from 'node:test'
 import { HistoryStore, safeModelId, trimQueuedEvents } from '../electron/history.ts'
-import type { AgentStatusEvent } from '../src/types/agent.ts'
+import type { AgentState, AgentStatusEvent } from '../src/types/agent.ts'
 import { removeTempTree } from './support/temp-dir.mts'
 
 interface RawDatabase {
@@ -487,10 +487,10 @@ test('queueEvent micro-batches into one commit and isolates a failing event', (t
   const base = { source: 'codex', sessionId: 's1', project: 'p', projectId: 'a'.repeat(32) } as const
   const onRecorded = () => { recorded += 1 }
   for (let i = 0; i < 50; i += 1) {
-    store.queueEvent({ ...base, state: 'tool-running', timestamp: 1_000_000 + i * 1000 } as never, 'aang-airbender', onRecorded)
+    store.queueEvent({ ...base, state: 'tool-running', timestamp: 1_000_000 + i * 1000 }, 'aang-airbender', onRecorded)
   }
-  store.queueEvent({ ...base, state: 'success', timestamp: 1_100_000, sessionId: '' } as never, 'aang-airbender')
-  store.queueEvent({ ...base, state: 'success', timestamp: 1_100_000 } as never, 'aang-airbender', onRecorded)
+  store.queueEvent({ ...base, state: 'success', timestamp: 1_100_000, sessionId: '' }, 'aang-airbender')
+  store.queueEvent({ ...base, state: 'success', timestamp: 1_100_000 }, 'aang-airbender', onRecorded)
   assert.equal(store.flushQueued(), 51)
   assert.equal(recorded, 1)
   const summary = store.getSummary('aang-airbender', undefined, 7)
@@ -521,12 +521,12 @@ test('heartbeats roll up into one row per session-day with identical active time
   const rand = () => { seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0; return seed / 2 ** 32 }
   const sent: Array<{ state: string, timestamp: number }> = []
   let ts = start
-  const states = ['thinking', 'tool-running', 'thinking', 'tool-running', 'waiting-input', 'idle']
+  const states: AgentState[] = ['thinking', 'tool-running', 'thinking', 'tool-running', 'waiting-input', 'idle']
   for (let i = 0; i < 1500; i += 1) {
     ts += Math.floor(rand() * 400_000) + 1
     const state = states[Math.floor(rand() * states.length)]!
     sent.push({ state, timestamp: ts })
-    assert.equal(store.recordEvent(event({ state: state as never, timestamp: ts, sessionId: 'long' })), true)
+    assert.equal(store.recordEvent(event({ state, timestamp: ts, sessionId: 'long' })), true)
   }
   const expected = activeOracle(sent)
   const read = () => store.getSummary('aang-airbender', undefined, 30).totals.activeMs
@@ -716,8 +716,8 @@ test('a failed batch commit re-queues events in order, sheds heartbeats first an
   const originalError = console.error
   console.error = () => {}
   t.after(() => { console.error = originalError })
-  store.queueEvent({ ...base, state: 'thinking', timestamp: 1_000_000 } as never)
-  store.queueEvent({ ...base, state: 'success', timestamp: 1_001_000 } as never)
+  store.queueEvent({ ...base, state: 'thinking', timestamp: 1_000_000 })
+  store.queueEvent({ ...base, state: 'success', timestamp: 1_001_000 })
   assert.equal(store.flushQueued(), 0)
   assert.equal(priv.queuedEvents.length, 2, 'events survive the failed commit')
   assert.equal(store.flushQueued(), 2, 'retry persists them')
@@ -725,7 +725,7 @@ test('a failed batch commit re-queues events in order, sheds heartbeats first an
 })
 
 test('trimQueuedEvents drops oldest heartbeats and never terminal events while heartbeats remain', () => {
-  const mk = (state: string, n: number) => ({ event: { source: 'codex', sessionId: 's', state, timestamp: n } as never, petId: 'p', receivedAt: n })
+  const mk = (state: AgentState, n: number) => ({ event: { source: 'codex', sessionId: 's', state, timestamp: n } satisfies AgentStatusEvent, petId: 'p', receivedAt: n })
   const items = [mk('thinking', 1), mk('success', 2), mk('thinking', 3), mk('error', 4), mk('thinking', 5)]
   const trimmed = trimQueuedEvents(items, 3)
   assert.deepEqual(trimmed.map(item => item.receivedAt), [2, 4, 5])

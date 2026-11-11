@@ -51,6 +51,11 @@ export default tseslint.config(
       // `<Transition>` 以 key 切換子節點（v-else-if 在 Transition 本身），不是子節點上的 v-if/v-show。
       'vue/require-toggle-inside-transition': 'off',
       '@typescript-eslint/no-explicit-any': 'error',
+      // `as never` 能塞進任何型別，和 `any` 一樣跳過檢查；`const _x: never = value` 這類窮盡性檢查是型別註記，不受影響。
+      'no-restricted-syntax': ['error',
+        { selector: 'TSAsExpression > TSNeverKeyword.typeAnnotation', message: '不要用 `as never` 跳過型別檢查：測試假物件用 tests/support 的 helper，刻意的非法輸入用 `invalid<T>()`。' },
+        { selector: 'TSTypeAssertion > TSNeverKeyword.typeAnnotation', message: '不要用 `<never>` 跳過型別檢查。' },
+      ],
     },
   },
 

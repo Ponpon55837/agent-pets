@@ -165,7 +165,7 @@ test('settings search finds the panel theme entry in both languages', () => {
   assert.equal(entry.section, 'appearance')
   const identity = (key: string) => key
   for (const query of ['wallpaper', '桌布', '字型', 'font', 'background', '背景']) {
-    assert.ok(searchSettings(query, identity as never).some(hit => hit.entry.id === 'panelThemeStyle'), query)
+    assert.ok(searchSettings(query, identity).some(hit => hit.entry.id === 'panelThemeStyle'), query)
   }
 })
 

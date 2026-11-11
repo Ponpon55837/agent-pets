@@ -537,7 +537,7 @@ test('large file is parsed in slices with the same totals, one project lookup pe
   const originalSetImmediate = globalThis.setImmediate
   globalThis.setImmediate = ((fn: () => void, ...args: unknown[]) => { yields += 1; return originalSetImmediate(fn, ...(args as [])) }) as typeof setImmediate
   try {
-    const reader = new LocalUsageReader({ homeDir: fixture.home, history: store, now: () => now, projectRouting: projectRouting as never })
+    const reader = new LocalUsageReader({ homeDir: fixture.home, history: store, now: () => now, projectRouting })
     const result = await reader.scan()
     assert.equal(result.recordsImported, RECORDS)
   } finally {

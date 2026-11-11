@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createPluginRuntime, type PluginRuntimeState } from '../electron/main/plugin-runtime.ts'
+import { createPluginRuntime, type PluginRuntimeDeps, type PluginRuntimeState } from '../electron/main/plugin-runtime.ts'
+import { fakeService } from './support/fake-service.mts'
 
 // plugin runtime 的 start() 需要 Electron；這裡只驗證能在 Node 執行的部分：
 // 重入防護與 dispose() 的釋放順序（與抽出前 teardownMainServices 的 plugin 段逐行相同）。
@@ -31,7 +32,7 @@ function setup() {
     pluginRegistry: null,
     pluginPreferences: null,
   }
-  const runtime = createPluginRuntime({ state: state as unknown as PluginRuntimeState, electron: {} } as never)
+  const runtime = createPluginRuntime(fakeService<PluginRuntimeDeps>({ state: fakeService<PluginRuntimeState>(state), electron: {} }))
   return { calls, state, runtime, contexts }
 }
 

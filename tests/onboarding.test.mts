@@ -7,6 +7,7 @@ import { OnboardingStore } from '../electron/onboarding-state.ts'
 import { registerOnboardingIpc } from '../electron/ipc/onboarding.ts'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { createFakeIpcMain } from './support/fake-ipc.mts'
+import { fakeService } from './support/fake-service.mts'
 import { removeTempTree } from './support/temp-dir.mts'
 
 test('onboarding state persists completion, skip and reset in a temp dir', () => {
@@ -31,7 +32,7 @@ test('onboarding IPC checks the sender and rejects unknown actions', async () =>
   registerOnboardingIpc({
     ipcMain,
     assertTrustedIpcSender: () => { trusted += 1 },
-    getStore: () => ({ get: () => ({ version: 1 }), update: (action: string) => { updates.push(action); return { version: 1 } } }) as never,
+    getStore: () => fakeService<OnboardingStore>({ get: () => ({ version: 1 }), update: (action: string) => { updates.push(action); return { version: 1 } } }),
   })
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)?.({}, ...args)
   assert.deepEqual(invoke(IPC_CHANNELS.onboardingGet), { version: 1 })
