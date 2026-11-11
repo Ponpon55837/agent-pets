@@ -34,6 +34,9 @@ import {
   LOCAL_WIRE_PATHS,
 } from '../src/types/local-wire.ts'
 import {
+  type AgentHooksFile,
+  type HookMatcherEntry,
+  agentHooksFor,
   codexHookCommand,
   ensureAgentPetsHookEntries,
   escapeCmdQuotedPath,
@@ -834,25 +837,25 @@ const CODEX_HOOK_EVENTS = [
   'PostToolUse',
   'Stop',
   'SessionEnd',
-]
+] as const
+type CodexHookEvent = (typeof CODEX_HOOK_EVENTS)[number]
 
-function codexHooksJson(): any {
+const CODEX_HOOKS_DESCRIPTION = 'Agent Pets lifecycle hooks for Codex CLI.'
+
+// 型別不管鍵順序；codexHooksJson 回傳的物件要把 description 寫在 hooks 前面，新安裝的 hooks.json 依此寫出。
+type CodexHooksFile = { description: string } & AgentHooksFile<CodexHookEvent>
+
+function codexHooksJson(): CodexHooksFile {
   const hook = hookScriptPath()
   const nodeBin = IS_WIN ? '' : requireNodeBin()
   const command = codexHookCommand({ isWindows: IS_WIN, nodeBin, hookScript: hook, wrapper: hookWrapperPath() })
-  const handler = () => ({
-    hooks: [
-      {
-        type: 'command',
-        command,
-        statusMessage: 'Updating Agent Pets status',
-      },
-    ],
+  const entry = (): HookMatcherEntry => ({
+    hooks: [{ type: 'command', command, statusMessage: 'Updating Agent Pets status' }],
   })
 
   return {
-    description: 'Agent Pets lifecycle hooks for Codex CLI.',
-    hooks: Object.fromEntries(CODEX_HOOK_EVENTS.map((event) => [event, [handler()]])),
+    description: CODEX_HOOKS_DESCRIPTION,
+    hooks: agentHooksFor(CODEX_HOOK_EVENTS, entry),
   }
 }
 
@@ -861,15 +864,14 @@ async function installCodex(): Promise<ConfigWriteResult[]> {
   const results: ConfigWriteResult[] = await installHookScript()
 
   // Throws ConfigRefusedError (and writes nothing) if hooks.json exists but is not valid JSON.
-  const newHooks = codexHooksJson()
-  const { hooks, ...defaults } = newHooks
+  const { hooks, ...defaults } = codexHooksJson()
   results.push(await mergeAgentPetsHooksFile(codexHooksPathIn(codexHome), hooks, defaults))
 
   results.push(await enableCodexHooksFeature(codexConfigPathIn(codexHome)))
   return results
 }
 
-const CODEX_HOOKS_OWNED_TOP_LEVEL = { description: 'Agent Pets lifecycle hooks for Codex CLI.' }
+const CODEX_HOOKS_OWNED_TOP_LEVEL = { description: CODEX_HOOKS_DESCRIPTION }
 
 // The hook script (and Windows wrapper) is shared by Codex, Claude Code and Claude Desktop.
 // Remove it only when no remaining config still points at it.
@@ -950,9 +952,11 @@ const CLAUDE_CODE_HOOK_EVENTS = [
   'PreCompact',
   'PostCompact',
   'SessionEnd',
-]
+] as const
+type ClaudeCodeHookEvent = (typeof CLAUDE_CODE_HOOK_EVENTS)[number]
+
 // 第一版就安裝的事件；其餘都是之後才加的，舊安裝要靠啟動升級補上。
-const CLAUDE_CODE_ORIGINAL_EVENTS: ReadonlySet<string> = new Set([
+const CLAUDE_CODE_ORIGINAL_EVENTS: ReadonlySet<ClaudeCodeHookEvent> = new Set<ClaudeCodeHookEvent>([
   'SessionStart',
   'UserPromptSubmit',
   'PreToolUse',
@@ -961,26 +965,24 @@ const CLAUDE_CODE_ORIGINAL_EVENTS: ReadonlySet<string> = new Set([
   'Stop',
   'SessionEnd',
 ])
-const CLAUDE_CODE_TOOL_EVENTS = new Set(['PreToolUse', 'PermissionRequest', 'PostToolUse', 'PostToolUseFailure'])
+const CLAUDE_CODE_TOOL_EVENTS: ReadonlySet<ClaudeCodeHookEvent> = new Set<ClaudeCodeHookEvent>(['PreToolUse', 'PermissionRequest', 'PostToolUse', 'PostToolUseFailure'])
 // Only the PermissionRequest handler may wait (for a pet answer); every other
 // event keeps Claude Code's default timeout.
-const CLAUDE_CODE_HOOK_TIMEOUTS: Readonly<Record<string, number>> = { PermissionRequest: CLAUDE_PERMISSION_HOOK_TIMEOUT_SECONDS }
+const CLAUDE_CODE_HOOK_TIMEOUTS: Readonly<Partial<Record<ClaudeCodeHookEvent, number>>> = { PermissionRequest: CLAUDE_PERMISSION_HOOK_TIMEOUT_SECONDS }
 
-function claudeCodeHooksJson(): any {
+function claudeCodeHooksJson(): AgentHooksFile<ClaudeCodeHookEvent> {
   const hook = hookScriptPath()
   const nodeBin = requireNodeBin()
-  const handler = (event: string) => {
+  // matcher 放在 hooks 之後，維持既有 settings.json 的鍵順序。
+  const entry = (event: ClaudeCodeHookEvent): HookMatcherEntry => {
     const timeout = CLAUDE_CODE_HOOK_TIMEOUTS[event]
-    const entry: any = {
+    return {
       hooks: [{ type: 'command', command: nodeBin, args: [hook, 'claude'], ...(timeout ? { timeout } : {}) }],
+      ...(CLAUDE_CODE_TOOL_EVENTS.has(event) ? { matcher: '*' } : {}),
     }
-    if (CLAUDE_CODE_TOOL_EVENTS.has(event)) entry.matcher = '*'
-    return entry
   }
 
-  return {
-    hooks: Object.fromEntries(CLAUDE_CODE_HOOK_EVENTS.map((event) => [event, [handler(event)]])),
-  }
+  return { hooks: agentHooksFor(CLAUDE_CODE_HOOK_EVENTS, entry) }
 }
 
 async function installClaudeCode(): Promise<ConfigWriteResult[]> {
@@ -991,7 +993,7 @@ async function installClaudeCode(): Promise<ConfigWriteResult[]> {
 }
 
 // 從安裝清單推導而非另外手寫：新增事件時不可能漏掉升級（StopFailure 曾因此從未補給舊安裝）。
-const CLAUDE_CODE_UPGRADE_EVENTS: readonly string[] = CLAUDE_CODE_HOOK_EVENTS.filter(event => !CLAUDE_CODE_ORIGINAL_EVENTS.has(event))
+const CLAUDE_CODE_UPGRADE_EVENTS: readonly ClaudeCodeHookEvent[] = CLAUDE_CODE_HOOK_EVENTS.filter(event => !CLAUDE_CODE_ORIGINAL_EVENTS.has(event))
 
 /**
  * Brings an install made by an older version up to date (adds the handlers for events added

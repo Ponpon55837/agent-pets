@@ -245,3 +245,50 @@ Haiku 掃描 `electron/**` 與 `integrations/**`（已知清單除外），共�
 - macOS Keychain 的憑證路徑沒有覆蓋：Claude 憑證檔的測試在 macOS 上會 skip，本機只在 Windows 上跑過。
 - 陣列 payload 現在會被拒絕。如果有 renderer 呼叫端真的送陣列、又依賴陣列上的具名欄位，就會失效。已 grep 確認 preload 送出的都是物件字面值，但沒有啟動 app 實機驗證。
 - `permission-audit.ts` 仍然是「確認是物件後直接斷言成 `PermissionAuditRecord`」，沒有逐欄驗證。這是既有問題，留給後續處理。
+
+## C：`electron/setup.ts` 的 hook 設定 JSON 型別
+
+- **分支**：`claude/cleanup-c-hook-json-types-c02d99`
+- **開始時間**：2026-11-11 12:20（Asia/Taipei）
+- **狀態**：通過
+- **完成時間**：2026-11-11 12:28（Asia/Taipei）
+
+### 步驟狀態
+
+| # | 步驟 | 狀態 | 備註 |
+|---|---|---|---|
+| 1 | 讀規範，盤點 `codexHooksJson`、`claudeCodeHooksJson`、`mergeAgentPetsHooksFile` | 通過 | |
+| 2 | characterization 測試（改動前先在原始碼跑綠） | 通過 | 逐位元組比對兩份新安裝的輸出 |
+| 3 | 在 `hook-config.ts` 定義寫出用的嚴格型別，套用到 `setup.ts` | 通過 | 3 處 `any` 全數移除，merge 呼叫不需斷言 |
+| 4 | `pnpm lint`、`vue-tsc --noEmit`、`pnpm test:unit`、code review | 通過 | 見「驗證」 |
+
+### 檔案變更
+
+| 檔案 | 變更內容 | 原因 |
+|---|---|---|
+| `electron/hook-config.ts` | 新增並 export 寫出用的嚴格型別 `HookCommandHandler`（`type: 'command'`、`command`、`args?`、`timeout?`、`statusMessage?`）、`HookMatcherEntry`（`hooks`、`matcher?`）、`AgentHooks<Event>`、`AgentHooksFile<Event>`，以及共用的 `agentHooksFor(events, entry)`；`mergeAgentPetsHooksFile` 的 `desired` 從 `Record<string, unknown[]>` 收緊為 `Readonly<Record<string, readonly HookMatcherEntry[]>>` | 產生端有明確契約；讀使用者檔案用的寬鬆 `HookEntry` 保持不變、不混用。merge 的執行期行為沒變（仍只取每個事件的第一個 entry） |
+| `electron/setup.ts` | `CODEX_HOOK_EVENTS`、`CLAUDE_CODE_HOOK_EVENTS` 加 `as const`，由它們推導 `CodexHookEvent`、`ClaudeCodeHookEvent`；`codexHooksJson()` 回傳 `CodexHooksFile`，`claudeCodeHooksJson()` 回傳 `AgentHooksFile<ClaudeCodeHookEvent>`；`const entry: any` 加上事後補 `matcher` 的寫法，改成一次回傳 `HookMatcherEntry`（條件展開 `matcher`，鍵順序與原本相同）；`CLAUDE_CODE_ORIGINAL_EVENTS`、`CLAUDE_CODE_TOOL_EVENTS`、`CLAUDE_CODE_HOOK_TIMEOUTS`、`CLAUDE_CODE_UPGRADE_EVENTS` 改用事件聯集型別；Codex 的 description 抽成 `CODEX_HOOKS_DESCRIPTION`，安裝與移除共用；拿掉多餘的 `newHooks` 中間變數 | 移除 3 處 `any`；事件名拼錯會在編譯期被抓到；description 原本在兩處手寫，改一處就可能讓移除時認不出自己寫的檔案 |
+| `tests/setup-install.test.mts` | 新增 2 項 characterization：新安裝的 `settings.json` 與 `hooks.json` 逐位元組比對（事件順序、`matcher` 只在 4 個工具事件且排在 `hooks` 之後、`timeout: 135` 只在 PermissionRequest、Codex 的 `description` 在 `hooks` 前、`statusMessage`、Windows／POSIX 的 command）；既有的事件清單測試放寬成 `readonly string[]` 來查詢 | 原本只檢查部分欄位，鎖不住鍵順序與完整輸出；改動前先在原始碼跑綠 |
+| `docs/phase-reports/phase-1-14-1-type-style-cleanup.md` | 新增 C 一節 | 階段紀錄 |
+
+### Code review 結論
+
+- **外部契約**：兩份 dotfile 的輸出逐位元組不變，由新的 characterization 測試固定（改動前後都通過）。`as const` 只影響型別，執行期仍是同一個陣列；`hook-literal-contract` 用 regex 讀 `const CODEX_HOOK_EVENTS … = [...]` 的寫法也不受影響。
+- **安全邊界**：寫入哪些檔案、寫入順序、`withConfigConflictRetry` 的衝突重試、`ConfigRefusedError` 的拒絕條件都沒動。`CODEX_HOOKS_OWNED_TOP_LEVEL` 的值與原本完全相同，移除時仍認得自己寫的 `description`。
+- **斷言**：傳給 `mergeAgentPetsHooksFile` 的 `hooks` 與 `defaults` 都不需要 `as`；`{ description: string }` 是 type alias，解構後直接符合 `JsonObject`。唯一的 `as` 在 `agentHooksFor` 裡：`Object.fromEntries` 的回傳型別會丟掉鍵的聯集，而鍵就是傳入的事件清單本身，已用註解說明。
+- **範圍**：OpenCode plugin 範本字串裡的 `event.type` 分支鏈（D 階段）沒動。動到的函式附近沒有三層以上的 `if`/`else if`。升級路徑 `upgradeClaudeCodeHooksUnlocked` 與安裝路徑對 matcher／timeout 的判斷仍各寫一次；兩者產出的形狀不同（`RequiredHookEntry` 與 `HookMatcherEntry`），合併的收益小，所以不擴大 diff。
+- **環境**：worktree 原本沒有 `node_modules`，先執行 `pnpm install --frozen-lockfile --prefer-offline`（沒有改動 lockfile）。本階段沒有派子代理，全部自行實作與複驗。
+
+### 驗證
+
+| 指令 | 結果 |
+|---|---|
+| `pnpm exec vue-tsc --noEmit` | 0 error |
+| `pnpm lint` | 0 error、36 warning，全部是 `no-explicit-any` 且都在 `tests/`（`setup.ts` 的 3 個已清除）；main-process lint passed |
+| `pnpm test:unit` | 1825 tests、1786 pass、0 fail、39 skip（比基準多 2 項 characterization） |
+| hook 相關測試（`setup-install`、`hook-literal-contract`、`hook-config`、`claude-permission-hook`、`config-write-conflict`） | 90 tests、87 pass、0 fail、3 skip |
+
+### 殘留風險
+
+- characterization 測試只在當前平台跑一種 command 形式（Windows 走 `.cmd` wrapper，POSIX 走 node + 腳本）；另一個平台的字串仍由既有的 `codexHookCommand` 測試覆蓋。
+- `agentHooksFor` 內的斷言依賴「鍵等於傳入的事件清單」；若日後在裡面加入過濾邏輯，需同步調整型別。
