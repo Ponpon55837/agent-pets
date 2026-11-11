@@ -10,6 +10,7 @@ import type {
 import { PERMISSION_DEFAULT_TTL_SECONDS } from '../src/types/permission.ts'
 import { isOpaqueId128 as isIdentifier } from '../src/types/id-patterns.ts'
 import { redactSensitiveText } from './permission-redact.ts'
+import { isRecord } from './value-guards.ts'
 
 const DEFAULT_TTL_MS = PERMISSION_DEFAULT_TTL_SECONDS * 1000
 const MIN_TTL_MS = 15_000
@@ -256,7 +257,7 @@ export class PermissionBroker {
     const adapter = this.adapters.get(adapterId)
     if (!adapter) return { ok: false, error: 'adapter_unavailable' }
     if (adapter.permissions !== 'respond') return { ok: false, error: 'capability_denied' }
-    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    if (!isRecord(input)) {
       return { ok: false, error: 'invalid_request' }
     }
     const candidate = input as Partial<PermissionRequestInput>

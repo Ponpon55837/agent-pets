@@ -2,6 +2,7 @@ import { constants as fsConstants } from 'node:fs'
 import { lstat, open, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AgentFamilyKey } from '../src/types/agent.ts'
+import { asRecord } from './value-guards.ts'
 
 // 從 agent 自己寫的對話紀錄檔判斷「回合是不是已經結束」。
 //
@@ -104,8 +105,7 @@ const codexFormat: TranscriptFormat = {
   },
   classify(record) {
     if (record.type !== 'event_msg') return null
-    const payload = record.payload as { type?: unknown } | null
-    const kind = payload && typeof payload === 'object' ? payload.type : undefined
+    const kind = asRecord(record.payload)?.type
     if (kind === 'task_started') return 'open'
     if (kind !== 'task_complete' && kind !== 'turn_aborted') return null
     const at = timestampMs(record.timestamp)
@@ -157,10 +157,10 @@ export function turnEndFromTail(family: AgentFamilyKey, tail: string, truncated:
   for (let index = lines.length - 1; index >= first; index -= 1) {
     const line = lines[index]!.trim()
     if (!line) continue
-    let record: unknown
-    try { record = JSON.parse(line) } catch { continue }
-    if (!record || typeof record !== 'object' || Array.isArray(record)) continue
-    const verdict = format.classify(record as Record<string, unknown>)
+    let record: Record<string, unknown> | null
+    try { record = asRecord(JSON.parse(line)) } catch { continue }
+    if (!record) continue
+    const verdict = format.classify(record)
     if (verdict === null) continue
     return verdict === 'open' ? null : verdict
   }

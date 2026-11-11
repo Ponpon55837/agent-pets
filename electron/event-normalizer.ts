@@ -2,6 +2,7 @@ import type { AgentSource, AgentState, AgentStatusEvent, AgentTokenUsage } from 
 import { AGENT_STATES, ALL_SOURCES } from '../src/types/agent.ts'
 import { EXTERNAL_ONLY_PERMISSION_NOTICE } from '../src/types/capabilities.ts'
 import { parseHostHints } from './host-app.ts'
+import { asRecord, isRecord } from './value-guards.ts'
 
 const MAX_SESSION_ID_LENGTH = 256
 const MAX_TEXT_FIELD_LENGTH = 512
@@ -39,8 +40,8 @@ function optionalText(value: unknown): string | undefined {
 }
 
 function optionalTokenUsage(value: unknown): AgentTokenUsage | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const raw = value as Record<string, unknown>
+  const raw = asRecord(value)
+  if (!raw) return undefined
   if (raw.quality !== 'estimated' && raw.quality !== 'exact') return undefined
   const input = typeof raw.input === 'number' && Number.isSafeInteger(raw.input) && raw.input >= 0 && raw.input <= MAX_TOKEN_COUNT
     ? raw.input
@@ -56,7 +57,7 @@ export function normalizeAgentStatusEvent(
   value: unknown,
   receivedAt = Date.now(),
 ): EventNormalizationResult {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return { ok: false, error: 'event must be an object' }
   }
 

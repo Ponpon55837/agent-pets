@@ -92,6 +92,9 @@ test('pet drag IPC polls OS cursor coordinates and persists once when drag ends'
   state.getIntervalCallback()?.()
   assert.equal(state.calls.filter(call => call === 'position:105,202').length, 1)
 
+  // 陣列上就算帶了 moved 欄位也不算有效 payload，不排程貼邊。
+  state.listeners.get('pet-drag-end')!('pet' as unknown as IpcMainEvent, Object.assign([], { moved: true }))
+  assert.ok(!state.calls.includes('edge:schedule'))
   state.listeners.get('pet-drag-end')!('pet' as unknown as IpcMainEvent, { moved: true })
   assert.ok(state.calls.includes('state:persist'))
   assert.ok(state.calls.includes('edge:schedule'))
@@ -100,6 +103,9 @@ test('pet drag IPC polls OS cursor coordinates and persists once when drag ends'
 test('shimeji movement clamps one step and stops for DND', () => {
   const state = fixture()
   const walk = state.listeners.get('shimeji-walk-step')!
+  walk('pet' as unknown as IpcMainEvent, Object.assign([], { deltaX: 100 }))
+  walk('pet' as unknown as IpcMainEvent, 'x')
+  assert.ok(!state.calls.includes('shimeji:persist'))
   walk('pet' as unknown as IpcMainEvent, { deltaX: 100 })
   assert.deepEqual(state.getPosition(), [124, 200])
   assert.ok(state.calls.includes('shimeji:persist'))

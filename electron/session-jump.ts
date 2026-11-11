@@ -6,6 +6,7 @@ import type { SessionJumpAction, SessionJumpResult } from '../src/types/session-
 import { isValidBundleId, parseHostHints, resolveHostBundleId } from './host-app.ts'
 import { SlidingWindowLimiter } from './sliding-window-limiter.ts'
 import type { WindowsActivationResult } from './windows-window-activator.ts'
+import { asRecord } from './value-guards.ts'
 
 // "Jump back" actions for one agent session: switch to its app, show its project folder or copy
 // its path. The absolute project path and bundle id arrive with token-authenticated events and are
@@ -312,7 +313,7 @@ export class SessionJumpService {
 const contexts = new WeakMap<AgentStatusEvent, SessionJumpContext>()
 
 function rawField(input: unknown, key: string): unknown {
-  return input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>)[key] : undefined
+  return asRecord(input)?.[key]
 }
 
 /**

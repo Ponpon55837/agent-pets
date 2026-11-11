@@ -115,7 +115,7 @@
 | `project-pets-pick` | `handle` | 設定面板 main frame（共用 sender guard） | 無 payload；檢查 sender 並回傳受限狀態 | pickProjectPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
 | `project-pets-bind` | `handle` | 設定面板 main frame（共用 sender guard） | 型別；isProjectId, isValidPetId；無效輸入回安全預設或錯誤 | setProjectPetBinding (invoke) | `tests/agent-store-characterization.test.mts` |
 | `project-pets-archive` | `handle` | 設定面板 main frame（共用 sender guard） | isProjectId；無效輸入回安全預設或錯誤 | archiveProjectPet (invoke) | `tests/ipc-inventory.test.mts`（頻道與寄件者契約） |
-| `quota-usage` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getQuotaUsage (invoke) | `tests/ipc-quota.test.mts`<br>`tests/quota.test.mts` |
+| `quota-usage` | `handle` | 受信任寵物或設定面板 main frame | handler／controller 驗證 payload；拒絕無效輸入 | getQuotaUsage (invoke) | `tests/ipc-quota.test.mts`<br>`tests/quota-parsing.test.mts`<br>`tests/quota.test.mts` |
 | `renderer-error-report` | `on` | 受信任寵物或設定面板 main frame | 型別；無效輸入回安全預設或錯誤 | reportRendererError (send) | `tests/ipc-reliability.test.mts` |
 | `renderer-reload` | `on` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | reloadRenderer (send) | `tests/ipc-reliability.test.mts` |
 | `server-health-get` | `handle` | 受信任寵物或設定面板 main frame | 無 payload；檢查 sender 並回傳受限狀態 | getServerHealth (invoke) | `tests/ipc-reliability.test.mts` |

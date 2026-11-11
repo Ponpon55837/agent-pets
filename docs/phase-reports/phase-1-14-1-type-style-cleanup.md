@@ -153,3 +153,95 @@
 - 型別現在宣稱 renderer 收到的一定是 `AgentStatusEvent`；若日後新增一條繞過 `event-normalizer` 的送出路徑，型別不會攔住，需在 main 端維持「只送正規化事件」的不變式。
 - `electron/event-server.ts` 送出時寫死字串 `'agent-status-event'`，未用 `IPC_CHANNELS.agentStatusEvent`；兩者目前一致，但不在 A 的 renderer 範圍，留給 D（風格統一）處理。
 - 本階段沒有 renderer 端的自動化測試覆蓋 `App.vue`／`useRealEventWait` 的事件接收；正確性依 `vue-tsc` 與既有行為推定，未啟動 app 實機驗證。
+
+## B：主程序共用值守衛與 `quota.ts` 的 `any`
+
+- **分支**：`claude/cleanup-b-value-guards-96b4de`
+- **開始時間**：2026-11-11 12:01（Asia/Taipei）
+- **狀態**：通過
+- **完成時間**：2026-11-11 12:18（Asia/Taipei）
+
+### 步驟狀態
+
+| # | 步驟 | 狀態 | 備註 |
+|---|---|---|---|
+| 1 | 讀規範，盤點 `quota.ts` 的 10 處 `any` 與指定的手寫守衛 | 通過 | `window-controls.ts` 實際有 5 處（多了 `petContentHeight`），一併替換 |
+| 2 | quota characterization 測試（改動前先在原始碼跑綠） | 通過 | `tests/quota-parsing.test.mts` 8 項 |
+| 3 | `value-guards.ts` 新增 `asRecord`、`recordOrEmpty`，並補單元測試 | 通過 | `tests/value-guards.test.mts` 3 項 |
+| 4 | `quota.ts` 改用 `Record<string, unknown>`，數字欄位改用 helper | 通過 | 10 處 `any` 全數移除 |
+| 5 | 替換指定檔案的手寫守衛，補陣列 payload 回歸斷言 | 通過 | 見「陣列 payload 的行為差異」 |
+| 6 | Haiku 掃 `electron/**`、`integrations/**`；Sonnet 替換等價守衛 | 通過 | 共 79 處，只換語意與 `isRecord` 完全一致的 29 處（23 個檔案） |
+| 7 | `pnpm lint`、`vue-tsc --noEmit`、`pnpm test:unit`、code review | 通過 | 見「驗證」 |
+
+### 檔案變更
+
+| 檔案 | 變更內容 | 原因 |
+|---|---|---|
+| `electron/value-guards.ts` | 新增 `asRecord(value): Record<string, unknown> \| null` 與 `recordOrEmpty(value): Record<string, unknown>`，判斷都交給 `isRecord` | 各處不必再手寫「是物件且不是陣列」的斷言 |
+| `electron/quota.ts` | 拿掉本地的 `asObject`，改用 `asRecord`；`requestJson`、`loadCodexCredential`、`codexNeedsRefresh`、`parseCodexUsage`、`parseClaudeUsage`、`readClaudeCliUsage` 改用 `Record<string, unknown>`；`limit_window_seconds`、`reset_at`、`expiresAt` 改用本地的 `coercedFiniteNumber` | 移除 10 處 `any`，數字欄位不用 `as number` 斷言 |
+| `electron/local-usage.ts` | 拿掉本地的 `asObject`，10 處呼叫改用 `asRecord` | 重複邏輯抽共用 |
+| `electron/ipc/window-controls.ts` | 5 個 handler 的 `payload && typeof payload === 'object' ? … : {}` 改為 `recordOrEmpty(payload)` | 同上，陣列不再被當成物件 |
+| `electron/ipc/pet-motion.ts` | drag-end 改為 `asRecord(payload)?.moved === true`；shimeji walk 改用 `recordOrEmpty` | 同上 |
+| `electron/history-sessions.ts` | 查詢改用 `recordOrEmpty(input)`，cursor 改用 `asRecord(raw.cursor)` | 同上；cursor 原本沒排除陣列 |
+| `electron/preload.ts` | `onServerHealthChanged`、`onPanelOpened` 改用 `asRecord` | 同上（preload 由 Vite 打包，沿用該檔不帶副檔名的 import 寫法） |
+| `electron/transcript-turn-end.ts` | Codex 的 `record.payload as { type?: unknown } \| null` 改為 `asRecord(record.payload)?.type`；`turnEndFromTail` 的手寫守衛改用 `asRecord` | 拿掉沒檢查就斷言的寫法 |
+| `electron/agent-adapter.ts`、`event-normalizer.ts`、`history.ts`、`permission-adapter-server.ts`、`permission-broker.ts`、`plugin-badges.ts`、`plugin-catalog-updates.ts`、`plugin-data-file.ts`、`plugin-panel-validation.ts`、`plugin-secret-consent.ts`、`plugin-settings.ts`、`presentation-controller.ts`、`safe-config-write.ts`、`session-jump.ts`、`ipc/panel-theme.ts`、`ipc/permission.ts`、`ipc/plugin-panel-ui.ts`、`ipc/project-mcp.ts`、`ipc/project-pets.ts`、`ipc/session-jump.ts`、`main/plugin-runtime.ts`、`main/runtime.ts` | 掃描找到的等價寫法（`!x \|\| typeof x !== 'object' \|\| Array.isArray(x)` 與 `x && typeof x === 'object' && !Array.isArray(x) ? x as Record : {}`）改用 `isRecord`、`asRecord`、`recordOrEmpty`，並刪掉守衛之後多餘的 `as Record<string, unknown>` | 原本就排除陣列，替換後行為完全相同 |
+| `scripts/generate-ipc-inventory.mjs` | 「型別」偵測也認 `isRecord`、`asRecord`、`recordOrEmpty`，`isRecord` 不另列在 helper 欄 | 不改的話，安全清單有 5 列會從「型別」退回通用描述，驗證資訊變少 |
+| `docs/security/ipc-inventory.md` | 重新產生；只有 `quota-usage` 一列多了新測試檔 | `tests/ipc-inventory.test.mts` 會比對產生結果 |
+| `tests/quota-parsing.test.mts` | 新增 8 項 characterization：Codex／Claude 解析（字串數字、標籤、reset、32 個上限、scoped limits），以及端到端憑證流程（Codex refresh 寫回內容、API-key 模式、壞掉的 root、Claude 憑證檔的到期與方案） | 原本只有零星的解析測試，憑證讀取完全沒有覆蓋 |
+| `tests/value-guards.test.mts` | 新增：三個守衛對 null、undefined、陣列、原始型別、函式、一般物件、`Object.create(null)` 的結果；`recordOrEmpty` 每次回傳新物件 | value-guards 有改動 |
+| `tests/ipc-window-controls.test.mts`、`ipc-pet-motion.test.mts`、`history-sessions.test.mts`、`transcript-turn-end.test.mts` | 補斷言：payload 不是一般物件（包括帶了同名欄位的陣列）時，不觸發任何動作 | 固定陣列 payload 的新行為 |
+| `docs/phase-reports/phase-1-14-1-type-style-cleanup.md` | 新增 B 一節 | 階段紀錄 |
+
+### `quota.ts` 行為不變的細節
+
+- `asRecord` 的判斷（`Boolean(value) && typeof value === 'object' && !Array.isArray(value)`）和原本 `asObject` 的 `value !== null && …` 結果相同：`typeof` 為 `'object'` 的值裡，只有 `null` 是 falsy。
+- `coercedFiniteNumber` 等於原本的「`Number(x)` 再加 `Number.isFinite`」，字串 `"18000"` 一樣會被認得。它刻意留在 `quota.ts` 當本地函式：不和 `main/runtime.ts` 只收 `number` 的 `finiteNumber` 合併，也不放進 value-guards，免得 IPC 驗證誤用這個會轉型的版本。`duration === 18_000` 這類比較裡，原本的 `NaN` 現在變成 `undefined`，兩者都不等於任何常數，結果相同。
+- 容錯、clamp、預設值、每個 provider 32 個視窗的上限、`requestJson` 的 endpoint 白名單與回應大小上限，全都沒改。
+- 憑證讀取的欄位沒變：`OPENAI_API_KEY`、`tokens.access_token/accessToken`、`refresh_token/refreshToken`、`account_id/accountId`、`last_refresh`、`claudeAiOauth.accessToken/expiresAt/subscriptionType/rateLimitTier`。refresh 寫回的欄位也沒變：`last_refresh` 與 `tokens.access_token/refresh_token/id_token`，其他欄位原樣保留。characterization 測試直接比對寫回的整份 `auth.json`、refresh request body 和 Authorization header，改動前後都通過。
+
+### 陣列 payload 的行為差異
+
+下列地方原本只檢查 `typeof === 'object'`，沒有排除陣列：`window-controls.ts`（5 處）、`pet-motion.ts`（2 處）、`history-sessions.ts` 的 cursor、`preload.ts`（2 處）、`transcript-turn-end.ts` 的 Codex payload。改用 `asRecord`／`recordOrEmpty` 之後，陣列一律當成 `null` 或 `{}`。
+
+- 這些地方後面只讀具名欄位（`ignore`、`release`、`height`、`width`、`pinned`、`modal`、`moved`、`deltaX`、`lastSeenAt`、`id`、`servers`、`restore`、`type`），不讀 `length` 也不讀索引。一般陣列本來就沒有這些欄位，讀到的一直是 `undefined`，所以行為不變。
+- 唯一的差異：陣列上另外掛了同名欄位時（例如 `Object.assign([], { height: 40 })`，Electron IPC 的 structured clone 可能保留這種欄位），原本會被採用，現在會被忽略。這只會讓驗證更嚴格，不會放寬；正常的 renderer 不會送這種 payload。新增的測試固定了這個行為。
+- `transcript-turn-end` 讀的是 `JSON.parse` 的結果，JSON 陣列不可能有具名欄位，所以完全等價。
+
+### 掃描結果與刻意不換的地方
+
+Haiku 掃描 `electron/**` 與 `integrations/**`（已知清單除外），共找到 79 處：`electron/` 74 處、`integrations/` 5 處。只替換語意與 `isRecord` 完全一致的 29 處，其餘不換：
+
+- `integrations/*.mjs`（5 處）：這些是獨立執行的 hook 腳本，不能 import electron 檔案。
+- `electron/setup.ts`（2 處）：屬於 C 階段的範圍。
+- `error && typeof error === 'object' && 'code' in error` 這類錯誤碼判斷（約 20 處）：用途是把型別收窄成帶 `code` 的物件，不是讀 record；換掉反而會失去 `in` 帶來的收窄。
+- `isJsonValue`（`plugin-broker.ts`、`plugin-ui-messages.ts`、`plugin-panel-view.ts`）：在這裡陣列是合法值。
+- 原本沒排除陣列、換掉會改變語意的地方：`agent-adapter-operations.ts`、`desktop-notifications.ts`、`diagnostics/redact.ts`、`ipc/adapters.ts`、`ipc/pet-assets.ts`、`ipc/reliability.ts`、`ipc/history.ts:118`、`ipc/plugin-panel-ui.ts` 的 viewport、`main/panel-theme-cache.ts`、`main/db-recovery.ts`、`permission-adapter-server.ts:485` 等。這些不在本階段指定的清單內，不擴大範圍。
+- `permission-audit.ts:40`：子代理換成 `isRecord` 之後，`vue-tsc` 報 TS2352。後面的 `value as PermissionAuditRecord` 原本是靠收窄成 `object` 才能成立，換成 `Record<string, unknown>` 就斷言不過去。要通過只能寫 `as unknown as`，等於掩蓋問題，所以還原成原樣。真正的修法是逐欄驗證 audit 紀錄，留作後續。
+- `onboarding-state.ts`、`ipc/pets.ts`、`agent-adapter-operations.ts:38`、`history.ts:1389`：都是 `JSON.parse(...) as Record` 或 SQLite row 的斷言。這些要的是「補驗證」而不是「換守衛」，不在本階段範圍。
+
+### Code review 結論
+
+- **安全邊界**：IPC payload 仍在 main 做執行期驗證。每一處替換若不是完全等價，就是只讓陣列改成被拒絕（見上節），沒有任何一處放寬驗證。`preload.ts` 那兩處只是 renderer 端的形狀檢查，main 端的驗證沒有變動。`quota.ts` 讀取與寫回的憑證欄位都沒變，而且有測試固定。`plugin-secret-consent.ts` 拿掉的 `'accepted' in value`，在 `isRecord` 之後和 `value.accepted === true` 等價。
+- **子代理產出複驗**：Sonnet 改的 23 個檔案逐一看過，修正了兩個問題。一是 `presentation-controller.ts` 有兩行重複的 value-guards import，已合併；二是 `permission-audit.ts` 的型別錯誤，已還原（見上節）。子代理自己重產的 IPC 清單，已改用修正後的產生器再產生一次。`ipc/permission.ts`、`ipc/project-pets.ts`、`ipc/plugin-panel-ui.ts`、`permission-adapter-server.ts` 留著 `const data = payload` 這類別名，用意是不動後面一長串欄位讀取；對可讀性影響小，所以不再擴大 diff。
+- **規範**：electron 端的 import 一律帶 `.ts`，因為測試用 `--experimental-strip-types` 直接執行這些檔案；`preload.ts` 沿用該檔不帶副檔名的寫法。`value-guards.ts` 沒有任何 import，不會把相依帶進 `src/` 的測試閉包（本階段沒動 `src/**`）。新增的註解都用繁體中文，只寫原因。`plugin-host-assets.ts`、`plugin-panel-themes.ts`、`integrations/**`、`.claude/` 都沒動。
+- 沒有 Liquid Glass 或其他視覺變更，不需要跑視覺閘門。
+
+### 驗證
+
+| 檢查 | A 之後 | B 之後 |
+|---|---|---|
+| `pnpm lint` | 0 error、49 warning（`no-explicit-any`） | 0 error、39 warning（全是 `no-explicit-any`，沒有其他種類）；main-process lint passed |
+| `pnpm exec vue-tsc --noEmit` | 0 error | 0 error |
+| `pnpm test:unit` | 1812 項：1773 pass、0 fail、39 skip | 1823 項：1784 pass、0 fail、39 skip（新增 11 項：quota-parsing 8、value-guards 3；另有 4 個既有測試檔補了斷言） |
+| `git diff --check` | 通過 | 通過 |
+
+- `tests/quota-parsing.test.mts` 先在未修改的 `quota.ts` 上跑過，8/8 通過；改完後再跑，仍是 8/8。
+- 第一次全量測試時 `ipc-inventory` 失敗，原因是安全清單文件和原始碼不同步。修正產生器並重新產生後，0 fail。
+
+### 殘留風險
+
+- Claude CLI 路徑（`readClaudeCliUsage`）沒有端到端測試，因為測試刻意清空 PATH，避免執行本機的 `claude`。這段只改了型別（`result?.result`、`result?.is_error`），正確性是靠型別檢查和閱讀程式碼判斷的。
+- macOS Keychain 的憑證路徑沒有覆蓋：Claude 憑證檔的測試在 macOS 上會 skip，本機只在 Windows 上跑過。
+- 陣列 payload 現在會被拒絕。如果有 renderer 呼叫端真的送陣列、又依賴陣列上的具名欄位，就會失效。已 grep 確認 preload 送出的都是物件字面值，但沒有啟動 app 實機驗證。
+- `permission-audit.ts` 仍然是「確認是物件後直接斷言成 `PermissionAuditRecord`」，沒有逐欄驗證。這是既有問題，留給後續處理。

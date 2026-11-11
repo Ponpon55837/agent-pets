@@ -1,4 +1,5 @@
 import { IPC_CHANNELS } from './ipc/channels'
+import { asRecord } from './value-guards'
 import type { ElectronAPI } from '../src/types/electron-api'
 import type { AgentSource, AgentStatusEvent } from '../src/types/agent'
 import type { AdapterDiagnoseIpcResult, AdapterInstallIpcResult } from '../src/types/ipc'
@@ -278,7 +279,7 @@ const electronAPI: ElectronAPI = {
 
   onServerHealthChanged: (callback: (snapshot: LocalServerHealthSnapshot) => void) => {
     const handler = (_event: unknown, payload: unknown) => {
-      if (payload && typeof payload === 'object' && Array.isArray((payload as { servers?: unknown }).servers)) {
+      if (Array.isArray(asRecord(payload)?.servers)) {
         callback(payload as LocalServerHealthSnapshot)
       }
     }
@@ -290,7 +291,7 @@ const electronAPI: ElectronAPI = {
 
   onPanelOpened: (callback: (options: { restore: boolean }) => void) => {
     const handler = (_event: unknown, payload: unknown) => callback({
-      restore: Boolean(payload && typeof payload === 'object' && (payload as { restore?: unknown }).restore === true),
+      restore: asRecord(payload)?.restore === true,
     })
     ipcRenderer.on(IPC_CHANNELS.panelOpened, handler)
     return () => {

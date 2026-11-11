@@ -99,6 +99,7 @@ test('unreadable input is treated as still running', () => {
   assert.equal(turnEndFromTail('claude', jsonl({ ...claudeInterrupt('x'), timestamp: 'not a date' }), false), null)
   assert.equal(turnEndFromTail('codex', jsonl({ timestamp: 5, type: 'event_msg', payload: { type: 'turn_aborted' } }), false), null)
   assert.equal(turnEndFromTail('codex', jsonl({ timestamp: '2026-11-04T03:23:52.669Z', type: 'event_msg', payload: null }), false), null)
+  assert.equal(turnEndFromTail('codex', jsonl({ timestamp: '2026-11-04T03:23:52.669Z', type: 'event_msg', payload: ['turn_aborted'] }), false), null)
   // 從檔案中間開始讀時第一行可能是半行；就算剛好是合法 JSON 也不採信。
   assert.equal(turnEndFromTail('claude', marker, true), null)
   assert.equal(turnEndFromTail('claude', `${marker}\n`, true), null)

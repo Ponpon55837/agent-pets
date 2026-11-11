@@ -59,6 +59,18 @@ test('window control IPC keeps sender scopes, bounds clamps, and hidden-pet pref
   })
   const send = (channel: string, ...args: unknown[]) => handlers.get(channel)?.({}, ...args)
   assert.equal(handlers.size, 12)
+  // 不是一般物件的 payload（含帶了同名欄位的陣列）一律當成沒給欄位，什麼都不做。
+  const arrayWithFields = Object.assign([], { ignore: true, release: true, pinned: true, modal: true, width: 300, height: 300 })
+  for (const malformed of [null, undefined, 'x', 7, true, [], arrayWithFields]) {
+    for (const channel of [
+      IPC_CHANNELS.petMousePassthrough,
+      IPC_CHANNELS.panelResize,
+      IPC_CHANNELS.panelBlurLock,
+      IPC_CHANNELS.petResize,
+      IPC_CHANNELS.petContentHeight,
+    ]) send(channel, malformed)
+  }
+  assert.deepEqual(calls, [])
   send(IPC_CHANNELS.petMousePassthrough, { ignore: true })
   send(IPC_CHANNELS.petHideRequest)
   send(IPC_CHANNELS.panelResize, { width: 960, height: 800 })

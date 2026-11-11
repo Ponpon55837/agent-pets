@@ -2,6 +2,7 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import type { PermissionBroker } from '../permission-broker'
 import type { PermissionAuditEntry } from '../../src/types/permission'
 import { IPC_CHANNELS } from './channels.ts'
+import { isRecord } from '../value-guards.ts'
 
 export interface PermissionIpcDependencies {
   ipcMain: Pick<IpcMain, 'handle'>
@@ -32,10 +33,10 @@ export function registerPermissionIpc(deps: PermissionIpcDependencies): void {
     const fromPanel = Boolean(panelWindow && !panelWindow.isDestroyed() && event.sender === panelWindow.webContents)
     const fromPet = Boolean(petWindow && !petWindow.isDestroyed() && event.sender === petWindow.webContents)
     if (!fromPanel && !fromPet) throw new Error('Unauthorized IPC sender')
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    if (!isRecord(payload)) {
       return { ok: false, error: 'invalid_decision' }
     }
-    const data = payload as Record<string, unknown>
+    const data = payload
     if (
       typeof data.requestId !== 'string'
       || (data.decision !== 'allow_once' && data.decision !== 'deny')

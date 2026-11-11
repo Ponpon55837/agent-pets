@@ -4,6 +4,7 @@ import {
   selectLatestCompatiblePluginVersion,
 } from './plugin-catalog.ts'
 import type { PluginCatalogDocument, PluginCatalogPanelItem } from '../src/types/plugin-catalog.ts'
+import { asRecord } from './value-guards.ts'
 
 export interface InstalledPluginUpdateState {
   id: string
@@ -82,8 +83,7 @@ export function comparePluginPermissionUnits(grantedPermissions: unknown, reques
 }
 
 function readGrantedPermissionUnits(value: unknown): Set<string> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const units = (value as Record<string, unknown>).units
+  const units = asRecord(value)?.units
   if (!Array.isArray(units) || units.some(unit => typeof unit !== 'string')) return null
   return new Set(units as string[])
 }

@@ -2,6 +2,7 @@ import * as fs from 'node:fs'
 import * as fsp from 'node:fs/promises'
 import * as path from 'node:path'
 import { pidTimestampTemporaryPath, writeFileAtomic, writeFileAtomicSync } from './atomic-file-write.ts'
+import { isRecord } from './value-guards.ts'
 
 // Shared, Electron-free helpers for touching configuration files that belong to
 // the user (~/.claude/settings.json, ~/.codex/hooks.json, ...). The rules:
@@ -51,7 +52,7 @@ export interface ConfigWriteResult {
 export type JsonObject = Record<string, unknown>
 
 export function isJsonObject(value: unknown): value is JsonObject {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+  return isRecord(value)
 }
 
 // Follow a symlinked dotfile (common for dotfile managers) to its real target so

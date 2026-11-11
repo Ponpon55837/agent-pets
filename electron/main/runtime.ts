@@ -88,6 +88,7 @@ import { clamp } from '../../src/utils/number'
 import { initialPetWindowSize } from '../../src/utils/pet-window-size'
 import { PANEL_GAP, PANEL_WIDTH, PANEL_BLUR_HIDE_DELAY_MS, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
 import { currentAgentConfigDirs } from '../agent-config-dirs.ts'
+import { asRecord } from '../value-guards.ts'
 
 let permissionHotkeys: PermissionHotkeys | null = null
 
@@ -228,8 +229,8 @@ export function finiteNumber(value: unknown): number | null {
 }
 
 export function readPluginPanelRect(value: unknown): PluginPanelRect | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const rect = value as Record<string, unknown>
+  const rect = asRecord(value)
+  if (!rect) return null
   const x = finiteNumber(rect.x)
   const y = finiteNumber(rect.y)
   const width = finiteNumber(rect.width)
@@ -2123,8 +2124,7 @@ export function createProjectRoutingServices(): void {
 }
 
 export function rawProjectPath(input: unknown): string | undefined {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
-  const value = (input as Record<string, unknown>).project
+  const value = asRecord(input)?.project
   return typeof value === 'string' ? value : undefined
 }
 

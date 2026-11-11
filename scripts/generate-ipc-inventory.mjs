@@ -100,12 +100,13 @@ function senderSummary(channel, block) {
 
 function validationSummary(block) {
   const checks = []
-  if (/typeof\s+[\w.]+\s*!==?/.test(block) || /typeof\s+[\w.]+\s*===?/.test(block)) checks.push('型別')
+  // value-guards 的物件守衛（isRecord／asRecord／recordOrEmpty）與手寫的 typeof 檢查同屬型別驗證，不另列成 helper。
+  if (/typeof\s+[\w.]+\s*!==?/.test(block) || /typeof\s+[\w.]+\s*===?/.test(block) || /\b(?:isRecord|asRecord|recordOrEmpty)\s*\(/.test(block)) checks.push('型別')
   if (/\.length\s*[<>!=]=?/.test(block) || /\.length\s*===?/.test(block)) checks.push('長度／數量上限')
   if (/Number\.is(?:Safe)?Integer|Number\.isFinite/.test(block)) checks.push('數值範圍')
   const helpers = [...new Set([...block.matchAll(/\b((?:is|validate|normalize)[A-Z][A-Za-z0-9_]*)\s*\(/g)]
     .map(match => match[1])
-    .filter(name => !['isTrustedIpcSender', 'isArray', 'isSafeInteger', 'isNaN', 'isFinite', 'isDestroyed', 'isVisible', 'isEnabled'].includes(name)))].slice(0, 3)
+    .filter(name => !['isTrustedIpcSender', 'isRecord', 'isArray', 'isSafeInteger', 'isNaN', 'isFinite', 'isDestroyed', 'isVisible', 'isEnabled'].includes(name)))].slice(0, 3)
   if (helpers.length) checks.push(helpers.join(', '))
   const hasPayload = /\(_?event\s*,/.test(block)
   if (!hasPayload) return '無 payload；檢查 sender 並回傳受限狀態'

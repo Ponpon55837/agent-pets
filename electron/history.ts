@@ -47,6 +47,7 @@ import {
   type StoredSessionFinalState,
 } from './history-sessions.ts'
 import { isOpaqueId256, isProjectId } from '../src/types/id-patterns.ts'
+import { asRecord } from './value-guards.ts'
 
 type SqliteRow = Record<string, unknown>
 
@@ -2253,14 +2254,14 @@ function addDaily(left: HistoryDailyStat, right: HistoryDailyStat): HistoryDaily
 }
 
 function normalizeQuotaSnapshot(value: unknown): HistoryQuotaSnapshot | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const raw = value as Record<string, unknown>
+  const raw = asRecord(value)
+  if (!raw) return null
   if (typeof raw.updatedAt !== 'string' || !Number.isFinite(Date.parse(raw.updatedAt))) return null
   if (!Array.isArray(raw.providers)) return null
   const providers: HistoryQuotaProvider[] = []
   for (const item of raw.providers.slice(0, MAX_QUOTA_PROVIDERS)) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
-    const provider = item as Record<string, unknown>
+    const provider = asRecord(item)
+    if (!provider) continue
     const id = safeText(provider.id)
     const name = safeText(provider.name)
     if (!id || !name || !Array.isArray(provider.windows)) continue
@@ -2269,8 +2270,8 @@ function normalizeQuotaSnapshot(value: unknown): HistoryQuotaSnapshot | null {
     // them as if they were measured at this snapshot's time.
     const retained = provider.stale === true ? [] : provider.windows
     for (const entry of retained.slice(0, MAX_QUOTA_WINDOWS)) {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
-      const window = entry as Record<string, unknown>
+      const window = asRecord(entry)
+      if (!window) continue
       const windowId = safeText(window.id)
       const label = safeText(window.label)
       const remaining = Number(window.remainingPercent)

@@ -3,6 +3,7 @@ import { isAgentSource } from '../../src/types/agent.ts'
 import { isSessionJumpAction, type SessionJumpAction, type SessionJumpResult } from '../../src/types/session-jump.ts'
 import { sessionJumpKey } from '../session-jump.ts'
 import { IPC_CHANNELS } from './channels.ts'
+import { asRecord } from '../value-guards.ts'
 
 const MAX_SESSION_ID_LENGTH = 256
 
@@ -14,8 +15,8 @@ export interface SessionJumpIpcDependencies {
 }
 
 function isValidSessionJumpRequest(value: unknown): value is { action: SessionJumpAction; source: string; sessionId: string } {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const raw = value as Record<string, unknown>
+  const raw = asRecord(value)
+  if (!raw) return false
   if (Object.keys(raw).length !== 3) return false
   return isSessionJumpAction(raw.action)
     && isAgentSource(raw.source)
