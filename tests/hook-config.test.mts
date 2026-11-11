@@ -23,6 +23,7 @@ import {
   writeConfigSafely,
   writeTextAtomic,
 } from '../electron/safe-config-write.ts'
+import { SKIP_WITHOUT_FILE_SYMLINKS } from './support/fs-capabilities.mts'
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-hook-config-'))
@@ -306,7 +307,7 @@ test('legacy Electron hooks are detected, a different Node install is not', () =
   assert.equal(isLegacyElectronHook({ command: '/usr/local/bin/node' }), false)
 })
 
-test('removing hooks from a symlinked dotfile keeps the link and its target', async () => {
+test('removing hooks from a symlinked dotfile keeps the link and its target', { skip: SKIP_WITHOUT_FILE_SYMLINKS }, async () => {
   const dir = tempDir()
   try {
     const target = path.join(dir, 'real.json')

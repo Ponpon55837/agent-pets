@@ -4,6 +4,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import test from 'node:test'
 import { PluginDeveloperModeWatcher } from '../electron/plugin-developer-mode.ts'
+import { linkDirectory } from './support/fs-capabilities.mts'
 
 test('developer folder watcher coalesces edits and closes its subscriptions', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-plugin-watch-'))
@@ -39,8 +40,7 @@ test('developer folder watcher rejects a symlink root and invalid plugin id', ()
   const source = path.join(directory, 'plugin')
   const linked = path.join(directory, 'linked')
   fs.mkdirSync(source)
-  // junction 不需要 Windows 開發者模式，在其他平台會被忽略而建立一般目錄 symlink。
-  fs.symlinkSync(source, linked, 'junction')
+  linkDirectory(source, linked)
   const watcher = new PluginDeveloperModeWatcher(10)
   try {
     assert.equal(watcher.watch('sample-plugin', linked, () => {}), false)

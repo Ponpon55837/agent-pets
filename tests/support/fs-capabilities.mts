@@ -21,5 +21,13 @@ export const SKIP_WITHOUT_FILE_SYMLINKS: string | false = canCreateFileSymlinks(
   ? false
   : 'file symlinks need Developer Mode or elevated privileges on Windows'
 
+// 目錄連結測試驗證的是受測程式碼不跟隨連結，而受測程式碼只靠 lstat().isSymbolicLink()、
+// readdir 的 Dirent 與 realpath 判斷；Node 在 Windows 對 junction 的這些回報與目錄 symlink 一致，
+// 且 junction 不需要開發者模式，所以用它讓這些安全測試在 Windows 也真正執行，而不是略過。
+// 其他平台會忽略 'junction' 型別，照常建立目錄 symlink。
+export function linkDirectory(target: string, link: string): void {
+  fs.symlinkSync(target, link, 'junction')
+}
+
 // Windows 不套用 POSIX 權限位元，0o600 寫入後仍回報 0o666。
 export const POSIX_FILE_MODES = process.platform !== 'win32'
