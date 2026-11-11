@@ -8,6 +8,8 @@ import { installProjectMcp } from '../electron/project-mcp-setup.ts'
 import { installProjectMcp as install2, planProjectMcp, removeProjectMcp } from '../electron/project-mcp-setup.ts'
 import { addLocalExcludes, findGitLocation, readTrackedPaths } from '../electron/git-tracking.ts'
 import { configureSetupEnvironment } from '../electron/setup-environment.ts'
+import { linkDirectory, SKIP_WITHOUT_FILE_SYMLINKS } from './support/fs-capabilities.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 function createProject(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-project-mcp-'))
@@ -21,7 +23,7 @@ function options(projectPath: string) {
 }
 
 function cleanup(projectPath: string): void {
-  fs.rmSync(projectPath, { recursive: true, force: true })
+  removeTempTree(projectPath)
 }
 
 test('installs all supported project MCP configs and is idempotent', () => {
@@ -387,25 +389,35 @@ test('git helpers never follow gitdir or commondir outside the picked folder', (
     // symlinked gitdir pointing outside
     const project4 = path.join(base, 'p4')
     fs.mkdirSync(project4)
-    fs.symlinkSync(outside, path.join(project4, 'link.git'))
+    linkDirectory(outside, path.join(project4, 'link.git'))
     fs.writeFileSync(path.join(project4, '.git'), 'gitdir: link.git\n')
     assert.equal(findGitLocation(project4)?.outside, true)
   } finally { cleanup(base) }
 })
 
-test('git helpers refuse a symlinked info directory or exclude file', () => {
+test('git helpers refuse a symlinked info directory', () => {
   const base = createProject()
   try {
     const outside = path.join(base, 'elsewhere')
     fs.mkdirSync(outside)
     const project = path.join(base, 'p')
     fs.mkdirSync(path.join(project, '.git'), { recursive: true })
-    fs.symlinkSync(outside, path.join(project, '.git', 'info'))
+    linkDirectory(outside, path.join(project, '.git', 'info'))
     const location = findGitLocation(project)!
     assert.throws(() => addLocalExcludes(location, ['a.json']), /unsafe/)
     assert.equal(fs.readdirSync(outside).length, 0)
-    fs.rmSync(path.join(project, '.git', 'info'))
-    fs.mkdirSync(path.join(project, '.git', 'info'))
+  } finally { cleanup(base) }
+})
+
+// 檔案 symlink 沒有 junction 這種免權限的替代品，無法建立時只能略過這一段。
+test('git helpers refuse a symlinked exclude file', { skip: SKIP_WITHOUT_FILE_SYMLINKS }, () => {
+  const base = createProject()
+  try {
+    const outside = path.join(base, 'elsewhere')
+    fs.mkdirSync(outside)
+    const project = path.join(base, 'p')
+    fs.mkdirSync(path.join(project, '.git', 'info'), { recursive: true })
+    const location = findGitLocation(project)!
     fs.writeFileSync(path.join(outside, 'x'), '')
     fs.symlinkSync(path.join(outside, 'x'), path.join(project, '.git', 'info', 'exclude'))
     assert.throws(() => addLocalExcludes(location, ['a.json']), /unsafe/)

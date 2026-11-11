@@ -108,8 +108,8 @@ test('hook source names are registered sources', () => {
   const desktopBlock = hook.match(/source === 'claude' && process\.env\.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop'\) \{\s*source = '([^']+)'/)
   assert.ok(desktopBlock, 'claude-desktop mapping not found')
   for (const source of [defaultSource[1], desktopBlock[1]]) assert.ok(AGENT_SOURCE_REGISTRY[source as keyof typeof AGENT_SOURCE_REGISTRY], source)
-  assert.ok(FAMILY_SOURCES.codex.includes(defaultSource[1] as never))
-  assert.ok(FAMILY_SOURCES.claude.includes(desktopBlock[1] as never))
+  assert.ok((FAMILY_SOURCES.codex as readonly string[]).includes(defaultSource[1]))
+  assert.ok((FAMILY_SOURCES.claude as readonly string[]).includes(desktopBlock[1]))
 })
 
 test('the OpenCode plugin template stamps registered opencode sources', () => {

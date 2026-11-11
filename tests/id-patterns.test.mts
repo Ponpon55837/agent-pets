@@ -78,8 +78,8 @@ test('each identifier format has exactly one source: no copied regex literal or 
 
 test('the worker host and the test packer use the same plugin id rule', () => {
   assert.equal(PLUGIN_ID_PATTERN.source, `^${PLUGIN_ID_SOURCE}$`)
-  for (const asset of ['host.js', 'worker-bootstrap.js']) {
-    const source = pluginHostAssets[asset]!
+  for (const asset of ['host.js', 'worker-bootstrap.js'] as const) {
+    const source = pluginHostAssets[asset]
     assert.ok(source.includes(`${PLUGIN_ID_PATTERN}.test(`), asset)
     assert.ok(source.includes(`${PLUGIN_COMMAND_ID_PATTERN}.test(data.commandId)`), asset)
   }

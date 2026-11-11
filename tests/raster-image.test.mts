@@ -12,6 +12,7 @@ import { checkPanelThemePackagedImage, checkPanelThemeUserImage } from '../elect
 import { PluginRegistry } from '../electron/plugin-registry.ts'
 import { rasterImageTypeIn, sniffRasterImageType } from '../electron/raster-image.ts'
 import { jpeg, png, webp } from './support/panel-theme-fixtures.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // 固定每個入口「依檔頭接受哪些圖片格式」。各入口的白名單刻意不同，
 // 共用的格式辨識不得改變任何一個入口的結果。
@@ -133,7 +134,7 @@ test('pet import decides by content, not by the file extension', () => {
 
 function withUserData(run: (directory: string) => void): void {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-raster-image-'))
-  try { run(directory) } finally { fs.rmSync(directory, { recursive: true, force: true }) }
+  try { run(directory) } finally { removeTempTree(directory) }
 }
 
 const PLUGIN_BASE = { id: 'sample-plugin', name: { 'zh-TW': '測試', 'en-US': 'Test' }, version: '1.0.0', apiVersion: '1', author: 'Test', permissions: {} }

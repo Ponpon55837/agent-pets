@@ -27,6 +27,8 @@ export interface TurnEndWatcherDeps {
   now(): number
   /** 主程序的 session 鏡像（最後狀態與最後事件時間）。 */
   sessions(): SessionSnapshotEntry[]
+  /** 單一 session 的最新鏡像；已移除或過期時回傳 undefined。 */
+  session(source: SessionSnapshotEntry['source'], sessionId: string): SessionSnapshotEntry | undefined
   /** 這個家族的 agent 設定目錄。 */
   configDir(family: AgentFamilyKey): string
   hasTranscript(family: AgentFamilyKey): boolean
@@ -92,7 +94,7 @@ export function createTurnEndWatcher(deps: TurnEndWatcherDeps): TurnEndWatcher {
         try { ended = await turnEndedFor(entry, family, now) } catch { ended = false }
         if (!ended) continue
         // 讀檔期間可能已經有新的 hook 事件進來；以新事件為準。
-        const current = deps.sessions().find(candidate => keyOf(candidate) === keyOf(entry))
+        const current = deps.session(entry.source, entry.sessionId)
         if (!current || current.lastSeenAt !== entry.lastSeenAt || current.state !== entry.state) continue
         deps.dispatch({
           // 少了 adapterId，歷史會把這個事件記到備用 adapter 底下的另一筆 session。

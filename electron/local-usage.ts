@@ -3,6 +3,8 @@ import { constants as fsConstants, type Dirent } from 'node:fs'
 import { lstat, open, readdir, realpath } from 'node:fs/promises'
 import { extname, join, relative } from 'node:path'
 import { safeModelId, type HistoryStore } from './history.ts'
+import { MAX_TOKEN_COUNT } from './event-normalizer.ts'
+import { asRecord } from './value-guards.ts'
 import type { HistoryTokenUsageRecord } from '../src/types/history.ts'
 
 export type UsageProvider = 'codex' | 'claude-code'
@@ -123,16 +125,9 @@ const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024
 const DEFAULT_MAX_LINE_BYTES = 256 * 1024
 const DEFAULT_MAX_SCAN_MS = 4_000
 const MAX_WALK_DEPTH = 8
-const MAX_TOKEN_COUNT = 1_000_000_000_000
 
 function digest(value: string, length = 48): string {
   return createHash('sha256').update(value).digest('hex').slice(0, length)
-}
-
-function asObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
 }
 
 function text(value: unknown): string | undefined {
@@ -184,7 +179,7 @@ function lineTooLong(line: string, maxLineBytes: number): boolean {
 
 function parseObject(line: string): Record<string, unknown> | null {
   try {
-    return asObject(JSON.parse(line))
+    return asRecord(JSON.parse(line))
   } catch {
     return null
   }
@@ -208,7 +203,7 @@ function claudeUsage(
   const input = token(usage.input_tokens)
   const cacheRead = token(usage.cache_read_input_tokens)
   const topLevelCacheCreation = token(usage.cache_creation_input_tokens)
-  const cacheCreation = asObject(usage.cache_creation)
+  const cacheCreation = asRecord(usage.cache_creation)
   const cacheCreationNested = cacheCreation
     ? tokenSum(cacheCreation, ['ephemeral_5m_input_tokens', 'ephemeral_1h_input_tokens'])
     : 0
@@ -263,7 +258,7 @@ function codexUsage(
   fileCwd: string | undefined,
   fileModel: string | undefined,
 ): CodexUsageResult | null {
-  const totalUsage = asObject(info.total_token_usage)
+  const totalUsage = asRecord(info.total_token_usage)
   // Codex's total_token_usage is cumulative for the rollout. last_token_usage
   // is a context snapshot and may be repeated on rate-limit-only events, so it
   // is never treated as a fresh spend when the cumulative counter is present.
@@ -335,8 +330,8 @@ export function parseLocalUsageLine(
   if (!record) return null
 
   if (record.type === 'assistant') {
-    const message = asObject(record.message)
-    const usage = asObject(message?.usage)
+    const message = asRecord(record.message)
+    const usage = asRecord(message?.usage)
     if (!message || !usage) return null
     return claudeUsage(record, message, usage, fileKey, lineNumber, inheritedAt)
   }
@@ -698,14 +693,14 @@ async function openVerifiedUsageFile(
 // builds also on `session_meta`); token_count events that follow inherit it.
 function codexContextModel(record: Record<string, unknown>): string | undefined {
   if (record.type !== 'turn_context' && record.type !== 'session_meta') return undefined
-  const payload = asObject(record.payload)
+  const payload = asRecord(record.payload)
   const model = payload ? safeModelId(payload.model) : ''
   return model || undefined
 }
 
 function codexSessionCwd(record: Record<string, unknown>): string | undefined {
   if (record.type !== 'session_meta') return undefined
-  const payload = asObject(record.payload)
+  const payload = asRecord(record.payload)
   return payload ? text(payload.cwd) : undefined
 }
 
@@ -719,10 +714,10 @@ function parseCodexUsageRecord(
   fileModel: string | undefined,
 ): CodexUsageResult | null {
   if (record.type !== 'event_msg') return null
-  const payload = asObject(record.payload)
+  const payload = asRecord(record.payload)
   if (!payload || payload.type !== 'token_count') return null
-  const info = asObject(payload.info)
-  const usage = info ? asObject(info.last_token_usage) : null
+  const info = asRecord(payload.info)
+  const usage = info ? asRecord(info.last_token_usage) : null
   if (!info || !usage) return null
   return codexUsage(record, payload, info, usage, fileKey, lineNumber, inheritedAt, previousTotal, fileCwd, fileModel)
 }

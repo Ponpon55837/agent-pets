@@ -60,7 +60,7 @@ import type { PresentationIntent } from '../../src/types/presentation'
 import type { PluginEventSourceStatusView, PluginPanelPlugin, PluginPanelResult, PluginPanelSnapshot } from '../../src/types/plugin'
 import type { IpcErrorCode } from '../../src/types/ipc'
 
-import { createPluginSkinPetId, isValidPetId, isValidRegularPetId } from '../../src/utils/pet-id.ts'
+import { createPluginSkinPetId, DEFAULT_PET_ID, isValidPetId, isValidRegularPetId } from '../../src/utils/pet-id.ts'
 import { availablePluginSkinPetIds } from '../plugin-skins.ts'
 import { IS_MAC, hookScriptDeployPath, readWindowState, syncClaudePermissionRespondOptIn, writeWindowState } from '../setup'
 
@@ -88,6 +88,7 @@ import { clamp } from '../../src/utils/number'
 import { initialPetWindowSize } from '../../src/utils/pet-window-size'
 import { PANEL_GAP, PANEL_WIDTH, PANEL_BLUR_HIDE_DELAY_MS, shouldHidePanelOnBlur } from '../../src/utils/panel-layout'
 import { currentAgentConfigDirs } from '../agent-config-dirs.ts'
+import { asRecord } from '../value-guards.ts'
 
 let permissionHotkeys: PermissionHotkeys | null = null
 
@@ -228,8 +229,8 @@ export function finiteNumber(value: unknown): number | null {
 }
 
 export function readPluginPanelRect(value: unknown): PluginPanelRect | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const rect = value as Record<string, unknown>
+  const rect = asRecord(value)
+  if (!rect) return null
   const x = finiteNumber(rect.x)
   const y = finiteNumber(rect.y)
   const width = finiteNumber(rect.width)
@@ -388,64 +389,66 @@ export function configureSecureProtocol(): void {
     try {
       const url = new URL(request.url)
       const pathname = decodeURIComponent(url.pathname)
-      if (url.hostname === 'plugin') {
-        return await handlePluginProtocolRequest(request.url, {
-          pluginRootForId: enabledPluginRoot,
-          hostAssets: pluginHostAssets,
-          pluginSkinAssetForId: async (pluginId, relativePath) => {
-            const context = mainState.pluginRuntimeContexts.get(pluginId)
-            const skin = context?.manifest.contributes.skins?.find(candidate => candidate.spritesheet === relativePath)
-            if (!skin) return undefined
-            const root = enabledPluginRoot(pluginId)
-            if (!root) return null
-            const data = await readRegularFileWithin(root, relativePath, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES)
-            const type = data ? rasterContentType(data) : null
-            return data && type ? { data, contentType: type } : null
-          },
-        })
-      }
-      if (url.hostname === 'panel-theme') {
-        return mainState.panelThemeRuntime
-          ? await mainState.panelThemeRuntime.handleRequest(request.url, request.method)
-          : new Response('Not found', { status: 404 })
-      }
-      if (url.hostname === 'app') {
-        const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
-        const data = await readRegularFileWithin(resolve(join(__dirname, '../dist')), relativePath, 25 * 1024 * 1024)
-        if (!data) return new Response('Not found', { status: 404 })
-        return new Response(responseBody(data), {
-          status: 200,
-          headers: {
-            'content-type': contentTypeFor(relativePath),
-            'x-content-type-options': 'nosniff',
-          },
-        })
-      }
-      if (url.hostname === 'import-preview') {
-        // Staged (not yet installed) import, addressed by an unguessable
-        // per-import token; anything else 404s.
-        const match = pathname.match(/^\/([0-9a-f]{32})\/spritesheet$/)
-        const directory = match ? mainState.petImport?.previewDirectory(match[1]) : null
-        const data = directory ? await readRegularFileWithin(directory, 'spritesheet.webp', MAX_PET_IMAGE_BYTES) : null
-        const contentType = data ? rasterContentType(data) : null
-        if (!data || !contentType) return new Response('Not found', { status: 404 })
-        return new Response(responseBody(data), {
-          status: 200,
-          headers: { 'content-type': contentType, 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' },
-        })
-      }
-      if (url.hostname === 'custom') {
-        const match = pathname.match(/^\/([a-zA-Z0-9_.-]{1,64})\/spritesheet\.webp$/)
-        const safeId = match ? sanitizePetId(match[1]) : null
-        if (!safeId) return new Response('Not found', { status: 404 })
-        const customRoot = resolve(hookScriptDeployPath(), 'custom')
-        const data = await readRegularFileWithin(customRoot, join(safeId, 'spritesheet.webp'), MAX_PET_IMAGE_BYTES)
-        const contentType = data ? rasterContentType(data) : null
-        if (!data || !contentType) return new Response('Not found', { status: 404 })
-        return new Response(responseBody(data), {
-          status: 200,
-          headers: { 'content-type': contentType, 'x-content-type-options': 'nosniff' },
-        })
+      switch (url.hostname) {
+        case 'plugin': {
+          return await handlePluginProtocolRequest(request.url, {
+            pluginRootForId: enabledPluginRoot,
+            hostAssets: pluginHostAssets,
+            pluginSkinAssetForId: async (pluginId, relativePath) => {
+              const context = mainState.pluginRuntimeContexts.get(pluginId)
+              const skin = context?.manifest.contributes.skins?.find(candidate => candidate.spritesheet === relativePath)
+              if (!skin) return undefined
+              const root = enabledPluginRoot(pluginId)
+              if (!root) return null
+              const data = await readRegularFileWithin(root, relativePath, PLUGIN_ARCHIVE_SKIN_IMAGE_MAX_BYTES)
+              const type = data ? rasterContentType(data) : null
+              return data && type ? { data, contentType: type } : null
+            },
+          })
+        }
+        case 'panel-theme': {
+          return mainState.panelThemeRuntime
+            ? await mainState.panelThemeRuntime.handleRequest(request.url, request.method)
+            : new Response('Not found', { status: 404 })
+        }
+        case 'app': {
+          const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
+          const data = await readRegularFileWithin(resolve(join(__dirname, '../dist')), relativePath, 25 * 1024 * 1024)
+          if (!data) return new Response('Not found', { status: 404 })
+          return new Response(responseBody(data), {
+            status: 200,
+            headers: {
+              'content-type': contentTypeFor(relativePath),
+              'x-content-type-options': 'nosniff',
+            },
+          })
+        }
+        case 'import-preview': {
+          // Staged (not yet installed) import, addressed by an unguessable
+          // per-import token; anything else 404s.
+          const match = pathname.match(/^\/([0-9a-f]{32})\/spritesheet$/)
+          const directory = match ? mainState.petImport?.previewDirectory(match[1]) : null
+          const data = directory ? await readRegularFileWithin(directory, 'spritesheet.webp', MAX_PET_IMAGE_BYTES) : null
+          const contentType = data ? rasterContentType(data) : null
+          if (!data || !contentType) return new Response('Not found', { status: 404 })
+          return new Response(responseBody(data), {
+            status: 200,
+            headers: { 'content-type': contentType, 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' },
+          })
+        }
+        case 'custom': {
+          const match = pathname.match(/^\/([a-zA-Z0-9_.-]{1,64})\/spritesheet\.webp$/)
+          const safeId = match ? sanitizePetId(match[1]) : null
+          if (!safeId) return new Response('Not found', { status: 404 })
+          const customRoot = resolve(hookScriptDeployPath(), 'custom')
+          const data = await readRegularFileWithin(customRoot, join(safeId, 'spritesheet.webp'), MAX_PET_IMAGE_BYTES)
+          const contentType = data ? rasterContentType(data) : null
+          if (!data || !contentType) return new Response('Not found', { status: 404 })
+          return new Response(responseBody(data), {
+            status: 200,
+            headers: { 'content-type': contentType, 'x-content-type-options': 'nosniff' },
+          })
+        }
       }
     } catch {}
     return new Response('Not found', { status: 404 })
@@ -1727,7 +1730,7 @@ export const setActiveProgressionPet = growth.setActivePet
 
 export function currentHistorySummary(projectId?: string, rangeDays = 7): HistorySummary | null {
   if (!mainState.historyStore) return null
-  const summary = mainState.historyStore.getSummary(mainState.progressionStore?.getActivePetId() ?? 'aang-airbender', projectId, rangeDays)
+  const summary = mainState.historyStore.getSummary(mainState.progressionStore?.getActivePetId() ?? DEFAULT_PET_ID, projectId, rangeDays)
   const scan = mainState.localUsageReader?.getDiagnostics()
   return scan
     ? {
@@ -2080,7 +2083,7 @@ export async function availablePetIds(): Promise<Set<string>> {
     mainState.pluginPreferencesSnapshot?.pluginsEnabled === true,
   )
   for (const petId of pluginSkinIds) ids.add(petId)
-  ids.add('aang-airbender')
+  ids.add(DEFAULT_PET_ID)
   return ids
 }
 
@@ -2114,7 +2117,7 @@ export function createProjectRoutingServices(): void {
   try {
     mainState.projectRoutingStore = new ProjectRoutingStore(
       appUserDataPaths().projectRouting,
-      { defaultPetId: 'aang-airbender' },
+      { defaultPetId: DEFAULT_PET_ID },
     )
   } catch (error) {
     console.error('Project routing storage is unavailable', error)
@@ -2123,8 +2126,7 @@ export function createProjectRoutingServices(): void {
 }
 
 export function rawProjectPath(input: unknown): string | undefined {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
-  const value = (input as Record<string, unknown>).project
+  const value = asRecord(input)?.project
   return typeof value === 'string' ? value : undefined
 }
 

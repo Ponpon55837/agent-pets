@@ -16,6 +16,7 @@ import {
   removeJsonKeyFile,
   setJsonKeyFile,
 } from '../electron/hook-config.ts'
+import type { HookMatcherEntry } from '../electron/hook-config.ts'
 import {
   BACKUP_MARKER,
   ConfigRefusedError,
@@ -23,13 +24,15 @@ import {
   writeConfigSafely,
   writeTextAtomic,
 } from '../electron/safe-config-write.ts'
+import { SKIP_WITHOUT_FILE_SYMLINKS } from './support/fs-capabilities.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-hook-config-'))
 }
 
 const HOOK = '/home/u/.desktop-pet/agent-hook.mjs'
-function ours(extra: Record<string, unknown> = {}) {
+function ours(extra: Record<string, unknown> = {}): HookMatcherEntry {
   return { hooks: [{ type: 'command', command: 'node', args: [HOOK, 'claude'] }], ...extra }
 }
 function desired() {
@@ -47,7 +50,7 @@ test('merge refuses unparseable JSON and leaves the file untouched', async () =>
     ))
     assert.equal(fs.readFileSync(file, 'utf8'), original)
     assert.deepEqual(listBackups(file), [])
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('merge refuses non-object roots and malformed hooks values', async () => {
@@ -61,7 +64,7 @@ test('merge refuses non-object roots and malformed hooks values', async () => {
     fs.writeFileSync(file, '{"hooks": {"Stop": "nope"}}')
     await assert.rejects(() => mergeAgentPetsHooksFile(file, desired()), ConfigRefusedError)
     assert.equal(fs.readFileSync(file, 'utf8'), '{"hooks": {"Stop": "nope"}}')
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('merge keeps user keys and hooks, backs up, and is idempotent', async () => {
@@ -86,7 +89,7 @@ test('merge keeps user keys and hooks, backs up, and is idempotent', async () =>
     assert.equal(second.status, 'unchanged')
     assert.equal(second.backupPath, null)
     assert.equal(listBackups(file).length, 1)
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('merge creates a missing file from defaults without a backup', async () => {
@@ -98,7 +101,7 @@ test('merge creates a missing file from defaults without a backup', async () => 
     const written = JSON.parse(fs.readFileSync(file, 'utf8'))
     assert.equal(written.description, 'Agent Pets')
     assert.ok(await fileHasAgentPetsHooksAsync(file))
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('merge treats an empty file as an empty object', async () => {
@@ -108,7 +111,7 @@ test('merge treats an empty file as an empty object', async () => {
     fs.writeFileSync(file, '')
     await mergeAgentPetsHooksFile(file, desired())
     assert.ok(await fileHasAgentPetsHooksAsync(file))
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('backups are pruned to the most recent entries', () => {
@@ -120,7 +123,7 @@ test('backups are pruned to the most recent entries', () => {
     const backups = listBackups(file)
     assert.equal(backups.length, 5)
     assert.ok(backups.every(name => path.basename(name).includes(BACKUP_MARKER)))
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('writes go through a symlink to the real target and preserve file mode', { skip: process.platform === 'win32' }, async () => {
@@ -135,7 +138,7 @@ test('writes go through a symlink to the real target and preserve file mode', { 
     assert.ok(fs.lstatSync(link).isSymbolicLink())
     assert.ok(await fileHasAgentPetsHooksAsync(real))
     assert.equal(fs.statSync(real).mode & 0o777, 0o640)
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('concurrent atomic writers never leave a partial file', () => {
@@ -145,7 +148,7 @@ test('concurrent atomic writers never leave a partial file', () => {
     for (let index = 0; index < 20; index += 1) writeTextAtomic(file, JSON.stringify({ index }))
     assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { index: 19 })
     assert.deepEqual(fs.readdirSync(dir).filter(name => name.endsWith('.tmp')), [])
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('remove only strips Agent Pets hooks and keeps user hooks and keys', async () => {
@@ -161,7 +164,7 @@ test('remove only strips Agent Pets hooks and keeps user hooks and keys', async 
     assert.deepEqual(Object.keys(after.hooks), ['Stop'])
     assert.equal(after.hooks.Stop[0].hooks[0].command, 'echo hi')
     assert.equal((await removeAgentPetsHooksFile(file)).status, 'absent')
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('remove deletes a hooks file that only contained Agent Pets content', async () => {
@@ -172,7 +175,7 @@ test('remove deletes a hooks file that only contained Agent Pets content', async
     const result = await removeAgentPetsHooksFile(file, { description: 'Agent Pets' })
     assert.equal(result.status, 'deleted_file')
     assert.equal(fs.existsSync(file), false)
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('remove refuses to touch an unparseable file', async () => {
@@ -182,7 +185,7 @@ test('remove refuses to touch an unparseable file', async () => {
     fs.writeFileSync(file, '{ broken')
     await assert.rejects(() => removeAgentPetsHooksFile(file), ConfigRefusedError)
     assert.equal(fs.readFileSync(file, 'utf8'), '{ broken')
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('single-key helpers only remove a value Agent Pets wrote', async () => {
@@ -195,7 +198,7 @@ test('single-key helpers only remove a value Agent Pets wrote', async () => {
     assert.equal((await removeJsonKeyFile(file, 'agent', '/something/else')).status, 'absent')
     assert.equal((await removeJsonKeyFile(file, 'agent', HOOK)).status, 'removed')
     assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { mcpServers: { a: 1 } })
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('codex feature text: enable adds once, disable reverts only that line', () => {
@@ -229,7 +232,7 @@ test('removing Codex hooks leaves Claude Code hooks (shared script) intact', asy
     assert.equal(await fileHasAgentPetsHooksAsync(claude), true)
     const kept = JSON.parse(fs.readFileSync(codex, 'utf8'))
     assert.equal(kept.hooks.Stop[0].hooks[0].command, 'echo mine')
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 import { configuredHookExecutableFromRoot, isCodexHooksFeatureEnabled, leadingExecutable } from '../electron/hook-config.ts'
@@ -306,7 +309,7 @@ test('legacy Electron hooks are detected, a different Node install is not', () =
   assert.equal(isLegacyElectronHook({ command: '/usr/local/bin/node' }), false)
 })
 
-test('removing hooks from a symlinked dotfile keeps the link and its target', async () => {
+test('removing hooks from a symlinked dotfile keeps the link and its target', { skip: SKIP_WITHOUT_FILE_SYMLINKS }, async () => {
   const dir = tempDir()
   try {
     const target = path.join(dir, 'real.json')
@@ -316,7 +319,7 @@ test('removing hooks from a symlinked dotfile keeps the link and its target', as
     await removeAgentPetsHooksFile(link)
     assert.ok(fs.lstatSync(link).isSymbolicLink())
     assert.deepEqual(JSON.parse(fs.readFileSync(target, 'utf8')), {})
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('batch wrapper path escaping doubles percent signs and rejects quotes', () => {
@@ -374,7 +377,7 @@ test('ensureAgentPetsHookEntries adds missing handlers and timeouts without touc
     assert.equal(fixed.hooks.PermissionRequest[1].hooks[0].timeout, 135)
     assert.equal(fixed.hooks.PermissionRequest[0].hooks[0].timeout, 30)
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    removeTempTree(dir)
   }
 })
 
@@ -391,7 +394,7 @@ test('ensureAgentPetsHookEntries leaves files without Agent Pets hooks or with i
     assert.equal(await ensureAgentPetsHookEntries(file, [{ event: 'PermissionRequest' }]), null)
     assert.equal(fs.readFileSync(file, 'utf8'), '{ "hooks": // broken')
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    removeTempTree(dir)
   }
 })
 
@@ -419,6 +422,6 @@ test('Windows Codex hook command launches the wrapper under PowerShell and cmd.e
       }
     }
   } finally {
-    fs.rmSync(root, { recursive: true, force: true })
+    removeTempTree(root)
   }
 })

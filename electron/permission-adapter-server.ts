@@ -7,6 +7,7 @@ import { FAMILY_SOURCES, familySourceSet, type SourceOfFamily } from '../src/typ
 import { isOpaqueId128 as isIdentifier } from '../src/types/id-patterns.ts'
 import { LOCAL_WIRE_HEADERS, LOCAL_WIRE_PATHS } from '../src/types/local-wire.ts'
 import { hasJsonContentType, JSON_RESPONSE_HEADERS, readBoundedJson, sendJson, tokenMatches } from './loopback-http.ts'
+import { isRecord } from './value-guards.ts'
 import {
   PermissionBroker,
   type AdapterPermissionDecision,
@@ -379,17 +380,11 @@ export function createPermissionAdapterServer(options: PermissionAdapterServerOp
 }
 
 function isRelayHandle(value: unknown): value is RelayHandle {
-  return Boolean(
-    value
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && isIdentifier((value as Record<string, unknown>).relayKey),
-  )
+  return isRecord(value) && isIdentifier(value.relayKey)
 }
 
-function normalizeCreatePayload(value: unknown): CreatePayload | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const data = value as Record<string, unknown>
+function normalizeCreatePayload(data: unknown): CreatePayload | null {
+  if (!isRecord(data)) return null
   if (
     typeof data.source !== 'string'
     || !SOURCES.has(data.source)
@@ -433,9 +428,8 @@ function normalizeCreatePayload(value: unknown): CreatePayload | null {
   }
 }
 
-function normalizeSessionLookupPayload(value: unknown): (Pick<CreatePayload, 'source' | 'instanceId'> & { scope?: string }) | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const data = value as Record<string, unknown>
+function normalizeSessionLookupPayload(data: unknown): (Pick<CreatePayload, 'source' | 'instanceId'> & { scope?: string }) | null {
+  if (!isRecord(data)) return null
   if (typeof data.source !== 'string' || !SOURCES.has(data.source) || !isIdentifier(data.instanceId)) return null
   if (data.scope !== undefined && !isIdentifier(data.scope)) return null
   return {
@@ -460,9 +454,8 @@ function resolveScope(
   }
 }
 
-function normalizeLookupPayload(value: unknown): (Pick<CreatePayload, 'source' | 'instanceId' | 'permissionId'> & { nonce?: string }) | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const data = value as Record<string, unknown>
+function normalizeLookupPayload(data: unknown): (Pick<CreatePayload, 'source' | 'instanceId' | 'permissionId'> & { nonce?: string }) | null {
+  if (!isRecord(data)) return null
   if (
     typeof data.source !== 'string'
     || !SOURCES.has(data.source)
@@ -477,13 +470,12 @@ function normalizeLookupPayload(value: unknown): (Pick<CreatePayload, 'source' |
   }
 }
 
-function normalizeResultPayload(value: unknown): (
+function normalizeResultPayload(data: unknown): (
   Pick<CreatePayload, 'source' | 'instanceId' | 'permissionId'>
   & { nonce?: string; decisionId: string; result: PermissionDeliveryResult }
 ) | null {
-  const lookup = normalizeLookupPayload(value)
-  if (!lookup || !value || typeof value !== 'object') return null
-  const data = value as Record<string, unknown>
+  const lookup = normalizeLookupPayload(data)
+  if (!lookup || !isRecord(data)) return null
   if (!isIdentifier(data.decisionId) || !isDeliveryResult(data.result)) return null
   return { ...lookup, decisionId: data.decisionId, result: data.result }
 }

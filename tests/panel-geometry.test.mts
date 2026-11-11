@@ -3,14 +3,15 @@ import test, { type TestContext } from 'node:test'
 import { createPanelGeometry, type PanelGeometryState } from '../electron/main/panel-geometry.ts'
 import type { PanelSizeStore } from '../electron/panel-size-store.ts'
 import { PROGRAMMATIC_PANEL_RESIZE_WINDOW_MS } from '../electron/plugin-panel-window.ts'
+import { fakeBrowserWindow, fakeDisplay } from './support/fake-electron.mts'
 import { PANEL_HEIGHT, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, PANEL_WIDTH } from '../src/utils/panel-layout.ts'
 
 // 從 electron/main/runtime.ts 抽出的面板尺寸與定位，用假螢幕、假視窗與假尺寸檔驗證。
 
 interface Rect { x: number; y: number; width: number; height: number }
 
-const main = { id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, workArea: { x: 0, y: 25, width: 1920, height: 1055 } }
-const side = { id: 2, bounds: { x: 1920, y: 0, width: 1280, height: 800 }, workArea: { x: 1920, y: 0, width: 1280, height: 800 } }
+const main = fakeDisplay(1, { x: 0, y: 0, width: 1920, height: 1080 }, { x: 0, y: 25, width: 1920, height: 1055 })
+const side = fakeDisplay(2, { x: 1920, y: 0, width: 1280, height: 800 }, { x: 1920, y: 0, width: 1280, height: 800 })
 const displays = [main, side]
 
 function displayFor(rect: Rect) {
@@ -44,8 +45,8 @@ function setup(t: TestContext, options: { pet?: Rect | null; panel?: Rect | null
   const pet = options.pet === null ? null : fakeWindow(options.pet ?? { x: 800, y: 700, width: 260, height: 350 })
   const panel = options.panel === null ? null : fakeWindow(options.panel ?? { x: 0, y: 0, width: PANEL_WIDTH, height: PANEL_HEIGHT }, options.visible ?? true)
   const state: PanelGeometryState = {
-    petWindow: pet as never,
-    panelWindow: panel as never,
+    petWindow: pet && fakeBrowserWindow(pet),
+    panelWindow: panel && fakeBrowserWindow(panel),
     petContentHeight: null,
     panelUserSize: null,
     panelMinimumSize: null,
@@ -58,8 +59,8 @@ function setup(t: TestContext, options: { pet?: Rect | null; panel?: Rect | null
   const geometry = createPanelGeometry({
     state,
     screen: {
-      getDisplayMatching: rect => displayFor(rect) as never,
-      getPrimaryDisplay: () => main as never,
+      getDisplayMatching: rect => displayFor(rect),
+      getPrimaryDisplay: () => main,
     },
     createSizeStore: () => { created += 1; return store },
   })

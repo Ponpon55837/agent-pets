@@ -16,6 +16,8 @@ import {
   type PluginPanelHarness,
 } from './support/plugin-panel-harness.mts'
 import { t, tPlural, type TranslationKey } from '../src/i18n.ts'
+import type { PluginCatalogPanelItem } from '../src/types/plugin-catalog.ts'
+import type { PluginErrorCode } from '../src/types/plugin.ts'
 
 afterEach(() => unmountLeftover())
 
@@ -696,7 +698,7 @@ test('the installed list puts plugins that need attention first and filters by s
   assert.deepEqual(controller.filteredPlugins.value.map(item => item.id), ['crashy'])
   controller.installedFilter.value = 'updates'
   assert.deepEqual(controller.filteredPlugins.value.map(item => item.id), [])
-  controller.catalogItems.value = [{ plugin: { id: 'beta' }, updateAvailable: true } as never, { plugin: { id: 'alpha' }, updateAvailable: false } as never]
+  controller.catalogItems.value = [catalogItem('beta', true), catalogItem('alpha', false)]
   assert.deepEqual(controller.filteredPlugins.value.map(item => item.id), ['beta'])
   assert.equal(controller.catalogItemFor('alpha'), controller.catalogItems.value[1])
   assert.equal(controller.catalogItemFor('zzz'), undefined)
@@ -707,7 +709,29 @@ test('the installed list puts plugins that need attention first and filters by s
   assert.equal(controller.pluginStatusTone(controller.plugins.value[1]), 'neutral')
 })
 
-const PERMISSION_COPY: Array<[string, TranslationKey, Record<string, string> | undefined, TranslationKey]> = [
+// 複數標籤只存在 `.one`/`.other` 後綴鍵，基底名稱不是 TranslationKey，因此獨立成一個型別。
+function catalogItem(id: string, updateAvailable: boolean): PluginCatalogPanelItem {
+  const name = { 'zh-TW': id, 'en-US': id }
+  const latestVersion = { version: '1.0.0', apiVersion: '1', url: `https://example.com/${id}.zip`, sha256: '0'.repeat(64), size: 1, publishedAt: '2026-01-01T00:00:00Z' }
+  return {
+    plugin: { id, name, description: name, author: 'Test', versions: [latestVersion] },
+    latestVersion,
+    installedVersion: null,
+    updateAvailable,
+    catalogOlder: false,
+    permissionsIncreased: null,
+    signingKeyChange: 'unknown',
+  }
+}
+
+const PLURAL_LABEL_KEYS = ['pluginPermissionSkins', 'pluginPermissionPanelThemes'] as const
+type PluralLabelKey = typeof PLURAL_LABEL_KEYS[number]
+
+function isPluralLabelKey(key: TranslationKey | PluralLabelKey): key is PluralLabelKey {
+  return (PLURAL_LABEL_KEYS as readonly string[]).includes(key)
+}
+
+const PERMISSION_COPY: Array<[string, TranslationKey | PluralLabelKey, Record<string, string> | undefined, TranslationKey]> = [
   ['network:api.example.com', 'pluginPermissionNetwork', { host: 'api.example.com' }, 'plugins.hintNetwork'],
   ['network:userGranted', 'plugins.permNetworkUserGranted', undefined, 'plugins.hintNetworkUserGranted'],
   ['links:docs.example.com', 'pluginPermissionLinks', { host: 'docs.example.com' }, 'plugins.hintLinks'],
@@ -738,7 +762,7 @@ test('permission units map to the same label and hint copy', async () => {
   const harness = await mountPluginPanel()
   for (const [unit, labelKey, params, hintKey] of PERMISSION_COPY) {
     // 帶數量的貢獻點標籤以 `.one`/`.other` 存放，依 count 走 tPlural。
-    const expectedLabel = labelKey === 'pluginPermissionSkins' || labelKey === 'pluginPermissionPanelThemes'
+    const expectedLabel = isPluralLabelKey(labelKey)
       ? tPlural(labelKey, Number(params?.count) || 0, params)
       : t(labelKey, params)
     assert.equal(harness.controller.permissionLabel(unit), expectedLabel, unit)
@@ -790,7 +814,9 @@ test('error-code lookups ignore prototype names', async () => {
   const harness = await mountPluginPanel()
   assert.equal(harness.controller.localizedError('constructor'), t('pluginActionFailed'))
   assert.equal(harness.controller.localizedError('toString'), t('pluginActionFailed'))
-  assert.equal(harness.controller.diagnosticCodeLabel({ at: 1, code: 'constructor' as never }), t('plugins.diagnosticRejectedHuman', { reason: t('plugins.reasonOther') }))
+  // 刻意餵入原型鏈上的名稱（不在 PluginErrorCode 裡），驗證標籤查表不會誤命中 Object.prototype 成員。
+  const prototypeName = 'constructor' as unknown as PluginErrorCode
+  assert.equal(harness.controller.diagnosticCodeLabel({ at: 1, code: prototypeName }), t('plugins.diagnosticRejectedHuman', { reason: t('plugins.reasonOther') }))
 })
 
 // --- 拆分時新增的守衛（刻意差異，原控制器沒有） ----------------------------------------

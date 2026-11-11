@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { createRequire } from 'node:module'
 import { LOCAL_USAGE_ADAPTER_IDS, LOCAL_USAGE_SOURCES, type AgentStatusEvent } from '../src/types/agent.ts'
-import { isValidPetId } from '../src/utils/pet-id.ts'
+import { DEFAULT_PET_ID, isValidPetId } from '../src/utils/pet-id.ts'
 import type { ProgressionSnapshot } from '../src/types/progression.ts'
 import {
   ACHIEVEMENT_DEFINITIONS,
@@ -15,6 +15,7 @@ import {
   type AchievementUnlock,
 } from '../src/types/achievement.ts'
 import { localDateKey, localHour as localHourOf } from '../src/utils/local-date.ts'
+import { MAX_TOKEN_COUNT } from './event-normalizer.ts'
 import { applyWalPragmas, type SqlitePragmaState } from './sqlite-pragmas.ts'
 import { optimizeAndVacuum } from './sqlite-maintenance.ts'
 import { StatementCache } from './sqlite-statements.ts'
@@ -56,10 +57,8 @@ export interface AchievementCompletedSessionFact {
   completedAt: number
 }
 
-const DEFAULT_PET_ID = 'aang-airbender'
 const ADAPTER_ID = /^[A-Za-z0-9._-]{1,128}$/
 const MAX_EVENT_ID_LENGTH = 256
-const MAX_TOKEN_COUNT = 1_000_000_000_000
 const LOCAL_TOKEN_TOTAL_KEY = 'local_token_total'
 const GROWTH_RESET_AT_KEY = 'growth_reset_at'
 const LOCAL_TOKEN_COMPACT_BATCH = 5_000

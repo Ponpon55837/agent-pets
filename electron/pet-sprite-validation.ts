@@ -48,17 +48,18 @@ function readPngSize(bytes: Uint8Array): ImageSize | null {
 function readWebpSize(bytes: Uint8Array): ImageSize | null {
   if (bytes.length < 30) return null
   const chunk = String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15])
-  if (chunk === 'VP8X') {
-    return { width: u24le(bytes, 24) + 1, height: u24le(bytes, 27) + 1 }
+  switch (chunk) {
+    case 'VP8X':
+      return { width: u24le(bytes, 24) + 1, height: u24le(bytes, 27) + 1 }
+    case 'VP8 ':
+      return { width: (bytes[26] | (bytes[27] << 8)) & 0x3fff, height: (bytes[28] | (bytes[29] << 8)) & 0x3fff }
+    case 'VP8L': {
+      const bits = bytes[21] | (bytes[22] << 8) | (bytes[23] << 16) | (bytes[24] << 24)
+      return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 }
+    }
+    default:
+      return null
   }
-  if (chunk === 'VP8 ') {
-    return { width: (bytes[26] | (bytes[27] << 8)) & 0x3fff, height: (bytes[28] | (bytes[29] << 8)) & 0x3fff }
-  }
-  if (chunk === 'VP8L') {
-    const bits = bytes[21] | (bytes[22] << 8) | (bytes[23] << 16) | (bytes[24] << 24)
-    return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 }
-  }
-  return null
 }
 
 const JPEG_SOS = 0xda

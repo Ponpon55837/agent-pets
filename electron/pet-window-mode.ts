@@ -99,10 +99,12 @@ export function edgeWindowBounds(
     width,
     height,
   }
-  if (edge === 'left') next.x = workArea.x
-  if (edge === 'right') next.x = workArea.x + workArea.width - width
-  if (edge === 'top') next.y = workArea.y
-  if (edge === 'bottom') next.y = workArea.y + workArea.height - height
+  switch (edge) {
+    case 'left': next.x = workArea.x; break
+    case 'right': next.x = workArea.x + workArea.width - width; break
+    case 'top': next.y = workArea.y; break
+    case 'bottom': next.y = workArea.y + workArea.height - height; break
+  }
   return next
 }
 

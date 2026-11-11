@@ -120,8 +120,15 @@ test('recordQuotaSample clears on reset change, usage drop, clock regress; toler
 
 test('large sample counts stay linear and fast', () => {
   const samples = Array.from({ length: 200_000 }, (_, i) => ({ atMs: T0 + i * 1000, usedPercent: i / 4000 }))
-  const start = performance.now()
   const result = forecastQuota(samples, T0 + 400_000 * 1000, nowOf(samples))
-  assert.ok(performance.now() - start < 500)
   assert.notEqual(result.kind, 'insufficient')
+  // 線性時 200k 筆約 1～2 ms；退化成平方是 4×10¹⁰ 次運算，至少數十秒。單次 500 ms 的舊門檻在三個全量測試
+  // 同時跑時曾被 GC 與 CPU 爭用打破（F2），所以取 3 次最快值、門檻放到 5 秒：仍與平方差兩個數量級以上。
+  let best = Number.POSITIVE_INFINITY
+  for (let run = 0; run < 3; run += 1) {
+    const start = performance.now()
+    forecastQuota(samples, T0 + 400_000 * 1000, nowOf(samples))
+    best = Math.min(best, performance.now() - start)
+  }
+  assert.ok(best < 5_000, `200k samples took ${best.toFixed(1)} ms`)
 })

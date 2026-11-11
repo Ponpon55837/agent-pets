@@ -17,6 +17,7 @@ import {
   withSessionJumpContext,
   type SessionJumpDependencies,
 } from '../electron/session-jump.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // Every side effect (open -b, Finder, clipboard) is injected: these tests never launch an app,
 // open a window or touch the real clipboard, and all paths live in a throw-away temp directory.
@@ -29,7 +30,7 @@ const realFs = {
 
 function tempRoot(t: { after(fn: () => void): void }): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-jump-'))
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  t.after(() => removeTempTree(root))
   return root
 }
 

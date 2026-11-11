@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test, { afterEach } from 'node:test'
 import { writeFileAtomic } from '../electron/atomic-file-write.ts'
-import { mergeAgentPetsHooksFile, setJsonKeyFile } from '../electron/hook-config.ts'
+import { mergeAgentPetsHooksFile, setJsonKeyFile, type HookMatcherEntry } from '../electron/hook-config.ts'
 import { classifyInstallError } from '../electron/install-outcome.ts'
 import {
   ConfigChangedError,
@@ -15,11 +15,12 @@ import {
   withConfigConflictRetry,
   writeConfigSafelyAsync,
 } from '../electron/safe-config-write.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // 讀 → 合併 → 寫之間，Claude Code / Codex 可能剛好也寫了同一個檔案：不能把它的修改蓋掉。
 
 const HOOK = '/home/u/.desktop-pet/agent-hook.mjs'
-const desired = () => ({ Stop: [{ hooks: [{ type: 'command', command: 'node', args: [HOOK, 'claude'] }] }] })
+const desired = (): Record<string, HookMatcherEntry[]> => ({ Stop: [{ hooks: [{ type: 'command', command: 'node', args: [HOOK, 'claude'] }] }] })
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-config-conflict-'))
@@ -42,7 +43,7 @@ test('the temp file is written first and beforeRename can veto the rename', asyn
     }), /veto/)
     assert.equal(fs.readFileSync(target, 'utf8'), 'old')
     assert.deepEqual(fs.readdirSync(dir), ['a.txt'])
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('the backup is the originally read content, not a fresh read of the file', async () => {
@@ -54,7 +55,7 @@ test('the backup is the originally read content, not a fresh read of the file', 
     assert.equal(fs.readFileSync(result.backupPath!, 'utf8'), 'READ-BY-US')
     assert.equal(fs.readFileSync(file, 'utf8'), 'NEXT\n')
     assert.equal((await backupConfigAsync(file, 5, 'explicit')) !== null, true)
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('an external edit before the rename is retried and merged, not overwritten', async () => {
@@ -74,7 +75,7 @@ test('an external edit before the rename is retried and merged, not overwritten'
     assert.equal(final.hooks.Stop.length, 1)
     assert.equal(fs.readFileSync(result.backupPath!, 'utf8'), '{"theme":"dark","external":true}\n', 'backup is what we replaced')
     assert.deepEqual(fs.readdirSync(dir).filter(name => name.endsWith('.tmp')), [])
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('a file created or deleted during the write also counts as a change', async () => {
@@ -96,7 +97,7 @@ test('a file created or deleted during the write also counts as a change', async
     }
     await setJsonKeyFile(gone, 'k', 2)
     assert.deepEqual(JSON.parse(fs.readFileSync(gone, 'utf8')), { k: 2 })
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('changed on both attempts: refused with changed_during_write, external content intact, nothing left behind', async () => {
@@ -123,7 +124,7 @@ test('changed on both attempts: refused with changed_during_write, external cont
     assert.equal(fs.readFileSync(file, 'utf8'), latest, 'the external content is left as it was')
     assert.deepEqual(fs.readdirSync(dir), ['settings.json'], 'no temp file and no backup of unwritten content')
     assert.deepEqual(listBackups(file), [])
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('withConfigConflictRetry only retries conflicts, once, and passes other errors through', async () => {

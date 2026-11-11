@@ -12,6 +12,7 @@ import {
   parseUsageFile,
   type UsageProvider,
 } from '../electron/local-usage.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 function seededRandom(seed: number): () => number {
   let state = seed >>> 0
@@ -26,7 +27,7 @@ function setup(): { home: string; database: string; cleanup: () => void } {
   return {
     home: path.join(root, 'home'),
     database: path.join(root, 'history.sqlite'),
-    cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
+    cleanup: () => removeTempTree(root),
   }
 }
 
@@ -536,7 +537,7 @@ test('large file is parsed in slices with the same totals, one project lookup pe
   const originalSetImmediate = globalThis.setImmediate
   globalThis.setImmediate = ((fn: () => void, ...args: unknown[]) => { yields += 1; return originalSetImmediate(fn, ...(args as [])) }) as typeof setImmediate
   try {
-    const reader = new LocalUsageReader({ homeDir: fixture.home, history: store, now: () => now, projectRouting: projectRouting as never })
+    const reader = new LocalUsageReader({ homeDir: fixture.home, history: store, now: () => now, projectRouting })
     const result = await reader.scan()
     assert.equal(result.recordsImported, RECORDS)
   } finally {

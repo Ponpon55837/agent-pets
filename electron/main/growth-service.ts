@@ -7,6 +7,7 @@ import type { AchievementUnlock } from '../../src/types/achievement'
 import type { AgentStatusEvent } from '../../src/types/agent'
 import type { ProgressionAwardEvent, ProgressionEventResult, ProgressionSnapshot } from '../../src/types/progression'
 import type { GrowthResetResult } from '../../src/types/growth-maintenance.ts'
+import { DEFAULT_PET_ID } from '../../src/utils/pet-id.ts'
 import type { MainState } from './state.ts'
 
 // Growth 服務：XP／進化的 progression store、成就 store（含初始化失敗的退避重試）、
@@ -21,7 +22,6 @@ import type { MainState } from './state.ts'
 // achievements silently for the rest of the session.
 export const ACHIEVEMENT_STORE_RETRY_DELAYS_MS = [3_000, 10_000, 30_000]
 export const ACHIEVEMENT_PROGRESS_DEBOUNCE_MS = 1_000
-const DEFAULT_PET_ID = 'aang-airbender'
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export type GrowthState = Pick<MainState,

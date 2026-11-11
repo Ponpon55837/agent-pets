@@ -14,6 +14,7 @@ import {
   sanitizeToolName,
 } from '../electron/history-sessions.ts'
 import type { AgentStatusEvent } from '../src/types/agent.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 type RawDb = {
   exec(sql: string): void
@@ -28,7 +29,7 @@ function open(t: { after(fn: () => void): void }, now: () => number = () => NOW)
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-sessions-'))
   const filePath = path.join(directory, 'history.sqlite')
   const store = new HistoryStore(filePath, { now })
-  t.after(() => { store.close(); fs.rmSync(directory, { recursive: true, force: true }) })
+  t.after(() => { store.close(); removeTempTree(directory) })
   return { store, filePath, directory, db: (store as unknown as { database: RawDb }).database }
 }
 
@@ -212,6 +213,9 @@ test('query normalisation drops anything invalid and bounds the rest', () => {
   assert.equal(swapped.to, NOW)
   assert.equal(normalizeSessionQuery({ limit: 2.5 }, NOW).limit, 30)
   assert.equal(normalizeSessionQuery({ cursor: { lastSeenAt: 'x', id: 'y' } }, NOW).cursor, undefined)
+  const arrayCursor = Object.assign([], { lastSeenAt: NOW, id: `codex:codex:${'c'.repeat(24)}` })
+  assert.equal(normalizeSessionQuery({ cursor: arrayCursor }, NOW).cursor, undefined)
+  assert.deepEqual(normalizeSessionQuery(Object.assign([], { limit: 7 }), NOW), { limit: 30 })
   assert.equal(isHistorySessionId(`a:b:${'0'.repeat(24)}`), true)
   assert.equal(isHistorySessionId(`a:b:${'0'.repeat(23)}`), false)
   assert.equal(isHistorySessionId(`${'a'.repeat(500)}:${'0'.repeat(24)}`), false)
@@ -278,7 +282,7 @@ test('local-log tokens join the hook session incrementally, with the top model',
 
 test('v9 migration backfills existing sessions additively and is idempotent', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-sessions-migrate-'))
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  t.after(() => removeTempTree(directory))
   const filePath = path.join(directory, 'history.sqlite')
   const first = new HistoryStore(filePath, { now: () => NOW })
   first.recordEvent(event({ state: 'thinking', eventId: 'start', timestamp: NOW - 50_000 }))

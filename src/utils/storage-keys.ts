@@ -10,9 +10,11 @@ import { DEFAULT_LOCALE, isAppLocale, type AppLocale } from '../types/locale.ts'
 import { isPetThemePreference, isThemePreference, type PetThemePreference, type ThemePreference } from '../types/theme.ts'
 import { parseStoredDashboardTab } from './plugin-tabs.ts'
 import { DEFAULT_SETTINGS_GROUP, isSettingsGroupId, type SettingsGroupId } from './settingsRegistry.ts'
+import { DEFAULT_PET_ID } from './pet-id.ts'
 
-/** 永遠可用的預設寵物（PetAnimation 載圖失敗與其他預設值都退回它），所以不能移除或隱藏。 */
-export const DEFAULT_PET_ID = 'aang-airbender'
+// 主程序與 renderer 共用同一個預設寵物 id；既有的 renderer 呼叫端仍從這裡取用。
+export { DEFAULT_PET_ID }
+
 /** 心情每天的起始值。 */
 export const MOOD_BASELINE = 10
 /** 心情系統版本；`agent-pet-mood-version` 不等於它時，啟動會把心情重設回起始值（migration）。 */

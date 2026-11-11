@@ -6,6 +6,11 @@ import {
   decodeCatalogBase64,
   type PluginCatalogRuntimeState,
 } from '../electron/main/plugin-catalog-runtime.ts'
+import type { PluginFeedController } from '../electron/plugin-feed.ts'
+import type { PluginNetworkClient } from '../electron/plugin-net.ts'
+import type { PluginPreferencesStore } from '../electron/plugin-preferences.ts'
+import type { PluginRegistry } from '../electron/plugin-registry.ts'
+import { fakeService } from './support/fake-service.mts'
 
 // 階段 11 後續：plugin catalog 閘道與每日自動檢查原本在 electron/main/runtime.ts，
 // 改由抽出的服務搭配假 state 與 node:test 假計時器驗證。
@@ -17,7 +22,8 @@ const E2E_KEY = ['__agent', 'PetsE2E'].join('')
 interface FakeOptions {
   enabled?: boolean
   lastDay?: string | null
-  network?: unknown
+  // 部分案例刻意回傳不符 PluginNetworkClient 形狀的值，所以只約束到成員名稱。
+  network?: Parameters<typeof fakeService<PluginNetworkClient>>[0] | null
 }
 
 function setup(t: TestContext, options: FakeOptions = {}) {
@@ -25,9 +31,9 @@ function setup(t: TestContext, options: FakeOptions = {}) {
   try { t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] }) } catch {}
   const calls: string[] = []
   const state: PluginCatalogRuntimeState = {
-    pluginNetworkClient: (options.network ?? null) as never,
-    pluginRegistry: { list: () => [] } as never,
-    pluginPreferences: {
+    pluginNetworkClient: options.network ? fakeService<PluginNetworkClient>(options.network) : null,
+    pluginRegistry: fakeService<PluginRegistry>({ list: () => [] }),
+    pluginPreferences: fakeService<PluginPreferencesStore>({
       get: () => ({
         onlineCatalogEnabled: options.enabled ?? false,
         dailyUpdateCheck: true,
@@ -35,10 +41,10 @@ function setup(t: TestContext, options: FakeOptions = {}) {
       }),
       getLastCatalogAutoCheckDay: () => options.lastDay ?? null,
       setLastCatalogAutoCheckDay: (day: string) => { calls.push(`day:${day}`) },
-    } as never,
-    pluginFeedController: {
+    }),
+    pluginFeedController: fakeService<PluginFeedController>({
       addSystemNotification: (...args: unknown[]) => { calls.push(`notify:${String(args[2])}|${String(args[3])}`) },
-    } as never,
+    }),
     pluginCatalogAutoCheckSchedule: null,
     pluginCatalogAutoCheckTimer: null,
   }
@@ -51,13 +57,13 @@ function setup(t: TestContext, options: FakeOptions = {}) {
 }
 
 function withE2e(value: unknown, body: () => Promise<void>): Promise<void> {
-  const holder = globalThis as unknown as Record<string, unknown>
-  const had = Object.prototype.hasOwnProperty.call(holder, E2E_KEY)
-  const previous = holder[E2E_KEY]
-  holder[E2E_KEY] = value
+  // 用 Reflect 讀寫 globalThis 上的動態鍵，不需要把 globalThis 轉型成索引型別。
+  const had = Reflect.has(globalThis, E2E_KEY)
+  const previous: unknown = Reflect.get(globalThis, E2E_KEY)
+  Reflect.set(globalThis, E2E_KEY, value)
   return body().finally(() => {
-    if (had) holder[E2E_KEY] = previous
-    else delete holder[E2E_KEY]
+    if (had) Reflect.set(globalThis, E2E_KEY, previous)
+    else Reflect.deleteProperty(globalThis, E2E_KEY)
   })
 }
 

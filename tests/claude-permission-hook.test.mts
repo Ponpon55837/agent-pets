@@ -9,6 +9,8 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { OPAQUE_ID_128_PATTERN } from '../src/types/id-patterns.ts'
 import { hookStartupMarkerName } from '../electron/main/hook-startup-marker.ts'
+import { withStartupBaseline } from './support/node-startup.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // Runs the real integrations/agent-hook.mjs against fake local servers. The hook hard-codes the
 // app's ports, so each test runs a copy whose ports point at ephemeral test servers; HOME is a
@@ -137,7 +139,7 @@ async function harness(options: {
         permissionServer.closeAllConnections()
         await new Promise<void>(resolve => permissionServer!.close(() => resolve()))
       }
-      fs.rmSync(home, { recursive: true, force: true })
+      removeTempTree(home)
     },
   }
 }
@@ -145,10 +147,14 @@ async function harness(options: {
 // Host-detection variables are cleared so the runner's own terminal never leaks into a payload.
 const HOST_ENV_KEYS = ['TERM_PROGRAM', '__CFBundleIdentifier', 'CLAUDE_CODE_ENTRYPOINT', 'WT_SESSION', 'VSCODE_INJECTION', 'VSCODE_GIT_IPC_HANDLE', 'CURSOR_TRACE_ID']
 
-function runHook(h: Harness, payload: Record<string, unknown>, extraEnv: NodeJS.ProcessEnv = {}): Promise<{ stdout: string; code: number | null; ms: number }> {
+function hookEnv(h: Harness, extraEnv: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: h.home, USERPROFILE: h.home }
   for (const key of HOST_ENV_KEYS) delete env[key]
-  Object.assign(env, extraEnv)
+  return Object.assign(env, extraEnv)
+}
+
+function runHook(h: Harness, payload: Record<string, unknown>, extraEnv: NodeJS.ProcessEnv = {}): Promise<{ stdout: string; code: number | null; ms: number }> {
+  const env = hookEnv(h, extraEnv)
   const startedAt = Date.now()
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [h.hookPath, 'claude'], { env, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -450,13 +456,18 @@ test('during app start-up the request call waits for the permission port and the
   }
 })
 
-test('without a start-up marker a refused request is not retried', async () => {
-  // 埠在 hook 通常已結束之後才開；沒有重試就一次請求都不會到。
-  const h = await harness({ handler: decisionFlow('deny', 0), permissionOpensAfterMs: 2_500 })
+test('without a start-up marker a refused request is not retried', async t => {
+  // 權限埠整段都關著，以耗時判斷：誤把重試打開會一直重試到 PERMISSION_STARTUP_WAIT_MS（5 秒）。
+  // 不用「晚 2.5 秒才開的埠」：高負載下 hook 比開埠還晚啟動，第一次請求就直接成功（F2 實測）。
+  // 上限與 agent-hook-delivery 相同，取兩倍 node 啟動基準加 1.5 秒；基準在 3.5 秒內都小於重試所需的時間。
+  const h = await harness({ permissionServer: false })
   try {
-    const result = await runHook(h, permissionRequest())
+    const result = await withStartupBaseline(hookEnv(h), () => runHook(h, permissionRequest()))
+    assert.equal(result.code, 0)
     assert.equal(result.stdout, '')
-    assert.equal(h.permissionCalls.length, 0)
+    const bound = result.baseline * 2 + 1_500
+    t.diagnostic(`hook ${result.ms} ms, node startup ${result.baseline} ms, bound ${bound} ms`)
+    assert.ok(result.ms < bound, `hook took ${result.ms} ms (node startup ${result.baseline} ms)`)
   } finally {
     await h.close()
   }

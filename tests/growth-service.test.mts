@@ -8,13 +8,20 @@ import {
   type GrowthWindow,
 } from '../electron/main/growth-service.ts'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
+import type { AchievementStore } from '../electron/achievements.ts'
+import type { HistoryStore } from '../electron/history.ts'
+import type { ProgressionStore } from '../electron/progression.ts'
+import type { AgentStatusEvent } from '../src/types/agent.ts'
+import type { ProgressionAward, ProgressionEventResult, ProgressionSnapshot } from '../src/types/progression.ts'
+import { makeAgentStatusEvent } from './support/agent-status-event.mts'
+import { fakeService } from './support/fake-service.mts'
 
 // 階段 11 之前在 electron/main/runtime.ts 內的成就／progression 行為，改由抽出的服務搭配
 // 假 store、假視窗與 node:test 假計時器驗證。
 
-const snapshot = (xp: number) => ({
-  petId: 'pet-a', totalXp: xp, level: 1, xpIntoLevel: xp, xpToNext: 10, evolutionStage: 0,
-  currentStreak: 0, longestStreak: 0, lastActiveLocalDate: null, updatedAt: 1,
+const snapshot = (xp: number): ProgressionSnapshot => ({
+  petId: 'pet-a', totalXp: xp, level: 1, xpIntoLevel: xp, xpToNext: 10, evolutionStage: 'egg',
+  currentStreak: 0, longestStreak: 0, updatedAt: 1,
 })
 
 function fakeWindow(sent: Array<[string, unknown]>, visible = true): GrowthWindow {
@@ -35,7 +42,7 @@ function setup(t: TestContext, options: { failOpens?: number; enabled?: boolean;
   let xp = options.progressionXp ?? 1
   let ledgerChanged = true
   const unlocks: unknown[] = []
-  const achievement = {
+  const achievement = fakeService<AchievementStore>({
     recordEvent: () => { calls.push('recordEvent'); return unlocks },
     getSnapshot: () => ({ snap: true }),
     syncLocalTokenUsage: () => { calls.push('sync'); return { changed: ledgerChanged } },
@@ -43,37 +50,37 @@ function setup(t: TestContext, options: { failOpens?: number; enabled?: boolean;
     reconcileCompletedSessions: () => { calls.push('reconcile'); return [] },
     getGrowthResetAt: () => 0,
     close: () => calls.push('achievement.close'),
-  }
-  const progression = {
+  })
+  const progression = fakeService<ProgressionStore>({
     getActivePetId: () => 'pet-a',
     getSnapshot: () => snapshot(xp),
     setActivePet: () => snapshot(xp),
-    handleEvent: () => { calls.push('handleEvent'); return { snapshot: snapshot(xp), awards: [], levelBefore: 1, stageBefore: 0 } },
+    handleEvent: () => { calls.push('handleEvent'); return { snapshot: snapshot(xp), awards: [], levelBefore: 1, stageBefore: 'egg' } },
     close: () => calls.push('progression.close'),
-  }
-  const state = {
+  })
+  const state: GrowthState = {
     progressionStore: null,
     achievementStore: null,
     achievementStoreRetryTimer: null,
     achievementStoreRetryAttempt: 0,
-    historyStore: {
+    historyStore: fakeService<HistoryStore>({
       getAchievementReconciledAt: () => 0,
       getAchievementCompletedSessions: () => [],
       setAchievementReconciledAt: () => { calls.push('reconciledAt') },
-    },
+    }),
     desktopNotifications: null,
-  } as unknown as GrowthState
+  }
   const hiddenSent: Array<[string, unknown]> = []
   const hiddenWindow = options.hiddenWindow ? fakeWindow(hiddenSent, false) : undefined
   const windows = [fakeWindow(sent), hiddenWindow ?? null]
   const service = createGrowthService({
     state,
     getWindows: () => windows,
-    openProgressionStore: () => progression as never,
+    openProgressionStore: () => progression,
     openAchievementStore: () => {
       calls.push('open')
       if (failOpens > 0) { failOpens -= 1; throw new Error('locked') }
-      return achievement as never
+      return achievement
     },
     achievementsEnabled: () => enabled,
     logError: message => { logged.push(message) },
@@ -87,7 +94,7 @@ function setup(t: TestContext, options: { failOpens?: number; enabled?: boolean;
   }
 }
 
-const eventOf = (over: Record<string, unknown> = {}) => ({ state: 'thinking', ...over }) as never
+const eventOf = (over: Partial<AgentStatusEvent> = {}): AgentStatusEvent => makeAgentStatusEvent(over.state ?? 'thinking', over)
 
 test('achievement init retries with 3s/10s/30s backoff and stops at the cap', t => {
   const h = setup(t, { failOpens: 99 })
@@ -128,7 +135,7 @@ test('event hot path only records success or token-usage events while enabled', 
   h.service.handleEvent(eventOf())
   assert.deepEqual(h.calls, ['handleEvent'])
   h.service.handleEvent(eventOf({ state: 'success' }))
-  h.service.handleEvent(eventOf({ tokenUsage: { totalTokens: 1 } }))
+  h.service.handleEvent(eventOf({ tokenUsage: { input: 1, output: 0, quality: 'exact' } }))
   assert.equal(h.calls.filter(c => c === 'recordEvent').length, 2)
   h.setEnabled(false)
   h.service.handleEvent(eventOf({ state: 'success' }))
@@ -223,11 +230,14 @@ test('a window hidden during a broadcast gets exactly one resync on show', t => 
 
 test('granted awards are broadcast with level and stage transitions; an empty result sends nothing', t => {
   const h = setup(t)
-  const base = { snapshot: { ...snapshot(5), level: 2, evolutionStage: 1 }, levelBefore: 1, stageBefore: 0 }
-  h.service.broadcastProgressionAwards({ ...base, awards: [] } as never)
+  const base = { snapshot: { ...snapshot(5), level: 2, evolutionStage: 'baby' as const }, levelBefore: 1, stageBefore: 'egg' as const } satisfies Omit<ProgressionEventResult, 'awards'>
+  h.service.broadcastProgressionAwards({ ...base, awards: [] })
   assert.equal(h.sent.filter(([channel]) => channel === IPC_CHANNELS.progressionAwarded).length, 0)
 
-  h.service.broadcastProgressionAwards({ ...base, awards: [{ ruleId: 'task-success', amount: 3, extra: 'dropped' }] } as never)
+  // 以變數傳入以保留額外欄位 extra：驗證服務不會把 ledger 的其他欄位送出去。
+  const award = { ruleId: 'task-success', amount: 3, extra: 'dropped' }
+  const awards: ProgressionAward[] = [award]
+  h.service.broadcastProgressionAwards({ ...base, awards })
   const awarded = h.sent.filter(([channel]) => channel === IPC_CHANNELS.progressionAwarded)
   assert.equal(awarded.length, 1)
   const payload = awarded[0][1] as Record<string, unknown>
@@ -235,6 +245,6 @@ test('granted awards are broadcast with level and stage transitions; an empty re
   assert.deepEqual(payload.awards, [{ ruleId: 'task-success', amount: 3 }])
   assert.deepEqual(
     { petId: payload.petId, levelBefore: payload.levelBefore, levelAfter: payload.levelAfter, stageBefore: payload.stageBefore, stageAfter: payload.stageAfter },
-    { petId: 'pet-a', levelBefore: 1, levelAfter: 2, stageBefore: 0, stageAfter: 1 },
+    { petId: 'pet-a', levelBefore: 1, levelAfter: 2, stageBefore: 'egg', stageAfter: 'baby' },
   )
 })

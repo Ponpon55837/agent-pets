@@ -15,6 +15,7 @@ import { installProjectMcp } from '../electron/project-mcp-setup.ts'
 import { BACKUP_MARKER, listBackups, writeConfigSafely, writeTextAtomic } from '../electron/safe-config-write.ts'
 import { POSIX_FILE_MODES, SKIP_WITHOUT_FILE_SYMLINKS } from './support/fs-capabilities.mts'
 import { builtinDefinition, png } from './support/panel-theme-fixtures.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // 以呼叫點為單位固定「暫存檔 → rename → 權限 → 失敗清理」的現有行為。
 // 每個案例都經由該模組公開的寫入入口，所以底層實作換掉後同一組斷言仍適用。
@@ -75,11 +76,19 @@ function withRenameFailures(codes: string[], run: (temporaryPaths: string[]) => 
   }) as typeof fs.renameSync, () => run(temporaryPaths))
 }
 
+// Windows 偶有防毒或索引程式短暫鎖檔，renameSyncWithRetry 會以同一個暫存路徑重試，
+// 所以 rename 次數不固定；要固定的是「一次寫入只用一個暫存檔」，因此比對不重複的路徑。
+function onlyTemporaryPath(temporaryPaths: readonly string[]): string {
+  const distinct = [...new Set(temporaryPaths)]
+  assert.equal(distinct.length, 1, 'one write uses exactly one temporary file')
+  return distinct[0]!
+}
+
 /** 寫入暫存檔時先寫一半再丟出 ENOSPC，模擬寫到一半磁碟滿。 */
 function withPartialWriteFailure(run: () => void): void {
   withFsPatch('writeFileSync', original => ((file: fs.PathOrFileDescriptor, data: string | NodeJS.ArrayBufferView, options?: fs.WriteFileOptions) => {
     if (typeof file === 'number' || isTemporary(file)) {
-      original(file, typeof data === 'string' ? data.slice(0, 1) : data.subarray(0, 1), options)
+      original(file, typeof data === 'string' ? data.slice(0, 1) : new Uint8Array(data.buffer, data.byteOffset, 1), options)
       throw fsError('ENOSPC')
     }
     original(file, data, options)
@@ -88,7 +97,7 @@ function withPartialWriteFailure(run: () => void): void {
 
 function withDirectory(run: (directory: string) => void): void {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-atomic-sites-')))
-  try { run(directory) } finally { fs.rmSync(directory, { recursive: true, force: true }) }
+  try { run(directory) } finally { removeTempTree(directory) }
 }
 
 function listing(directory: string): string[] {
@@ -250,9 +259,9 @@ for (const site of CASES) {
       write(0)
       withRenameFailures([], temporaryPaths => {
         write(1)
-        assert.equal(temporaryPaths.length, 1)
-        assert.equal(path.dirname(temporaryPaths[0]!), path.dirname(target))
-        assert.match(path.basename(temporaryPaths[0]!), site.temporaryName)
+        const temporaryPath = onlyTemporaryPath(temporaryPaths)
+        assert.equal(path.dirname(temporaryPath), path.dirname(target))
+        assert.match(path.basename(temporaryPath), site.temporaryName)
       })
     })
   })
@@ -275,8 +284,8 @@ for (const site of CASES) {
       withRenameFailures(['EBUSY'], temporaryPaths => {
         if (process.platform === 'win32') {
           write(1)
-          assert.equal(temporaryPaths.length, 2, 'the same temporary file is renamed again')
-          assert.equal(temporaryPaths[0], temporaryPaths[1])
+          assert.ok(temporaryPaths.length >= 2, 'the temporary file is renamed again after EBUSY')
+          onlyTemporaryPath(temporaryPaths)
           assert.notDeepEqual(fs.readFileSync(target), before.bytes)
           assert.deepEqual(listing(path.dirname(target)), before.listing)
         } else {
@@ -342,8 +351,7 @@ test('panel-theme-images storeUserImage: content-addressed write, cleanup and sy
 
     withRenameFailures([], temporaryPaths => {
       storeUserImage(userData, 'demo-plugin', prepared)
-      assert.equal(temporaryPaths.length, 1)
-      assert.match(path.basename(temporaryPaths[0]!), new RegExp(`^\\.${prepared.sha256}\\.${UUID}\\.tmp$`))
+      assert.match(path.basename(onlyTemporaryPath(temporaryPaths)), new RegExp(`^\\.${prepared.sha256}\\.${UUID}\\.tmp$`))
     })
     assert.deepEqual(listing(directory), [prepared.file])
     assert.deepEqual(new Uint8Array(fs.readFileSync(target)), prepared.bytes)

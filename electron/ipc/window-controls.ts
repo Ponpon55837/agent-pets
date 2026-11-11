@@ -4,6 +4,7 @@ import type { PresentationStatusSnapshot } from '../../src/types/presentation'
 import type { PetWindowMode } from '../../src/types/pet-window'
 import { normalizePresentationStatus } from '../presentation-controller.ts'
 import { IPC_CHANNELS } from './channels.ts'
+import { recordOrEmpty } from '../value-guards.ts'
 import { clamp } from '../../src/utils/number.ts'
 import { clampPetWindowDimension } from '../../src/utils/pet-window-size.ts'
 
@@ -52,7 +53,7 @@ export function registerWindowControlsIpc(deps: WindowControlsIpcDependencies): 
   deps.ipcMain.on(IPC_CHANNELS.petMousePassthrough, (event, payload: unknown) => {
     const petWindow = deps.getPetWindow()
     if (!petWindow || !deps.isTrustedIpcSender(event, petWindow)) return
-    const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    const data = recordOrEmpty(payload)
     const ignore = data.ignore
     if (typeof ignore !== 'boolean') return
     // Electron cannot forward mouse-move over an ignored window on Linux, so
@@ -84,7 +85,7 @@ export function registerWindowControlsIpc(deps: WindowControlsIpcDependencies): 
   deps.ipcMain.on(IPC_CHANNELS.panelResize, (event, payload: unknown) => {
     const panelWindow = deps.getPanelWindow()
     if (!panelWindow || !deps.isTrustedIpcSender(event, panelWindow)) return
-    const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    const data = recordOrEmpty(payload)
     if (data.release === true) {
       deps.requestPanelMinimum(null)
       return
@@ -105,7 +106,7 @@ export function registerWindowControlsIpc(deps: WindowControlsIpcDependencies): 
 
   deps.ipcMain.on(IPC_CHANNELS.panelBlurLock, (event, payload: unknown) => {
     if (!deps.isTrustedIpcSender(event, deps.getPanelWindow())) return
-    const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    const data = recordOrEmpty(payload)
     const lock: { pinned?: boolean; modal?: boolean } = {}
     if (typeof data.pinned === 'boolean') lock.pinned = data.pinned
     if (typeof data.modal === 'boolean') lock.modal = data.modal
@@ -121,7 +122,7 @@ export function registerWindowControlsIpc(deps: WindowControlsIpcDependencies): 
   deps.ipcMain.on(IPC_CHANNELS.petResize, (event, payload: unknown) => {
     const petWindow = deps.getPetWindow()
     if (!petWindow || !deps.isTrustedIpcSender(event, petWindow)) return
-    const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    const data = recordOrEmpty(payload)
     const rawWidth = deps.finiteNumber(data.width)
     const rawHeight = deps.finiteNumber(data.height)
     if (rawWidth === null || rawHeight === null) return
@@ -158,7 +159,7 @@ export function registerWindowControlsIpc(deps: WindowControlsIpcDependencies): 
   deps.ipcMain.on(IPC_CHANNELS.petContentHeight, (event, payload: unknown) => {
     const petWindow = deps.getPetWindow()
     if (!petWindow || !deps.isTrustedIpcSender(event, petWindow)) return
-    const data = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    const data = recordOrEmpty(payload)
     const rawHeight = deps.finiteNumber(data.height)
     if (rawHeight === null) return
     const next = Math.round(clamp(rawHeight, 40, 1_600))

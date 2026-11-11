@@ -10,6 +10,7 @@ import {
   probeTranscript,
   turnEndFromTail,
 } from '../electron/transcript-turn-end.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // 紀錄的形狀取自真實的 Claude Code／Codex 紀錄檔（只留判斷用得到的欄位）。
 
@@ -99,6 +100,7 @@ test('unreadable input is treated as still running', () => {
   assert.equal(turnEndFromTail('claude', jsonl({ ...claudeInterrupt('x'), timestamp: 'not a date' }), false), null)
   assert.equal(turnEndFromTail('codex', jsonl({ timestamp: 5, type: 'event_msg', payload: { type: 'turn_aborted' } }), false), null)
   assert.equal(turnEndFromTail('codex', jsonl({ timestamp: '2026-11-04T03:23:52.669Z', type: 'event_msg', payload: null }), false), null)
+  assert.equal(turnEndFromTail('codex', jsonl({ timestamp: '2026-11-04T03:23:52.669Z', type: 'event_msg', payload: ['turn_aborted'] }), false), null)
   // 從檔案中間開始讀時第一行可能是半行；就算剛好是合法 JSON 也不採信。
   assert.equal(turnEndFromTail('claude', marker, true), null)
   assert.equal(turnEndFromTail('claude', `${marker}\n`, true), null)
@@ -139,7 +141,7 @@ test('locate finds the Claude and Codex files from the config folder and the ses
     assert.equal(await locateTranscript('opencode', home, codexId), null)
     assert.equal(await locateTranscript('claude', path.join(home, 'missing'), claudeId), null)
   } finally {
-    fs.rmSync(home, { recursive: true, force: true })
+    removeTempTree(home)
   }
 })
 
@@ -178,6 +180,6 @@ test('probe reads only the tail, reports unchanged files, and fails closed', asy
     assert.equal(await probeTranscript('claude', path.join(dir, 'missing.jsonl')), null)
     assert.equal(await probeTranscript('claude', dir), null)
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    removeTempTree(dir)
   }
 })

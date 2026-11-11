@@ -11,6 +11,8 @@ import {
   PermissionAdapterRelay,
   type PermissionAdapterSource,
 } from '../electron/permission-adapter-server.ts'
+import { linkDirectory } from './support/fs-capabilities.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 const TOKEN = 'a'.repeat(64)
 
@@ -408,10 +410,10 @@ test('a new prompt or PreToolUse in the same agent scope takes older Claude prom
 test('a file edit is medium only inside the project and never for execution-relevant paths', async () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-edit-risk-')))
   const project = path.join(root, 'project')
-  fs.mkdirSync(path.join(project, 'src'), { recursive: true })
-  fs.mkdirSync(path.join(root, 'outside'))
-  fs.symlinkSync(path.join(root, 'outside'), path.join(project, 'linked'))
   try {
+    fs.mkdirSync(path.join(project, 'src'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'outside'))
+    linkDirectory(path.join(root, 'outside'), path.join(project, 'linked'))
     await withServer(async ({ broker, post }) => {
       const cases: Array<[string, unknown, string, string?]> = [
         ['Write', path.join(project, 'src', 'app.ts'), 'medium', path.join('src', 'app.ts')],
@@ -452,7 +454,7 @@ test('a file edit is medium only inside the project and never for execution-rele
       assert.equal(broker.listRequests().find(request => request.requestId === requestId)!.risk, 'high')
     })
   } finally {
-    fs.rmSync(root, { recursive: true, force: true })
+    removeTempTree(root)
   }
 })
 

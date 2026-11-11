@@ -3,25 +3,8 @@ import vue from '@vitejs/plugin-vue'
 import electron from 'vite-plugin-electron/simple'
 import type { SpawnOptions } from 'node:child_process'
 import { resolve } from 'path'
-
-export const GPU_SAFE_DEV_MODE = 'gpu-safe'
-
-/** Keep Vite's Electron launch equivalent to `electron .`. */
-export const electronDevArgv = (): string[] => ['.']
-
-/** Build an isolated child environment for the selected development mode. */
-export const electronDevEnvironment = (
-  environment: NodeJS.ProcessEnv,
-  gpuSafeMode: boolean,
-): NodeJS.ProcessEnv => {
-  const childEnvironment = { ...environment }
-  if (gpuSafeMode) {
-    childEnvironment.AGENT_PETS_GPU_SAFE_MODE = '1'
-  } else {
-    delete childEnvironment.AGENT_PETS_GPU_SAFE_MODE
-  }
-  return childEnvironment
-}
+// 啟動參數與環境放在不依賴 vite 的模組：測試只載入它，tests 的型別檢查才不會經由 vite 的宣告檔多帶進一份 @types/node。
+import { electronDevArgv, electronDevEnvironment, GPU_SAFE_DEV_MODE } from './electron/dev-runtime.ts'
 
 const createElectronStarter = (gpuSafeMode: boolean) => ({
   startup,

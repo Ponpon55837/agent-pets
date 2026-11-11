@@ -26,14 +26,17 @@ import {
   CLAUDE_CODE_HOOK_EVENTS,
   CLAUDE_CODE_UPGRADE_EVENTS,
   CODEX_HOOK_EVENTS,
+  hookScriptDeployPath,
   hookScriptPath,
   installIntegration,
   openCodeCliPluginPath,
   refreshInstalledIntegrationScriptsAsync,
   uninstallIntegration,
 } from '../electron/setup.ts'
-import { fileHasAgentPetsHooksAsync, isCodexHooksFeatureEnabled } from '../electron/hook-config.ts'
+import { codexHookCommand, fileHasAgentPetsHooksAsync, isCodexHooksFeatureEnabled } from '../electron/hook-config.ts'
+import { DEPLOY_FILES } from '../src/types/local-wire.ts'
 import { ConfigRefusedError } from '../electron/safe-config-write.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // Integration tests for the real installer against a throw-away HOME. Nothing here touches the
 // user's actual home directory or the macOS Keychain.
@@ -56,7 +59,7 @@ async function withHome<T>(work: (home: string) => T | Promise<T>, env: (home: s
   try {
     return await work(home)
   } finally {
-    fs.rmSync(home, { recursive: true, force: true })
+    removeTempTree(home)
   }
 }
 
@@ -70,6 +73,62 @@ test('fresh install writes hooks, the hook script and the Codex feature flag', a
     await installIntegration('codex')
     assert.equal(await fileHasAgentPetsHooksAsync(codexHooksPath()), true)
     assert.equal(isCodexHooksFeatureEnabled(fs.readFileSync(codexConfigPath(), 'utf8')), true)
+  })
+})
+
+// 寫進使用者 dotfile 的 JSON 是外部契約：逐位元組鎖住新安裝的完整輸出（事件與鍵的順序、只有工具
+// 事件有 matcher、只有 PermissionRequest 有 timeout、Codex 的頂層 description），型別重構不得改變任何字元。
+test('a fresh Claude Code install writes exactly the expected settings.json bytes', async () => {
+  await withHome(async () => {
+    await installIntegration('claudeCode')
+    const args = [hookScriptPath(), 'claude']
+    const plain = { hooks: [{ type: 'command', command: process.execPath, args }] }
+    // matcher 在現行輸出中排在 hooks 之後；比對原始字串才鎖得住鍵順序。
+    const tool = { hooks: plain.hooks, matcher: '*' }
+    const expected = {
+      hooks: {
+        SessionStart: [plain],
+        UserPromptSubmit: [plain],
+        PreToolUse: [tool],
+        PermissionRequest: [{ hooks: [{ type: 'command', command: process.execPath, args, timeout: 135 }], matcher: '*' }],
+        PostToolUse: [tool],
+        PostToolUseFailure: [tool],
+        Notification: [plain],
+        Stop: [plain],
+        StopFailure: [plain],
+        PreCompact: [plain],
+        PostCompact: [plain],
+        SessionEnd: [plain],
+      },
+    }
+    assert.equal(fs.readFileSync(claudeCodeSettingsPath(), 'utf8'), `${JSON.stringify(expected, null, 2)}\n`)
+  })
+})
+
+test('a fresh Codex install writes exactly the expected hooks.json bytes', async () => {
+  await withHome(async () => {
+    await installIntegration('codex')
+    const isWindows = process.platform === 'win32'
+    const command = codexHookCommand({
+      isWindows,
+      nodeBin: isWindows ? '' : process.execPath,
+      hookScript: hookScriptPath(),
+      wrapper: path.join(hookScriptDeployPath(), DEPLOY_FILES.hookWrapper),
+    })
+    const entry = [{ hooks: [{ type: 'command', command, statusMessage: 'Updating Agent Pets status' }] }]
+    const expected = {
+      description: 'Agent Pets lifecycle hooks for Codex CLI.',
+      hooks: {
+        SessionStart: entry,
+        UserPromptSubmit: entry,
+        PreToolUse: entry,
+        PermissionRequest: entry,
+        PostToolUse: entry,
+        Stop: entry,
+        SessionEnd: entry,
+      },
+    }
+    assert.equal(fs.readFileSync(codexHooksPath(), 'utf8'), `${JSON.stringify(expected, null, 2)}\n`)
   })
 })
 
@@ -156,7 +215,7 @@ test('install.mjs is a thin wrapper around the same installer', { skip: process.
     // On macOS/Linux install.mjs needs a Node.js it can find; skip the write assertion if none is resolvable here.
     run('--list')
   } finally {
-    fs.rmSync(home, { recursive: true, force: true })
+    removeTempTree(home)
   }
 })
 
@@ -219,9 +278,11 @@ const ORIGINAL_CLAUDE_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse'
 
 test('every installed Claude Code event is either an original one or in the startup upgrade list', () => {
   const original = new Set(ORIGINAL_CLAUDE_EVENTS)
-  const upgrade = new Set(CLAUDE_CODE_UPGRADE_EVENTS)
-  for (const event of CLAUDE_CODE_HOOK_EVENTS) assert.ok(original.has(event) || upgrade.has(event), `${event} would never reach existing installs`)
-  for (const event of upgrade) assert.ok(CLAUDE_CODE_HOOK_EVENTS.includes(event) && !original.has(event), event)
+  // 事件清單是字面值聯集；這裡要拿任意字串去查，所以放寬成 string。
+  const installed: readonly string[] = CLAUDE_CODE_HOOK_EVENTS
+  const upgrade = new Set<string>(CLAUDE_CODE_UPGRADE_EVENTS)
+  for (const event of installed) assert.ok(original.has(event) || upgrade.has(event), `${event} would never reach existing installs`)
+  for (const event of upgrade) assert.ok(installed.includes(event) && !original.has(event), event)
   for (const event of ['StopFailure', 'PreCompact', 'PostCompact']) assert.ok(upgrade.has(event), event)
 })
 
@@ -477,7 +538,7 @@ test('setting the variables after installing reports the old location and uninst
       for (const kind of ['claude', 'codex', 'opencode'] as const) assert.equal((await agentConfigDirStatus(kind)).staleLocation, undefined)
     })
   } finally {
-    fs.rmSync(home, { recursive: true, force: true })
+    removeTempTree(home)
   }
 })
 
@@ -490,7 +551,7 @@ test('the shared hook script stays while only the old location still uses it', a
       assert.ok(fs.existsSync(hookScriptPath()), 'the default settings.json still runs the script')
     })
   } finally {
-    fs.rmSync(home, { recursive: true, force: true })
+    removeTempTree(home)
   }
 })
 

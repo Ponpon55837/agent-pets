@@ -46,6 +46,7 @@ import { PanelThemeRuntime } from './panel-theme-runtime.ts'
 import type { LogLevel } from '../diagnostics/logger.ts'
 import type { PluginPanelRect } from '../plugin-panel-window.ts'
 import type { UserDataPaths } from './user-data-paths.ts'
+import { recordOrEmpty } from '../value-guards.ts'
 
 // Plugin runtime：建立並接線 plugin 服務（registry、偏好、機密、broker、feed、host 視窗、
 // 面板 view 與所有 plugin／面板主題 IPC registrar），並以 `dispose()` 依固定順序釋放。
@@ -349,9 +350,7 @@ export function createPluginRuntime(deps: PluginRuntimeDeps): PluginRuntime {
     })
     mainState.pluginHostWindow = deps.createPluginHostWindow({
       onRpc: (pluginId, request) => {
-        const data = request && typeof request === 'object' && !Array.isArray(request)
-          ? request as Record<string, unknown>
-          : {}
+        const data = recordOrEmpty(request)
         if (data.method === 'ui.postMessage') {
           if (!Array.isArray(data.args) || data.args.length !== 1) return { ok: false, error: 'invalid_request' }
           if (typeof data.id !== 'string') return { ok: false, error: 'invalid_request' }

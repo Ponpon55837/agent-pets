@@ -14,7 +14,38 @@ import {
 // Electron-free hook-config editing shared by the installers in setup.ts.
 // Every function here only ever touches Agent Pets' own entries.
 
+// 讀使用者檔案用的寬鬆形狀：內容可能被使用者或其他工具改過，欄位一律要先驗證。
 type HookEntry = Record<string, unknown>
+
+// 以下是 Agent Pets「寫出去」的嚴格形狀，屬於使用者 dotfile 的外部契約；和上面的 HookEntry 分開，
+// 才不會讓讀檔時的寬鬆型別滲進產生端。
+export interface HookCommandHandler {
+  type: 'command'
+  command: string
+  args?: string[]
+  /** 秒。只有需要等待寵物回覆的事件才設定，其餘沿用 agent 的預設值。 */
+  timeout?: number
+  statusMessage?: string
+}
+
+export interface HookMatcherEntry {
+  hooks: HookCommandHandler[]
+  matcher?: string
+}
+
+export type AgentHooks<Event extends string> = Record<Event, HookMatcherEntry[]>
+
+// 用 type alias 而非 interface：解構掉 hooks 之後的其餘欄位才能直接當成 JsonObject 傳給 merge。
+export type AgentHooksFile<Event extends string> = { hooks: AgentHooks<Event> }
+
+/** 每個事件各放一個 entry，鍵的順序就是事件清單的順序（寫出的 JSON 依此排序）。 */
+export function agentHooksFor<Event extends string>(
+  events: readonly Event[],
+  entry: (event: Event) => HookMatcherEntry,
+): AgentHooks<Event> {
+  // Object.fromEntries 的回傳型別會丟掉鍵的聯集；鍵正是 events 本身，所以這裡的斷言成立。
+  return Object.fromEntries(events.map(event => [event, [entry(event)]])) as AgentHooks<Event>
+}
 
 // Our hooks always run the deployed script `<home>/.desktop-pet/agent-hook.mjs` (or its Windows
 // `.cmd` wrapper). A hook is ours only when one whole command token / argument is exactly such a
@@ -112,7 +143,7 @@ function requireEventArray(filePath: string, event: string, value: unknown): unk
  */
 export async function mergeAgentPetsHooksFile(
   filePath: string,
-  desired: Record<string, unknown[]>,
+  desired: Readonly<Record<string, readonly HookMatcherEntry[]>>,
   defaults: JsonObject = {},
 ): Promise<ConfigWriteResult> {
   return withConfigConflictRetry(filePath, async () => {

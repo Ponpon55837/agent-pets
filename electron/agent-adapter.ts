@@ -19,6 +19,7 @@ import { buildOutcome, failedOutcome } from './install-outcome.ts'
 import { AGENT_ADAPTER_REGISTRY } from '../src/types/agent-adapter.ts'
 import { familyOfSource } from '../src/types/agent.ts'
 import { LOCAL_WIRE_PATHS } from '../src/types/local-wire.ts'
+import { recordOrEmpty } from './value-guards.ts'
 
 const ADAPTER_VERSION = '1.0.0'
 const ADAPTER_IDS: ReadonlySet<string> = new Set(AGENT_ADAPTER_REGISTRY.map(definition => definition.id))
@@ -206,9 +207,7 @@ export function createAgentAdapterRegistry(operations: AgentAdapterOperations = 
       return byId.get(id)?.uninstall(context()) ?? Promise.resolve(null)
     },
     async normalize(input, receivedAt = Date.now()) {
-      const raw = input && typeof input === 'object' && !Array.isArray(input)
-        ? input as Record<string, unknown>
-        : {}
+      const raw = recordOrEmpty(input)
       const requestedId = raw.adapterId
       if (requestedId !== undefined) {
         if (!isAgentAdapterId(requestedId)) return { ok: false, error: 'unknown_adapter' }

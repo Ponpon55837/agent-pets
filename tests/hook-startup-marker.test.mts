@@ -10,6 +10,7 @@ import { resolveLocalPorts } from '../electron/main/ports.ts'
 import { LOCAL_PORT_ENV } from '../src/types/local-wire.ts'
 import { configureSetupEnvironment, setupEnvironment } from '../electron/setup-environment.ts'
 import { hookScriptDeployPath } from '../electron/setup.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // app 啟動標記：hook 連線被拒時只有看到它才重試（見 docs/dev/hook-delivery.md）。
 
@@ -27,7 +28,7 @@ test('the marker is named after the event port and holds only the owner pid', ()
     assert.equal(fs.readFileSync(file, 'utf8'), '4242\n')
     if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600)
   } finally {
-    fs.rmSync(root, { recursive: true, force: true })
+    removeTempTree(root)
   }
 })
 
@@ -57,7 +58,7 @@ test('clear removes only a marker this process wrote', () => {
     second.clear()
     assert.equal(fs.existsSync(markerFile(dir)), false)
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    removeTempTree(dir)
   }
 })
 
@@ -73,7 +74,7 @@ test('a fresh marker owned by a live process is neither overwritten nor removed 
     first.clear()
     assert.equal(fs.existsSync(markerFile(dir)), false)
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    removeTempTree(dir)
   }
 })
 
@@ -89,7 +90,7 @@ test('a stale marker or one owned by a dead process is replaced', () => {
     writeHookStartupMarker(dir, 17373, { pid: 4343 })
     assert.equal(fs.readFileSync(markerFile(dir), 'utf8'), '4343\n')
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    removeTempTree(dir)
   }
 })
 
@@ -102,7 +103,7 @@ test('a garbled or oversized marker is replaced', () => {
       assert.equal(fs.readFileSync(markerFile(dir), 'utf8'), '4242\n')
     }
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    removeTempTree(dir)
   }
 })
 
@@ -120,7 +121,7 @@ test('claim after the single-instance lock takes over a live owner, and only our
     next.clear()
     assert.equal(fs.existsSync(markerFile(dir)), false)
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    removeTempTree(dir)
   }
 })
 
@@ -137,7 +138,7 @@ test('claim recreates a marker the previous instance already removed, and is a n
     marker.claim()
     assert.equal(fs.existsSync(markerFile(dir)), false, 'claim after the port is listening must not write a marker')
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    removeTempTree(dir)
   }
 })
 
@@ -154,7 +155,7 @@ test('listening removes the marker after a short linger, once', () => {
     timers[0].callback()
     assert.equal(fs.existsSync(path.join(dir, hookStartupMarkerName(17373))), false)
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    removeTempTree(dir)
   }
 })
 
@@ -168,7 +169,7 @@ test('a symlink planted at the marker path is replaced, never written through', 
     assert.equal(fs.readFileSync(target, 'utf8'), 'keep me')
     assert.equal(fs.lstatSync(path.join(dir, hookStartupMarkerName(17373))).isFile(), true)
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    removeTempTree(dir)
   }
 })
 
@@ -182,7 +183,7 @@ test('an unwritable directory never throws', () => {
     marker.listening()
     marker.claim()
   } finally {
-    fs.rmSync(root, { recursive: true, force: true })
+    removeTempTree(root)
   }
 })
 

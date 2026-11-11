@@ -2,6 +2,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { pidTimestampTemporaryPath, writeFileAtomicSync } from './atomic-file-write.ts'
 import { isPluginId } from '../src/types/id-patterns.ts'
+import { isRecord } from './value-guards.ts'
 
 
 export class PluginDataFileError extends Error {
@@ -51,8 +52,8 @@ export function readPluginDataJson(filePath: string, maxBytes: number): Record<s
     const stat = fs.fstatSync(descriptor)
     if (!stat.isFile() || stat.size > maxBytes) throw new PluginDataFileError()
     const value: unknown = JSON.parse(fs.readFileSync(descriptor, 'utf8'))
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new PluginDataFileError()
-    return value as Record<string, unknown>
+    if (!isRecord(value)) throw new PluginDataFileError()
+    return value
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return Object.create(null) as Record<string, unknown>
     if (error instanceof PluginDataFileError) throw error
