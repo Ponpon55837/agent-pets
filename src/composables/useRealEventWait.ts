@@ -38,9 +38,8 @@ export function useRealEventWait() {
         cancel()
       }
     }, 250)
-    const unsubscribe = window.electronAPI?.onAgentStatusEvent((raw: unknown) => {
-      const event = raw as { source?: AgentSource, sessionId?: string, originalEvent?: string }
-      if (!event?.source || !tool.sources.includes(event.source)) return
+    const unsubscribe = window.electronAPI?.onAgentStatusEvent((event) => {
+      if (!tool.sources.includes(event.source)) return
       if (event.originalEvent === 'AgentPetsIntegrationTest' || event.sessionId?.startsWith('agent-pets-test-')) return
       tool.realEvent = { source: event.source, at: Date.now() }
       cancel()

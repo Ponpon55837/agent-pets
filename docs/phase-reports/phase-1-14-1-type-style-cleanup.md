@@ -97,3 +97,59 @@
 - junction 與目錄 symlink 在 Windows 上仍有差異（junction 只能指向本機絕對路徑、不能指向檔案或網路路徑）；受測程式碼目前的判斷只用到兩者一致的部分，日後若改用 `readlink` 的原始字串或依賴相對目標，需要重新檢查。
 - `atomic-write-call-sites` 的偶發失敗只觀察到一次，原因是依 `renameSyncWithRetry` 的重試行為推定（單獨跑 5 次、修正後全量 2 次都通過），未直接捕捉到當次的 `EPERM`／`EBUSY`。
 - 本機只在 Windows 執行；macOS／Linux 上 `'junction'` 被忽略的行為依 Node 文件推定，未在本階段實機驗證。
+
+## A：renderer 收 agent 狀態事件路徑上的 `any`
+
+- **分支**：`claude/cleanup-a-renderer-any-e2cedd`
+- **開始時間**：2026-11-11 03:55（Asia/Taipei）
+- **狀態**：通過
+- **完成時間**：2026-11-11 03:57（Asia/Taipei）
+
+### 步驟狀態
+
+| # | 步驟 | 狀態 | 備註 |
+|---|---|---|---|
+| 1 | 讀規範、追 `agent-status-event` 從 main 到 renderer 的路徑 | 通過 | 唯一送出點是 `electron/event-server.ts` 的批次 `webContents.send` |
+| 2 | 型別對齊：`electron-api.ts`、`preload.ts` | 通過 | 執行期驗證仍在 main 的 `event-normalizer`，未變動 |
+| 3 | 移除 `App.vue`、`useRealEventWait.ts` 的 `any`／手動斷言 | 通過 | |
+| 4 | 掃 `src/**` 其他 `any` | 通過 | 只剩一處英文註解裡的 "any" 字樣，非型別 |
+| 5 | `pnpm lint`、`vue-tsc --noEmit`、`pnpm test:unit`、code review | 通過 | 見「驗證」 |
+
+### 檔案變更
+
+| 檔案 | 變更內容 | 原因 |
+|---|---|---|
+| `src/types/electron-api.ts` | `onAgentStatusEvent` 的 callback 參數由 `any` 改為 `AgentStatusEvent` | main 只送正規化後的 `AgentStatusEvent`，型別應反映實際契約 |
+| `electron/preload.ts` | callback 型別改為 `AgentStatusEvent`，`data` 標為 `AgentStatusEvent \| AgentStatusEvent[]`；加註說明驗證在 main | 與 `ElectronAPI` 對齊；preload 不做驗證，避免讀者誤以為型別等於檢查 |
+| `src/App.vue` | `(window as any).electronAPI` 改為 `window.electronAPI`（`env.d.ts` 已宣告為 optional，保留 `?.`）；`store.handleEvent(event)` 不再 `as any` | 移除 2 個 `any`；改用全域宣告後，同一區塊其他 `electronAPI.*` 呼叫也開始受型別檢查（`vue-tsc` 0 error） |
+| `src/composables/useRealEventWait.ts` | 移除 `raw: unknown` 與 `raw as {...}` 手動斷言，直接用推導出的 `AgentStatusEvent`；拿掉 `!event?.source` 檢查 | `source` 在型別上必填，且 normalizer 會拒絕缺少或不合法的 `source` |
+| `docs/phase-reports/phase-1-14-1-type-style-cleanup.md` | 新增 A 一節 | 階段紀錄 |
+
+### 事件契約確認
+
+- main → renderer 只有一個送出點：`electron/event-server.ts` 的 `enqueueAgentEvent` 批次回呼，送出 `AgentStatusEvent[]`。
+- 進入 `sendToWindows` 的事件只有兩個來源：HTTP ingress 經 `normalizeAgentStatusEvent`（拒絕非字串或不在 `VALID_SOURCES` 的 `source` 等），以及主程序自產、以 `AgentStatusEvent` 型別傳入的 dispatcher 事件。
+- preload 仍保留「陣列或單筆」的攤平邏輯，執行期行為不變；main 端驗證未因型別變更而省略。
+
+### Code review 結論
+
+- 只改型別與移除斷言，沒有改變執行期行為（除 `useRealEventWait` 拿掉一個依契約不會成立的 `!event?.source` 防禦）。
+- 不碰 B～F 範圍：未動 `electron/quota.ts`、`value-guards.ts`、`setup.ts`，也未調整 eslint 規則層級。
+- `src/**` import 仍為 `@/`；`preload.ts` 是 electron 端，沿用相對路徑。新增註解為繁體中文且只寫原因。
+- `useRealEventWait.ts` 的 `AgentSource` import 仍被 `WaitableTool` 使用，無多餘 import。
+- 無 Liquid Glass／視覺變更，不需視覺閘門。
+
+### 驗證
+
+| 檢查 | G0 之後 | A 之後 |
+|---|---|---|
+| `pnpm lint` | 0 error、52 warning（`no-explicit-any`） | 0 error、49 warning（皆為 `no-explicit-any`，全在 `tests/`、`electron/`；`src/` 0 個）；main-process lint passed |
+| `pnpm exec vue-tsc --noEmit` | 0 error | 0 error |
+| `pnpm test:unit` | 1812 項：1773 pass、0 fail、39 skip | 1812 項：1773 pass、0 fail、39 skip |
+| `git diff --check` | 通過 | 通過 |
+
+### 殘留風險
+
+- 型別現在宣稱 renderer 收到的一定是 `AgentStatusEvent`；若日後新增一條繞過 `event-normalizer` 的送出路徑，型別不會攔住，需在 main 端維持「只送正規化事件」的不變式。
+- `electron/event-server.ts` 送出時寫死字串 `'agent-status-event'`，未用 `IPC_CHANNELS.agentStatusEvent`；兩者目前一致，但不在 A 的 renderer 範圍，留給 D（風格統一）處理。
+- 本階段沒有 renderer 端的自動化測試覆蓋 `App.vue`／`useRealEventWait` 的事件接收；正確性依 `vue-tsc` 與既有行為推定，未啟動 app 實機驗證。

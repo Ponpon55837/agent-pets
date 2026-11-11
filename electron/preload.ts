@@ -1,6 +1,6 @@
 import { IPC_CHANNELS } from './ipc/channels'
 import type { ElectronAPI } from '../src/types/electron-api'
-import type { AgentSource } from '../src/types/agent'
+import type { AgentSource, AgentStatusEvent } from '../src/types/agent'
 import type { AdapterDiagnoseIpcResult, AdapterInstallIpcResult } from '../src/types/ipc'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopPreferences, DesktopPreferencesPatch } from '../src/types/desktop'
@@ -49,8 +49,10 @@ import type { SessionSnapshotEntry } from './main/session-snapshot'
 import type { LocalServerHealthSnapshot, LocalServerId } from '../src/types/reliability'
 
 const electronAPI: ElectronAPI = {
-  onAgentStatusEvent: (callback: (event: unknown) => void) => {
-    const handler = (_event: unknown, data: unknown) => {
+  onAgentStatusEvent: (callback: (event: AgentStatusEvent) => void) => {
+    // main 端（event-server）只送 event-normalizer 正規化過的事件，且以批次陣列送出；
+    // 執行期驗證在 main 做，這裡只負責把批次攤平。
+    const handler = (_event: unknown, data: AgentStatusEvent | AgentStatusEvent[]) => {
       if (Array.isArray(data)) {
         for (const item of data) callback(item)
       } else {

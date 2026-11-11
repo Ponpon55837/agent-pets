@@ -326,10 +326,10 @@ onMounted(() => {
   // CSS 裡的 sprite 格寬也從 types/pet-atlas.ts 來，不另外寫死。
   document.documentElement.style.setProperty('--pet-cell-w', `${PET_CELL_WIDTH}px`)
 
-  const electronAPI = (window as any).electronAPI
+  const electronAPI = window.electronAPI
   if (electronAPI?.onAgentStatusEvent) {
-    cleanupListener = electronAPI.onAgentStatusEvent((event: unknown) => {
-      const cue = store.handleEvent(event as any)
+    cleanupListener = electronAPI.onAgentStatusEvent((event) => {
+      const cue = store.handleEvent(event)
       if (cue) playCueIfAllowed(cue)
     })
   }

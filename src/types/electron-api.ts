@@ -12,7 +12,7 @@ import type { HistoryClearResult, HistoryCommandResult, HistoryExportRequest, Hi
 import type { PetWindowMode, PetWindowModeState } from '@/types/pet-window'
 import type { PetBehaviorManifest, PluginSkinPetSource } from '@/types/pet'
 import type { PetImportCommitResult, PetImportDecision, PetImportPrepareResult } from '@/types/pet-import'
-import type { AgentSession, AgentSource, QuotaFamilyKey } from '@/types/agent'
+import type { AgentSession, AgentSource, AgentStatusEvent, QuotaFamilyKey } from '@/types/agent'
 import type { AgentAdapterId } from '@/types/agent-adapter'
 import type { LocalServerHealthSnapshot, LocalServerId } from '@/types/reliability'
 import type { PresentationIntent, PresentationStatusUpdate } from '@/types/presentation'
@@ -60,7 +60,7 @@ export interface ElectronAPI {
       getServerHealth: () => Promise<LocalServerHealthSnapshot>
       retryServerHealth: (id?: LocalServerId) => Promise<LocalServerHealthSnapshot>
       onServerHealthChanged: (callback: (snapshot: LocalServerHealthSnapshot) => void) => () => void
-      onAgentStatusEvent: (callback: (event: any) => void) => () => void
+      onAgentStatusEvent: (callback: (event: AgentStatusEvent) => void) => () => void
       onPresentationIntent: (callback: (intent: PresentationIntent) => void) => () => void
       onPluginFeedItem: (callback: (item: PluginFeedItem) => void) => () => void
       onPluginFeedUnreadCount: (callback: (count: number) => void) => () => void
