@@ -83,7 +83,16 @@ thinking 的 5 分鐘來自本機歷史資料：Claude 6418 筆「之後還有�
 
 Codex 那筆沒有對到 rollout 裡的 `turn_aborted` 時間：Windows 對仍被開啟的檔案不會即時更新修改時間，查核腳本用修改時間篩選檔案而漏掉它；補上的事件本身有記錄在歷史資料庫。
 
-這次實測抓到一個問題並已修正：補送的事件沒有帶 `adapterId`，歷史資料庫把它記成備用 adapter（`generic-http`）底下的另一筆 session，原本那筆仍停在 thinking。寵物與面板的顯示不受影響（它們用來源＋session id 辨識）。修正後主程序的 session 鏡像會保留 `adapterId` 並帶進補送的事件，`turn-end-watcher` 測試新增一項用真的 `HistoryStore` 確認兩者落在同一筆。使用者的歷史資料庫因此留有兩筆 `generic-http` 的 idle 紀錄，沒有自動清除。修正後的版本尚未再用真實的 agent 重測。
+這次實測抓到一個問題並已修正：補送的事件沒有帶 `adapterId`，歷史資料庫把它記成備用 adapter（`generic-http`）底下的另一筆 session，原本那筆仍停在 thinking。寵物與面板的顯示不受影響（它們用來源＋session id 辨識）。修正後主程序的 session 鏡像會保留 `adapterId` 並帶進補送的事件，`turn-end-watcher` 測試新增一項用真的 `HistoryStore` 確認兩者落在同一筆。使用者的歷史資料庫因此留有兩筆 `generic-http` 的 idle 紀錄，沒有自動清除。
+
+修正後重新打包並重測（同一天 11:01 起）：
+
+| agent | 最後一個 hook 事件 | 紀錄檔的中斷時間 | 補上 idle 的時間 | 歷史紀錄 |
+| --- | --- | --- | --- | --- |
+| Codex | 11:01:54.641（thinking） | 未取得 | 11:02:06.439 | 記在原本那筆（`codex`），結局維持 success |
+| Claude Desktop | 11:02:20.035（thinking） | 11:02:23.947 | 11:02:31.662（中斷後 7.7 秒） | 記在原本那筆（`claude-code`） |
+
+重測期間沒有新增 `generic-http` 的紀錄。Claude 那個 session 在 idle 之後 1.7 秒使用者送出新的提問，狀態照常回到 thinking，之後的工具事件也正常。
 
 ## 未驗證與殘留風險
 
