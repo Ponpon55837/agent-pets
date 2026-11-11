@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { registerProjectPetsIpc } from '../electron/ipc/project-pets.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 test('project pets IPC delegates through injected store and dialog dependencies', async () => {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const trusted: Array<{ event: unknown; window: unknown }> = []
   const records: string[] = []
   const panelWindow = { isDestroyed: () => false }
@@ -28,7 +29,7 @@ test('project pets IPC delegates through injected store and dialog dependencies'
   }
 
   registerProjectPetsIpc({
-    ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler) } },
+    ipcMain,
     assertTrustedIpcSender: (event, window) => { trusted.push({ event, window }) },
     getPanelWindow: () => panelWindow,
     getPetWindow: () => petWindow,
@@ -69,11 +70,11 @@ test('project pets IPC delegates through injected store and dialog dependencies'
 })
 
 test('project pets picker fails closed when a dialog is already open', async () => {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   let pickerCalls = 0
   const panelWindow = { isDestroyed: () => false }
   registerProjectPetsIpc({
-    ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler) } },
+    ipcMain,
     assertTrustedIpcSender: () => undefined,
     getPanelWindow: () => panelWindow,
     getPetWindow: () => null,

@@ -15,7 +15,7 @@ const tsFiles = ['src/**/*.ts', 'electron/**/*.ts', 'tests/**/*.mts', 'vite.conf
 const nodeClosure = nodeTestClosure(root).filter(file => file.endsWith('.ts'))
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'dist-electron/**', 'release/**', 'node_modules/**', 'tests/fixtures/**', 'docs/plugins/examples/**', 'public/**'] },
+  { ignores: ['dist/**', 'dist-electron/**', 'release/**', 'node_modules/**', 'tests/fixtures/**', 'docs/plugins/examples/**', 'public/**', '.claude/**', '.playwright-mcp/**'] },
   { linterOptions: { reportUnusedDisableDirectives: 'error' } },
 
   js.configs.recommended,
@@ -50,8 +50,7 @@ export default tseslint.config(
       'vue/multi-word-component-names': 'off',
       // `<Transition>` 以 key 切換子節點（v-else-if 在 Transition 本身），不是子節點上的 v-if/v-show。
       'vue/require-toggle-inside-transition': 'off',
-      // 先以 warn 記錄存量（見 docs/phase-reports/phase-packaging-ci-lint-backlog.md），新程式碼請避免 any。
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
     },
   },
 

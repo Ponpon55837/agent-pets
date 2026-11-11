@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { registerPermissionIpc } from '../electron/ipc/permission.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 test('permission IPC keeps request decisions bounded and sender-scoped', async () => {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const trusted: Array<{ event: unknown; window: unknown }> = []
   const decisions: unknown[][] = []
   const petWindow = { id: 'pet', isDestroyed: () => false, webContents: { id: 'pet-contents' } }
@@ -17,7 +18,7 @@ test('permission IPC keeps request decisions bounded and sender-scoped', async (
   }
 
   registerPermissionIpc({
-    ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler) },
+    ipcMain,
     assertTrustedIpcSender: (event: unknown, window: unknown) => trusted.push({ event, window }),
     getPetWindow: () => petWindow,
     getPanelWindow: () => panelWindow,

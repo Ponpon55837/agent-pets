@@ -5,9 +5,10 @@ import type { PluginCatalogDocument, PluginCatalogPanelItem, PluginCatalogVersio
 import type { PluginCatalogIpcDependencies } from '../electron/ipc/plugin-catalog.ts'
 import { registerPluginCatalogIpc } from '../electron/ipc/plugin-catalog.ts'
 import { catalogFingerprintMatches, isPluginCatalogUrl, selectLatestCompatiblePluginVersion } from '../electron/plugin-catalog.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 function fixture() {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const calls: string[] = []
   const pluginVersion: PluginCatalogVersion = {
     version: '1.2.0', apiVersion: '1', url: 'https://cdn.example.test/sample.zip', sha256: 'a'.repeat(64),
@@ -35,9 +36,6 @@ function fixture() {
   }
   let cache: { url: string; document: PluginCatalogDocument } | null = null
   const opened: string[] = []
-  const ipcMain = {
-    handle: (channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) },
-  } as unknown as PluginCatalogIpcDependencies['ipcMain']
   const deps: PluginCatalogIpcDependencies = {
     ipcMain,
     assertPluginPanelSender: event => { if (event !== 'panel') throw new Error('untrusted panel') },

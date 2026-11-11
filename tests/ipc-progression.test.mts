@@ -2,14 +2,15 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { registerProgressionIpc } from '../electron/ipc/progression.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 test('progression IPC registration delegates validation and pet-scoped snapshots', async () => {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const senders: unknown[] = []
   const selectedPets: string[] = []
   const achievementSnapshots: string[] = []
   registerProgressionIpc({
-    ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler) },
+    ipcMain,
     assertTrustedIpcSender: event => senders.push(event),
     isProgressionPetId: value => typeof value === 'string' && value.startsWith('pet-'),
     setActiveProgressionPet: petId => { selectedPets.push(petId); return { petId } },

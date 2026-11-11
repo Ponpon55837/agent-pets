@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { registerDesktopIpc } from '../electron/ipc/desktop.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 test('desktop IPC uses injected stores and keeps mode and preference contracts', async () => {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const trusted: Array<{ event: unknown; requiredWindow: unknown }> = []
   const setModes: string[] = []
   const legacyFlags: boolean[] = []
@@ -17,7 +18,7 @@ test('desktop IPC uses injected stores and keeps mode and preference contracts',
   const opened: string[] = []
 
   registerDesktopIpc({
-    ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler) },
+    ipcMain,
     assertTrustedIpcSender: (event: unknown, requiredWindow: unknown) => { trusted.push({ event, requiredWindow }) },
     getPanelWindow: () => panelWindow,
     getDesktopPreferences: () => preferencesStore,

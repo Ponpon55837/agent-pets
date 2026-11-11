@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { registerHistoryIpc } from '../electron/ipc/history.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 function createHistoryIpcHarness() {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const panelWindow = { id: 'panel' }
   const records = { trusted: [] as Array<unknown>, broadcasts: 0, refreshes: 0, writes: [] as Array<{ path: string; value: unknown }>, reveals: [] as string[], sessionQueries: [] as Array<{ petId: string; query: unknown }>, detailIds: [] as string[] }
   let dialogResult: { canceled: boolean; filePath?: string } = { canceled: true }
@@ -23,7 +24,7 @@ function createHistoryIpcHarness() {
   }
 
   registerHistoryIpc({
-    ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler) },
+    ipcMain,
     assertTrustedIpcSender: (event: unknown, requiredWindow: unknown) => records.trusted.push({ event, requiredWindow }),
     getPanelWindow: () => panelWindow,
     getHistoryStore: () => historyStore,

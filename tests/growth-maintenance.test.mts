@@ -18,6 +18,7 @@ import { ProgressionStore } from '../electron/progression.ts'
 import { SqliteBusyError, optimizeAndVacuum, sqliteFootprintBytes } from '../electron/sqlite-maintenance.ts'
 import { GROWTH_RESET_TOKEN_TTL_MS } from '../src/types/growth-maintenance.ts'
 import { formatBytes } from '../src/utils/bytes-format.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 const DAY = 24 * 60 * 60 * 1000
 const BASE = Date.UTC(2026, 5, 1, 12)
@@ -380,13 +381,13 @@ test('maintenance proceeds when statfs itself fails, since VACUUM would roll bac
 })
 
 function ipcHarness(overrides: { resetResult?: unknown } = {}) {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const panel = { id: 'panel' }
   let resets = 0
   let runs = 0
   let clock = 1_000_000
   registerGrowthMaintenanceIpc({
-    ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler) },
+    ipcMain,
     assertTrustedIpcSender: (event, required) => {
       if ((event as unknown as { sender: unknown }).sender !== required) throw new Error('untrusted sender')
     },

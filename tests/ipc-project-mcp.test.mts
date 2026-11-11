@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { registerProjectMcpIpc } from '../electron/ipc/project-mcp.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 test('project MCP IPC preserves setup, list, remove, and forget contracts through injected services', async () => {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const calls: string[] = []
   const panelWindow = { isDestroyed: () => false }
   const tracked = new Set<string>()
@@ -15,7 +16,7 @@ test('project MCP IPC preserves setup, list, remove, and forget contracts throug
     forget: (projectPath: string) => { calls.push(`forget:${projectPath}`); return true },
   }
   registerProjectMcpIpc({
-    ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler) } },
+    ipcMain,
     assertTrustedIpcSender: () => undefined,
     getPanelWindow: () => panelWindow,
     getPetWindow: () => null,

@@ -4,9 +4,10 @@ import type { IpcMainInvokeEvent } from 'electron'
 import type { PluginInstallIpcDependencies } from '../electron/ipc/plugin-install.ts'
 import { registerPluginInstallIpc } from '../electron/ipc/plugin-install.ts'
 import { isPluginPanelInstallConfirmation, isPluginPanelPluginId } from '../electron/plugin-panel-validation.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 function fixture() {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const calls: string[] = []
   const pendingPlanIds = new Map<string, string>()
   const pendingDeveloperFolders = new Map<string, string>()
@@ -34,9 +35,6 @@ function fixture() {
     removePlugin: (pluginId: string) => { calls.push(`preferences:remove:${pluginId}`) },
   }
   const panelWindow = { isDestroyed: () => false } as never
-  const ipcMain = {
-    handle: (channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) },
-  } as unknown as PluginInstallIpcDependencies['ipcMain']
   const deps: PluginInstallIpcDependencies = {
     ipcMain,
     assertPluginPanelSender: event => { if (event !== 'panel') throw new Error('untrusted panel') },

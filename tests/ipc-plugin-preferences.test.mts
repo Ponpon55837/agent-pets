@@ -4,9 +4,10 @@ import type { IpcMainInvokeEvent } from 'electron'
 import type { PluginPreferencesIpcDependencies } from '../electron/ipc/plugin-preferences.ts'
 import { registerPluginPreferencesIpc } from '../electron/ipc/plugin-preferences.ts'
 import { isPluginPanelPluginId, isPluginPanelPreferencePatch } from '../electron/plugin-panel-validation.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 function fixture() {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const calls: string[] = []
   const pluginEnableOrder = new Map<string, number>()
   const sequence = { value: 0 }
@@ -33,9 +34,6 @@ function fixture() {
       return preferences
     },
   }
-  const ipcMain = {
-    handle: (channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) },
-  } as unknown as PluginPreferencesIpcDependencies['ipcMain']
   const deps: PluginPreferencesIpcDependencies = {
     ipcMain,
     assertPluginPanelSender: event => { if (event !== 'panel') throw new Error('untrusted panel') },

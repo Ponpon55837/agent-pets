@@ -7,6 +7,9 @@ import {
   PRESENTATION_TOKEN_HEADER,
 } from '../electron/presentation-mcp.ts'
 import { PresentationController } from '../electron/presentation-controller.ts'
+import type { PresentationIntentResult, PresentationStatusSnapshot } from '../src/types/presentation.ts'
+
+type PresentationStatusResponse = PresentationStatusSnapshot & { queueDepth: number }
 
 function startServer(t: test.TestContext) {
   const controller = new PresentationController({
@@ -27,14 +30,14 @@ function startServer(t: test.TestContext) {
   })
 }
 
-function call(port: number, options: {
+function call<T = unknown>(port: number, options: {
   method: string
   path: string
   token?: string
   client?: string
   origin?: string
   body?: unknown
-}): Promise<{ status: number; body: any }> {
+}): Promise<{ status: number; body: T }> {
   return new Promise((resolve, reject) => {
     const serialized = options.body === undefined ? '' : JSON.stringify(options.body)
     const req = request({
@@ -70,7 +73,7 @@ test('presentation MCP is token-authenticated and browser-origin resistant', asy
   const token = 'a'.repeat(64)
   assert.equal((await call(port, { method: 'GET', path: '/v1/presentation/status' })).status, 401)
   assert.equal((await call(port, { method: 'GET', path: '/v1/presentation/status', token, origin: 'https://evil.test' })).status, 403)
-  const status = await call(port, { method: 'GET', path: '/v1/presentation/status', token })
+  const status = await call<PresentationStatusResponse>(port, { method: 'GET', path: '/v1/presentation/status', token })
   assert.equal(status.status, 200)
   assert.equal(status.body.queueDepth, 0)
 })
@@ -86,7 +89,7 @@ test('presentation MCP exposes only bounded intent routes and disconnect cleanup
     body: {},
   })
   assert.equal(badMethod.status, 405)
-  const intent = await call(port, {
+  const intent = await call<PresentationIntentResult>(port, {
     method: 'POST',
     path: '/v1/presentation/intents',
     token,

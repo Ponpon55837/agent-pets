@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { registerAdapterIpc } from '../electron/ipc/adapters.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 test('adapter IPC is panel-scoped and never installs the observe-only adapter', async () => {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const trustedWindows: unknown[] = []
   const calls: unknown[][] = []
   const panelWindow = { id: 'panel' }
@@ -15,7 +16,7 @@ test('adapter IPC is panel-scoped and never installs the observe-only adapter', 
     uninstall: async (id: string) => { calls.push(['uninstall', id]); return { id, installed: false } },
   }
   registerAdapterIpc({
-    ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler) },
+    ipcMain,
     assertTrustedIpcSender: (_event, window) => trustedWindows.push(window),
     getPanelWindow: () => panelWindow,
     getAgentAdapterRegistry: () => registry,
@@ -39,11 +40,11 @@ test('adapter IPC is panel-scoped and never installs the observe-only adapter', 
 })
 
 test('the pet may read integration status for first-run onboarding; diagnose stays panel-only', async () => {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const panelContents = { id: 'panel-wc' }
   const petContents = { id: 'pet-wc' }
   registerAdapterIpc({
-    ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) } },
+    ipcMain,
     assertTrustedIpcSender: (event: { sender: unknown }, window?: { webContents: unknown } | null) => {
       if (event.sender !== window?.webContents) throw new Error('Unauthorized IPC sender')
     },

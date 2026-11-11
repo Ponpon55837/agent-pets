@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { registerQuotaIpc } from '../electron/ipc/quota.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 test('quota IPC normalizes force, stores a snapshot, and broadcasts to live windows', async () => {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const calls: unknown[] = []
   const sent: unknown[] = []
   const liveWindow = {
@@ -13,7 +14,7 @@ test('quota IPC normalizes force, stores a snapshot, and broadcasts to live wind
   }
   const destroyedWindow = { isDestroyed: () => true, webContents: { send: () => assert.fail('destroyed window must not receive quota') } }
   registerQuotaIpc({
-    ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler) } },
+    ipcMain,
     assertTrustedIpcSender: event => calls.push(event),
     getQuotaUsage: async force => { calls.push(`force:${force}`); return { remaining: 7 } },
     getHistoryStore: () => ({ recordQuotaSnapshot: value => { calls.push(value); return true } }) as never,

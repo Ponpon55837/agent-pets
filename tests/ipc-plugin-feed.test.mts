@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { registerPluginFeedIpc } from '../electron/ipc/plugin-feed.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 test('plugin feed IPC keeps pet and panel sender scopes and bounded payload checks', async () => {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const trusted: Array<unknown> = []
   const panelWindow = { id: 'panel' }
   const petWindow = { id: 'pet' }
@@ -27,7 +28,7 @@ test('plugin feed IPC keeps pet and panel sender scopes and bounded payload chec
   const badges = { list: () => [{ id: 'badge' }] }
   const eventSource = { list: () => [{ id: 'source' }] }
   registerPluginFeedIpc({
-    ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler) } },
+    ipcMain,
     assertTrustedIpcSender: (event, window) => trusted.push({ event, window }),
     assertPluginPanelSender: event => trusted.push({ event, panelApi: true }),
     getPetWindow: () => petWindow,
@@ -93,13 +94,13 @@ test('plugin feed IPC keeps pet and panel sender scopes and bounded payload chec
 })
 
 test('plugin badges can be read by the pet and by the panel (dashboard plugin tabs), nobody else', async () => {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const panelContents = { id: 'panel-wc' }
   const petContents = { id: 'pet-wc' }
   const panelWindow = { webContents: panelContents }
   const petWindow = { webContents: petContents }
   registerPluginFeedIpc({
-    ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler) } },
+    ipcMain,
     assertTrustedIpcSender: (event, window) => {
       if ((event as { sender: unknown }).sender !== (window as { webContents: unknown } | null)?.webContents) throw new Error('Unauthorized IPC sender')
     },

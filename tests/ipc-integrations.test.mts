@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { registerIntegrationIpc } from '../electron/ipc/integrations.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 test('integration IPC keeps sender scope, source allowlist, and target validation', async () => {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const calls: string[] = []
   const panelWindow = { id: 'panel' }
   registerIntegrationIpc({
-    ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler) } },
+    ipcMain,
     assertTrustedIpcSender: (_event, window) => { assert.equal(window, panelWindow) },
     getPanelWindow: () => panelWindow,
     sendIntegrationTestEvent: async (source, sessionId, state) => { calls.push(`send:${source}:${sessionId}:${state}`) },

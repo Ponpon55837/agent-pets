@@ -4,9 +4,10 @@ import type { IpcMainInvokeEvent } from 'electron'
 import type { PluginBrokerContext } from '../electron/plugin-broker.ts'
 import type { PluginPanelSettingsSnapshot } from '../src/types/plugin.ts'
 import { registerPluginSettingsIpc, type PluginSettingsIpcDependencies } from '../electron/ipc/plugin-settings.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 function fixture() {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const calls: string[] = []
   let consented = false
   let secretConfigured = false
@@ -41,9 +42,6 @@ function fixture() {
     hasAccepted: () => consented,
     accept: () => { consented = true },
   }
-  const ipcMain = {
-    handle: (channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) },
-  } as unknown as PluginSettingsIpcDependencies['ipcMain']
   const deps: PluginSettingsIpcDependencies = {
     ipcMain,
     assertPluginPanelSender: event => { if (event !== 'panel') throw new Error('untrusted panel') },

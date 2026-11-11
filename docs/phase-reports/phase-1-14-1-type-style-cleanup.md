@@ -4,6 +4,41 @@
 - **階段順序**：G0 → A → B → C → D → E → F，每階段一個分支，下一階段從上一階段切出；最後統一升 patch 版（1.14.1）。
 - 本檔由各階段依序續寫，每階段一節。
 
+## 整輪總結
+
+### 各階段 commit
+
+| 階段 | commit | 檔案數 | 摘要 |
+|---|---|---|---|
+| G0 | `aa2f783` | 8 | 目錄連結測試改用 junction，Windows 不用開發者模式也能跑；檔案 symlink 測試在無法建立時 skip；順手修正 `atomic-write-call-sites` 的偶發失敗 |
+| A | `c3e0dfd` | 5 | renderer 收 agent 狀態事件的路徑改用 `AgentStatusEvent` 型別，不再是 `any` |
+| B | `da302ae` | 39 | 新增 `electron/value-guards.ts`（`asRecord`／`recordOrEmpty`），取代約 30 處手寫的物件守衛；`quota.ts` 不再有 `any` |
+| C | `031c09b` | 4 | `setup.ts` 產生的 Codex／Claude Code hook JSON 改用嚴格型別，characterization 測試逐位元組鎖住 dotfile 輸出 |
+| D | `04162d1` | 42 | 分支鏈改成 `switch` 或 handler map（`ActionMenu` 改為泛型）；集中重複常數；`event-server` 改用 `IPC_CHANNELS`；`PermissionBubble` 的 CSS 抽成獨立檔 |
+| E | `416e556` | 9 | `plugin-feed` 的 `addToCenter` 改成 O(n) 原地壓縮；`SessionSnapshotStore.get` 改成 O(1)；plugin storage 寫入改成增量計算大小，順手修正 prototype key 的問題 |
+| F | 見 F 一節 | 35 | 測試檔剩下的 36 個 `any` 清零，抽出 `makeAgentStatusEvent` 與 `createFakeIpcMain` 兩個共用 fixture；`no-explicit-any` 升成 error；lint 忽略 `.claude/**`、`.playwright-mcp/**` |
+
+整輪相對基準 `79e3704`：共 122 個檔案變更（各階段有重疊的檔案只算一次）。
+
+### 前後對比
+
+| 項目 | 基準（`79e3704`） | 本輪結束（F） |
+|---|---|---|
+| `pnpm lint` | 0 error、52 warning（全是 `no-explicit-any`） | 0 error、0 warning；`no-explicit-any` 已是 error |
+| `pnpm exec vue-tsc --noEmit` | 0 error | 0 error |
+| `pnpm test:unit` | 1811 tests、6 fail、37 skip | 1837 tests、0 fail、39 skip |
+
+測試數增加 26 項：G0 拆出 1 項、B 11 項、C 2 項、D 1 項、E 11 項，都是 characterization 或回歸測試。skip 多 2 項是 G0 掛上的檔案 symlink 測試。F 只重構測試，沒有增減測試數。
+
+### 殘留風險彙總
+
+- 沒有啟動 Electron 實機確認 `PermissionBubble` 的畫面，以及頁首、插件卡片、我的主題等選單（D）。插件通知中心與 turn-end 補送 idle 也只靠單元測試與差分測試（E）。
+- `pnpm bench:lag:check` 在這台 Windows 機器上，E 之前就已超出門檻：mean 約 15.4–15.5 ms，門檻 12 ms。baseline 檔是在 macOS 上量的，15.5 ms 又剛好接近 Windows 預設的計時器粒度。E 前後數值相同，與本輪無關；需要在 macOS／CI 重跑，或替 Windows 另建 baseline。
+- Windows 無法建立檔案 symlink 時（沒開開發者模式），2 個測試會 skip；這兩個測試只在 macOS／Linux 或開了開發者模式的 Windows 上驗證（G0）。
+- 本輪只在 Windows 上驗證；macOS／Linux 的行為（junction 型別被忽略、macOS Keychain 憑證路徑等）依文件與既有測試推定。
+- `tests/` 不在 `tsconfig.json` 的 `include` 裡，所以測試的型別只靠 lint 的 `no-explicit-any` 把關，沒有完整型別檢查。F 用臨時 tsconfig 量測：測試檔本來就有大量型別錯誤（多半是假物件沒有實作完整的 `BrowserWindow` 等型別），F 沒有新增錯誤，還修掉 22 個。是否把 tests 納入型別檢查留待之後決定。
+- **建議版號：patch 1.14.1**。本輪是型別、風格、測試與內部演算法的調整，沒有改持久化 schema、公開契約或安全邊界。
+
 ## G0：Windows 無法建立 symlink 的測試
 
 - **分支**：`claude/cleanup-g0-symlink-tests-8871b0`
@@ -463,3 +498,96 @@ n = center 筆數（≤ 500），k = 單一 plugin 筆數（≤ 100），S = 單
 - `bench:lag:check` 在 Windows 上一定會失敗。它目前無法作為這台機器的回歸門檻，建議之後替 Windows 另建 baseline，或改用高解析度計時。
 - storage 的增量計數是新的不變式：日後若新增其他修改 `state.values` 的路徑，卻沒有同步更新 `size`（或把它設回 `null`），容量判斷就會偏掉。目前的防線是 `flushStorage` 寫檔前的完整檢查，以及差分測試。已在 `size` 欄位的註解說明。
 - 沒有啟動 Electron 實機確認插件通知中心與 turn-end 補送 idle 的行為。依據是單元測試與差分測試。
+
+## F：測試檔的 `any` 清零、`no-explicit-any` 升成 error
+
+- **分支**：`claude/cleanup-f-tests-lint-7bf76c`
+- **狀態**：通過
+
+### 步驟狀態
+
+| # | 步驟 | 狀態 | 備註 |
+|---|---|---|---|
+| 1 | 讀規範與 `pnpm lint` 現況 | 通過 | 36 個 warning，全在 `tests/` |
+| 2 | 抽 `makeAgentStatusEvent` 並替換 | 通過 | 只有 `notification-policy`、`agent-state-registry` 語意相同，其他各自的 builder 維持原樣 |
+| 3 | 比對假 ipcMain，抽 `createFakeIpcMain` | 通過 | 21 個測試檔改用；6 個寫法不同的維持原樣 |
+| 4 | 清掉其餘測試檔的 `any` | 通過 | |
+| 5 | `eslint.config.mjs` | 通過 | |
+| 6 | 文件 | 通過 | 本節、檔案開頭的整輪總結、`phase-packaging-ci-lint-backlog.md` |
+| 7 | 全套驗證與 code review | 通過 | 見「驗證」 |
+
+### 檔案變更
+
+| 檔案 | 變更內容 |
+|---|---|
+| `tests/support/agent-status-event.mts` | 新增 `makeAgentStatusEvent(state: AgentState, overrides?: Partial<AgentStatusEvent>): AgentStatusEvent`，預設值沿用 `notification-policy` 原本的 builder（codex、`session-1`、`agent-pets`、`Date.now()`） |
+| `tests/support/fake-ipc.mts` | 新增 `createFakeIpcMain()`，回傳 `ipcMain`（型別為 `Pick<IpcMain, 'handle' \| 'on'>`）、`handlers`（`handle` 註冊）、`listeners`（`on` 註冊），handler 型別是 `(...args: unknown[]) => unknown` |
+| `tests/notification-policy.test.mts` | 改用共用 fixture，14 處 `as any` 全部移除；state 參數現在是 `AgentState` |
+| `tests/agent-state-registry.test.mts` | 通知表改用共用 fixture；故意餵入的非法狀態（`bogus`、`constructor`、`toString`）改用 `as AgentState`；permission notice 那個物件字面值直接傳入，不用斷言 |
+| `tests/ipc-reliability.test.mts` | 改用 `createFakeIpcMain`；reports 用 `Parameters<ReliabilityIpcDependencies['reportRendererError']>[0]`；`stack` 是選填欄位，改成 `stack?.length`（斷言值不變，缺欄位時一樣會失敗） |
+| `tests/ipc-*.test.mts`（18 個）、`tests/growth-maintenance.test.mts`、`tests/onboarding.test.mts` | 手寫的 `handlers = new Map…` 加上 inline `ipcMain` 改用 `createFakeIpcMain()`；5 個 plugin IPC 測試順便移除 `ipcMain` 上的型別斷言 |
+| `tests/progression-broadcast-gate.test.mts` | `snap(over: Partial<ProgressionSnapshot>): ProgressionSnapshot`；`createVisibleSender<DeferrableWindow>()`；空陣列斷言改成 `[] as number[]` |
+| `tests/presentation-mcp.test.mts` | `call<T = unknown>()`，status 與 intent 回應分別收窄成 `PresentationStatusSnapshot & { queueDepth }`、`PresentationIntentResult` |
+| `tests/presentation-stdio.test.mts` | 新增 `JsonRpcResponse<T>`；`waitForId<T>()` 依各呼叫收窄成 `serverInfo`、`tools`、`PresentationStatusSnapshot`、`PresentationIntentResult` |
+| `tests/panel-theme-user-ipc.test.mts` | `invoke` 回傳 `unknown`；新增 `validate`／`user`／`userAsync`／`theme`，各自斷言成協定的 result 型別（`PanelThemeValidateIpcResult`、`UserPanelThemeIpcResult`、`PanelThemeIpcResult`）；讀 `value`／`error` 前先用 `okValue()`／`failure()` 斷言分支 |
+| `tests/panel-theme-user.test.mts` | 非法定義案例改用 `Record<string, unknown>` 與 `node(definition, ...keys)` 取巢狀物件；canonical 顏色那個測試直接用 `UserPanelThemeDefinition` |
+| `tests/diagnostics-logger.test.mts` | `Record<string, unknown>`，巢狀物件另外收窄 |
+| `tests/sound-registry.test.mts` | `(globalThis as { window?: unknown }).window` |
+| `eslint.config.mjs` | `no-explicit-any` 升成 `'error'`，刪除「先以 warn 記錄存量」的註解；全域 `ignores` 加上 `.claude/**`、`.playwright-mcp/**`；`src/env.d.ts` 的豁免不變 |
+| `docs/phase-reports/phase-packaging-ci-lint-backlog.md` | 存量已清零、規則已升成 error |
+| `docs/phase-reports/phase-1-14-1-type-style-cleanup.md` | 開頭的整輪總結與本節 |
+
+### event builder 比對結果
+
+| 測試檔 | 預設值 | 處理 |
+|---|---|---|
+| `notification-policy` | codex、`session-1`、`agent-pets`、`Date.now()`，`(state, overrides)` | 改用共用 fixture（fixture 就是照它寫的） |
+| `agent-state-registry` | 內聯 `base`（codex、`s1`、`p`、1） | 改用共用 fixture，覆寫 sessionId／project／timestamp |
+| `progression`、`achievements` | codex、無 project，timestamp 與 sessionId 是位置參數 | 不改：預設沒有 project，參數形狀也不同；硬套會在每個呼叫點補 `project: undefined` |
+| `history-sessions`、`session-jump` | claude、帶 `adapterId`（session-jump 還帶 `host`），只收 overrides | 不改：預設值不同 |
+| `agent-store-characterization` | claude，`(sessionId, state, extra)` | 不改：參數形狀與預設都不同 |
+| `attention-tracker` | 只有 source／sessionId／state 三個欄位 | 不改：不是完整事件 |
+
+### 假 ipcMain 比對結果
+
+改用 `createFakeIpcMain` 的條件：`Map<string, (...args: unknown[]) => unknown>`，`ipcMain` 只把 handler 原樣存進 map。`handle` 與 `on` 分開存的（`ipc-reliability`、`ipc-plugin-panel-ui`）也符合，同樣改用。以下 6 個寫法不同，維持原樣：
+
+| 測試檔 | 不同之處 |
+|---|---|
+| `ipc-panel-theme`、`panel-theme-user-ipc` | `handle` 和 `on` 存進同一個 map，測試用同一個 map 查兩種 channel |
+| `ipc-window-controls` | `on` 註冊的 listener 存在名為 `handlers` 的 map，呼叫點依賴這個名字 |
+| `ipc-pet-motion`、`pet-context-menu` | listener 存成 `(event, payload?) => void` 等較窄的簽名，呼叫點依賴這個型別 |
+| `ipc-pets` | `handle: () => undefined`，根本不存 handler |
+
+### Code review 結論
+
+- **斷言沒有放寬**：替換前後每個 `assert` 的比較值相同。`panel-theme-user-ipc` 的 `okValue()`／`failure()` 只是多一個 `ok` 分支斷言，比原本嚴格。`stack?.length`、`validation?.valid`、`schemaError?.path` 遇到缺欄位時會得到 `undefined`，跟期望值不相等，一樣會失敗。
+- **沒有新增 `as never`**：diff 裡新增的行沒有 `as never`，也沒有 `any`。保留的型別斷言都是把 `unknown` 收窄成協定型別，或是故意餵入非法值（`as AgentState`、`node()`）。`fake-ipc.mts` 有一處 `as unknown as Pick<IpcMain, …>`：Electron 的 `on` 回傳 `this`（完整的 `IpcMain`），假物件只實作兩個方法，已用註解說明。
+- **測試閉包**：兩個新的 support 檔都只有 `import type`，不會讓 Node 測試多載入 src 執行期模組。
+- **`createVisibleSender` 的型別參數**：任務原本寫 `createVisibleSender<ProgressionSnapshot>()`，但它的型別參數是視窗型別（`W extends DeferrableWindow`），`ProgressionSnapshot` 不符合約束，所以改用 `DeferrableWindow`。
+- **`.claude/**` 的忽略範圍**：ignore pattern 以設定檔所在目錄為基準，所以主 checkout 會跳過 `.claude/worktrees/*`。從 worktree 內執行時，基準是 worktree 根目錄，自己的檔案照常檢查（本 worktree 的 `pnpm lint` 有掃到 tests 的變更可以佐證）。
+
+### 測試的型別檢查（額外量測）
+
+`tsconfig.json` 只 include `src/**` 與 `electron/**`，`vue-tsc` 不會檢查 `tests/`。為了確認 F 的型別真的正確，我用臨時 tsconfig（extends 專案設定、include `tests/**/*.mts`，量完即刪）跑 `tsc --noEmit`，並把改動前的檔案放在同層目錄跑一次做對照：
+
+- F 動到的 30 個測試檔：改動前 74 個錯誤，改動後 52 個。沒有新增，修掉 22 個（都是手寫假 ipcMain 的型別不相容，以及 `progression-broadcast-gate` 的 `never[]` 收窄）。
+- 剩下的錯誤都是既有的：假物件沒有實作完整的 `BrowserWindow`、`HistoryStore` 等型別。這些超出本階段範圍，記在殘留風險。
+
+### 驗證
+
+| 指令 | 結果 |
+|---|---|
+| `pnpm lint` | 0 error、0 warning；main-process lint passed |
+| `pnpm exec vue-tsc --noEmit` | 0 error |
+| `pnpm test:unit` | 1837 tests、1798 pass、0 fail、39 skip，與 E 結束時相同 |
+| `pnpm test:unit`（commit 前再跑 4 次） | 第 1 次 1831 tests、2 fail、38 skip；之後 3 次都是 1837 tests、0 fail、39 skip |
+| F 動到的 30 個測試檔單獨跑 3 次 | 每次 124 tests、0 fail、0 skip |
+| `git diff --check` | 通過 |
+
+### 殘留風險
+
+- `tests/` 仍不在型別檢查範圍內，測試的型別只靠 `no-explicit-any` 與 code review 把關；既有的假物件型別錯誤還在。
+- 改用共用 fixture 後，`makeAgentStatusEvent` 的預設值變成多個測試的共同依賴；日後改預設值時，要重新檢查 `notification-policy` 的 body 斷言（`agent-pets`）。
+- commit 前的全量測試出現過一次偶發失敗（1831 tests、2 fail、38 skip）：有一個測試檔整個沒跑完，少了 6 項測試和 1 項 skip。F 動到的測試檔都沒有 skip，所以出錯的檔案不在本階段範圍內；但當次輸出沒有保留下來，無法指出是哪個檔案。之後 3 次全量都正常。若再出現，要保留完整輸出再追查。
+- 沒有啟動 Electron。本階段只改測試與 lint 設定，產品程式碼沒有變動。

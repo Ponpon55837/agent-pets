@@ -3,15 +3,16 @@ import test from 'node:test'
 import { registerAppUpdateIpc } from '../electron/ipc/app-update.ts'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import type { AppUpdateState } from '../src/types/app-update.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 const state: AppUpdateState = { currentVersion: '1.13.1', enabled: false, lastCheckedAt: null, lastResult: null, latestVersion: null }
 
 function setup(allow: (event: unknown, window: unknown) => boolean = () => true) {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const calls: string[] = []
   const panelWindow = { id: 'panel' }
   registerAppUpdateIpc({
-    ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler) },
+    ipcMain,
     assertTrustedIpcSender: (event: unknown, requiredWindow: unknown) => { if (!allow(event, requiredWindow)) throw new Error('untrusted sender') },
     getPanelWindow: () => panelWindow as never,
     getState: () => { calls.push('get'); return state },

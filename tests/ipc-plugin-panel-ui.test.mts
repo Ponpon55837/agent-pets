@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron'
 import { registerPluginPanelUiIpc, type PluginPanelUiIpcDependencies } from '../electron/ipc/plugin-panel-ui.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 function createFixture() {
-  const handles = new Map<string, (...args: unknown[]) => unknown>()
-  const listeners = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers: handles, listeners } = createFakeIpcMain()
   const calls: string[] = []
   const window = {
     destroyed: false,
@@ -25,10 +25,7 @@ function createFixture() {
     initialTheme: (sender: unknown): unknown => (sender && typeof sender === 'object' && 'theme' in sender ? sender.theme : null),
   }
   const deps: PluginPanelUiIpcDependencies = {
-    ipcMain: {
-      handle: (channel, handler) => { handles.set(channel, handler as (...args: unknown[]) => unknown) },
-      on: (channel, listener) => { listeners.set(channel, listener as (...args: unknown[]) => unknown) },
-    } as PluginPanelUiIpcDependencies['ipcMain'],
+    ipcMain,
     assertPluginPanelSender: event => { if (event !== 'panel') throw new Error('untrusted panel') },
     isTrustedIpcSender: (event, requiredWindow) => event === 'pet' && requiredWindow === window,
     isPluginPanelPluginId: value => typeof value === 'string' && /^[a-z0-9-]{3,48}$/.test(value),

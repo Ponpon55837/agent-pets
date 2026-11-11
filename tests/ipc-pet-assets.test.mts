@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { registerPetAssetIpc, type PetAssetIpcDependencies } from '../electron/ipc/pet-assets.ts'
+import { createFakeIpcMain } from './support/fake-ipc.mts'
 
 test('pet asset IPC uses injected paths, archive helpers, and renderer sender checks', async () => {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const { ipcMain, handlers } = createFakeIpcMain()
   const trusted: Array<unknown> = []
   const createdDirectories: string[] = []
   const writtenFiles: Array<{ path: string; contents: string }> = []
@@ -24,7 +25,7 @@ test('pet asset IPC uses injected paths, archive helpers, and renderer sender ch
     rm: async (path: string) => { removedDirectories.push(path) },
   }
   const deps: PetAssetIpcDependencies = {
-    ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler) } },
+    ipcMain,
     assertTrustedIpcSender: (event, window) => trusted.push({ event, window }),
     getPanelWindow: () => panelWindow,
     getPetWindow: () => null,
