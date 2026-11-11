@@ -3,9 +3,9 @@ import { isAgentSource } from '../../src/types/agent.ts'
 import { isSessionJumpAction, type SessionJumpAction, type SessionJumpResult } from '../../src/types/session-jump.ts'
 import { sessionJumpKey } from '../session-jump.ts'
 import { IPC_CHANNELS } from './channels.ts'
+import { MAX_SESSION_ID_LENGTH } from '../event-normalizer.ts'
 import { asRecord } from '../value-guards.ts'
 
-const MAX_SESSION_ID_LENGTH = 256
 
 export interface SessionJumpIpcDependencies {
   ipcMain: Pick<IpcMain, 'handle'>

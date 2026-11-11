@@ -30,7 +30,7 @@ import { applyWalPragmas, type SqlitePragmaState } from './sqlite-pragmas.ts'
 import { optimizeAndVacuum } from './sqlite-maintenance.ts'
 import { StatementCache } from './sqlite-statements.ts'
 import { eventPipelineStats } from './event-stats.ts'
-import { isValidPetId } from '../src/utils/pet-id.ts'
+import { DEFAULT_PET_ID, isValidPetId } from '../src/utils/pet-id.ts'
 import {
   MAX_PERMISSION_WAIT_MS,
   SESSION_LIST_COLUMNS,
@@ -47,6 +47,8 @@ import {
   type StoredSessionFinalState,
 } from './history-sessions.ts'
 import { isOpaqueId256, isProjectId } from '../src/types/id-patterns.ts'
+import { MAX_SESSION_ID_LENGTH, MAX_TOKEN_COUNT } from './event-normalizer.ts'
+import { MAX_ACTIVE_GAP_MS } from './progression.ts'
 import { asRecord } from './value-guards.ts'
 
 type SqliteRow = Record<string, unknown>
@@ -74,13 +76,10 @@ export interface HistoryStoreOptions {
   retentionDays?: number
 }
 
-const DEFAULT_PET_ID = 'aang-airbender'
 const LOCAL_USAGE_PET_ID = 'local-usage'
 const DEFAULT_RETENTION_DAYS = 90
 const MAX_RETENTION_DAYS = 3650
 const MAX_TEXT_LENGTH = 128
-const MAX_SESSION_ID_LENGTH = 256
-const MAX_TOKEN_COUNT = 1_000_000_000_000
 const MAX_QUOTA_SNAPSHOTS = 500
 const QUOTA_SNAPSHOT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 const ACHIEVEMENT_RECONCILED_KEY = 'achievement_reconciled_at'
@@ -91,7 +90,6 @@ const FLUSH_RETRY_BASE_MS = 250
 const FLUSH_RETRY_MAX_MS = 5000
 const PRUNE_BATCH_ROWS = 5000
 const ACTIVE_ROLLUP_STATE = 'active-rollup'
-const MAX_ACTIVE_GAP_MS = 5 * 60 * 1000
 const COMPLETED_SESSION_PAGE_ROWS = 5000
 const LOCAL_USAGE_CUTOFF_KEY = 'local_usage_cutoff_at'
 const HISTORY_RANGES: readonly number[] = [7, 30, 90]
@@ -182,14 +180,16 @@ function mergeTokenQuality(left: HistoryTokenQuality, right: HistoryTokenQuality
 }
 
 function eventType(state: AgentState): string {
-  if (state === 'success') return 'agent.session.completed'
-  if (state === 'error') return 'agent.session.failed'
-  if (state === 'offline') return 'agent.session.cancelled'
-  if (state === 'waiting-input') return 'agent.waiting_input'
-  if (state === 'waiting-permission') return 'agent.permission.requested'
-  if (state === 'tool-running') return 'agent.tool.started'
-  if (state === 'thinking') return 'agent.working'
-  return 'agent.session.started'
+  switch (state) {
+    case 'success': return 'agent.session.completed'
+    case 'error': return 'agent.session.failed'
+    case 'offline': return 'agent.session.cancelled'
+    case 'waiting-input': return 'agent.waiting_input'
+    case 'waiting-permission': return 'agent.permission.requested'
+    case 'tool-running': return 'agent.tool.started'
+    case 'thinking': return 'agent.working'
+    default: return 'agent.session.started'
+  }
 }
 
 function tokenUsage(event: AgentStatusEvent): {

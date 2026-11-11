@@ -56,9 +56,8 @@ export function registerPluginPanelUiIpc(deps: PluginPanelUiIpcDependencies): vo
   handleWithSenderGuard(deps.ipcMain, IPC_CHANNELS.pluginPanelViewOpen, deps.assertPluginPanelSender, async (_event, pluginId: unknown, payload: unknown) => {
     if (!deps.isPluginPanelPluginId(pluginId) || !isRecord(payload)
       || deps.openSequence.value >= Number.MAX_SAFE_INTEGER) return { ok: false, error: 'invalid_request' }
-    const bounds = payload
     const openToken = ++deps.openSequence.value
-    return deps.openPluginPanelView(pluginId, openToken, bounds.frame, bounds.content)
+    return deps.openPluginPanelView(pluginId, openToken, payload.frame, payload.content)
   })
   deps.ipcMain.handle(IPC_CHANNELS.pluginPanelViewOpenFromPet, (event, pluginId: unknown) => {
     const petWindow = deps.getPetWindow()

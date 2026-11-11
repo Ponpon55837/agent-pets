@@ -7,6 +7,7 @@ import { isValidBundleId, parseHostHints, resolveHostBundleId } from './host-app
 import { SlidingWindowLimiter } from './sliding-window-limiter.ts'
 import type { WindowsActivationResult } from './windows-window-activator.ts'
 import { asRecord } from './value-guards.ts'
+import { SESSION_REMOVE_MS } from '../src/utils/session-lifecycle.ts'
 
 // "Jump back" actions for one agent session: switch to its app, show its project folder or copy
 // its path. The absolute project path and bundle id arrive with token-authenticated events and are
@@ -20,7 +21,7 @@ import { asRecord } from './value-guards.ts'
 
 const MAX_ENTRIES = 200
 /** Matches the renderer's removal horizon; an older session cannot be shown, so it cannot be targeted. */
-const MAX_AGE_MS = 45 * 60_000
+const MAX_AGE_MS = SESSION_REMOVE_MS
 const MAX_PATH_LENGTH = 4096
 const RATE_WINDOW_MS = 10_000
 const RATE_LIMIT_PER_ACTION = 5

@@ -3,6 +3,7 @@ import type { BrowserWindow } from 'electron'
 import { app } from 'electron'
 import type { AgentStatusEvent } from '../src/types/agent'
 import { createOrderedBatchCoalescer } from './ipc/broadcast-coalescer.ts'
+import { IPC_CHANNELS } from './ipc/channels.ts'
 import { createEventRateLimiter } from './event-rate-limit.ts'
 import { eventPipelineStats } from './event-stats.ts'
 import { hasJsonContentType, readBoundedJson, sendJson, tokenMatches } from './loopback-http.ts'
@@ -51,7 +52,7 @@ export function createEventServer(
     }
     for (const [window, events] of eventsByWindow) {
       if (window.isDestroyed()) continue
-      try { window.webContents.send('agent-status-event', events) } catch (error) {
+      try { window.webContents.send(IPC_CHANNELS.agentStatusEvent, events) } catch (error) {
         eventPipelineStats.sendFailures += events.length
         const current = Date.now()
         if (current - lastSendFailureLogAt >= SEND_FAILURE_LOG_INTERVAL_MS) {

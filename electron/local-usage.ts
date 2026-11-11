@@ -3,6 +3,7 @@ import { constants as fsConstants, type Dirent } from 'node:fs'
 import { lstat, open, readdir, realpath } from 'node:fs/promises'
 import { extname, join, relative } from 'node:path'
 import { safeModelId, type HistoryStore } from './history.ts'
+import { MAX_TOKEN_COUNT } from './event-normalizer.ts'
 import { asRecord } from './value-guards.ts'
 import type { HistoryTokenUsageRecord } from '../src/types/history.ts'
 
@@ -124,7 +125,6 @@ const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024
 const DEFAULT_MAX_LINE_BYTES = 256 * 1024
 const DEFAULT_MAX_SCAN_MS = 4_000
 const MAX_WALK_DEPTH = 8
-const MAX_TOKEN_COUNT = 1_000_000_000_000
 
 function digest(value: string, length = 48): string {
   return createHash('sha256').update(value).digest('hex').slice(0, length)

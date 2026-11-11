@@ -34,9 +34,11 @@ function setClaudeWait(seconds: number): void {
 const launchHelp = computed(() => {
   if (!store.launchAtStartupSupported) return t('availablePackaged')
   if (store.launchAtStartup) {
-    if (store.launchAtStartupStatus === 'requires-approval') return t('reliability.launch.pending')
-    if (store.launchAtStartupStatus === 'not-in-applications') return t('reliability.launch.notInApplications')
-    if (store.launchAtStartupStatus === 'error') return t('reliability.launch.error')
+    switch (store.launchAtStartupStatus) {
+      case 'requires-approval': return t('reliability.launch.pending')
+      case 'not-in-applications': return t('reliability.launch.notInApplications')
+      case 'error': return t('reliability.launch.error')
+    }
   }
   return t('launchAtStartupHelp')
 })
@@ -64,11 +66,13 @@ function auditResult(entry: PermissionAuditEntry): string {
   // Claude Code keeps its terminal prompt open, so a decision sent from here may have
   // arrived after the user had already answered there.
   const maybeTerminal = alsoAnswerableKey(entry.agentId) ? t('permission.auditMaybeTerminal') : ''
-  if (entry.status === 'allowed') return t('permission.auditAllowed') + maybeTerminal
-  if (entry.status === 'denied') return t('permission.auditDenied') + maybeTerminal
-  if (entry.status === 'expired') return t('permission.auditExpired')
-  if (entry.status === 'delivery_failed') return t('permission.auditFailed')
-  return t('permission.auditCancelled')
+  switch (entry.status) {
+    case 'allowed': return t('permission.auditAllowed') + maybeTerminal
+    case 'denied': return t('permission.auditDenied') + maybeTerminal
+    case 'expired': return t('permission.auditExpired')
+    case 'delivery_failed': return t('permission.auditFailed')
+    default: return t('permission.auditCancelled')
+  }
 }
 
 function auditTime(timestamp: number): string {

@@ -383,9 +383,8 @@ function isRelayHandle(value: unknown): value is RelayHandle {
   return isRecord(value) && isIdentifier(value.relayKey)
 }
 
-function normalizeCreatePayload(value: unknown): CreatePayload | null {
-  if (!isRecord(value)) return null
-  const data = value
+function normalizeCreatePayload(data: unknown): CreatePayload | null {
+  if (!isRecord(data)) return null
   if (
     typeof data.source !== 'string'
     || !SOURCES.has(data.source)
@@ -429,9 +428,8 @@ function normalizeCreatePayload(value: unknown): CreatePayload | null {
   }
 }
 
-function normalizeSessionLookupPayload(value: unknown): (Pick<CreatePayload, 'source' | 'instanceId'> & { scope?: string }) | null {
-  if (!isRecord(value)) return null
-  const data = value
+function normalizeSessionLookupPayload(data: unknown): (Pick<CreatePayload, 'source' | 'instanceId'> & { scope?: string }) | null {
+  if (!isRecord(data)) return null
   if (typeof data.source !== 'string' || !SOURCES.has(data.source) || !isIdentifier(data.instanceId)) return null
   if (data.scope !== undefined && !isIdentifier(data.scope)) return null
   return {
@@ -456,9 +454,8 @@ function resolveScope(
   }
 }
 
-function normalizeLookupPayload(value: unknown): (Pick<CreatePayload, 'source' | 'instanceId' | 'permissionId'> & { nonce?: string }) | null {
-  if (!isRecord(value)) return null
-  const data = value
+function normalizeLookupPayload(data: unknown): (Pick<CreatePayload, 'source' | 'instanceId' | 'permissionId'> & { nonce?: string }) | null {
+  if (!isRecord(data)) return null
   if (
     typeof data.source !== 'string'
     || !SOURCES.has(data.source)
@@ -473,13 +470,12 @@ function normalizeLookupPayload(value: unknown): (Pick<CreatePayload, 'source' |
   }
 }
 
-function normalizeResultPayload(value: unknown): (
+function normalizeResultPayload(data: unknown): (
   Pick<CreatePayload, 'source' | 'instanceId' | 'permissionId'>
   & { nonce?: string; decisionId: string; result: PermissionDeliveryResult }
 ) | null {
-  const lookup = normalizeLookupPayload(value)
-  if (!lookup || !value || typeof value !== 'object') return null
-  const data = value as Record<string, unknown>
+  const lookup = normalizeLookupPayload(data)
+  if (!lookup || !isRecord(data)) return null
   if (!isIdentifier(data.decisionId) || !isDeliveryResult(data.result)) return null
   return { ...lookup, decisionId: data.decisionId, result: data.result }
 }

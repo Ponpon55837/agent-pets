@@ -802,38 +802,41 @@ function parseStops(value: unknown, path: string): Array<{ color: PanelThemeRgba
 function parseBackground(value: unknown, path: string): ResolvedPanelThemeBackground {
   if (value === undefined) return { type: 'solid' }
   if (!isRecord(value)) fail(path, 'must be an object')
-  if (value.type === 'solid') {
-    assertKeys(value, ['type'], path)
-    return { type: 'solid' }
-  }
-  if (value.type === 'gradient') {
-    if (value.kind === 'linear') {
-      assertKeys(value, ['type', 'kind', 'angle', 'stops'], path)
-      const angle = value.angle === undefined ? 180 : integerIn(value.angle, 0, 359, `${path}.angle`)
-      return { type: 'gradient', kind: 'linear', angle, stops: parseStops(value.stops, `${path}.stops`) }
+  switch (value.type) {
+    case 'solid': {
+      assertKeys(value, ['type'], path)
+      return { type: 'solid' }
     }
-    if (value.kind === 'radial') {
-      assertKeys(value, ['type', 'kind', 'position', 'stops'], path)
-      const position = enumOf<PluginPanelThemePosition>(value.position, POSITIONS, 'center', `${path}.position`)
-      return { type: 'gradient', kind: 'radial', position, stops: parseStops(value.stops, `${path}.stops`) }
+    case 'gradient': {
+      if (value.kind === 'linear') {
+        assertKeys(value, ['type', 'kind', 'angle', 'stops'], path)
+        const angle = value.angle === undefined ? 180 : integerIn(value.angle, 0, 359, `${path}.angle`)
+        return { type: 'gradient', kind: 'linear', angle, stops: parseStops(value.stops, `${path}.stops`) }
+      }
+      if (value.kind === 'radial') {
+        assertKeys(value, ['type', 'kind', 'position', 'stops'], path)
+        const position = enumOf<PluginPanelThemePosition>(value.position, POSITIONS, 'center', `${path}.position`)
+        return { type: 'gradient', kind: 'radial', position, stops: parseStops(value.stops, `${path}.stops`) }
+      }
+      return fail(`${path}.kind`, 'must be linear or radial')
     }
-    fail(`${path}.kind`, 'must be linear or radial')
-  }
-  if (value.type === 'image') {
-    assertKeys(value, ['type', 'src', 'fit', 'position', 'opacity', 'blur', 'overlay'], path)
-    const src = normalizePanelThemeAssetPath(value.src, ['.png', '.webp'])
-    if (!src) fail(`${path}.src`, 'must be a safe relative .png or .webp path')
-    return {
-      type: 'image',
-      src,
-      fit: enumOf<PluginPanelThemeFit>(value.fit, FITS, 'cover', `${path}.fit`),
-      position: enumOf<PluginPanelThemePosition>(value.position, POSITIONS, 'center', `${path}.position`),
-      opacity: value.opacity === undefined ? 1 : numberIn(value.opacity, 0.2, 1, `${path}.opacity`),
-      blur: value.blur === undefined ? 0 : integerIn(value.blur, 0, 24, `${path}.blur`),
-      overlay: parseOverlay(value.overlay, `${path}.overlay`),
+    case 'image': {
+      assertKeys(value, ['type', 'src', 'fit', 'position', 'opacity', 'blur', 'overlay'], path)
+      const src = normalizePanelThemeAssetPath(value.src, ['.png', '.webp'])
+      if (!src) fail(`${path}.src`, 'must be a safe relative .png or .webp path')
+      return {
+        type: 'image',
+        src,
+        fit: enumOf<PluginPanelThemeFit>(value.fit, FITS, 'cover', `${path}.fit`),
+        position: enumOf<PluginPanelThemePosition>(value.position, POSITIONS, 'center', `${path}.position`),
+        opacity: value.opacity === undefined ? 1 : numberIn(value.opacity, 0.2, 1, `${path}.opacity`),
+        blur: value.blur === undefined ? 0 : integerIn(value.blur, 0, 24, `${path}.blur`),
+        overlay: parseOverlay(value.overlay, `${path}.overlay`),
+      }
     }
+    default:
+      fail(`${path}.type`, 'must be solid, gradient or image')
   }
-  fail(`${path}.type`, 'must be solid, gradient or image')
 }
 
 function contrastIssue(failure: ContrastFailure): PanelThemeIssue {

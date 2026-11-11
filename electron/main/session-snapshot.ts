@@ -1,6 +1,7 @@
 import type { AgentSource, AgentState, AgentStatusEvent } from '../../src/types/agent.ts'
 import type { AgentAdapterId } from '../../src/types/agent-adapter.ts'
 import type { AgentHost } from '../../src/types/host-app.ts'
+import { SESSION_REMOVE_MS } from '../../src/utils/session-lifecycle.ts'
 
 export interface SessionSnapshotEntry {
   /** 事件來自哪個 adapter；主程序替這個 session 補送事件時要帶上，歷史才會記在同一筆。 */
@@ -19,7 +20,7 @@ export interface SessionSnapshotEntry {
 
 const MAX_ENTRIES = 200
 /** Matches the renderer removal horizon: older entries are useless after a reload. */
-const MAX_AGE_MS = 45 * 60_000
+const MAX_AGE_MS = SESSION_REMOVE_MS
 
 /**
  * Tiny main-owned mirror of the latest state per session. The renderer owns

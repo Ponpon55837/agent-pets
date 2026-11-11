@@ -777,19 +777,32 @@ const DesktopPetPlugin = async ({ client, project, directory }) => {
   // They are not direct hook keys in the current plugin API.
   event: async ({ event }) => {
     const sessionId = event && event.properties && event.properties.sessionID;
-    if (event.type === 'session.status') {
-      if (event.properties.status.type === 'busy') setState(sessionId, 'thinking', undefined, event.type, projectPath);
-      if (event.properties.status.type === 'retry') setState(sessionId, 'thinking', undefined, event.type, projectPath);
-      if (event.properties.status.type === 'idle') setState(sessionId, 'idle', undefined, event.type, projectPath);
-    } else if (event.type === 'session.idle') {
-      setState(sessionId, 'idle', undefined, event.type, projectPath);
-    } else if (event.type === 'session.error') {
-      setState(sessionId, 'error', undefined, event.type, projectPath);
-    } else if (event.type === 'permission.updated' || event.type === 'permission.asked') {
-      await registerPermission(client, event.properties, projectPath, directory);
-    } else if (event.type === 'permission.replied') {
-      await resolvePermission(event.properties);
-      setState(sessionId, 'thinking', undefined, event.type, projectPath);
+    switch (event.type) {
+      case 'session.status':
+        switch (event.properties.status.type) {
+          case 'busy':
+          case 'retry':
+            setState(sessionId, 'thinking', undefined, event.type, projectPath);
+            break;
+          case 'idle':
+            setState(sessionId, 'idle', undefined, event.type, projectPath);
+            break;
+        }
+        break;
+      case 'session.idle':
+        setState(sessionId, 'idle', undefined, event.type, projectPath);
+        break;
+      case 'session.error':
+        setState(sessionId, 'error', undefined, event.type, projectPath);
+        break;
+      case 'permission.updated':
+      case 'permission.asked':
+        await registerPermission(client, event.properties, projectPath, directory);
+        break;
+      case 'permission.replied':
+        await resolvePermission(event.properties);
+        setState(sessionId, 'thinking', undefined, event.type, projectPath);
+        break;
     }
   },
   // This hook can announce waiting state, but has no stable permission ID;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
-import { t } from '@/i18n'
+import { t, type TranslationKey } from '@/i18n'
 import { useProgressionLabels } from '@/composables/useProgressionLabels'
 import type { PluginEventSourceStatusView } from '@/types/plugin'
 import Button from '@/components/ui/Button.vue'
@@ -38,26 +38,40 @@ provide(DIALOG_HOST_KEY, panelRoot)
 const { backdrop: panelThemeBackdrop } = usePanelTheme()
 const settingsShortcut = /Mac/i.test(navigator.platform) ? '\u2318,' : 'Ctrl+,'
 
-const themeLabel = (preference: ThemePreference) =>
-  preference === 'light' ? t('design.theme.light') : preference === 'dark' ? t('design.theme.dark') : t('design.theme.system')
+const THEME_LABEL_KEY = {
+  light: 'design.theme.light',
+  dark: 'design.theme.dark',
+  system: 'design.theme.system',
+} as const satisfies Record<ThemePreference, TranslationKey>
+const THEME_ICON = {
+  light: 'sun',
+  dark: 'moon',
+  system: 'theme-auto',
+} as const satisfies Record<ThemePreference, string>
+const themeLabel = (preference: ThemePreference) => t(THEME_LABEL_KEY[preference])
 
 // Toggles close the menu after the click (ActionMenu's single behaviour); the
 // current state stays visible in each row and, for DND, as a dot on the trigger.
-const headerMenuItems = computed<ActionMenuItem[]>(() => [
+const headerMenuItems = computed(() => [
   { id: 'dnd', icon: 'bell-off', label: t('dnd'), role: 'menuitemcheckbox', checked: store.dndEnabled, state: store.dndEnabled ? t('panel.stateOn') : t('panel.stateOff') },
   { id: 'pin', icon: 'pin', label: t('panel.menuKeepOpen'), role: 'menuitemcheckbox', checked: store.panelPinned, state: store.panelPinned ? t('panel.stateOn') : t('panel.stateOff') },
   {
     id: 'theme',
-    icon: themePreference.value === 'light' ? 'sun' : themePreference.value === 'dark' ? 'moon' : 'theme-auto',
+    icon: THEME_ICON[themePreference.value],
     label: t('design.theme.menuLabel'),
     state: t('design.theme.cycle', { current: themeLabel(themePreference.value), next: themeLabel(nextThemePreference(themePreference.value)) }),
   },
-])
+] as const satisfies readonly ActionMenuItem[])
+type HeaderMenuId = (typeof headerMenuItems.value)[number]['id']
 
-function onHeaderMenu(id: string): void {
-  if (id === 'dnd') store.setDndEnabled(!store.dndEnabled)
-  else if (id === 'pin') store.setPanelPinned(!store.panelPinned)
-  else if (id === 'theme') setThemePreference(nextThemePreference(themePreference.value))
+const HEADER_MENU_ACTIONS = {
+  dnd: () => store.setDndEnabled(!store.dndEnabled),
+  pin: () => store.setPanelPinned(!store.panelPinned),
+  theme: () => setThemePreference(nextThemePreference(themePreference.value)),
+} satisfies Record<HeaderMenuId, () => void>
+
+function onHeaderMenu(id: HeaderMenuId): void {
+  HEADER_MENU_ACTIONS[id]()
 }
 
 type DashboardTab = string

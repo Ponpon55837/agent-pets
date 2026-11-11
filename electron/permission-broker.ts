@@ -9,6 +9,7 @@ import type {
 } from '../src/types/permission'
 import { PERMISSION_DEFAULT_TTL_SECONDS } from '../src/types/permission.ts'
 import { isOpaqueId128 as isIdentifier } from '../src/types/id-patterns.ts'
+import { MAX_AUDIT_RECORDS } from './permission-audit.ts'
 import { redactSensitiveText } from './permission-redact.ts'
 import { isRecord } from './value-guards.ts'
 
@@ -19,7 +20,6 @@ const MAX_ACTION_LENGTH = 80
 const MAX_DESCRIPTION_LENGTH = 280
 const MAX_DETAIL_ITEMS = 5
 const MAX_DETAIL_LENGTH = 120
-const MAX_AUDIT_RECORDS = 500
 // Cap on *active* requests. Finished requests are kept only briefly (replay
 // protection + late polls) and then dropped, so a long-running app never fills up.
 const DEFAULT_MAX_REQUEST_RECORDS = 5_000

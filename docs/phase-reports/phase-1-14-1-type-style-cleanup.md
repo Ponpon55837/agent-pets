@@ -292,3 +292,83 @@ Haiku 掃描 `electron/**` 與 `integrations/**`（已知清單除外），共�
 
 - characterization 測試只在當前平台跑一種 command 形式（Windows 走 `.cmd` wrapper，POSIX 走 node + 腳本）；另一個平台的字串仍由既有的 `codexHookCommand` 測試覆蓋。
 - `agentHooksFor` 內的斷言依賴「鍵等於傳入的事件清單」；若日後在裡面加入過濾邏輯，需同步調整型別。
+
+## D：風格統一（分支鏈、重複常數、IPC channel、多餘別名、scoped CSS 抽檔）
+
+- **分支**：`claude/cleanup-d-style-unify-c9c4d9`
+- **開始時間**：2026-11-11 12:33（Asia/Taipei）
+- **狀態**：通過（未開始 → 進行中 12:33 → 通過 12:52）
+- **完成時間**：2026-11-11 12:52（Asia/Taipei）
+
+### 步驟狀態
+
+| # | 步驟 | 狀態 | 備註 |
+|---|---|---|---|
+| 1 | 讀規範，盤點選單、範本、常數、channel、別名、CSS | 通過 | |
+| 2 | 選單 handler map 與分支鏈掃描 | 通過 | haiku 子代理掃描，sonnet 子代理改寫 10 處，每處 diff 都由我複驗 |
+| 3 | OpenCode plugin 範本 `switch` 與測試 | 通過 | 先補一項執行產出 plugin 的 characterization 測試，改寫前後都通過 |
+| 4 | 重複常數、IPC channel 字面值、多餘別名 | 通過 | |
+| 5 | `PermissionBubble` scoped CSS 抽檔 | 通過 | 建置後的 CSS 與基準逐條相同（scope hash 除外） |
+| 6 | 全套驗證與 code review | 通過 | 見「驗證」 |
+
+### 檔案變更
+
+| 檔案 | 變更內容 | 原因 |
+|---|---|---|
+| `src/components/ui/ActionMenu.vue` | 改成泛型元件 `generic="Id extends string = string"`；`ActionMenuItem<Id>`、`items: readonly ActionMenuItem<Id>[]`、`select: [id: Id]` | 讓呼叫端從選單定義推導 id 聯集。預設是 `string`，其他呼叫端不受影響 |
+| `src/components/StatusPanel.vue` | `onHeaderMenu` 改為 `HEADER_MENU_ACTIONS` handler map（`satisfies Record<HeaderMenuId, () => void>`），`HeaderMenuId` 由 `headerMenuItems`（`as const satisfies readonly ActionMenuItem[]`）推導；主題標籤與圖示的 3 段巢狀三元改成 `THEME_LABEL_KEY`／`THEME_ICON` 查表（`satisfies Record<ThemePreference, …>`） | §4 B／C。漏寫 handler 或選單 id 打錯都會在編譯期報錯。已實測：刪掉一個 handler，或讓 handler 只接受部分 id，`vue-tsc` 都會失敗 |
+| `src/components/plugin-panel/PluginCard.vue` | `onMenu` 改為 `MENU_ACTIONS` handler map，`MenuId` 由 `menuItems` 推導 | 同上 |
+| `src/components/panel-theme/MyPanelThemes.vue` | 既有的 `MENU_ACTIONS: Record<string, …>` 收窄為 `satisfies Record<MenuId, …>`，模板拿掉多餘的 `?.` | ActionMenu 改成泛型後，這裡不必另外改寫就能得到窮盡檢查 |
+| `electron/setup.ts` | OpenCode plugin 範本的 `event.type` 分派改成 `switch`；`session.status` 內 3 個獨立的 `status.type` 比對改成巢狀 `switch`（`busy`／`retry` 共用一個 case） | §4 A。三個值互斥，所以原本 3 個獨立的 `if` 與 `switch` 等價 |
+| `tests/opencode-plugin.test.mts` | 新增 characterization：在行程內攔截 `fs.readFileSync`（token）與 `http.request`，實際執行產出的 plugin，依序送入 12 種事件，比對送出請求的路徑、`state`、`originalEvent`、`sessionId` 與順序 | 原本只驗模組能否載入和幾段字串，沒有鎖住分派語意。改寫前先跑過一次確認通過；把 `session.error` 刻意改成 `idle` 時，測試會失敗 |
+| `electron/history.ts`、`electron/plugin-catalog.ts`、`electron/pet-sprite-validation.ts`、`electron/plugin-host-window.ts`、`electron/main/runtime.ts`、`electron/plugin-panel-themes.ts`、`electron/desktop-preferences.ts`、`electron/pet-window-mode.ts`、`src/utils/plugin-panel-view.ts`、`src/components/status-panel/SettingsDesktop.vue`（2 處） | 11 處「同一個變數比對 3 個以上離散值」的 `if` 鏈改成 `switch`。fallback 都保留，寫成 `default` 或留在 switch 之後原本的 return | §4 A。這些鏈都有 fallback，或各分支有副作用，用 switch 比查表直接。key 型別是 `string` 的地方不用物件查表，避免 `constructor` 之類的繼承 key 被誤中 |
+| `tests/panel-theme-runtime.test.mts` | 比對原始碼的 regex 從 `url.hostname === 'panel-theme'` 改為 `switch (url.hostname) { … case 'panel-theme':` | runtime 的 protocol handler 改成 switch。這項測試要保護的「panel-theme host 只在主視窗處理」不變 |
+| `electron/permission-audit.ts`、`electron/permission-broker.ts` | `MAX_AUDIT_RECORDS` 只在 permission-audit 留一份並 export，broker 改為 import | 兩邊保留的是同一份稽核紀錄 |
+| `src/utils/pet-id.ts`、`src/utils/storage-keys.ts`、`electron/{achievements,history,progression,project-routing}.ts`、`electron/main/{growth-service,runtime}.ts`、`electron/ipc/{history,progression}.ts` | `DEFAULT_PET_ID` 移到 `pet-id.ts`。主程序本來就對這個檔案做值 import，它也在測試閉包內，只用相對路徑。`storage-keys.ts` 改成 re-export。主程序裡 5 份重複定義與 6 處 `'aang-airbender'` 字面值都改用這個常數 | 名稱、值、語意都相同（永遠存在的預設寵物） |
+| `electron/event-normalizer.ts`、`electron/{achievements,history,local-usage}.ts`、`electron/ipc/session-jump.ts` | `MAX_TOKEN_COUNT`（原本 4 份）、`MAX_SESSION_ID_LENGTH`（原本 3 份）改由事件入口 `event-normalizer.ts` export | 下游不該接受入口已經拒收的值 |
+| `electron/progression.ts`、`electron/history.ts` | `MAX_ACTIVE_GAP_MS` 由 progression export，history 改為 import | 兩邊計算的 session 活躍時長必須一致 |
+| `electron/session-jump.ts`、`electron/main/session-snapshot.ts` | `MAX_AGE_MS = 45 * 60_000` 改為 `SESSION_REMOVE_MS`（`src/utils/session-lifecycle.ts`，也就是 `AGENT_STATE_POLICY.offline.quiet.afterMs`） | 兩處註解都寫「對齊 renderer 的移除時限」，數字卻各自寫死 |
+| `electron/event-server.ts`、`electron/plugin-host-window.ts` | `'agent-status-event'`、`'plugin-host-port'` 改用 `IPC_CHANNELS.agentStatusEvent`／`IPC_CHANNELS.pluginHostPort` | 全面掃描後，只找到這 2 處 channel 字面值 |
+| `electron/ipc/permission.ts` | 拿掉 `const data = payload`；兩段都回傳 `invalid_decision` 的守衛合併成一段 | 多餘別名 |
+| `electron/ipc/plugin-panel-ui.ts`、`electron/ipc/project-pets.ts` | 拿掉 `const bounds = payload`、`const input = payload`，直接用 `payload` | 多餘別名 |
+| `electron/permission-adapter-server.ts` | `normalizeCreatePayload`、`normalizeSessionLookupPayload`、`normalizeLookupPayload` 的參數直接命名為 `data`，在守衛那一行就收窄；同檔 `normalizeResultPayload` 原本用 `!value \|\| typeof value !== 'object'` 加 `as Record`，改成用 `isRecord(data)` 收窄 | 清掉多餘別名，以及動到範圍內的斷言。陣列本來就會在 `normalizeLookupPayload` 被擋下，所以行為不變 |
+| `src/components/permission/PermissionBubble.vue`、`PermissionBubble.css`（新檔） | 258 行 `<style scoped>` 原封不動搬到同目錄的 `.css`，用 `<style scoped src="@/components/permission/PermissionBubble.css">` 引入 | §9。原本的樣式已經全部使用 token，沒有硬編碼的 hex／rgba 可以替換 |
+| `tests/panel-theme-pet-status.test.mts`、`tests/pet-style-tokens.test.mts` | 讀取樣式的檔案清單加上 `PermissionBubble.css`，或改讀這個檔案 | 這些測試直接讀樣式原始碼 |
+| `docs/phase-reports/phase-1-14-1-type-style-cleanup.md` | 新增 D 一節 | 階段紀錄 |
+
+### 掃描結果與刻意不改的地方
+
+- **分支鏈**：haiku 掃描 `src/**`、`electron/**`，找到 12 處符合條件。`PluginDetail.vue` 模板裡依 `section` 切換子樹的 `v-if`／`v-else-if` 保留：這是 Vue 模板的慣用寫法，模板裡也沒有 switch 可用。依 §4，條件混合不同變數的、複合條件的、只有 2 層的都維持原樣，例如 `PluginDetail.vue`／`PluginPanel.vue` 各 2 項的選單、`install-outcome.ts`、`PetBubbleStack.vue` 的模板。`electron/plugin-host-assets.ts` 內的 `String.raw` 範本是產出用的程式碼，不在範圍內。
+- **常數**：以下不合併。`DAY_MS` 是單位換算，值不會漂移，共用只會增加耦合；`DWMWA_CLOAKED` 是 Win32 API 常數；`MAX_BODY_BYTES` 各處的值不同；`MAX_CONFIG_BYTES`、`RATE_WINDOW_MS`，以及 session-snapshot 與 session-jump 的 `MAX_ENTRIES` 屬於各自獨立的上限或快取，值相同只是巧合。
+- **IPC inventory**：重新執行 `scripts/generate-ipc-inventory.mjs` 後，`docs/security/ipc-inventory.md` 沒有差異。它只解析 `IPC_CHANNELS.*` 的用法，而這兩處改動前後的 channel 名稱相同。
+- **其他 `as Record<string, unknown>` 斷言**（`event-normalizer.ts`、`host-app.ts`、`src/stores/agent/*.ts` 等）：不在本階段動到的範圍內，B 階段已經評估過，這次不擴大 diff。
+
+### Code review 結論
+
+- **語意等價**：子代理的 switch 改寫逐處複驗過。每個 case 的提前 return、fallback、例外訊息與副作用順序都和原本相同。`runtime.ts` 的 protocol handler 只是把 `if` 換成 `case` 並重新縮排，已用 `git diff -w` 確認；`return await` 仍在 `try` 內，所以 catch 的行為不變。`desktop-preferences.ts` 把 `continue` 換成 `break`，布林 key 的檢查移到 `default`，驗證順序不變。lint 的 `no-fallthrough` 通過，沒有意外的 fallthrough。
+- **寫到使用者機器上的檔案**：OpenCode plugin 範本只改了 `event` hook 內部的分派寫法，其他字元都沒動。新的 characterization 測試會實際執行產出的 plugin，鎖住 12 種事件各自送出的請求。`hook-literal-contract` 用 regex 收集的 `setState(..., '<state>'` 仍然是字面值，所以「每個 registry 狀態都有路徑可達」的檢查照常運作。
+- **型別**：`ActionMenu` 的泛型推導在模板裡也有效：`@select` handler 的參數型別不對時，`vue-tsc` 會報錯，已實測。新的查表都加了 `satisfies Record<…>`，多一項或少一項都會編譯失敗。
+- **安全邊界**：IPC sender 驗證、payload 守衛的條件與回傳的錯誤碼都沒變。`permission.ts` 合併的兩段守衛原本就回傳同一個錯誤。合併常數只是換了定義的位置，值沒有變。
+- **測試閉包**：`pet-id.ts`、`session-lifecycle.ts` 都會被 Node 測試直接載入，新增的 import 都用相對路徑。`pnpm test:unit` 沒有出現 `ERR_MODULE_NOT_FOUND`。
+- **範圍內順手修正**：`normalizeResultPayload` 原本手寫物件判斷再加 `as Record` 斷言，改成用 `isRecord` 收窄；`MyPanelThemes.vue` 的 handler map 也一併收窄。
+- **流程事故**：為了比對 CSS，我在 scratchpad 用 HEAD 建了一個暫時的 worktree，並用 junction 連到本 worktree 的 `node_modules`。移除暫時 worktree 時，本 worktree 的 `node_modules` 被刪掉一部分。已用 `pnpm install --frozen-lockfile --prefer-offline` 重建，lockfile 與 package.json 都沒有變更。重建後全套檢查重跑，全部通過。原始碼與 git 狀態不受影響。
+
+### 驗證
+
+| 指令 | 結果 |
+|---|---|
+| `pnpm exec vue-tsc --noEmit` | 0 error |
+| `pnpm lint` | 0 error、36 warning，全部是 `tests/` 內的 `no-explicit-any`，與基準相同，沒有其他 warning；main-process lint passed |
+| `pnpm test:unit` | 1826 tests、1787 pass、0 fail、39 skip（比基準多 1 項：OpenCode 事件分派 characterization） |
+| `pnpm check:design` | `rawColors: 0`、`rawSpacing: 61`、`rawMotion: 24`、`rawControls: 0`，與 HEAD 基準完全相同 |
+| `pnpm check:contrast` | 通過，輸出與 HEAD 基準逐字相同 |
+| `pnpm exec vite build` | 成功。把建置出的所有 CSS 規則排序後比對，除了 scoped hash 以外，與 HEAD 的建置結果完全相同 |
+| `node scripts/generate-ipc-inventory.mjs` + `tests/ipc-inventory.test.mts` | inventory 沒有差異；5 pass、0 fail |
+| `tests/opencode-plugin`、`hook-literal-contract`、`local-wire-contract`、`setup-install` | 52 tests、51 pass、0 fail、1 skip |
+
+### 殘留風險
+
+- 沒有啟動 Electron 實機確認 `PermissionBubble` 的畫面。目前的依據是：建置後的 CSS 與基準相同，且 scoped 屬性選擇器已經套到 `.permission-request[data-v-…]`。仍建議在寵物視窗觸發一次權限請求，目視確認。
+- 頁首選單（勿擾、保持開啟、主題）、插件卡片選單、我的主題選單只做了型別與建置驗證，沒有在實機上點過。
+- OpenCode plugin 的 characterization 測試是在行程內攔截請求，沒有接上真的 OpenCode。與 OpenCode 事件格式的相容性仍靠既有的契約測試。
+- `DEFAULT_PET_ID` 目前只在 `src/utils/pet-id.ts` 定義一次，`storage-keys.ts` 是 re-export。日後若有人在 storage-keys 又寫死一次，`tests/storage-keys.test.mts` 只驗值、不驗來源，抓不到。

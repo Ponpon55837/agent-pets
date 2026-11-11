@@ -201,6 +201,7 @@ test('plugin partitions never get the panel-theme host', () => {
   const protocol = fs.readFileSync('electron/plugin-protocol.ts', 'utf8')
   assert.doesNotMatch(protocol, /panel-theme/)
   const runtime = fs.readFileSync('electron/main/runtime.ts', 'utf8')
-  assert.match(runtime, /url\.hostname === 'panel-theme'/)
+  // 主視窗的 protocol handler 依 url.hostname 分派；panel-theme 必須是其中一個 case。
+  assert.match(runtime, /switch \(url\.hostname\) \{[\s\S]*?case 'panel-theme':/)
   assert.match(fs.readFileSync('index.html', 'utf8'), /font-src 'self' data: agent-pets:\/\/panel-theme;/)
 })

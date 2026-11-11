@@ -86,9 +86,8 @@ export function registerProjectPetsIpc(deps: ProjectPetsIpcDependencies): void {
     if (!store || !isRecord(payload)) {
       return { ok: false, error: 'unavailable' }
     }
-    const input = payload
-    const projectId = typeof input.projectId === 'string' ? input.projectId : ''
-    const petId = input.petId === null ? null : typeof input.petId === 'string' ? input.petId : undefined
+    const projectId = typeof payload.projectId === 'string' ? payload.projectId : ''
+    const petId = payload.petId === null ? null : typeof payload.petId === 'string' ? payload.petId : undefined
     if (!isProjectId(projectId)) return { ok: false, error: 'invalid_project' }
     if (petId === undefined) return { ok: false, error: 'invalid_pet' }
     const available = await deps.availablePetIds()

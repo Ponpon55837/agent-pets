@@ -161,28 +161,27 @@ export function parseDesktopPreferencesPatch(value: unknown): DesktopPreferences
   const allowed = new Set<string>([...BOOLEAN_KEYS, 'locale', 'dndUntil', 'soundVolume', 'claudePermissionWaitSeconds'])
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) throw new TypeError(`Unsupported desktop preference: ${key}`)
-    if (key === 'locale') {
-      if (!isAppLocale(value[key])) throw new TypeError('Desktop preference locale is unsupported')
-      continue
-    }
-    if (key === 'soundVolume') {
-      if (!isVolume(value[key])) throw new TypeError(`Desktop preference soundVolume must be a number from ${SOUND_VOLUME.min} to ${SOUND_VOLUME.max}`)
-      continue
-    }
-    if (key === 'claudePermissionWaitSeconds') {
-      if (!isWaitSeconds(value[key])) {
-        throw new TypeError(`Desktop preference claudePermissionWaitSeconds must be an integer from ${CLAUDE_PERMISSION_WAIT_MIN_SECONDS} to ${CLAUDE_PERMISSION_WAIT_MAX_SECONDS}`)
-      }
-      continue
-    }
-    if (key === 'dndUntil') {
-      if (value[key] !== null && !(typeof value[key] === 'number' && Number.isFinite(value[key]) && (value[key] as number) > 0)) {
-        throw new TypeError('Desktop preference dndUntil must be a positive number or null')
-      }
-      continue
-    }
-    if (typeof value[key] !== 'boolean') {
-      throw new TypeError(`Desktop preference ${key} must be boolean`)
+    switch (key) {
+      case 'locale':
+        if (!isAppLocale(value[key])) throw new TypeError('Desktop preference locale is unsupported')
+        break
+      case 'soundVolume':
+        if (!isVolume(value[key])) throw new TypeError(`Desktop preference soundVolume must be a number from ${SOUND_VOLUME.min} to ${SOUND_VOLUME.max}`)
+        break
+      case 'claudePermissionWaitSeconds':
+        if (!isWaitSeconds(value[key])) {
+          throw new TypeError(`Desktop preference claudePermissionWaitSeconds must be an integer from ${CLAUDE_PERMISSION_WAIT_MIN_SECONDS} to ${CLAUDE_PERMISSION_WAIT_MAX_SECONDS}`)
+        }
+        break
+      case 'dndUntil':
+        if (value[key] !== null && !(typeof value[key] === 'number' && Number.isFinite(value[key]) && (value[key] as number) > 0)) {
+          throw new TypeError('Desktop preference dndUntil must be a positive number or null')
+        }
+        break
+      default:
+        if (typeof value[key] !== 'boolean') {
+          throw new TypeError(`Desktop preference ${key} must be boolean`)
+        }
     }
   }
 

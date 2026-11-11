@@ -86,7 +86,7 @@ test('the pet window receives exactly the palette properties its CSS reaches', (
   // 從寵物視窗用到的 token 出發，沿著 tokens.css 的 var() 找出最終依賴的可套主題屬性。
   const files = ['src/components/DesktopPet.vue', 'src/components/DesktopPet.css', 'src/components/desktop-pet/PetStatusLine.vue', 'src/components/desktop-pet/PetStatusLine.css',
     'src/components/desktop-pet/PetBubbleStack.vue', 'src/components/desktop-pet/PetEdgePeekHandle.vue', 'src/components/desktop-pet/PetEdgePeekHandle.css', 'src/components/DesktopPetBubbles.css', 'src/components/PetAnimation.vue',
-    'src/components/PetAnimation.css', 'src/components/permission/PermissionBubble.vue', 'src/components/permission/PermissionCountdown.vue',
+    'src/components/PetAnimation.css', 'src/components/permission/PermissionBubble.vue', 'src/components/permission/PermissionBubble.css', 'src/components/permission/PermissionCountdown.vue',
     'src/components/permission/PermissionDetails.vue', 'src/components/permission/PermissionNoticeBubble.vue', 'src/components/permission/PermissionRiskBadge.vue',
     'src/components/ui/Button.vue', 'src/components/ui/Icon.vue', 'src/utils/agent-state-presentation.ts', 'src/styles/base.css']
   const used = new Set(files.flatMap(file => [...readFileSync(file, 'utf8').matchAll(/var\((--[a-z0-9-]+)/g)].map(m => m[1]!)))
@@ -120,7 +120,7 @@ test('only the status pill reads --pet-status-*; bubbles, permission UI, dots an
     assert.match(selector!.trim(), /status-line|quota-meter|^:root\[data-pet-status-theme\] \.desktop-pet/, selector)
     assert.doesNotMatch(selector!, /bubble|permission|badge|tooltip|line-dot|marker|edge|context/, selector)
   }
-  for (const file of ['src/components/DesktopPetBubbles.css', 'src/components/permission/PermissionBubble.vue', 'src/components/permission/PermissionNoticeBubble.vue', 'src/components/PetAnimation.css']) {
+  for (const file of ['src/components/DesktopPetBubbles.css', 'src/components/permission/PermissionBubble.vue', 'src/components/permission/PermissionBubble.css', 'src/components/permission/PermissionNoticeBubble.vue', 'src/components/PetAnimation.css']) {
     assert.doesNotMatch(readFileSync(file, 'utf8'), /--pet-status-|--organic-bg|panel-theme/, file)
   }
   const pet = readFileSync('src/components/DesktopPet.vue', 'utf8')
