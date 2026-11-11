@@ -467,6 +467,7 @@ async function bootstrapApp(): Promise<void> {
           turnEndWatcher = createTurnEndWatcher({
             now: Date.now,
             sessions: () => mainState.sessionSnapshot.list(),
+            session: (source, sessionId) => mainState.sessionSnapshot.get(source, sessionId),
             configDir: family => currentAgentConfigDirs()[family].path,
             hasTranscript: familyHasTranscript,
             locate: locateTranscript,

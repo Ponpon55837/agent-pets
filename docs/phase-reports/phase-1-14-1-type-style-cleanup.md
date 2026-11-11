@@ -372,3 +372,94 @@ Haiku 掃描 `electron/**` 與 `integrations/**`（已知清單除外），共�
 - 頁首選單（勿擾、保持開啟、主題）、插件卡片選單、我的主題選單只做了型別與建置驗證，沒有在實機上點過。
 - OpenCode plugin 的 characterization 測試是在行程內攔截請求，沒有接上真的 OpenCode。與 OpenCode 事件格式的相容性仍靠既有的契約測試。
 - `DEFAULT_PET_ID` 目前只在 `src/utils/pet-id.ts` 定義一次，`storage-keys.ts` 是 re-export。日後若有人在 storage-keys 又寫死一次，`tests/storage-keys.test.mts` 只驗值、不驗來源，抓不到。
+
+## E：演算法與效能優化
+
+- **分支**：`claude/cleanup-e-algorithm-perf-441068`
+- **開始時間**：2026-11-11 12:55（Asia/Taipei）
+- **狀態**：通過（未開始 → 進行中 12:55 → 通過 13:12）
+- **完成時間**：2026-11-11 13:12（Asia/Taipei）
+
+### 步驟狀態
+
+| # | 步驟 | 狀態 | 備註 |
+|---|---|---|---|
+| 1 | 讀規範（§8）與相關檔案 | 通過 | |
+| 2 | `plugin-feed` characterization 測試與 `addToCenter` 優化 | 通過 | 5 項新測試先在舊實作上跑過，改寫後也全過 |
+| 3 | `SessionSnapshotStore.get` 與 turn-end watcher 改接 | 通過 | 2 項 watcher 測試先在舊實作上跑過；另加 1 項 `get` 測試 |
+| 4 | 熱路徑掃描與評估 | 通過 | haiku 子代理掃描，候選項由我逐一讀原始碼複核。只改 `plugin-broker` storage 一處 |
+| 5 | 全套驗證與 code review | 通過 | `bench:lag:check` 在本機超出門檻，原因與本階段無關，見「驗證」 |
+
+### 檔案變更
+
+| 檔案 | 變更內容 | 原因 |
+|---|---|---|
+| `electron/plugin-feed.ts` | `addToCenter` 拿掉 `map`+`filter` 建索引清單、迴圈內 `splice` 和索引修正，改成新增的 `trimPluginOverflow`：先數該 plugin 的筆數，超額時原地壓縮一次。總量修剪從 `while … shift()` 改成一次 `splice(0, overflow)` | 任務 1 |
+| `electron/main/session-snapshot.ts` | 新增 `get(source, sessionId)`；抽出 `snapshotKey`、`cloneEntry`，讓 `record`／`list`／`get` 共用 | 任務 2 |
+| `electron/main/turn-end-watcher.ts` | `TurnEndWatcherDeps` 新增 `session(source, sessionId)`；讀完檔後改用它重新取最新狀態 | 任務 2 |
+| `electron/main.ts` | watcher deps 接上 `mainState.sessionSnapshot.get` | 任務 2 |
+| `electron/plugin-broker.ts` | `PluginStorageState` 新增 `size`（序列化後的位元組數與筆數，第一次寫入時才算）。`storage.set`／`storage.remove` 改成只增減變動那一筆，並原地修改 `values`，不再每次 spread 複製 | 任務 3 掃描結果；同時修正 prototype key 的 bug（見下） |
+| `tests/plugin-feed.test.mts` | 新增 5 項 retention characterization：單一 plugin 超額（含 read 狀態）、多 plugin 交錯、總量超額、兩種修剪同時觸發（鎖住先後順序）、clone 隔離；同時驗證 `onNotificationsChanged` 的呼叫次數 | 動手前先鎖行為 |
+| `tests/turn-end-watcher.test.mts` | 新增：讀檔期間 state 改變不送 idle、讀檔期間 session 消失不送 idle、`SessionSnapshotStore.get` 的複本隔離與過期線；3 組 fake deps 補上 `session` | 同上 |
+| `tests/plugin-broker.test.mts` | 新增：隨機 set／remove 序列的差分測試（3 個種子，每個 400 步，對照「寫入後整份 JSON 的 UTF-8 位元組數」參考模型，內容含多位元組字元、跳脫字元、單獨代理字元、數字 key）；剛好等於上限與多 1 byte 的邊界（含從磁碟載入的既有資料）；prototype key 回歸測試 | 同上 |
+| `docs/phase-reports/phase-1-14-1-type-style-cleanup.md` | 新增 E 一節 | 階段紀錄 |
+
+### 複雜度變化
+
+n = center 筆數（≤ 500），k = 單一 plugin 筆數（≤ 100），S = 單一 plugin storage 序列化大小（預設 1 MiB，最大 50 MiB），v = 單次寫入的值大小（受 RPC 256 KB 上限限制）。
+
+| 改動 | 改動前 | 改動後 |
+|---|---|---|
+| `PluginFeedController.addToCenter` | 時間：`map`+`filter` O(n)；超額 e 筆時，每筆要 `splice` O(n) 加索引修正 O(k)，所以是 O(n + e·(n+k))。總量修剪的 `shift` 每次 O(n)，共 O(n·g)。空間：兩個暫時陣列，O(n) | 時間：計數 O(n)，超額時一次壓縮 O(n)，總量修剪一次 `splice` O(n)，合計 O(n)，跟 e、g 無關。空間 O(1) |
+| turn-end watcher 讀檔後重新取狀態 | `list()`：掃過期 O(m)、複製全部 entry O(m)、線性比對 O(m)；m ≤ 200（`MAX_ENTRIES`）。空間 O(m) | `get()`：Map 查詢 O(1)，只複製一筆。空間 O(1) |
+| `PluginBroker` `storage.set`／`storage.remove` | 每次 spread 複製 O(keys)，再完整 `JSON.stringify` O(S)。空間 O(S) | 第一次寫入算一次 O(S)，之後每次 O(v + 舊值大小)。不複製物件，空間 O(v) |
+
+說明：
+- 在目前的不變式下（每次新增後都會修剪），e 與 g 最多是 1，所以 `addToCenter` 原本實際上已接近 O(n)。這次的收益是不再建立兩個暫時陣列、去掉迴圈內的 `splice`，最差情況也有界，不依賴不變式。
+- **為什麼不維護 `Map<pluginId, count>`**：`center` 有 6 條修改路徑（新增、`markRead`、`markAllRead`、`clear`、依 plugin `clear`、兩種修剪），每條都要同步計數，漏一條就會刪錯紀錄，而且很難從測試看出來。n 上限只有 500，每次新增多掃一次的成本可以忽略。只在新增時線性掃描，正確性只要看一個函式就能證明，維護成本最低。
+- **`get` 的過期語意**：照 `list()`。`lastSeenAt < now - MAX_AGE_MS` 的項目視為不存在，回傳 `undefined`，並同樣把它刪掉；剛好在線上的仍可見。這樣 watcher 用 `get` 和用 `list()` 看到的結果一致。介面用 `(source, sessionId)` 兩個參數，不用字串 key，讓 key 的組法只留在 store 內部。
+- **storage 量測**（scratchpad 一次性腳本，不是 repo 內的 bench；以 200 KiB 一筆、改寫 1 筆量測）：1 MiB 從 1.02 降到 0.23 ms／次；10 MiB 從 11.6 降到 0.24 ms／次；50 MiB 從 58.7 降到 0.32 ms／次。`storage.set` 沒有速率限制，所以改動前，plugin 在大 storage 上連續寫入會持續卡住主程序。
+- **增量計算為什麼精確**：物件的序列化結果是 `{` + 各筆 `"key":value` 用逗號分隔 + `}`，所以總長 = 2 + Σ 各筆長度 + (筆數 − 1)。key 與值的跳脫規則跟 `JSON.stringify(key)`、`JSON.stringify(value)` 單獨序列化時相同；`JSON.stringify(JSON.parse(s)) === s` 對 `JSON.stringify` 的輸出也成立。key 的順序不影響總長。差分測試把這幾點都實際跑過一次。
+
+### 範圍內順手修正：storage 的 prototype key
+
+原本每次寫入都用 `{ ...state.values }` 複製，結果 `loadStorage` 建立的 null-prototype 物件被換成一般物件。之後 `storage.get('toString')` 會得到 `{ found: false, value: <Object.prototype.toString> }`，而不是 `value: null`。改成原地修改後，`values` 一直保持 null-prototype。新增的回歸測試在舊實作上會失敗（已用 stash 只還原 `plugin-broker.ts` 確認），在新實作上通過。
+
+### 評估過但決定不改
+
+| 項目 | 不改的理由 |
+|---|---|
+| `PluginFeedController.clear(pluginId)` 在迴圈內反向 `splice` | 最差 O(n·k) = 500×100，只在使用者手動清除時觸發，頻率低，沒有量測依據 |
+| `electron/history.ts` `getUsageBlocks`（每次最多 5 萬列） | 主要成本在 SQL 取列，排序對近乎有序的輸入接近線性。要改就得換成 SQL 聚合或快取，屬於行為層級的改動。目前沒有 bench 能量測，呼叫頻率是使用者開啟用量面板時才觸發 |
+| `electron/local-usage.ts` `filesUnder` 對每個項目 `lstat` | 屬於 I/O 成本，不是演算法問題。append 不會改變目錄 mtime，不用 file watcher 就省不掉 stat。應該先用 `scripts/bench/local-usage-lag.mjs` 量測 |
+| `electron/permission-broker.ts` `createRequest` 做 4 次全掃描、`expireDue` 每 400 ms 一次 | 每個 session 最多 20 筆進行中、200 筆終態紀錄，建立速率限制每分鐘 60 次，實際 n 很小 |
+| `broadcast-coalescer`、`event-server`／`event-rate-limit`、`src/stores/agent/*`、`usePetStatusLines` | 已經是 amortized O(1)、有上限（≤ 200 sessions、≤ 8 佇列、≤ 2 providers），或已經有索引與快取 |
+| 固定小白名單的 `includes`／`Set`、有上限陣列上的 `shift`（200、500、8） | conventions §8：沒有量測依據不做 |
+
+### Code review 結論
+
+- **`addToCenter` 淘汰順序**：先做單一 plugin 修剪，再做總量修剪，順序不變，並以註解說明原因。原地壓縮只會寫入已經走過的位置，所以邊迭代邊寫入是安全的。read 狀態跟著紀錄物件走，不會重建；`cloneFeedItem` 仍只在 push 時呼叫一次；`notifyNotificationsChanged` 每次新增仍只呼叫一次，測試驗證了呼叫次數與最後的 unread 值。
+- **watcher**：「讀檔期間有新 hook 事件進來時以新事件為準」的判斷條件（`!current || lastSeenAt 不同 || state 不同`）原封不動，只是換了資料來源。開頭的 `deps.sessions()` 仍用 `list()`，因為需要整份清單來找候選項並清掉 `tracked`。
+- **storage**：唯一的接受／拒絕條件仍是「寫入後的序列化位元組數 ≤ 上限」，差分測試涵蓋 1200 步、兩種結果都有。失敗的寫入（`too_large`、`invalid_request`）不會修改 `values` 或 `size`。`flushStorage` 寫檔前仍會完整 stringify 再檢查一次，即使計數出錯，也不會寫出超過上限的檔案。`size` 綁在 state 上，`removePlugin` 刪掉 state 時一併清掉；重新載入時是 `null`，會重新計算。`storage.get` 不受影響。
+- **安全邊界**：RPC 驗證、key 白名單（`__proto__`／`prototype`／`constructor` 仍被拒絕）、容量上限的語意都沒變。prototype key 修正讓 plugin 拿不到宿主端的函式參考。
+- **測試閉包**：沒有新增 src 執行期 import；新測試 import 的 `src/utils/session-lifecycle.ts` 本來就在閉包內。
+- **流程備註**：本機的 `python` 是 Windows Store 空殼，一開始用它做的兩段編輯其實沒有生效。發現後改用 Edit 重做，並重新確認 characterization 測試確實先在舊實作上跑過，才套用實作改動。
+
+### 驗證
+
+| 指令 | 結果 |
+|---|---|
+| `pnpm exec vue-tsc --noEmit` | 0 error |
+| `pnpm lint` | 0 error、36 warning，全部是 `tests/` 內的 `no-explicit-any`，與基準相同；main-process lint passed |
+| `pnpm test:unit` | 1837 tests、1798 pass、0 fail、39 skip（比基準多 11 項：plugin-feed 5、turn-end-watcher 3、plugin-broker 3） |
+| `node --test tests/plugin-feed.test.mts tests/ipc-plugin-feed.test.mts` | 27 pass、0 fail |
+| `node --test tests/turn-end-watcher.test.mts` | 12 pass、0 fail |
+| `node --test tests/plugin-broker.test.mts` | 13 pass、0 fail、1 skip（既有的 file symlink skip） |
+| `git diff --check` | 通過 |
+| `pnpm bench:lag:check` | **超出門檻**：3 次都是 mean 15.5 ms（門檻 12 ms），p99 約 18 ms，max 20–24 ms。這個 bench 只量 `HistoryStore.recordEvent`。我用 module resolve hook 列出它載入的 20 個 repo 內模組，其中沒有本階段改過的檔案，所以結果與改動前相同。15.5 ms 和 Windows 預設 15.6 ms 的計時器粒度一致；baseline 是在 macOS 上量的（mean 5.43 ms，解析度 5 ms）。本機無法用這個 bench 判斷回歸，需要在 macOS 或 CI 上重跑，或另外替 Windows 建立 baseline |
+
+### 殘留風險
+
+- `bench:lag:check` 在 Windows 上一定會失敗。它目前無法作為這台機器的回歸門檻，建議之後替 Windows 另建 baseline，或改用高解析度計時。
+- storage 的增量計數是新的不變式：日後若新增其他修改 `state.values` 的路徑，卻沒有同步更新 `size`（或把它設回 `null`），容量判斷就會偏掉。目前的防線是 `flushStorage` 寫檔前的完整檢查，以及差分測試。已在 `size` 欄位的註解說明。
+- 沒有啟動 Electron 實機確認插件通知中心與 turn-end 補送 idle 的行為。依據是單元測試與差分測試。
