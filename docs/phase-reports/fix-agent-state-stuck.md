@@ -58,10 +58,11 @@ thinking 的 5 分鐘來自本機歷史資料：Claude 6418 筆「之後還有�
 | --- | --- |
 | `vue-tsc --noEmit` | 通過 |
 | `pnpm lint` | 0 個錯誤（52 個既有警告） |
-| `pnpm test:unit` | 1810 個測試：1767 通過、37 略過、6 失敗 |
-| 新增測試 | `session-lifecycle`（7）、`transcript-turn-end`（9）、`turn-end-watcher`（8）、store 特性測試 2 個、hook 對應 3 個 |
+| `pnpm test:unit` | 1811 個測試：1768 通過、37 略過、6 失敗 |
+| 新增測試 | `session-lifecycle`（7）、`transcript-turn-end`（9）、`turn-end-watcher`（9）、store 特性測試 2 個、hook 對應 3 個 |
 | 真實紀錄檔（唯讀） | Claude 300 個、Codex 73 個：只讀檔尾的判讀與整檔讀取 0 筆不符；每次讀取平均約 2 毫秒 |
 | 隔離的 app 端到端 | 10 項全過（見下） |
+| 打包的可攜版＋真實的 agent | Claude Desktop 與 Codex 各中斷一次，都回到 idle（見下） |
 
 6 個失敗全部是 `EPERM: operation not permitted, symlink`：這台 Windows 沒有建立符號連結的權限，失敗的是既有的符號連結測試（hook-config、pet-import、project-mcp、edit-risk），與這次改動無關。
 
@@ -71,9 +72,22 @@ thinking 的 5 分鐘來自本機歷史資料：Claude 6418 筆「之後還有�
 - 對照組三項維持原狀：紀錄檔沒有結束紀錄的長時間工具、只有上一回合中斷紀錄的新回合、沒有紀錄檔的 session。
 - 補上 idle 之後再送真實事件，狀態照常被蓋過。
 
+### 打包版實測（2026-11-11）
+
+`pnpm build` 產生的可攜版 `AgentPets-1.13.2.exe`，使用者在真實的 Claude Desktop 與 Codex 對話各按一次中斷：
+
+| agent | 最後一個 hook 事件 | 紀錄檔的中斷時間 | 補上 idle 的時間 | 中斷到 idle |
+| --- | --- | --- | --- | --- |
+| Claude Desktop | 10:48:06.491（thinking） | 10:48:08.661 | 10:48:19.484 | 10.8 秒 |
+| Codex | 10:48:28.387（thinking） | 未取得 | 10:48:39.345 | 距最後事件 11.0 秒 |
+
+Codex 那筆沒有對到 rollout 裡的 `turn_aborted` 時間：Windows 對仍被開啟的檔案不會即時更新修改時間，查核腳本用修改時間篩選檔案而漏掉它；補上的事件本身有記錄在歷史資料庫。
+
+這次實測抓到一個問題並已修正：補送的事件沒有帶 `adapterId`，歷史資料庫把它記成備用 adapter（`generic-http`）底下的另一筆 session，原本那筆仍停在 thinking。寵物與面板的顯示不受影響（它們用來源＋session id 辨識）。修正後主程序的 session 鏡像會保留 `adapterId` 並帶進補送的事件，`turn-end-watcher` 測試新增一項用真的 `HistoryStore` 確認兩者落在同一筆。使用者的歷史資料庫因此留有兩筆 `generic-http` 的 idle 紀錄，沒有自動清除。修正後的版本尚未再用真實的 agent 重測。
+
 ## 未驗證與殘留風險
 
-- 沒有用真的 Claude Code／Codex 按 Esc 在已安裝的 app 上重現；端到端用的是依真實紀錄形狀寫的檔案。修正要等重新打包的 app 啟動後才生效（`~/.desktop-pet/agent-hook.mjs` 也是那時重新部署）。
+- 真實 agent 只測了「思考中中斷」各一次；工具執行中中斷、拒絕權限、Claude Code CLI 與 Codex CLI 沒有用真實 agent 測（隔離的端到端有涵蓋對應的紀錄形狀）。
 - 紀錄檔格式不是公開契約。格式改變時判讀會回到「還在進行」，行為退回只有狀態期限；不會誤判成結束。
 - `transcript_path` 為空是否能用來辨識 Codex 的內部執行緒，還沒驗證（需要在真實的 Codex Desktop 執行時記錄 hook payload）。成立的話可以取代第 3 項的目錄名稱規則，並涵蓋另一個背景執行緒（工作目錄是使用者專案、會正常結束，目前仍會短暫顯示成一個 session）。
 - 工具執行中 agent 程序被強制結束：紀錄檔沒有結束紀錄，仍要 15 分鐘才轉離線。

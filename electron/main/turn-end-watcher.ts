@@ -95,6 +95,8 @@ export function createTurnEndWatcher(deps: TurnEndWatcherDeps): TurnEndWatcher {
         const current = deps.sessions().find(candidate => keyOf(candidate) === keyOf(entry))
         if (!current || current.lastSeenAt !== entry.lastSeenAt || current.state !== entry.state) continue
         deps.dispatch({
+          // 少了 adapterId，歷史會把這個事件記到備用 adapter 底下的另一筆 session。
+          ...(entry.adapterId ? { adapterId: entry.adapterId } : {}),
           source: entry.source,
           sessionId: entry.sessionId,
           state: 'idle',

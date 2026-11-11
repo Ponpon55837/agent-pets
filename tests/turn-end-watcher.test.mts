@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
 import type { AgentFamilyKey, AgentState, AgentStatusEvent } from '../src/types/agent.ts'
-import type { SessionSnapshotEntry } from '../electron/main/session-snapshot.ts'
+import { HistoryStore } from '../electron/history.ts'
+import { SessionSnapshotStore, type SessionSnapshotEntry } from '../electron/main/session-snapshot.ts'
 import type { TranscriptFingerprint, TranscriptProbe, TranscriptTurnEnd } from '../electron/transcript-turn-end.ts'
 import {
   TURN_END_CLOCK_SKEW_MS,
@@ -63,12 +67,14 @@ const interruptedAt = (endedAt: number): TranscriptTurnEnd => ({ endedAt, reason
 test('an interrupted turn becomes one idle event that carries the session routing', async () => {
   const h = harness()
   h.sessions = [session('claude-desktop', 'sess-0001', 'tool-running', START, {
+    adapterId: 'claude-code',
     project: 'demo', projectId: 'p1', routedPetId: 'pet-1', host: { kind: 'desktop', app: 'claude-desktop', switchable: true } as never,
   })]
   h.files.set('/config/claude/sess-0001.jsonl', { version: 1, turnEnd: interruptedAt(START + 3_000) })
   h.now = START + TURN_END_QUIET_MS
   assert.equal(await h.watcher.check(), 1)
   assert.deepEqual(h.dispatched, [{
+    adapterId: 'claude-code',
     source: 'claude-desktop', sessionId: 'sess-0001', state: 'idle', timestamp: h.now, originalEvent: TURN_END_EVENT,
     project: 'demo', projectId: 'p1', routedPetId: 'pet-1', host: { kind: 'desktop', app: 'claude-desktop', switchable: true },
   }])
@@ -191,4 +197,38 @@ test('overlapping checks do not run twice, and stop() ends the timer', async () 
   h.watcher.start()
   h.watcher.stop()
   h.watcher.stop()
+})
+
+test('the settled event lands in the same history session as the hook events', async (t) => {
+  // 實測抓到的問題：補送的事件少了 adapterId，歷史把它記成備用 adapter 底下的另一筆 session。
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-turn-end-history-'))
+  const history = new HistoryStore(path.join(directory, 'history.sqlite'), { now: () => START + 60_000 })
+  t.after(() => { history.close(); fs.rmSync(directory, { recursive: true, force: true }) })
+  const snapshot = new SessionSnapshotStore(() => START + TURN_END_QUIET_MS)
+  const dispatched: AgentStatusEvent[] = []
+  const watcher = createTurnEndWatcher({
+    now: () => START + TURN_END_QUIET_MS,
+    sessions: () => snapshot.list(),
+    configDir: () => '/config',
+    hasTranscript: () => true,
+    locate: async () => '/config/session.jsonl',
+    probe: async () => ({ fingerprint: { size: 1, mtimeMs: 1 }, turnEnd: interruptedAt(START + 1) }),
+    dispatch: event => { dispatched.push(event) },
+  })
+
+  for (const [source, adapterId] of [['claude-desktop', 'claude-code'], ['codex', 'codex']] as const) {
+    const hookEvent: AgentStatusEvent = {
+      adapterId, source, sessionId: `sess-${adapterId}`, state: 'thinking', timestamp: START,
+      project: 'demo', projectId: 'a'.repeat(24), originalEvent: 'UserPromptSubmit',
+    }
+    snapshot.record(hookEvent)
+    history.recordEvent(hookEvent)
+  }
+  assert.equal(await watcher.check(), 2)
+  for (const event of dispatched) history.recordEvent(event)
+
+  const sessions = history.listSessions().items
+  assert.equal(sessions.length, 2)
+  assert.deepEqual(sessions.map(item => item.adapterId).sort(), ['claude-code', 'codex'])
+  // 修正前這裡會是 4 筆：每個 session 多一筆 generic-http 的紀錄。
 })
