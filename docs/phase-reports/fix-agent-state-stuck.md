@@ -83,7 +83,7 @@ thinking 的 5 分鐘來自本機歷史資料：Claude 6418 筆「之後還有�
 
 Codex 那筆沒有對到 rollout 裡的 `turn_aborted` 時間：Windows 對仍被開啟的檔案不會即時更新修改時間，查核腳本用修改時間篩選檔案而漏掉它；補上的事件本身有記錄在歷史資料庫。
 
-這次實測抓到一個問題並已修正：補送的事件沒有帶 `adapterId`，歷史資料庫把它記成備用 adapter（`generic-http`）底下的另一筆 session，原本那筆仍停在 thinking。寵物與面板的顯示不受影響（它們用來源＋session id 辨識）。修正後主程序的 session 鏡像會保留 `adapterId` 並帶進補送的事件，`turn-end-watcher` 測試新增一項用真的 `HistoryStore` 確認兩者落在同一筆。使用者的歷史資料庫因此留有兩筆 `generic-http` 的 idle 紀錄，沒有自動清除。
+這次實測抓到一個問題並已修正：補送的事件沒有帶 `adapterId`，歷史資料庫把它記成備用 adapter（`generic-http`）底下的另一筆 session，原本那筆仍停在 thinking。寵物與面板的顯示不受影響（它們用來源＋session id 辨識）。修正後主程序的 session 鏡像會保留 `adapterId` 並帶進補送的事件，`turn-end-watcher` 測試新增一項用真的 `HistoryStore` 確認兩者落在同一筆。使用者的歷史資料庫因此留有兩筆 `generic-http` 的 idle 紀錄；經使用者同意後已手動刪除（2 筆 session、2 筆事件、2 筆時間軸、2 筆搜尋索引，`PRAGMA quick_check` 為 ok）。
 
 修正後重新打包並重測（同一天 11:01 起）：
 
@@ -105,6 +105,6 @@ Codex 那筆沒有對到 rollout 裡的 `turn_aborted` 時間：Windows 對仍�
 - 沒有處理 Codex 的 `Interrupt` hook 事件（官方文件有列，版本依據只有第三方文章）。第 2 項已涵蓋中斷，之後可以再加來縮短那幾秒延遲。
 - 另外發現歷史資料庫會因為 `cwd` 改變把同一個 session 拆成多筆（240 筆紀錄實際是 87 個 session），與本次無關，另案處理。
 
-## 建議版本
+## 版本
 
-minor：主程序新增一類讀取（agent 對話紀錄檔的結尾內容），屬於安全邊界的變動；另外新增了主程序內部送事件的入口，thinking 的期限行為也改了。
+使用者確認後升為 1.14.0（minor）：主程序新增一類讀取（agent 對話紀錄檔的結尾內容），屬於安全邊界的變動；另外新增了主程序內部送事件的入口，thinking 的期限行為也改了。
