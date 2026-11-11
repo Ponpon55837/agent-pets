@@ -137,6 +137,9 @@ test('will-quit closes servers and native surfaces in the established order', ()
     'mainState.presentationMcpServer?.close()',
     'mainState.presentationMcpServer = null',
     'mainState.presentationController = null',
+    // 先停掉會往事件流程送事件的監看，再關事件伺服器。
+    'turnEndWatcher?.stop()',
+    'turnEndWatcher = null',
     'mainState.eventServer?.closeAllConnections?.()',
     'mainState.eventServer?.close()',
     'mainState.eventServer = null',

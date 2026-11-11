@@ -86,7 +86,9 @@ import { registerAdapterIpc } from './ipc/adapters'
 import { registerProjectMcpIpc } from './ipc/project-mcp'
 import { registerOnboardingIpc } from './ipc/onboarding'
 import { configureSetupEnvironment } from './setup-environment'
-import { agentConfigEnvReady, createAgentConfigEnvironment } from './agent-config-dirs'
+import { agentConfigEnvReady, createAgentConfigEnvironment, currentAgentConfigDirs } from './agent-config-dirs'
+import { createTurnEndWatcher, type TurnEndWatcher, type TurnEndWatcherDeps } from './main/turn-end-watcher'
+import { familyHasTranscript, locateTranscript, probeTranscript } from './transcript-turn-end'
 import { OnboardingStore } from './onboarding-state'
 import { registerProjectPetsIpc } from './ipc/project-pets'
 
@@ -460,6 +462,19 @@ async function bootstrapApp(): Promise<void> {
           health.onPersistentFailure(status)
         },
         onHandle: health.attach,
+        // agent 沒送結束事件時（中斷、拒絕工具），由對話紀錄檔補上；走同一條事件流程。
+        onDispatcher: (dispatch: TurnEndWatcherDeps['dispatch']) => {
+          turnEndWatcher = createTurnEndWatcher({
+            now: Date.now,
+            sessions: () => mainState.sessionSnapshot.list(),
+            configDir: family => currentAgentConfigDirs()[family].path,
+            hasTranscript: familyHasTranscript,
+            locate: locateTranscript,
+            probe: probeTranscript,
+            dispatch,
+          })
+          turnEndWatcher.start()
+        },
       }
     })(),
   )
@@ -890,10 +905,14 @@ app.on('will-quit', () => {
   mainState.presentationMcpServer?.close()
   mainState.presentationMcpServer = null
   mainState.presentationController = null
+  turnEndWatcher?.stop()
+  turnEndWatcher = null
   mainState.eventServer?.closeAllConnections?.()
   mainState.eventServer?.close()
   mainState.eventServer = null
 })
+
+let turnEndWatcher: TurnEndWatcher | null = null
 
 // Agent Pets is a tray application on every supported desktop platform.
 // Hiding or closing its windows must not stop hooks or background status.

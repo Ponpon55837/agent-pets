@@ -30,7 +30,15 @@ export function createEventServer(
   eventToken: string,
   onEvent?: (event: AgentStatusEvent) => void,
   normalizeEvent: EventIngressNormalizer = normalizeAgentStatusEvent,
-  listenHooks: Pick<LocalServerListenOptions, 'onStatus' | 'onPersistentFailure'> & { onHandle?: (handle: LocalServerListenHandle) => void; port?: number } = {},
+  listenHooks: Pick<LocalServerListenOptions, 'onStatus' | 'onPersistentFailure'> & {
+    onHandle?: (handle: LocalServerListenHandle) => void
+    port?: number
+    /**
+     * 給主程序自己產生的事件用（例如從對話紀錄檔補上的回合結束）：拿到一個把事件送進
+     * 跟 hook 事件相同流程的函式。事件必須已經是正規化過的；不經過 HTTP、token 與流量限制。
+     */
+    onDispatcher?: (dispatch: (event: AgentStatusEvent) => void) => void
+  } = {},
 ) {
   const limiter = createEventRateLimiter()
   let lastSendFailureLogAt = 0
@@ -60,6 +68,31 @@ export function createEventServer(
   })
 
   const expectedToken = Buffer.from(eventToken)
+
+  function sendToWindows(event: AgentStatusEvent): void {
+    try {
+      for (const win of getWindows()) enqueueAgentEvent({ window: win, event })
+    } catch (error) {
+      console.error('Event dispatch failed', error)
+    }
+  }
+
+  // Side effects (notifications, XP, history). setImmediate keeps arrival order, and a failure
+  // here is our bug, not the caller's, so it is logged rather than surfaced.
+  function runSideEffects(event: AgentStatusEvent): void {
+    setImmediate(() => {
+      try {
+        onEvent?.(event)
+      } catch (error) {
+        console.error('Event handler failed', error)
+      }
+    })
+  }
+
+  listenHooks.onDispatcher?.((event) => {
+    sendToWindows(event)
+    runSideEffects(event)
+  })
 
   const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
     // Lets a second Agent Pets instance recognise this port owner without a token.
@@ -132,26 +165,14 @@ export function createEventServer(
       return
     }
 
-    try {
-      for (const win of getWindows()) enqueueAgentEvent({ window: win, event })
-    } catch (error) {
-      console.error('Event dispatch failed', error)
-    }
+    sendToWindows(event)
 
     // Acknowledge first: the hook must never wait on synchronous SQLite work.
     response.writeHead(204)
     response.end()
 
-    // Side effects (notifications, XP, history) run right after the response
-    // is flushed. setImmediate keeps arrival order, and a failure here is our
-    // bug, not the caller's, so it is logged rather than surfaced.
-    setImmediate(() => {
-      try {
-        onEvent?.(event)
-      } catch (error) {
-        console.error('Event handler failed', error)
-      }
-    })
+    // Runs right after the response is flushed.
+    runSideEffects(event)
   })
 
   // 本機 hook 的請求都很小；縮短逾時，避免慢速連線長時間佔用 socket。

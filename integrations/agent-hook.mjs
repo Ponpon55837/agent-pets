@@ -92,6 +92,19 @@ function mapCodexEvent(eventName) {
   }
 }
 
+// Codex Desktop 會在自己的設定目錄底下跑背景執行緒（記憶整理的工作目錄是 <CODEX_HOME>/memories_v2）。
+// 那不是使用者的對話，結束時也不送 Stop／SessionEnd，寵物會停在 thinking 直到逾時，所以整個略過。
+const CODEX_INTERNAL_DIR = /^memories(?:_v\d+)?$/i
+
+function isCodexInternalThread(cwd) {
+  if (typeof cwd !== 'string' || !cwd) return false
+  const codexHome = path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'))
+  // Windows 的 Codex 可能回報 `\\?\C:\...` 形式的路徑。
+  const relative = path.relative(codexHome, path.resolve(cwd.replace(/^\\\\\?\\/, '')))
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return false
+  return CODEX_INTERNAL_DIR.test(relative.split(/[\\/]/)[0])
+}
+
 // Claude Code 的 Notification 事件帶結構化的 notification_type；null 代表有文件記載但不影響寵物狀態。
 const CLAUDE_NOTIFICATION_STATES = Object.freeze({
   permission_prompt: 'waiting-permission',
@@ -454,6 +467,7 @@ async function main() {
   let state = null
 
   if (source.startsWith('codex')) {
+    if (isCodexInternalThread(payload?.cwd)) process.exit(0)
     state = mapCodexEvent(eventName)
   } else if (source.startsWith('claude')) {
     state = mapClaudeEvent(eventName, payload)

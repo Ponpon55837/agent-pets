@@ -410,6 +410,38 @@ test('stale sweeps mark silent sessions offline and drop long-offline ones; pend
   assert.equal(store.sessionByKey('claude:off'), undefined)
 })
 
+test('a turn whose end never arrives settles to idle quietly, and the next real event takes over', () => {
+  const { store, tick } = open()
+  store.handleEvent(event('stuck', 'thinking', { originalEvent: 'UserPromptSubmit' }))
+  store.handleEvent(event('build', 'tool-running'))
+  tick(5 * 60_000 + 1)
+  store.cleanupStale()
+  assert.equal(store.sessionByKey('claude:stuck')?.state, 'idle')
+  // 工具可以合法地跑很久，不會因為安靜就被改掉。
+  assert.equal(store.sessionByKey('claude:build')?.state, 'tool-running')
+  // 降級只改顯示：沒有提示框，也不當成工作完成。
+  assert.equal(store.toast, null)
+
+  // 回合其實還在跑：後續事件照常蓋過，完成時仍然有完成的提示。
+  store.handleEvent(event('stuck', 'tool-running'))
+  assert.equal(store.sessionByKey('claude:stuck')?.state, 'tool-running')
+  assert.equal(store.handleEvent(event('stuck', 'success')), 'success')
+  assert.ok(store.toast)
+})
+
+test('the two sweep entry points are the same sweep', () => {
+  const { store, tick } = open()
+  store.handleEvent(event('done', 'success'))
+  store.handleEvent(event('quiet', 'thinking'))
+  tick(4_001)
+  store.cleanupStale()
+  assert.equal(store.sessionByKey('claude:done')?.state, 'idle')
+  tick(SESSION_STALE_MS)
+  store.handleSuccessTimeout()
+  assert.equal(store.sessionByKey('claude:quiet')?.state, 'offline')
+  assert.equal(store.sessionByKey('claude:done')?.state, 'offline')
+})
+
 test('success turns idle after the display window, and a restored snapshot never overwrites live data', () => {
   const { store, tick } = open()
   store.handleEvent(event('done', 'success'))
