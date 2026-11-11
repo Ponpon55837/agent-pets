@@ -1,7 +1,8 @@
 # 1.14.1 型別與風格清理
 
 - **基準 commit**：`79e3704`（`main`，版本 1.14.0）
-- **階段順序**：G0 → A → B → C → D → E → F → F2 → F3，每階段一個分支，下一階段從上一階段切出；最後統一升 patch 版（1.14.1）。
+- **階段順序**：G0 → A → B → C → D → E → F → F2 → F3。每階段一個 worktree 分支，都從整合分支 `claude/release-1-14-1` 切出；主 session 複驗後 squash 合併回整合分支，再刪掉該階段的 session、worktree 與分支。
+- **版號**：使用者核准後升 patch 版 1.14.1（`package.json`）。升版後重跑 lint、vue-tsc、vite build 與全量單元測試。
 - 本檔由各階段依序續寫，每階段一節。
 
 ## 整輪總結
@@ -18,7 +19,7 @@
 | E | `416e556` | 9 | `plugin-feed` 的 `addToCenter` 改成 O(n) 原地壓縮；`SessionSnapshotStore.get` 改成 O(1)；plugin storage 寫入改成增量計算大小，順手修正 prototype key 的問題 |
 | F | `7901aa2` | 35 | 測試檔剩下的 36 個 `any` 清零，抽出 `makeAgentStatusEvent` 與 `createFakeIpcMain` 兩個共用 fixture；`no-explicit-any` 升成 error；lint 忽略 `.claude/**`、`.playwright-mcp/**` |
 | F2 | `35c5dd8` | 106 | 修正「整個測試檔沒跑完」的根因（import 時 `rmSync` 遇到 Windows 檔案鎖）；7 個測試檔的計時斷言改成負載下穩定；新增 `tsconfig.tests.json`，`tests/` 的 178 個型別錯誤清零並接進 `pnpm lint` |
-| F3 | 見 F3 一節 | 47 | `tests/` 的 114 處 `as never` 與 `electron/` 的 3 處清零，lint 以 `no-restricted-syntax` 禁止；新增 `invalid<T>()`、`fakeDisplay`、`makePermissionRequestView`；`CrashGuardProcess.off` 改成逐事件 overload |
+| F3 | `9e294c6` | 47 | `tests/` 的 114 處 `as never` 與 `electron/` 的 3 處清零，lint 以 `no-restricted-syntax` 禁止；新增 `invalid<T>()`、`fakeDisplay`、`makePermissionRequestView`；`CrashGuardProcess.off` 改成逐事件 overload |
 
 整輪相對基準 `79e3704`：共 220 個檔案變更（各階段有重疊的檔案只算一次）。
 
