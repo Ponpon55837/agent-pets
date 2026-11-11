@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AchievementStore } from '../electron/achievements.ts'
@@ -9,6 +9,7 @@ import {
   evaluateAchievements,
   type AchievementEvaluationContext,
 } from '../src/types/achievement.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 const BASE_TIME = Date.UTC(2026, 0, 1, 12)
 
@@ -48,7 +49,7 @@ function withStore<T>(work: (store: AchievementStore, path: string) => T): T {
     return work(store, path)
   } finally {
     store.close()
-    rmSync(directory, { recursive: true, force: true })
+    removeTempTree(directory)
   }
 }
 
@@ -99,7 +100,7 @@ test('unlocks are idempotent per pet and survive a store restart', () => {
   assert.equal(second.getSnapshot('wolf').totalUnlocked, 1)
   assert.equal(second.recordEvent(event('success', BASE_TIME, 'second-session'), 'wolf').length, 0)
   second.close()
-  rmSync(directory, { recursive: true, force: true })
+  removeTempTree(directory)
 })
 
 test('Night Owl uses the injected local hour boundary', () => {
@@ -231,7 +232,7 @@ test('progress comes from the same facts as the unlock rules and never exceeds t
     for (const item of snapshot.achievements) assert.ok(item.progress.current <= item.progress.target)
   } finally {
     store.close()
-    rmSync(directory, { recursive: true, force: true })
+    removeTempTree(directory)
   }
 })
 
@@ -284,7 +285,7 @@ test('v2 migration backfills counters and adds pet_id indexes to a v1 database',
     assert.deepEqual(second.getPragmaState(), { journalMode: 'wal', synchronous: 1 })
     second.close()
   } finally {
-    rmSync(directory, { recursive: true, force: true })
+    removeTempTree(directory)
   }
 })
 

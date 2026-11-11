@@ -10,6 +10,7 @@ import {
   resetQuotaCacheForTests,
   type QuotaProvider,
 } from '../electron/quota.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage'
 const CODEX_REFRESH_URL = 'https://auth.openai.com/oauth/token'
@@ -161,7 +162,7 @@ function isolateEnvironment(t: TestContext, responder: (request: RecordedRequest
       else process.env[name] = value
     }
     resetQuotaCacheForTests()
-    fs.rmSync(root, { recursive: true, force: true })
+    removeTempTree(root)
   })
   return { root, codexHome, claudeHome, requests }
 }

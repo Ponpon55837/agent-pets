@@ -16,7 +16,8 @@
 | C | `031c09b` | 4 | `setup.ts` 產生的 Codex／Claude Code hook JSON 改用嚴格型別，characterization 測試逐位元組鎖住 dotfile 輸出 |
 | D | `04162d1` | 42 | 分支鏈改成 `switch` 或 handler map（`ActionMenu` 改為泛型）；集中重複常數；`event-server` 改用 `IPC_CHANNELS`；`PermissionBubble` 的 CSS 抽成獨立檔 |
 | E | `416e556` | 9 | `plugin-feed` 的 `addToCenter` 改成 O(n) 原地壓縮；`SessionSnapshotStore.get` 改成 O(1)；plugin storage 寫入改成增量計算大小，順手修正 prototype key 的問題 |
-| F | 見 F 一節 | 35 | 測試檔剩下的 36 個 `any` 清零，抽出 `makeAgentStatusEvent` 與 `createFakeIpcMain` 兩個共用 fixture；`no-explicit-any` 升成 error；lint 忽略 `.claude/**`、`.playwright-mcp/**` |
+| F | `7901aa2` | 35 | 測試檔剩下的 36 個 `any` 清零，抽出 `makeAgentStatusEvent` 與 `createFakeIpcMain` 兩個共用 fixture；`no-explicit-any` 升成 error；lint 忽略 `.claude/**`、`.playwright-mcp/**` |
+| F2 | 見 F2 一節 | 106 | 修正「整個測試檔沒跑完」的根因（import 時 `rmSync` 遇到 Windows 檔案鎖）；7 個測試檔的計時斷言改成負載下穩定；新增 `tsconfig.tests.json`，`tests/` 的 178 個型別錯誤清零並接進 `pnpm lint` |
 
 整輪相對基準 `79e3704`：共 122 個檔案變更（各階段有重疊的檔案只算一次）。
 
@@ -24,11 +25,12 @@
 
 | 項目 | 基準（`79e3704`） | 本輪結束（F） |
 |---|---|---|
-| `pnpm lint` | 0 error、52 warning（全是 `no-explicit-any`） | 0 error、0 warning；`no-explicit-any` 已是 error |
+| `pnpm lint` | 0 error、52 warning（全是 `no-explicit-any`） | 0 error、0 warning；`no-explicit-any` 已是 error；含 tests 型別檢查 |
+| `tests/` 型別檢查 | 沒有（`tsconfig.json` 不含 `tests/`） | `tsconfig.tests.json`，0 error |
 | `pnpm exec vue-tsc --noEmit` | 0 error | 0 error |
-| `pnpm test:unit` | 1811 tests、6 fail、37 skip | 1837 tests、0 fail、39 skip |
+| `pnpm test:unit` | 1811 tests、6 fail、37 skip | 1837 tests、0 fail、39 skip；連續 5 次與 3 個全量同時跑 6 次都穩定 |
 
-測試數增加 26 項：G0 拆出 1 項、B 11 項、C 2 項、D 1 項、E 11 項，都是 characterization 或回歸測試。skip 多 2 項是 G0 掛上的檔案 symlink 測試。F 只重構測試，沒有增減測試數。
+測試數增加 26 項：G0 拆出 1 項、B 11 項、C 2 項、D 1 項、E 11 項，都是 characterization 或回歸測試。skip 多 2 項是 G0 掛上的檔案 symlink 測試。F、F2 只重構測試，沒有增減測試數。
 
 ### 殘留風險彙總
 
@@ -36,7 +38,8 @@
 - `pnpm bench:lag:check` 在這台 Windows 機器上，E 之前就已超出門檻：mean 約 15.4–15.5 ms，門檻 12 ms。baseline 檔是在 macOS 上量的，15.5 ms 又剛好接近 Windows 預設的計時器粒度。E 前後數值相同，與本輪無關；需要在 macOS／CI 重跑，或替 Windows 另建 baseline。
 - Windows 無法建立檔案 symlink 時（沒開開發者模式），2 個測試會 skip；這兩個測試只在 macOS／Linux 或開了開發者模式的 Windows 上驗證（G0）。
 - 本輪只在 Windows 上驗證；macOS／Linux 的行為（junction 型別被忽略、macOS Keychain 憑證路徑等）依文件與既有測試推定。
-- `tests/` 不在 `tsconfig.json` 的 `include` 裡，所以測試的型別只靠 lint 的 `no-explicit-any` 把關，沒有完整型別檢查。F 用臨時 tsconfig 量測：測試檔本來就有大量型別錯誤（多半是假物件沒有實作完整的 `BrowserWindow` 等型別），F 沒有新增錯誤，還修掉 22 個。是否把 tests 納入型別檢查留待之後決定。
+- `tests/` 已納入型別檢查（F2），但還有 117 處既有的 `as never` 會跳過檢查；`fakeService` 只檢查鍵名。編輯器開啟測試檔時會顯示推斷專案的假錯誤，實際以 `pnpm typecheck:tests` 為準。
+- hook 計時測試的上限是兩倍 node 啟動基準加餘裕。基準超過 3.5–5.5 秒的極端負載下仍不會誤報，但抓不到對應的退化（F2）。
 - **建議版號：patch 1.14.1**。本輪是型別、風格、測試與內部演算法的調整，沒有改持久化 schema、公開契約或安全邊界。
 
 ## G0：Windows 無法建立 symlink 的測試
@@ -591,3 +594,156 @@ n = center 筆數（≤ 500），k = 單一 plugin 筆數（≤ 100），S = 單
 - 改用共用 fixture 後，`makeAgentStatusEvent` 的預設值變成多個測試的共同依賴；日後改預設值時，要重新檢查 `notification-policy` 的 body 斷言（`agent-pets`）。
 - commit 前的全量測試出現過一次偶發失敗（1831 tests、2 fail、38 skip）：有一個測試檔整個沒跑完，少了 6 項測試和 1 項 skip。F 動到的測試檔都沒有 skip，所以出錯的檔案不在本階段範圍內；但當次輸出沒有保留下來，無法指出是哪個檔案。之後 3 次全量都正常。若再出現，要保留完整輸出再追查。
 - 沒有啟動 Electron。本階段只改測試與 lint 設定，產品程式碼沒有變動。
+
+## F2：複驗發現的既有問題（不穩定測試、`tests/` 型別檢查）
+
+- **分支**：`claude/cleanup-f2-flaky-test-types-4fd907`
+- **開始時間**：2026-11-11 13:45（Asia/Taipei）
+- **完成時間**：2026-11-11 15:35（Asia/Taipei）
+- **狀態**：通過
+
+### 步驟狀態
+
+| # | 步驟 | 狀態 | 備註 |
+|---|---|---|---|
+| 1 | 讀規範、量測現況 | 通過 | 臨時量測的 52 個錯誤只涵蓋 F 動到的檔案；全部 `tests/` 實際是 178 個 |
+| 2 | 計時測試改成負載下穩定的判斷 | 通過 | 起初處理 `panel-theme-diagnostics`、`panel-theme-palette`；驗證時在高負載下又重現 6 個，逐一修正 |
+| 3 | 重現「整個測試檔沒跑完」並修根因 | 通過 | 高負載壓測重現 `rmSync` 的 `EPERM` |
+| 4 | 新增 `tsconfig.tests.json`，修完型別錯誤 | 通過 | 178 → 0；四個子代理分組修正，我複核並補修 |
+| 5 | 接進 `pnpm lint` 與 CI | 通過 | |
+| 6 | code review、連續 5 次全量驗證、文件 | 通過 | 另加 6 次 3 倍負載的全量 |
+
+### 檔案變更
+
+| 檔案 | 變更內容 | 原因 |
+|---|---|---|
+| `tests/support/fs-capabilities.mts` | symlink 探測的清理改用 `removeTempTree`，失敗時吞掉 | 根因：探測在 import 時執行，`rmSync` 遇到 Windows 檔案鎖拋 `EPERM` 會讓整個測試檔失敗 |
+| `tests/support/temp-dir.mts`（新增） | `removeTempTree`／`removeTempTreeAsync`：`rmSync` 加 `maxRetries: 10, retryDelay: 20` | 同上，所有測試共用 |
+| 59 個 `tests/*.test.mts` | 164 處 `fs.rmSync(x, { recursive: true, force: true })`（含 `pet-assets-fs` 的 async `rm`）改用 `removeTempTree` | 同一個檔案鎖問題在測試內會讓單一 test 偶發失敗；5 個檔案移除不再使用的 `rmSync` import |
+| `tests/panel-theme-diagnostics.test.mts` | 絕對門檻 `best < 30 ms` 改成與逐格搜尋交錯量測的比值 `< 0.1`，並以 `t.diagnostic` 印出實測值 | 計時不穩定 |
+| `tests/panel-theme-palette.test.mts` | 絕對門檻 `< 2000 ms` 改成用 `Proxy` 數讀取的像素值，斷言 `≤ IMAGE_MAX_SAMPLES × 4`，不再量時間 | 舊門檻離取樣失效時的 2469 ms 太近；改用比值後在 3 倍負載下仍失敗一次 |
+| `tests/plugin-developer-mode.test.mts` | 合併測試的 debounce 200 ms 改 1 秒，等待依它推算 | 高負載驗證時重現失敗 |
+| `tests/presentation-stdio.test.mts` | 2 秒逾時改成 `BRIDGE_TIMEOUT_MS = 15_000` | 高負載驗證時重現逾時 |
+| `tests/support/node-startup.mts`（新增） | `nodeStartupBaselineMs`、`withStartupBaseline`（hook 前後各量一次基準取較大值），從 `agent-hook-delivery` 移出，兩個 hook 測試共用 | |
+| `tests/claude-permission-hook.test.mts` | 「沒有標記不重試」改成權限埠整段關著、以相對基準的耗時判斷；抽出 `hookEnv` | 高負載驗證時重現失敗 |
+| `tests/quota-forecast.test.mts` | 線性時間測試改成 3 次取最快、門檻 5 秒，並在註解寫明與平方退化的差距 | 高負載驗證時重現失敗 |
+| `tests/agent-hook-delivery.test.mts` | 改用 `withStartupBaseline`；busy app、cut／stall、never-opens 的上限改成兩倍基準加餘裕；app 延遲 3 秒改 8 秒（計時器 `unref`）；四個計時斷言加 `t.diagnostic` | 驗證時重現兩次失敗：stall 3229 ms（門檻 2879 ms）、never-opens 8066 ms（基準 314 ms） |
+| `tsconfig.tests.json`（新增） | extends `tsconfig.json`，include `tests/**/*.mts` 與 `src/env.d.ts`，`allowJs`（讀 `scripts/*.mjs` 的推斷型別）、`noEmit`、獨立的 `tsBuildInfoFile` | `tests/` 沒有型別檢查 |
+| `package.json` | 新增 `typecheck:tests`（`tsc -p tsconfig.tests.json`），接在 `lint` 最後 | CI 的 `pnpm lint` 會一起跑；`build` 不變 |
+| `.github/workflows/ci.yml` | lint 步驟的註解寫明含 tests 型別檢查 | |
+| `electron/dev-runtime.ts`、`vite.config.mts`、`tests/dev-runtime.test.mts` | `GPU_SAFE_DEV_MODE`、`electronDevArgv`、`electronDevEnvironment` 從 `vite.config.mts` 移到 `electron/dev-runtime.ts`，測試改從這裡 import | 測試 import `vite.config.mts` 會經由 vite 的宣告檔帶進第二份 `@types/node`（26.1.1，專案是 24.13.3），在 `electron/` 與測試產生 27 個假錯誤 |
+| `tests/support/fake-electron.mts`（新增） | `fakeBrowserWindow`／`fakeWebContents`／`fakeIpcMainEvent`／`fakeIpcMainInvokeEvent`，參數是 `Partial<…>` | 原本各檔各自 `as unknown as BrowserWindow`，或用字串當事件哨兵 |
+| `tests/support/fake-service.mts`（新增） | `fakeService<T>(members: Partial<Record<keyof T, unknown>>)` | 帶私有欄位的服務 class 假物件；鍵名仍受檢查。取代 5 個檔案各自複製的 `asService` 與 12 處逐點轉型 |
+| 其餘約 40 個 `tests/*.test.mts` | 修正型別錯誤，見下方「型別錯誤的處理」 | |
+| `.agents/skills/pet-skill/references/build-environment.md` | Lint 一節：`typecheck:tests`、`no-explicit-any` 已是 error、測試假物件與暫存目錄 helper、不要讓測試 import `vite.config.mts` | |
+| `docs/phase-reports/phase-1-14-1-type-style-cleanup.md` | 本節、開頭的整輪總結與殘留風險 | |
+
+### 根因分析
+
+#### 1. 整個測試檔沒跑完（1831 tests、2 fail、38 skip）
+
+- **哪個檔案**：用自訂 reporter 依檔案統計，執行期剛好「7 個 test、1 個 skip」的只有 `tests/panel-theme-store.test.mts`。Node 24 的 `node --test` 在測試檔 import 階段丟出例外時，會把整個檔案記成 1 個失敗，檔內的 test 全部不計：1837 − 7 + 1 = 1831，skip 39 − 1 = 38，完全吻合。另一個 fail 是同一次的計時測試。我用一個 import 時就丟錯的檔案重現了這個計數方式。
+- **為什麼 import 會失敗**：`panel-theme-store` import 了 `tests/support/fs-capabilities.mts`，它在 import 時建一個暫存目錄探測能否建立 symlink，最後在 `finally` 裡 `fs.rmSync(directory, { recursive: true, force: true })`，沒有重試，也沒有 catch。
+- **重現**：16 個行程平行、各跑 400 次同樣的探測，6400 次裡 `rmSync` 拋了 2 次 `EPERM, Permission denied`（剛建立的檔案被 Windows 的防毒或索引服務短暫鎖住）。加上 `maxRetries: 10, retryDelay: 20` 後，同樣 6400 次是 0 次。
+- **為什麼當時沒有線索**：stack 只印在 stderr 的早段，結尾的失敗摘要只有一行 `'test failed'`，不會顯示原因。
+- **修法**：探測的清理改用有重試的 `removeTempTree`，且吞掉錯誤（重試後仍刪不掉，只會在暫存目錄留下一個空目錄；import 不能失敗）。同樣的 `rmSync` 寫法在 59 個測試檔裡還有 164 處，失敗時會讓單一 test 偶發失敗，所以一併改用 `removeTempTree`。這是測試的問題，受測程式碼沒有 bug。
+- **另一個候選**：`safe-config-write-async.test.mts` 執行期是 6 個 test、1 個 skip，跟缺少的數字對不上，排除。
+
+#### 2. 計時斷言
+
+| 測試 | 原本 | 實測 | 處理 |
+|---|---|---|---|
+| `panel-theme-diagnostics` worst-case | best-of-5 `< 30 ms` | 單獨約 4–5 ms；全量平行時曾 33.3、48.8 ms | 改成相對比值。分母是同一個測試檔裡的逐格搜尋 `exhaustiveSuggestion`（改寫前演算法的參考答案），兩邊交錯量測、各取最快一次。分子取 15 次樣本，分母取 3 次 |
+| `panel-theme-palette` 大圖取樣 | 單次 `< 2000 ms` | 30–160 ms；故意讓取樣失效（stride = 1）時 2469 ms | 先改成 1024×768 和 128×128 的比值 `< 6`（正常 0.4–1.9，取樣失效 60.7），但 3 個全量同時跑時比值曾到 20.7：大圖是 3 MB 的跨步讀取，被記憶體頻寬爭用拖慢的程度遠大於放得進快取的小圖，兩邊受負載影響並不對稱。最後改成不量時間，用 `Proxy` 數讀取的像素值，斷言 `≤ IMAGE_MAX_SAMPLES × 4`。結果是確定的；取樣失效時讀了 3,145,728 次，測試失敗（已實測） |
+| `agent-hook-delivery` busy app、cut／stall | `baseline + 2_000` | 驗證時重現失敗：stall 3229 ms、基準 879 ms | 原本就和 node 啟動基準比，但 hook 載入的模組比空程序多，高負載時多出的時間跟著基準放大（實測多 0.3–2.3 秒）。改成 `baseline * 2 + 2_500`，和既有的 pet-closed 測試同一個原則。busy app 的 app 延遲從 3 秒改 8 秒：基準在 5.5 秒內，若 hook 改成等 app 回答一定超過上限 |
+| `agent-hook-delivery` never opens | `baseline + 6_500` | 驗證時重現失敗：基準 314 ms，hook 8066 ms | 基準在 hook 之前量，剛好量到負載空檔，hook 執行期間負載又升高。改成前後各量一次取較大值（四個計時測試都用），上限改成 `baseline * 2 + 6_500` |
+| `agent-hook-delivery` pet closed | `baseline * 2 + 1_500` | 高負載下最大 3062 ms，門檻 6264 ms | 原本就是兩倍基準，只改用前後量測的基準；加 `t.diagnostic` |
+| `history` v6/v7 migration | `< 10_000 ms` | 600 ms（16 倍餘裕） | 不改：沒有可當分母的舊做法，且餘裕夠大 |
+| `claude-permission-hook` 沒有標記時不重試 | 權限埠 2.5 秒後才開，預期 hook 早已結束、收不到請求 | 3 個全量同時跑時失敗一次：hook 啟動得比開埠還晚，第一次請求就直接成功 | 時序假設失效。改成權限埠整段關著，用耗時判斷：誤開重試會等到 5 秒，上限 `baseline * 2 + 1_500`（基準前後各量一次） |
+| `claude-permission-hook` 其餘 | `< 15_000`、`>= 4_500 && < 12_000` | 下限不受負載影響；上限是 1–5 秒等待加啟動 | 不改：上限遠大於負載造成的放大 |
+| `quota-forecast` 20 萬筆樣本 | 單次 `< 500 ms` | 正常 1–2 ms；3 個全量同時跑時失敗一次 | 要擋的是退化成平方（4×10¹⁰ 次運算，至少數十秒）。比值不可行：數字在 1 ms 上下，比值被計時解析度與 GC 主導。改成 3 次取最快、`< 5_000 ms`，對平方退化仍差兩個數量級 |
+| `presentation-stdio` 等 MCP 回應 | 每個回應、子行程結束各等 2 秒 | 3 個全量同時跑時，3 次中有 2 次 `Timed out waiting for MCP response 1` | 這不是效能門檻，只是防卡住的逾時，但第一個回應包含子行程的 node 啟動。改成具名常數 `BRIDGE_TIMEOUT_MS = 15_000` 並註明原因 |
+| `plugin-developer-mode` 合併連續編輯 | debounce 200 ms，兩次連續寫入要合併成 1 次 reload | 3 個全量同時跑時失敗一次（`2 !== 1`）：兩次寫入的 `fs.watch` 事件送達間隔超過 200 ms | 測試用的 debounce 改成 1 秒（`COALESCE_DEBOUNCE_MS`），之後的等待依它推算；等第一次 reload 的防卡住 deadline 從 5 秒放寬到 15 秒。受測程式碼的預設 debounce（500 ms）不變 |
+
+`panel-theme-diagnostics` 的門檻依據：我用 `git archive 76b9525^` 取出改寫前的程式碼，在同一個測試裡換成舊的 `validateUserPanelTheme`，比值是 0.23–0.45；現在單獨跑 0.009–0.028，3 個全量同時跑時 0.003–0.026。門檻 0.1 對兩邊都留兩倍以上的餘裕。
+
+#### 3. `tests/` 的型別檢查
+
+- 上一階段的「約 52 個」只量了 F 動到的 30 個檔案。全部 `tests/` 第一次量是 178 個。
+- 其中 34 個是工具鏈造成的假錯誤。27 個來自型別衝突：`tests/dev-runtime.test.mts` import `vite.config.mts`，vite 的宣告檔帶進 `@types/node@26.1.1`，和專案的 24.13.3 衝突，連 `electron/local-server-listen.ts` 都出現 `Property 'on' does not exist on type 'Server'`。另有 7 個是 `scripts/*.mjs` 沒有宣告檔，用 `allowJs` 解決。
+- 剩下 144 個真錯誤，分四組交給子代理，我複核後再補修（見下方）。
+
+### 型別錯誤的處理
+
+| 類型 | 處理 |
+|---|---|
+| 假 `BrowserWindow`／`WebContents`／事件（約 40 處） | 改用 `fake-electron.mts`；用字串當事件的哨兵（`event === 'pet'`）改成事件物件，用 `===` 比對 |
+| 帶私有欄位的服務 class | `fakeService<T>()`，鍵名受檢查 |
+| `assert.equal(x.ok, true)` 讓後面的 `x.error` 變成 `never` | 刪掉這行，由 `if (!x.ok) throw` 收窄（失敗時一樣會丟錯） |
+| `assert.equal(store.toast, null)` 讓之後的讀取變成 `never` | `peek(() => store.toast)`，附註解 |
+| 假物件回傳的資料形狀與真實型別不同 | 補成完整的型別資料（`HistorySummary`、`HistoryExport`、`PermissionRequestView`、`DesktopPreferences`、`PluginPanelPlugin` 等），斷言跟著比對完整物件 |
+| hook JSON 的 `type: string` 被放寬 | 標註 `HookMatcherEntry` |
+| `HistoryStore` 的私有 `database` | 檔內唯一的 `rawDatabase()` accessor（附註解），其餘 8 處各自的轉型都改用它 |
+
+型別錯誤暴露出的語意問題（都已修正，受測程式碼沒有 bug）：
+
+- `desktop-preferences` 的兩個假 adapter 還在用已不存在的 `getOpenAtLogin`／`setOpenAtLogin`。原本能過只是因為 store 沒呼叫它們；改成真正的 `LoginItemAdapter`。
+- `ipc-permission` 的假 broker 回傳 `{ ok: true }`，真實是 `{ ok: true, status }`。
+- `ipc-history`、`ipc-desktop`、`ipc-progression` 的假物件回傳不完整的資料，測試其實只比對了假資料本身。
+- `ipc-quota` 原本用 `{}` 對 `{}` 的 `deepEqual` 確認 guard 收到事件，太鬆；改成確認是同一個事件物件。
+
+### Code review 結論
+
+我逐檔看過子代理的 diff，並自己補修了以下幾處：
+
+- **子代理回報有誤**：`plugin-registry` 回報已修，但第 63 行的 `assert.equal(result.ok, true)` 還在，`tsc` 仍報錯（可能是四個子代理平行跑 `tsc`，共用同一個 incremental buildinfo，拿到過期結果）。我自己修正，最後再用 `--incremental false` 確認 0 個錯誤。
+- `panel-theme-pet-status` 的「多一個名稱」案例會被物件字面值的多餘屬性檢查擋下；改成經由 `Record<string, string>` 變數傳入，測試意圖不變。
+- 5 個檔案各自複製的 `asService` 和 12 處逐點的 `as unknown as <服務>` 收斂成 `fakeService`。
+- `ipc-plugin-install` 把轉型 helper 用在資料物件上（`preferences: asService({})`），改成 `DEFAULT_PLUGIN_PREFERENCES` 和完整的 `PluginPanelPlugin`，斷言改成比對完整物件。
+- `history.test.mts` 剩下的 8 處區域轉型改用 `rawDatabase()`。
+- **新增的程式碼**沒有 `any`、`as never`、`@ts-ignore`、`@ts-expect-error`。diff 共移除 64 處 `as never` 與 64 處 `as unknown as`。新增的 `as unknown as` 有 5 處集中在 support helper，另外 7 處各有中文註解：`rawDatabase`、`updateDailyStat`、`ipc-adapters` 的 `asRegistry`、`ipc-pet-assets` 的 Node `fs` 多載假物件、`ipc-window-controls` 的 `DesktopPreferences`（2 處）、故意餵入的非法 `PluginErrorCode`。
+- `plugin-panel-controller-characterization` 把註解塞在物件字面值同一行中間，改成獨立的註解加具名變數。
+- **測試閉包**：新的 support 檔不 import 任何 src 執行期模組；`ipc-plugin-install` 對 `electron/plugin-preferences.ts` 的值 import 是 `electron/` 檔案，不受 `@/` 規則影響。
+- **build 耗時**：`build` 只跑 `vue-tsc`，不受影響。`pnpm lint` 多了 `tsc -p tsconfig.tests.json`：冷快取約 20 秒，有 incremental 快取約 4 秒。
+- `vite build` 通過，`vite.config.mts` 改從 `./electron/dev-runtime.ts` import 能正常打包。
+
+### 驗證輸出摘要
+
+| 指令 | 結果 |
+|---|---|
+| `pnpm lint` | 0 error、0 warning；main-process lint passed；`typecheck:tests` 0 error |
+| `pnpm exec vue-tsc --noEmit` | 0 error |
+| `pnpm exec tsc -p tsconfig.tests.json --incremental false` | 0 error（開始時 178 個） |
+| `pnpm exec vite build` | 通過 |
+| `git diff --check` | 通過 |
+
+`pnpm test:unit`（同一條指令，加上自訂 reporter 依檔案統計並保留失敗的 stack），最終版本：
+
+| 次數 | 條件 | tests | fail | skip | 耗時 |
+|---|---|---|---|---|---|
+| 1 | 單獨 | 1837 | 0 | 39 | 50 s |
+| 2 | 單獨 | 1837 | 0 | 39 | 40 s |
+| 3 | 單獨 | 1837 | 0 | 39 | 38 s |
+| 4 | 單獨 | 1837 | 0 | 39 | 38 s |
+| 5 | 單獨 | 1837 | 0 | 39 | 37 s |
+| 6–8 | 3 個全量同時跑（第一輪） | 各 1837 | 各 0 | 各 39 | 128 s |
+| 9–11 | 3 個全量同時跑（第二輪） | 各 1837 | 各 0 | 各 39 | 118 s |
+
+最終版本各計時測試的實測值：
+
+| 測試 | 單獨 5 次 | 3 倍負載 6 次 | 門檻 |
+|---|---|---|---|
+| `panel-theme-diagnostics` 比值 | 0.015–0.025 | 0.006–0.018 | `< 0.1` |
+| `agent-hook-delivery` stall | 667–1197 ms（上限 3312–4292） | 1838–4489 ms（上限 6134–8822） | `baseline * 2 + 2_500` |
+| `history` migration | 540–748 ms | 843–2256 ms | `< 10_000 ms` |
+
+驗證過程中，高負載下陸續重現 6 個計時問題，每修一個就重跑整套 5 次全量；上表是全部修完之後的結果。中途的失敗依序是：`agent-hook-delivery` stall（3229 ms）、never-opens（8066 ms）、`presentation-stdio` 逾時、`plugin-developer-mode` 合併（`2 !== 1`）、`quota-forecast`（`> 500 ms`）與 `claude-permission-hook` 不重試、`panel-theme-palette` 比值 20.7。另外有一次 `ipc-plugin-install` 失敗，是我在全量執行期間修改那個檔案造成的，不是不穩定。
+
+### 殘留風險
+
+- 3 倍負載下 node 啟動基準最高量到 3.2 秒。基準超過 5.5 秒時，busy app 測試的上限（`baseline * 2 + 2_500`）會超過 app 的 8 秒延遲；超過 3.5 秒時，pet closed 與不重試測試的上限會超過重試的 5 秒。這時測試不會誤報，但抓不到「改成等回答／誤開重試」的退化。
+- 編輯器（VS Code 的 TS server）只認 `tsconfig.json`，開啟 `tests/*.mts` 時會用推斷專案，顯示找不到 `node:*` 型別等假錯誤。實際檢查以 `pnpm typecheck:tests` 為準，CI 經由 `pnpm lint` 執行。
+- `tests/` 裡還有 117 處既有的 `as never`（分布在 40 個檔案，多半是假物件或故意餵入的非法值），能通過編譯，但會跳過型別檢查。全部清掉會擴大本階段範圍，所以沒動；新增的程式碼沒有 `as never`，skill 文件已寫明不要再新增。
+- `fakeService<T>()` 只檢查鍵名，不檢查成員型別：假物件的回傳值若與真實型別不符，`tsc` 不會發現。改用 `Partial<T>` 會讓 5 個檔案出現假資料形狀不完整的錯誤，補齊屬於另一輪工作。
+- 只在 Windows 驗證。Windows 的檔案鎖是 `EPERM` 的來源；macOS／Linux 上 `removeTempTree` 的重試通常不會觸發。
+- 沒有啟動 Electron。本階段改的是測試、型別檢查設定，以及 `vite.config.mts` 的 import 位置（`vite build` 通過；`pnpm dev` 沒有實際啟動驗證）。

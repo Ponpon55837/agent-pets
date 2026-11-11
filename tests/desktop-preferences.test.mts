@@ -9,6 +9,7 @@ import {
   resolveLoginItemExecutable,
 } from '../electron/desktop-preferences.ts'
 import type { DesktopVisibilityCapabilities } from '../src/types/desktop-visibility.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 const TEST_VISIBILITY_CAPABILITIES: DesktopVisibilityCapabilities = {
   captureExclusion: { supported: true, mode: 'system' },
@@ -17,7 +18,7 @@ const TEST_VISIBILITY_CAPABILITIES: DesktopVisibilityCapabilities = {
 
 function tempPreferencesFile(t: test.TestContext): string {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-preferences-'))
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  t.after(() => removeTempTree(directory))
   return path.join(directory, 'desktop-preferences.json')
 }
 
@@ -77,8 +78,8 @@ test('migrates legacy sound once and persists desktop preferences', (t) => {
 
   const reloaded = new DesktopPreferencesStore(filePath, {
     supported: true,
-    getOpenAtLogin: () => openAtLogin,
-    setOpenAtLogin: enabled => enabled,
+    getStatus: () => (openAtLogin ? 'enabled' : 'disabled'),
+    setLaunchAtStartup: enabled => (enabled ? 'enabled' : 'disabled'),
   }, TEST_VISIBILITY_CAPABILITIES)
   assert.equal(reloaded.get().soundEnabled, true)
   assert.equal(reloaded.get().dndEnabled, true)
@@ -154,8 +155,8 @@ test('clears visibility toggles when a native capability becomes unavailable', (
   const filePath = tempPreferencesFile(t)
   const store = new DesktopPreferencesStore(filePath, {
     supported: false,
-    getOpenAtLogin: () => false,
-    setOpenAtLogin: () => false,
+    getStatus: () => 'unsupported',
+    setLaunchAtStartup: () => 'unsupported',
   }, TEST_VISIBILITY_CAPABILITIES)
   store.update({ captureExclusionEnabled: true, fullscreenAutoHideEnabled: true })
 
@@ -174,7 +175,7 @@ test('clears visibility toggles when a native capability becomes unavailable', (
 
 test('uses only the original regular portable executable for Windows startup', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-portable-'))
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  t.after(() => removeTempTree(directory))
   const portablePath = path.join(directory, 'AgentPets.exe')
   fs.writeFileSync(portablePath, 'test launcher')
 
@@ -191,7 +192,7 @@ test('uses only the original regular portable executable for Windows startup', (
 
 test('NSIS installs (no portable variable) register the installed exe for Windows startup', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-nsis-'))
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  t.after(() => removeTempTree(directory))
   const installed = path.join(directory, 'Agent Pets.exe')
   fs.writeFileSync(installed, 'installed app')
 

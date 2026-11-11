@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import type { PresentationIntentResult, PresentationStatusSnapshot } from '../src/types/presentation.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 interface JsonRpcResponse<T = unknown> {
   jsonrpc: '2.0'
@@ -13,6 +14,9 @@ interface JsonRpcResponse<T = unknown> {
   result: T
   error?: { code: number; message: string }
 }
+
+// 只防止測試卡住，不是效能門檻：第一個回應要等子行程的 node 啟動，三個全量測試同時跑時光啟動就接近 2 秒（F2 實測曾逾時）。
+const BRIDGE_TIMEOUT_MS = 15_000
 
 test('stdio presentation bridge speaks MCP and disconnects its client', async t => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-presentation-'))
@@ -41,7 +45,7 @@ test('stdio presentation bridge speaks MCP and disconnects its client', async t 
     })
   })
   t.after(() => {
-    fs.rmSync(home, { recursive: true, force: true })
+    removeTempTree(home)
     server.close()
   })
 
@@ -83,7 +87,7 @@ test('stdio presentation bridge speaks MCP and disconnects its client', async t 
   })
 
   const waitForId = async <T,>(id: number): Promise<JsonRpcResponse<T>> => {
-    const deadline = Date.now() + 2_000
+    const deadline = Date.now() + BRIDGE_TIMEOUT_MS
     while (Date.now() < deadline) {
       const result = lines.find(message => message.id === id)
       if (result) return result as JsonRpcResponse<T>
@@ -107,7 +111,7 @@ test('stdio presentation bridge speaks MCP and disconnects its client', async t 
   child.stdin.end()
 
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('stdio bridge did not exit')), 2_000)
+    const timer = setTimeout(() => reject(new Error('stdio bridge did not exit')), BRIDGE_TIMEOUT_MS)
     child.once('exit', () => {
       clearTimeout(timer)
       resolve()

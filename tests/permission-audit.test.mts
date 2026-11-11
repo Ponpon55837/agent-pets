@@ -1,9 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { appendPermissionAudit, clearPermissionAudit, readPermissionAudit } from '../electron/permission-audit.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 test('persistent permission audit remains bounded and excludes sensitive fields', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'agent-pets-audit-'))
@@ -36,7 +37,7 @@ test('persistent permission audit remains bounded and excludes sensitive fields'
     assert.equal(serialized.includes('secret description'), false)
     assert.equal(serialized.includes('secret handle'), false)
   } finally {
-    rmSync(directory, { recursive: true, force: true })
+    removeTempTree(directory)
   }
 })
 
@@ -54,7 +55,7 @@ test('audit can be cleared and tolerates a torn last line', () => {
     clearPermissionAudit(filePath)
     assert.deepEqual(readPermissionAudit(filePath), [])
   } finally {
-    rmSync(directory, { recursive: true, force: true })
+    removeTempTree(directory)
   }
 })
 
@@ -77,6 +78,6 @@ test('startup trim shrinks an oversized audit file, drops the legacy json and re
     assert.equal(JSON.parse(remaining.at(-1)!).requestId, 'r-4999')
     assert.throws(() => readFileSync(legacy), /ENOENT/)
   } finally {
-    rmSync(directory, { recursive: true, force: true })
+    removeTempTree(directory)
   }
 })

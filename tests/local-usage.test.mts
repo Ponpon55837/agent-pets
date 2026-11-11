@@ -12,6 +12,7 @@ import {
   parseUsageFile,
   type UsageProvider,
 } from '../electron/local-usage.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 function seededRandom(seed: number): () => number {
   let state = seed >>> 0
@@ -26,7 +27,7 @@ function setup(): { home: string; database: string; cleanup: () => void } {
   return {
     home: path.join(root, 'home'),
     database: path.join(root, 'history.sqlite'),
-    cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
+    cleanup: () => removeTempTree(root),
   }
 }
 

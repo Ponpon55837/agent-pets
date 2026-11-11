@@ -7,6 +7,7 @@ import { OnboardingStore } from '../electron/onboarding-state.ts'
 import { registerOnboardingIpc } from '../electron/ipc/onboarding.ts'
 import { IPC_CHANNELS } from '../electron/ipc/channels.ts'
 import { createFakeIpcMain } from './support/fake-ipc.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 test('onboarding state persists completion, skip and reset in a temp dir', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-onboarding-'))
@@ -20,7 +21,7 @@ test('onboarding state persists completion, skip and reset in a temp dir', () =>
     assert.deepEqual(store.update('reset'), { version: 1 })
     fs.writeFileSync(path.join(dir, 'nested', 'onboarding.json'), '{ not json')
     assert.deepEqual(store.get(), { version: 1 })
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('onboarding IPC checks the sender and rejects unknown actions', async () => {

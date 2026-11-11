@@ -27,6 +27,11 @@ afterEach(() => {
   harness = null
 })
 
+// assert.equal(x, null) 會把 store 屬性窄化成 null，之後計時器推進或事件處理改變的值就變成 never；經由函式讀取才能反映真實狀態。
+function peek<T>(read: () => T): T {
+  return read()
+}
+
 function event(
   sessionId: string,
   state: AgentState,
@@ -420,7 +425,7 @@ test('a turn whose end never arrives settles to idle quietly, and the next real 
   // 工具可以合法地跑很久，不會因為安靜就被改掉。
   assert.equal(store.sessionByKey('claude:build')?.state, 'tool-running')
   // 降級只改顯示：沒有提示框，也不當成工作完成。
-  assert.equal(store.toast, null)
+  assert.equal(peek(() => store.toast), null)
 
   // 回合其實還在跑：後續事件照常蓋過，完成時仍然有完成的提示。
   store.handleEvent(event('stuck', 'tool-running'))
@@ -464,7 +469,7 @@ test('success turns idle after the display window, and a restored snapshot never
   const back = store.sessionByKey('codex:back')
   assert.equal(back?.firstSeenAt, now - 1_000)
   assert.equal(back?.host, undefined)
-  assert.equal(store.toast, null)
+  assert.equal(peek(() => store.toast), null)
 })
 
 test('handleEvent returns the sound cue for new terminal and permission states only', () => {
@@ -547,7 +552,7 @@ test('a success toast merges with the previous success and closes after its TTL'
   tick(TOAST_SUCCESS_MS - 101)
   assert.ok(store.toast)
   tick(1)
-  assert.equal(store.toast, null)
+  assert.equal(peek(() => store.toast), null)
   assert.equal(store.toastRemainingMs, 0)
 })
 
@@ -561,7 +566,7 @@ test('an error toast replaces a success toast instead of merging, and uses the e
   tick(TOAST_ERROR_MS - 1)
   assert.ok(store.toast)
   tick(1)
-  assert.equal(store.toast, null)
+  assert.equal(peek(() => store.toast), null)
 })
 
 test('hover pauses the countdown and resume continues from what was left', () => {
@@ -578,7 +583,7 @@ test('hover pauses the countdown and resume continues from what was left', () =>
   tick(TOAST_SUCCESS_MS - 1_001)
   assert.ok(store.toast)
   tick(1)
-  assert.equal(store.toast, null)
+  assert.equal(peek(() => store.toast), null)
 })
 
 test('an unanswered prompt shows the waiting toast after the grace period and asks for its cue', () => {
@@ -587,7 +592,7 @@ test('an unanswered prompt shows the waiting toast after the grace period and as
   store.setCueSink(cue => cues.push(cue))
   store.handleEvent(event('w', 'waiting-input'))
   tick(WAITING_INPUT_DELAY_MS - 1)
-  assert.equal(store.toast, null)
+  assert.equal(peek(() => store.toast), null)
   tick(1)
   assert.equal(store.toast?.tone, 'waiting')
   assert.equal(store.toast?.title, t('pet.toastWaiting'))
@@ -598,7 +603,7 @@ test('an unanswered prompt shows the waiting toast after the grace period and as
   store.handleEvent(event('w2', 'waiting-input'))
   store.handleEvent(event('w2', 'thinking'))
   tick(WAITING_INPUT_DELAY_MS)
-  assert.equal(store.toast, null)
+  assert.equal(peek(() => store.toast), null)
 })
 
 test('results that finish while you are away become unread markers', () => {
@@ -621,7 +626,7 @@ function intent(id: string, patch: Record<string, unknown> = {}) {
 test('presentation intents are ignored until desktop preferences arrive', () => {
   const { store } = open()
   store.handlePresentationIntent(intent('early'))
-  assert.equal(store.presentationReaction, null)
+  assert.equal(peek(() => store.presentationReaction), null)
 })
 
 test('presentation intents play in order, expire, and respect the queue bound', () => {
@@ -630,12 +635,12 @@ test('presentation intents play in order, expire, and respect the queue bound', 
   store.handlePresentationIntent(intent('r1'))
   store.handlePresentationIntent({ id: 's1', kind: 'say', message: '  hi\u0000 <b>there</b>  ', createdAt: Date.now(), expiresAt: Date.now() + 2_000 })
   assert.deepEqual(store.presentationReaction, { id: 'r1', reaction: 'happy' })
-  assert.equal(store.presentationSay, null)
+  assert.equal(peek(() => store.presentationSay), null)
   tick(1_000)
-  assert.equal(store.presentationReaction, null)
+  assert.equal(peek(() => store.presentationReaction), null)
   assert.equal(store.presentationSay?.message, 'hi b there /b')
   tick(1_000)
-  assert.equal(store.presentationSay, null)
+  assert.equal(peek(() => store.presentationSay), null)
 
   // 佇列上限 8：超過時丟最舊的。
   store.handlePresentationIntent(intent('active', { expiresAt: Date.now() + 10_000 }))
@@ -651,9 +656,9 @@ test('urgent agent states, DND and the MCP switch clear presentation, but plugin
   store.applyDesktopPreferences(preferences())
   store.handlePresentationIntent(intent('r1'))
   store.handleEvent(event('x', 'waiting-input'))
-  assert.equal(store.presentationReaction, null)
+  assert.equal(peek(() => store.presentationReaction), null)
   store.handlePresentationIntent(intent('blocked'))
-  assert.equal(store.presentationReaction, null)
+  assert.equal(peek(() => store.presentationReaction), null)
   store.handleEvent(event('x', 'idle'))
 
   store.handlePresentationIntent(intent('plugin', { source: 'plugin', expiresAt: Date.now() + 5_000 }))
@@ -663,11 +668,11 @@ test('urgent agent states, DND and the MCP switch clear presentation, but plugin
   assert.equal(store.presentationReaction?.id, 'plugin')
   store.handlePresentationIntent(intent('mcp-2'))
   tick(5_000)
-  assert.equal(store.presentationReaction, null)
+  assert.equal(peek(() => store.presentationReaction), null)
 
   store.applyDesktopPreferences(preferences({ dndEnabled: true }))
   store.handlePresentationIntent(intent('plugin-dnd', { source: 'plugin' }))
-  assert.equal(store.presentationReaction, null)
+  assert.equal(peek(() => store.presentationReaction), null)
 })
 
 test('presentation intents for an unknown pet or with an invalid shape are dropped', () => {
@@ -681,8 +686,8 @@ test('presentation intents for an unknown pet or with an invalid shape are dropp
     { id: 'e', kind: 'say', message: '   ', createdAt: Date.now(), expiresAt: Date.now() + 1_000 },
     null,
   ]) store.handlePresentationIntent(bad)
-  assert.equal(store.presentationReaction, null)
-  assert.equal(store.presentationSay, null)
+  assert.equal(peek(() => store.presentationReaction), null)
+  assert.equal(peek(() => store.presentationSay), null)
   store.handlePresentationIntent(intent('ok', { petId: 'aang-airbender' }))
   assert.deepEqual(store.presentationReaction, { id: 'ok', reaction: 'happy', petId: 'aang-airbender' })
 })
@@ -765,7 +770,7 @@ test('external-only permission notices list every waiting session until dismisse
   assert.equal(store.permissionNotice?.items.length, 2)
   assert.equal(store.permissionNotice?.title, t('permission.noticeTitleMulti', { count: 2 }))
   store.dismissPermissionNotice()
-  assert.equal(store.permissionNotice, null)
+  assert.equal(peek(() => store.permissionNotice), null)
   store.handleEvent(event('n1', 'thinking'))
   store.handleEvent(event('n1', 'waiting-permission', { permissionNotice: notice, project: 'C:/a/one' }))
   assert.equal(store.permissionNotice?.items.length, 1)

@@ -7,6 +7,7 @@ import { PluginBroker, PLUGIN_LOG_MAX_ENTRIES, PLUGIN_RPC_MAX_BYTES } from '../e
 import { PluginFeedController } from '../electron/plugin-feed.ts'
 import type { PluginManifest } from '../src/types/plugin.ts'
 import { SKIP_WITHOUT_FILE_SYMLINKS } from './support/fs-capabilities.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 const PLUGIN_NAME = { 'zh-TW': '測試插件', 'en-US': 'Test Plugin' }
 
@@ -81,7 +82,7 @@ function createHarness(options: {
     setNow: (value: number) => { now = value },
     cleanup: () => {
       broker.destroy()
-      fs.rmSync(userDataDirectory, { recursive: true, force: true })
+      removeTempTree(userDataDirectory)
     },
   }
 }

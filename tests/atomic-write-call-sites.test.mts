@@ -15,6 +15,7 @@ import { installProjectMcp } from '../electron/project-mcp-setup.ts'
 import { BACKUP_MARKER, listBackups, writeConfigSafely, writeTextAtomic } from '../electron/safe-config-write.ts'
 import { POSIX_FILE_MODES, SKIP_WITHOUT_FILE_SYMLINKS } from './support/fs-capabilities.mts'
 import { builtinDefinition, png } from './support/panel-theme-fixtures.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // 以呼叫點為單位固定「暫存檔 → rename → 權限 → 失敗清理」的現有行為。
 // 每個案例都經由該模組公開的寫入入口，所以底層實作換掉後同一組斷言仍適用。
@@ -87,7 +88,7 @@ function onlyTemporaryPath(temporaryPaths: readonly string[]): string {
 function withPartialWriteFailure(run: () => void): void {
   withFsPatch('writeFileSync', original => ((file: fs.PathOrFileDescriptor, data: string | NodeJS.ArrayBufferView, options?: fs.WriteFileOptions) => {
     if (typeof file === 'number' || isTemporary(file)) {
-      original(file, typeof data === 'string' ? data.slice(0, 1) : data.subarray(0, 1), options)
+      original(file, typeof data === 'string' ? data.slice(0, 1) : new Uint8Array(data.buffer, data.byteOffset, 1), options)
       throw fsError('ENOSPC')
     }
     original(file, data, options)
@@ -96,7 +97,7 @@ function withPartialWriteFailure(run: () => void): void {
 
 function withDirectory(run: (directory: string) => void): void {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-atomic-sites-')))
-  try { run(directory) } finally { fs.rmSync(directory, { recursive: true, force: true }) }
+  try { run(directory) } finally { removeTempTree(directory) }
 }
 
 function listing(directory: string): string[] {

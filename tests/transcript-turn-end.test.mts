@@ -10,6 +10,7 @@ import {
   probeTranscript,
   turnEndFromTail,
 } from '../electron/transcript-turn-end.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // 紀錄的形狀取自真實的 Claude Code／Codex 紀錄檔（只留判斷用得到的欄位）。
 
@@ -140,7 +141,7 @@ test('locate finds the Claude and Codex files from the config folder and the ses
     assert.equal(await locateTranscript('opencode', home, codexId), null)
     assert.equal(await locateTranscript('claude', path.join(home, 'missing'), claudeId), null)
   } finally {
-    fs.rmSync(home, { recursive: true, force: true })
+    removeTempTree(home)
   }
 })
 
@@ -179,6 +180,6 @@ test('probe reads only the tail, reports unchanged files, and fails closed', asy
     assert.equal(await probeTranscript('claude', path.join(dir, 'missing.jsonl')), null)
     assert.equal(await probeTranscript('claude', dir), null)
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    removeTempTree(dir)
   }
 })

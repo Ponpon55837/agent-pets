@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -19,6 +19,7 @@ import { SqliteBusyError, optimizeAndVacuum, sqliteFootprintBytes } from '../ele
 import { GROWTH_RESET_TOKEN_TTL_MS } from '../src/types/growth-maintenance.ts'
 import { formatBytes } from '../src/utils/bytes-format.ts'
 import { createFakeIpcMain } from './support/fake-ipc.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 const DAY = 24 * 60 * 60 * 1000
 const BASE = Date.UTC(2026, 5, 1, 12)
@@ -49,7 +50,7 @@ function harness(t: { after(fn: () => void): void }, options: { now?: () => numb
   const history = new HistoryStore(paths.history, { now, localDate })
   t.after(() => {
     for (const store of [progression, achievements, history]) { try { store.close() } catch {} }
-    rmSync(directory, { recursive: true, force: true })
+    removeTempTree(directory)
   })
   return { directory, paths, progression, achievements, history, now, setNow: (v: number) => { clock = v }, tick: (ms: number) => { clock += ms } }
 }

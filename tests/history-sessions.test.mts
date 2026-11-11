@@ -14,6 +14,7 @@ import {
   sanitizeToolName,
 } from '../electron/history-sessions.ts'
 import type { AgentStatusEvent } from '../src/types/agent.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 type RawDb = {
   exec(sql: string): void
@@ -28,7 +29,7 @@ function open(t: { after(fn: () => void): void }, now: () => number = () => NOW)
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-sessions-'))
   const filePath = path.join(directory, 'history.sqlite')
   const store = new HistoryStore(filePath, { now })
-  t.after(() => { store.close(); fs.rmSync(directory, { recursive: true, force: true }) })
+  t.after(() => { store.close(); removeTempTree(directory) })
   return { store, filePath, directory, db: (store as unknown as { database: RawDb }).database }
 }
 
@@ -281,7 +282,7 @@ test('local-log tokens join the hook session incrementally, with the top model',
 
 test('v9 migration backfills existing sessions additively and is idempotent', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-sessions-migrate-'))
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  t.after(() => removeTempTree(directory))
   const filePath = path.join(directory, 'history.sqlite')
   const first = new HistoryStore(filePath, { now: () => NOW })
   first.recordEvent(event({ state: 'thinking', eventId: 'start', timestamp: NOW - 50_000 }))

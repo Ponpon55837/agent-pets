@@ -9,6 +9,7 @@ import { grantedPermissionUnits as permissionUnits } from '../src/utils/plugin-p
 import { groupPermissionUnits, permissionUnitsOfPlan } from '../src/utils/plugin-permissions.ts'
 import { PLUGIN_CONTRIBUTION_REGISTRY } from '../src/types/plugin.ts'
 import type { PluginManifest } from '../src/types/plugin.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // 這些期望值是 1.12.5 的主行程 permissionUnits() 與畫面 permissionUnitsOfPlan() 的實際輸出，
 // 在抽取共用產生器之前先執行通過。主行程的結果會寫進 registry.json 的 grantedPermissions.units，
@@ -120,7 +121,7 @@ test('the registry turns any other true permission key into its own unit', () =>
 
 function withUserData(run: (directory: string) => void): void {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-permission-units-'))
-  try { run(directory) } finally { fs.rmSync(directory, { recursive: true, force: true }) }
+  try { run(directory) } finally { removeTempTree(directory) }
 }
 
 function archive(version: string, permissions: Record<string, unknown>, contributes: Record<string, unknown>): Uint8Array {

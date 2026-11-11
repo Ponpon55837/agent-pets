@@ -13,10 +13,11 @@ import { parsePermissionUnit, permissionUnitsOfPlan } from '../src/utils/plugin-
 import { pluginCapabilities } from '../src/utils/plugin-capabilities.ts'
 import { SETTINGS_ENTRIES, searchSettings } from '../src/utils/settingsRegistry.ts'
 import { DARK_COLORS, LIGHT_COLORS, manifest, png, theme, webp, woff2 } from './support/panel-theme-fixtures.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 function withUserData(run: (directory: string, registry: PluginRegistry) => void | Promise<void>): Promise<void> {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-panel-theme-registry-'))
-  return Promise.resolve(run(directory, new PluginRegistry(directory))).finally(() => fs.rmSync(directory, { recursive: true, force: true }))
+  return Promise.resolve(run(directory, new PluginRegistry(directory))).finally(() => removeTempTree(directory))
 }
 
 function archive(rawManifest: unknown, files: Record<string, Uint8Array> = {}): Uint8Array {
@@ -196,6 +197,6 @@ test('the workerless fixture validates and packs without dist/main.js', () => {
       assert.equal(registry.planInstall(fs.readFileSync(output)).ok, true)
     })
   } finally {
-    fs.rmSync(path.dirname(output), { recursive: true, force: true })
+    removeTempTree(path.dirname(output))
   }
 })

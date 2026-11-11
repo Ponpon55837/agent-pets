@@ -36,6 +36,7 @@ import {
 import { codexHookCommand, fileHasAgentPetsHooksAsync, isCodexHooksFeatureEnabled } from '../electron/hook-config.ts'
 import { DEPLOY_FILES } from '../src/types/local-wire.ts'
 import { ConfigRefusedError } from '../electron/safe-config-write.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // Integration tests for the real installer against a throw-away HOME. Nothing here touches the
 // user's actual home directory or the macOS Keychain.
@@ -58,7 +59,7 @@ async function withHome<T>(work: (home: string) => T | Promise<T>, env: (home: s
   try {
     return await work(home)
   } finally {
-    fs.rmSync(home, { recursive: true, force: true })
+    removeTempTree(home)
   }
 }
 
@@ -214,7 +215,7 @@ test('install.mjs is a thin wrapper around the same installer', { skip: process.
     // On macOS/Linux install.mjs needs a Node.js it can find; skip the write assertion if none is resolvable here.
     run('--list')
   } finally {
-    fs.rmSync(home, { recursive: true, force: true })
+    removeTempTree(home)
   }
 })
 
@@ -537,7 +538,7 @@ test('setting the variables after installing reports the old location and uninst
       for (const kind of ['claude', 'codex', 'opencode'] as const) assert.equal((await agentConfigDirStatus(kind)).staleLocation, undefined)
     })
   } finally {
-    fs.rmSync(home, { recursive: true, force: true })
+    removeTempTree(home)
   }
 })
 
@@ -550,7 +551,7 @@ test('the shared hook script stays while only the old location still uses it', a
       assert.ok(fs.existsSync(hookScriptPath()), 'the default settings.json still runs the script')
     })
   } finally {
-    fs.rmSync(home, { recursive: true, force: true })
+    removeTempTree(home)
   }
 })
 

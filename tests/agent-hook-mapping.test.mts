@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // 用真正的 integrations/agent-hook.mjs 檢查 Claude Code 事件對應到的寵物狀態（送到假的本機伺服器）。
 // 寫法同 agent-hook-delivery.test.mts：只改事件網址的副本，HOME 是暫時目錄。
@@ -53,7 +54,7 @@ async function sentState(
   } finally {
     server.closeAllConnections()
     await new Promise<void>(resolve => server.close(() => resolve()))
-    fs.rmSync(home, { recursive: true, force: true })
+    removeTempTree(home)
   }
 }
 

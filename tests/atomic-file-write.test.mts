@@ -6,10 +6,11 @@ import path from 'node:path'
 import test from 'node:test'
 import { pidTimestampTemporaryPath, writeFileAtomicSync } from '../electron/atomic-file-write.ts'
 import { POSIX_FILE_MODES, SKIP_WITHOUT_FILE_SYMLINKS } from './support/fs-capabilities.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 function withDirectory(run: (directory: string) => void): void {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-atomic-write-'))
-  try { run(directory) } finally { fs.rmSync(directory, { recursive: true, force: true }) }
+  try { run(directory) } finally { removeTempTree(directory) }
 }
 
 function withFsPatch<K extends 'renameSync' | 'fsyncSync'>(name: K, replacement: (original: typeof fs[K]) => typeof fs[K], run: () => void): void {

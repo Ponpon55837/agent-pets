@@ -45,7 +45,7 @@ jobs:
 
       - run: pnpm exec vue-tsc --noEmit
 
-      # 主行程守門：loadURL 未處理的 Promise、缺少全域錯誤兜底
+      # ESLint、主行程守門（loadURL 未處理的 Promise、缺少全域錯誤兜底），以及 tests/ 的型別檢查（tsconfig.tests.json）
       - run: pnpm lint
 
       # 單元測試同時產生主行程模組的覆蓋率並設下限

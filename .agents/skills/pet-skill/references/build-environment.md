@@ -48,12 +48,14 @@ Phase report 必須記錄每個 gate 的實際結果、未測平台與殘餘風�
 
 ## Lint
 
-`pnpm lint` = `eslint .`（快取在 `node_modules/.cache/eslint/`）接 `node scripts/lint-main-process.mjs`（只剩主程序 crash guard 契約檢查）。設定在 `eslint.config.mjs`，只開 correctness 規則，不含 stylistic／Prettier。
+`pnpm lint` = `eslint .`（快取在 `node_modules/.cache/eslint/`）接 `node scripts/lint-main-process.mjs`（只剩主程序 crash guard 契約檢查），最後是 `pnpm typecheck:tests`（`tsc -p tsconfig.tests.json`：`tsconfig.json` 只涵蓋 `src`、`electron`，`vue-tsc` 不檢查 `tests/`）。設定在 `eslint.config.mjs`，只開 correctness 規則，不含 stylistic／Prettier。
 
 - `src/**` 禁止 `./`、`../` 的 import，一律 `@/`（`../../electron/*` 例外，沒有別名可用）。
 - 會被 Node 測試直接載入的 src 檔案（閉包由 `scripts/node-test-closure.mjs` 在 lint 時從 `tests/*.test.mts` 即時計算）相反：值 import 只能用相對路徑，`@/` 只允許 `import type`。測試若 import `tests/support/src-alias.mts`，該測試的閉包不受限制。新增被測試載入的檔案時不用維護任何清單。
 - `electron/**` 開 type-aware 的 `@typescript-eslint/no-floating-promises`（取代舊的 `loadURL` 字串比對）；其他目錄不跑 type-aware 規則以保持速度。
-- `@typescript-eslint/no-explicit-any` 為 warning（存量見 `docs/phase-reports/phase-packaging-ci-lint-backlog.md`），其餘為 error。
+- `@typescript-eslint/no-explicit-any` 與其餘規則都是 error（1.14.1 清零存量）。
+- 測試假物件：Electron 物件用 `tests/support/fake-electron.mts`，只呼叫少數方法的服務 class 用 `tests/support/fake-service.mts`；不要用 `as never` 跳過型別檢查。測試的暫存目錄用 `tests/support/temp-dir.mts` 的 `removeTempTree` 清理（Windows 檔案鎖會讓沒有重試的 `rmSync` 偶發 EPERM）。
+- 不要讓測試 import `vite.config.mts`：vite 的宣告檔會帶進第二份 `@types/node`，讓 tests 的型別檢查出現大量假錯誤；要測的啟動邏輯放在 `electron/dev-runtime.ts`。
 
 ## 自動發版
 

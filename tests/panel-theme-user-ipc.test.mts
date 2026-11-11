@@ -13,6 +13,7 @@ import { readUserPanelThemeImportFile, writeUserPanelThemeExportFile } from '../
 import { USER_PANEL_THEME_NAME_MAX, USER_PANEL_THEME_OWNER, type PanelThemeValidateIpcResult, type UserPanelThemeIpcResult } from '../src/types/panel-theme-user.ts'
 import type { PanelThemeIpcResult } from '../src/types/panel-theme.ts'
 import { builtinDefinition, png } from './support/panel-theme-fixtures.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // 先斷言 ok 分支再取值：讀錯分支的欄位只會得到 undefined，斷言訊息會很難看懂。
 function okValue<V>(result: { ok: true; value: V } | { ok: false }): V {
@@ -105,7 +106,7 @@ function setup(dialog: { open?: string[]; save?: string } = {}) {
   const user = (channel: string, ...args: unknown[]) => invoke(channel, ...args) as UserPanelThemeIpcResult
   const userAsync = (channel: string, ...args: unknown[]) => invoke(channel, ...args) as Promise<UserPanelThemeIpcResult>
   const theme = (channel: string, ...args: unknown[]) => invoke(channel, ...args) as PanelThemeIpcResult | Promise<PanelThemeIpcResult>
-  return { userData, runtime, sent, handlers, invoke, validate, user, userAsync, theme, dialogFilters, cleanup: () => fs.rmSync(userData, { recursive: true, force: true }) }
+  return { userData, runtime, sent, handlers, invoke, validate, user, userAsync, theme, dialogFilters, cleanup: () => removeTempTree(userData) }
 }
 
 test('every user theme channel rejects senders other than the panel main frame', async () => {
@@ -203,7 +204,7 @@ test('user background images reuse the host import, are served with panel CORS f
     assert.equal(fs.existsSync(directory) ? fs.readdirSync(directory).length : 0, 0)
   } finally {
     context.cleanup()
-    fs.rmSync(userData, { recursive: true, force: true })
+    removeTempTree(userData)
   }
 })
 
@@ -241,7 +242,7 @@ test('export writes only name and definition; import is strictly validated and c
     } finally { importer.cleanup() }
   } finally {
     context.cleanup()
-    fs.rmSync(scratch, { recursive: true, force: true })
+    removeTempTree(scratch)
   }
 })
 

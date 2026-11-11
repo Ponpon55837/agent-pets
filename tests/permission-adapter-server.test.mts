@@ -12,6 +12,7 @@ import {
   type PermissionAdapterSource,
 } from '../electron/permission-adapter-server.ts'
 import { linkDirectory } from './support/fs-capabilities.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 const TOKEN = 'a'.repeat(64)
 
@@ -453,7 +454,7 @@ test('a file edit is medium only inside the project and never for execution-rele
       assert.equal(broker.listRequests().find(request => request.requestId === requestId)!.risk, 'high')
     })
   } finally {
-    fs.rmSync(root, { recursive: true, force: true })
+    removeTempTree(root)
   }
 })
 

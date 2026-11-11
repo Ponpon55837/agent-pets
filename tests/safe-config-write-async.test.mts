@@ -19,6 +19,7 @@ import {
   writeTextAtomicAsync,
 } from '../electron/safe-config-write.ts'
 import { POSIX_FILE_MODES, SKIP_WITHOUT_FILE_SYMLINKS } from './support/fs-capabilities.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 // 非同步版與同步版必須遵守同一組規則（備份、symlink、大小上限、不覆寫壞檔、unchanged）。
 
@@ -44,7 +45,7 @@ test('async write backs up at 0600, prunes to MAX_BACKUPS, and reports unchanged
     assert.ok(backups.every(name => path.basename(name).includes(BACKUP_MARKER)))
     assert.equal((await writeConfigSafelyAsync(file, `{"n":${MAX_BACKUPS + 2}}\n`)).status, 'unchanged')
     assert.equal(fs.readdirSync(dir).filter(name => name.endsWith('.tmp')).length, 0)
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('async and sync writers produce the same file and backup', async () => {
@@ -58,7 +59,7 @@ test('async and sync writers produce the same file and backup', async () => {
     const async = await writeConfigSafelyAsync(b, '{"x":2}\n')
     assert.equal(fs.readFileSync(a, 'utf8'), fs.readFileSync(b, 'utf8'))
     assert.equal(fs.readFileSync(sync.backupPath!, 'utf8'), fs.readFileSync(async.backupPath!, 'utf8'))
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('async write follows a symlinked dotfile and keeps its mode', { skip: SKIP_WITHOUT_FILE_SYMLINKS }, async () => {
@@ -74,7 +75,7 @@ test('async write follows a symlinked dotfile and keeps its mode', { skip: SKIP_
     assert.equal(fs.readFileSync(real, 'utf8'), '{"a":1}\n')
     if (POSIX_FILE_MODES) assert.equal(fs.statSync(real).mode & 0o777, 0o640)
     assert.equal(listBackups(real).length, 1)
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('async readers refuse oversized, non-regular and unparseable files and never modify them', async () => {
@@ -96,7 +97,7 @@ test('async readers refuse oversized, non-regular and unparseable files and neve
     assert.deepEqual(await readJsonObjectConfigAsync(path.join(dir, 'missing.json')), { exists: false, root: {}, raw: null })
     fs.writeFileSync(bad, '﻿{"a":1}')
     assert.deepEqual((await readJsonObjectConfigAsync(bad)).root, { a: 1 })
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('async atomic write cleans its temporary file when the rename fails and keeps the old content', async () => {
@@ -114,7 +115,7 @@ test('async atomic write cleans its temporary file when the rename fails and kee
     await assert.rejects(() => writeFileAtomic(target, 'new', { temporaryPath: path.join(os.tmpdir(), 'elsewhere.tmp') }), TypeError)
     await writeTextAtomicAsync(path.join(dir, 'nested', 'deep', 'y.json'), 'ok', { mode: 0o600 })
     assert.equal(fs.readFileSync(path.join(dir, 'nested', 'deep', 'y.json'), 'utf8'), 'ok')
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })
 
 test('async rename retries only the Windows transient codes, without blocking', async () => {

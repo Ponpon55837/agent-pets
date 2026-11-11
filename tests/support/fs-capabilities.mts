@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { removeTempTree } from './temp-dir.mts'
 
 function canCreateFileSymlinks(): boolean {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-symlink-probe-'))
@@ -11,7 +12,10 @@ function canCreateFileSymlinks(): boolean {
   } catch {
     return false
   } finally {
-    fs.rmSync(directory, { recursive: true, force: true })
+    // 探測在 import 時執行：這裡拋錯會讓整個測試檔在跑任何 test 之前失敗，
+    // 摘要只剩一行 'test failed'（F2 的 1831 tests／38 skip 就是這樣來的）。
+    // 重試後仍刪不掉只會在暫存目錄留下一個空目錄，不影響結果，所以吞掉。
+    try { removeTempTree(directory) } catch {}
   }
 }
 

@@ -9,6 +9,7 @@ import { installProjectMcp as install2, planProjectMcp, removeProjectMcp } from 
 import { addLocalExcludes, findGitLocation, readTrackedPaths } from '../electron/git-tracking.ts'
 import { configureSetupEnvironment } from '../electron/setup-environment.ts'
 import { linkDirectory, SKIP_WITHOUT_FILE_SYMLINKS } from './support/fs-capabilities.mts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 function createProject(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-project-mcp-'))
@@ -22,7 +23,7 @@ function options(projectPath: string) {
 }
 
 function cleanup(projectPath: string): void {
-  fs.rmSync(projectPath, { recursive: true, force: true })
+  removeTempTree(projectPath)
 }
 
 test('installs all supported project MCP configs and is idempotent', () => {

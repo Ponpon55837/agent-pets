@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -7,6 +7,7 @@ import { APP_UPDATE_API_URL, APP_UPDATE_RELEASES_PREFIX } from '../electron/app-
 import { AppUpdateStore, sanitizeAppUpdateStored } from '../electron/app-update-store.ts'
 import { createAppUpdateRuntime } from '../electron/main/app-update-runtime.ts'
 import { PluginNetworkClient } from '../electron/plugin-net.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 const DAY = Date.UTC(2026, 10, 11, 8)
 
@@ -48,7 +49,7 @@ function setup(options: { body?: string; status?: number; version?: string; noti
     dir, runtime, requested, notifications, opened,
     setBody: (value: string, nextStatus = 200) => { body = value; status = nextStatus },
     setNow: (value: number) => { now = value },
-    cleanup: () => { runtime.dispose(); rmSync(dir, { recursive: true, force: true }) },
+    cleanup: () => { runtime.dispose(); removeTempTree(dir) },
   }
 }
 
@@ -305,5 +306,5 @@ test('the stored file is sanitized: wrong types, tampered URLs and oversized fil
     assert.equal(new AppUpdateStore(dir).get().enabled, false)
     writeFileSync(join(dir, 'app-update.json'), '{broken')
     assert.equal(new AppUpdateStore(dir).get().enabled, false)
-  } finally { rmSync(dir, { recursive: true, force: true }) }
+  } finally { removeTempTree(dir) }
 })

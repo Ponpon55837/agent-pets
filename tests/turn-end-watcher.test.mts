@@ -14,6 +14,7 @@ import {
   TURN_END_QUIET_MS,
   createTurnEndWatcher,
 } from '../electron/main/turn-end-watcher.ts'
+import { removeTempTree } from './support/temp-dir.mts'
 
 const MINUTE = 60_000
 const START = 1_000_000
@@ -230,7 +231,7 @@ test('the settled event lands in the same history session as the hook events', a
   // 實測抓到的問題：補送的事件少了 adapterId，歷史把它記成備用 adapter 底下的另一筆 session。
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-turn-end-history-'))
   const history = new HistoryStore(path.join(directory, 'history.sqlite'), { now: () => START + 60_000 })
-  t.after(() => { history.close(); fs.rmSync(directory, { recursive: true, force: true }) })
+  t.after(() => { history.close(); removeTempTree(directory) })
   const snapshot = new SessionSnapshotStore(() => START + TURN_END_QUIET_MS)
   const dispatched: AgentStatusEvent[] = []
   const watcher = createTurnEndWatcher({
