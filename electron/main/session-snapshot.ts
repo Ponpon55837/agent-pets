@@ -1,7 +1,10 @@
 import type { AgentSource, AgentState, AgentStatusEvent } from '../../src/types/agent.ts'
+import type { AgentAdapterId } from '../../src/types/agent-adapter.ts'
 import type { AgentHost } from '../../src/types/host-app.ts'
 
 export interface SessionSnapshotEntry {
+  /** 事件來自哪個 adapter；主程序替這個 session 補送事件時要帶上，歷史才會記在同一筆。 */
+  adapterId?: AgentAdapterId
   source: AgentSource
   sessionId: string
   project?: string
@@ -26,7 +29,12 @@ const MAX_AGE_MS = 45 * 60_000
 export class SessionSnapshotStore {
   private readonly entries = new Map<string, SessionSnapshotEntry>()
 
-  constructor(private readonly now: () => number = Date.now) {}
+  private readonly now: () => number
+
+  // 不用 parameter property：測試以 Node 的 strip-types 直接載入這個檔案。
+  constructor(now: () => number = Date.now) {
+    this.now = now
+  }
 
   record(event: AgentStatusEvent): void {
     if (event.originalEvent === 'AgentPetsIntegrationTest') return
@@ -40,6 +48,7 @@ export class SessionSnapshotStore {
     const host = event.host ?? previous?.host
     this.entries.delete(key)
     this.entries.set(key, {
+      ...(event.adapterId ? { adapterId: event.adapterId } : {}),
       source: event.source,
       sessionId: event.sessionId,
       project: event.project,

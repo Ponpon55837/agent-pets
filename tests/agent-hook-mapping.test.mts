@@ -14,7 +14,13 @@ import { fileURLToPath } from 'node:url'
 const HOOK_SOURCE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'integrations', 'agent-hook.mjs')
 const EVENT_TOKEN = 'e'.repeat(64)
 
-async function sentState(source: string, payload: Record<string, unknown>): Promise<string | null> {
+type HookPayload = Record<string, unknown>
+
+async function sentState(
+  source: string,
+  payloadOrFactory: HookPayload | ((home: string) => HookPayload),
+  extraEnv: Record<string, string> = {},
+): Promise<string | null> {
   const states: string[] = []
   const server: Server = createServer((request, response) => {
     const chunks: Buffer[] = []
@@ -28,6 +34,7 @@ async function sentState(source: string, payload: Record<string, unknown>): Prom
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-hook-mapping-'))
   try {
+    const payload = typeof payloadOrFactory === 'function' ? payloadOrFactory(home) : payloadOrFactory
     fs.mkdirSync(path.join(home, '.desktop-pet'))
     fs.writeFileSync(path.join(home, '.desktop-pet', 'event-token'), `${EVENT_TOKEN}\n`)
     const patched = fs.readFileSync(HOOK_SOURCE, 'utf8').replace('127.0.0.1:17373', `127.0.0.1:${(server.address() as AddressInfo).port}`)
@@ -35,7 +42,7 @@ async function sentState(source: string, payload: Record<string, unknown>): Prom
     fs.writeFileSync(hookPath, patched)
     await new Promise<void>((resolve, reject) => {
       const child = spawn(process.execPath, [hookPath, source], {
-        env: { PATH: process.env.PATH ?? '', HOME: home, USERPROFILE: home },
+        env: { PATH: process.env.PATH ?? '', HOME: home, USERPROFILE: home, ...extraEnv },
         stdio: ['pipe', 'ignore', 'inherit'],
       })
       child.on('error', reject)
@@ -80,4 +87,47 @@ for (const [name, payload, expected] of cases) {
 
 test('codex mapping does not know the Claude-only compaction events', async () => {
   assert.equal(await sentState('codex', { hook_event_name: 'PreCompact' }), null)
+})
+
+// Codex Desktop 的記憶整理執行緒在 <CODEX_HOME>/memories_v2 底下跑，結束時不送 Stop，不能當成使用者的對話。
+test('codex ignores its own memory thread under the Codex home', async () => {
+  for (const dir of ['memories_v2', 'memories', path.join('memories_v2', 'nested')]) {
+    assert.equal(
+      await sentState('codex', home => ({ hook_event_name: 'UserPromptSubmit', cwd: path.join(home, '.codex', dir) })),
+      null,
+      dir,
+    )
+  }
+})
+
+test('codex memory thread is recognised under CODEX_HOME and with a Windows long-path prefix', async () => {
+  const custom = path.join(os.tmpdir(), 'agent-pets-custom-codex-home')
+  assert.equal(
+    await sentState('codex', { hook_event_name: 'PostToolUse', cwd: path.join(custom, 'memories_v2') }, { CODEX_HOME: custom }),
+    null,
+  )
+  if (process.platform === 'win32') {
+    assert.equal(
+      await sentState('codex', home => ({ hook_event_name: 'UserPromptSubmit', cwd: `\\\\?\\${path.join(home, '.codex', 'memories_v2')}` })),
+      null,
+    )
+  }
+})
+
+test('codex still reports ordinary projects, including look-alike folder names', async () => {
+  assert.equal(await sentState('codex', { hook_event_name: 'UserPromptSubmit' }), 'thinking')
+  assert.equal(
+    await sentState('codex', home => ({ hook_event_name: 'UserPromptSubmit', cwd: path.join(home, 'projects', 'memories_v2') })),
+    'thinking',
+  )
+  assert.equal(
+    await sentState('codex', home => ({ hook_event_name: 'UserPromptSubmit', cwd: path.join(home, '.codex', 'memories-notes') })),
+    'thinking',
+  )
+  assert.equal(await sentState('codex', home => ({ hook_event_name: 'UserPromptSubmit', cwd: path.join(home, '.codex') })), 'thinking')
+  // Claude 的事件不受 Codex 的目錄規則影響。
+  assert.equal(
+    await sentState('claude', home => ({ hook_event_name: 'UserPromptSubmit', cwd: path.join(home, '.codex', 'memories_v2') })),
+    'thinking',
+  )
 })

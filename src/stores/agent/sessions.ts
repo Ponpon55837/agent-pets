@@ -6,14 +6,13 @@
 // - 計時器：無；週期性呼叫由 App.vue 驅動。等待輸入的提醒計時器在 unread-alerts.ts。
 // - storage：無。
 // - 跨視窗同步：不同步；兩個視窗各自吃同一串事件，只有 App.vue 指定的視窗會真的出聲。
-import type { AgentSession, AgentSource, AgentStatusEvent } from '@/types/agent'
-import { isAgentState, isQuotaCapableSource } from '@/types/agent'
+import type { AgentSession, AgentSource, AgentState, AgentStatusEvent } from '@/types/agent'
+import { AGENT_STATE_POLICY, isAgentState, isQuotaCapableSource } from '@/types/agent'
 import { isHostAppId, type AgentHost } from '@/types/host-app'
 import type { SessionJumpAction, SessionJumpResult } from '@/types/session-jump'
 import type { SoundCue } from '@/types/sound'
 import { AgentSessionIndex } from '@/utils/agent-session-index'
 import { AGENT_STATE_PRESENTATION } from '@/utils/agent-state-presentation'
-import { SUCCESS_DISPLAY_MS } from '@/utils/pet-motion-plan'
 import { SESSION_REMOVE_MS, sessionLifecycleAction } from '@/utils/session-lifecycle'
 import { shouldPlaySuccessSound } from '@/utils/sound-policy'
 import type { usePetMood } from '@/stores/agent/mood'
@@ -47,6 +46,8 @@ export interface SessionsDeps {
 export function useSessions(deps: SessionsDeps) {
   const { sessionsByKey, petMood, showToast, unreadAlerts } = deps
   const sessionIndex = new AgentSessionIndex(sessionsByKey)
+  /** 被定期清理降級的 session 原本的狀態；下一個真實事件進來或 session 被移除時清掉。 */
+  const quietSettledFrom = new Map<string, AgentState>()
 
   function getSessionKey(source: AgentSource, sessionId: string): string {
     return `${source}:${sessionId}`
@@ -99,7 +100,9 @@ export function useSessions(deps: SessionsDeps) {
     const taskStartedAt = petMood.taskStartedAt(key)
     const taskElapsedMs = taskStartedAt === undefined ? undefined : Date.now() - taskStartedAt
 
-    petMood.awardTaskProgress(event, key, prevState)
+    // 清理把它降到閒置之後才來的事件，代表工作其實沒停：用降級前的狀態算進度，工作計時才不會重來。
+    petMood.awardTaskProgress(event, key, quietSettledFrom.get(key) ?? prevState)
+    quietSettledFrom.delete(key)
 
     if (event.state === 'waiting-input') {
       if (prevState !== 'waiting-input') unreadAlerts.scheduleWaitingInputReminder(key)
@@ -130,23 +133,28 @@ export function useSessions(deps: SessionsDeps) {
     return null
   }
 
-  function cleanupStale() {
+  // 唯一的定期清理：每個狀態安靜太久後該變成什麼，全部由狀態 registry 的 quiet 決定
+  // （成功顯示幾秒後回閒置、思考太久回閒置、整個沒消息轉離線再移除）。
+  // 只改顯示：不發通知、不播音效、不動 lastSeenAt，下一個真實事件會直接蓋過。
+  function sweepQuietSessions() {
     const now = Date.now()
     const hasPendingPermission = deps.hasPendingPermission()
     for (const session of [...sessionIndex.values()]) {
-      const action = sessionLifecycleAction(session, now, { hasPendingPermission })
-      if (action === 'remove') {
-        // Offline long enough that nobody is looking for it any more.
+      const next = sessionLifecycleAction(session, now, { hasPendingPermission })
+      if (next === null) continue
+      unreadAlerts.cancelWaitingInputReminder(session.key)
+      if (next === 'remove') {
         sessionIndex.delete(session.key)
         petMood.forgetTask(session.key)
-      } else if (action === 'offline') {
-        // No update in a long time means the process died without sending a
-        // terminal event (Stop/SessionEnd) — treat it as gone rather than
-        // letting a stuck thinking/tool-running state mask real sessions.
-        session.state = 'offline'
-        sessionIndex.updatePriority(session.key, session.state, session.lastSeenAt)
-        petMood.forgetTask(session.key)
+        quietSettledFrom.delete(session.key)
+        continue
       }
+      if (!quietSettledFrom.has(session.key)) quietSettledFrom.set(session.key, session.state)
+      session.state = next
+      session.permissionNotice = undefined
+      sessionIndex.updatePriority(session.key, session.state, session.lastSeenAt)
+      // 降到閒置時工作可能還在跑（只是很久沒事件），保留計時；判定程序不在了才放掉。
+      if (AGENT_STATE_POLICY[next].historyOutcome === 'cancelled') petMood.forgetTask(session.key)
     }
   }
 
@@ -185,19 +193,8 @@ export function useSessions(deps: SessionsDeps) {
     return restored
   }
 
-  function handleSuccessTimeout() {
-    const now = Date.now()
-    for (const session of sessionIndex.values()) {
-      if (session.state === 'success') {
-        if (now - session.lastSeenAt > SUCCESS_DISPLAY_MS) {
-          session.state = 'idle'
-          sessionIndex.updatePriority(session.key, session.state, session.lastSeenAt)
-        }
-      }
-    }
-  }
-
   function removeSession(key: string) {
+    quietSettledFrom.delete(key)
     unreadAlerts.cancelWaitingInputReminder(key)
     sessionIndex.delete(key)
     petMood.forgetTask(key)
@@ -206,6 +203,7 @@ export function useSessions(deps: SessionsDeps) {
   function clearOfflineSessions() {
     for (const session of [...sessionIndex.values()]) {
       if (session.state === 'offline') {
+        quietSettledFrom.delete(session.key)
         sessionIndex.delete(session.key)
         petMood.forgetTask(session.key)
       }
@@ -250,9 +248,10 @@ export function useSessions(deps: SessionsDeps) {
     sessionIndex,
     getSessionKey,
     handleEvent,
-    cleanupStale,
+    // 兩個名字是同一個清理：App.vue 平常每分鐘跑一次，有成功狀態要收掉時每秒跑一次。
+    cleanupStale: sweepQuietSessions,
     restoreSessionSnapshot,
-    handleSuccessTimeout,
+    handleSuccessTimeout: sweepQuietSessions,
     removeSession,
     clearOfflineSessions,
     settleWaitingPermission,

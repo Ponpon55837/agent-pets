@@ -40,6 +40,7 @@
    - `integrations/install.mjs`、`electron/setup.ts`（含 `IntegrationTarget`）、`electron/hook-config.ts`：負責寫入使用者的設定檔，這一輪由 hook 強化線負責，沒有改成讀 registry。
    - 連線用的 port、`~/.desktop-pet` 與 token 檔名、header、`/v1/...` 路徑不用另外改：它們只寫在 `src/types/local-wire.ts`，`setup.ts` 的 OpenCode plugin 模板以插值取用，hook 與 presentation MCP 腳本的字面值由 `tests/local-wire-contract.test.mts` 比對。
 5. 更新 `tests/agent-source-registry.test.mts` 裡固定的值。
+6. 在 `electron/transcript-turn-end.ts` 的 `TRANSCRIPT_FORMATS` 填上新家族（漏填會編譯失敗）：agent 會在本機寫對話紀錄檔、而且能從結尾看出回合已結束或被中斷時，提供「怎麼找檔案」與「怎麼判讀一筆紀錄」；沒有就填 `null`。agent 不保證會送結束事件，填了這一格，中斷後才能在幾秒內回到閒置，否則只能等狀態期限（`AGENT_STATE_POLICY` 的 `quiet`）。
 
 ## hook 與 plugin 的手動同步字面值
 
