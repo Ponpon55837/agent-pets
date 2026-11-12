@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { t, type TranslationKey } from '@/i18n'
 import { isAgentState } from '@/types/agent'
 import {
@@ -35,24 +35,68 @@ const detail = shallowRef<HistorySessionDetail | null>(null)
 const loading = ref(false)
 const failed = ref(false)
 let requestSeq = 0
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+const REFRESH_DEBOUNCE_MS = 500
 
-watch(() => props.session?.id, async id => {
+// silent：背景刷新沿用畫面上的資料，不閃骨架；失敗時保留上一份結果。
+async function load(id: string, silent = false): Promise<void> {
   const seq = ++requestSeq
-  detail.value = null
-  failed.value = false
-  if (!id) return
-  loading.value = true
+  if (!silent) {
+    detail.value = null
+    failed.value = false
+    loading.value = true
+  }
   try {
     const result = await window.electronAPI?.getHistorySessionDetail(id)
     if (seq !== requestSeq) return
-    detail.value = result ?? null
-    failed.value = !result
+    if (result) {
+      detail.value = result
+      failed.value = false
+    } else if (!silent) {
+      failed.value = true
+    }
   } catch {
-    if (seq === requestSeq) failed.value = true
+    if (seq === requestSeq && !silent) failed.value = true
   } finally {
     if (seq === requestSeq) loading.value = false
   }
+}
+
+function cancelRefresh(): void {
+  if (refreshTimer) clearTimeout(refreshTimer)
+  refreshTimer = null
+}
+
+watch(() => props.session?.id, id => {
+  cancelRefresh()
+  if (id) {
+    void load(id)
+    return
+  }
+  requestSeq += 1
+  detail.value = null
+  failed.value = false
+  loading.value = false
 }, { immediate: true })
+
+// 彈窗開著時跟著歷史更新即時刷新，不必關掉重開。
+let cleanupHistoryUpdated: (() => void) | null = null
+onMounted(() => {
+  cleanupHistoryUpdated = window.electronAPI?.onHistoryUpdated(() => {
+    if (!props.session?.id) return
+    cancelRefresh()
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null
+      const id = props.session?.id
+      if (id) void load(id, true)
+    }, REFRESH_DEBOUNCE_MS)
+  }) ?? null
+})
+onUnmounted(() => {
+  cleanupHistoryUpdated?.()
+  cancelRefresh()
+  requestSeq += 1
+})
 
 // 優先用剛讀到的資料列；載入中先用清單上的那一列。
 const current = computed(() => detail.value?.session ?? props.session)
