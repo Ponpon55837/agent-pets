@@ -814,6 +814,8 @@ export class HistoryStore {
           && previousProjectId === projectId
           && previousOccurredAt === occurredAt
           && previousQuality === record.quality
+          // A rescan that learned the real session id re-attributes the row.
+          && (existing.session_id ?? null) === sessionId
           // A rescan of a row imported before model tracking backfills its model.
           && (previousModel === model || model === '')
         ) return false

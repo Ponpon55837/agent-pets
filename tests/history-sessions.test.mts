@@ -280,6 +280,26 @@ test('local-log tokens join the hook session incrementally, with the top model',
   assert.equal(hookOnly.topModel, '')
 })
 
+test('a rescan that learns the real session id moves the usage onto that session', (t) => {
+  const { store } = open(t)
+  store.recordEvent(event({ adapterId: 'codex', source: 'codex', sessionId: 'thread-1' }))
+  const usage = (sessionId: string) => ({
+    adapterId: 'codex', agentId: 'codex', sessionId, sourceEventId: 'line-1',
+    occurredAt: NOW - 50_000, input: 40, output: 9, quality: 'exact' as const, model: 'gpt-5-codex',
+  })
+  // Rows imported before the fix were keyed by the log file, not the thread.
+  assert.equal(store.recordTokenUsage(usage('file-key')), true)
+  assert.equal(store.listSessions('aang-airbender', {}).items[0]!.tokenSource, 'none')
+  assert.equal(store.recordTokenUsage(usage('thread-1')), true)
+  const item = store.listSessions('aang-airbender', {}).items[0]!
+  assert.equal(item.tokenSource, 'local')
+  assert.equal(item.tokenInput, 40)
+  assert.equal(item.tokenOutput, 9)
+  // The move is not a new spend, and a repeat is a no-op.
+  assert.equal(store.getSummary().totals.tokenInput, 40)
+  assert.equal(store.recordTokenUsage(usage('thread-1')), false)
+})
+
 test('v9 migration backfills existing sessions additively and is idempotent', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pets-sessions-migrate-'))
   t.after(() => removeTempTree(directory))

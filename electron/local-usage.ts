@@ -33,6 +33,11 @@ export interface IncrementalLocalUsageParserState {
   nextLineNumber: number
   previousCodexTotal: TokenCounters | null
   codexCwd: string | undefined
+  /**
+   * Thread id from the file's session_meta line. token_count events carry no
+   * session id, and the hook reports this same id, so it is the join key.
+   */
+  codexSessionId?: string
   /** Latest model announced by a Codex turn_context line; later token_count events inherit it. */
   codexModel?: string
   /** Latest real timestamp seen in this file; undated lines inherit it. */
@@ -257,6 +262,7 @@ function codexUsage(
   previousTotal: TokenCounters | null,
   fileCwd: string | undefined,
   fileModel: string | undefined,
+  fileSessionId: string | undefined,
 ): CodexUsageResult | null {
   const totalUsage = asRecord(info.total_token_usage)
   // Codex's total_token_usage is cumulative for the rollout. last_token_usage
@@ -290,6 +296,7 @@ function codexUsage(
     ?? text(record.sessionId)
     ?? text(payload.session_id)
     ?? text(payload.sessionId)
+    ?? fileSessionId
     ?? fileKey
   const stableKey = `line:${fileKey}:${lineNumber}`
   const occurredAt = timestamp(record.timestamp ?? payload.timestamp, inheritedAt)
@@ -510,19 +517,23 @@ export function parseUsageFile(
     // session_meta line; every later token_count event inherits it.
     let codexCwd: string | undefined
     let codexModel: string | undefined
+    let codexSessionId: string | undefined
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index]
       if (!line || lineTooLong(line, maxLineBytes)) continue
-      const wantsCwd = codexCwd === undefined && line.includes('"session_meta"')
+      const wantsCwd = (codexCwd === undefined || codexSessionId === undefined) && line.includes('"session_meta"')
       const wantsModel = line.includes('"turn_context"') || (codexModel === undefined && line.includes('"session_meta"'))
       if (!wantsCwd && !wantsModel && !line.includes('"token_count"')) continue
       // 每行只 JSON.parse 一次，同時供 session_meta、turn_context 與 token_count 判斷使用。
       const record = parseObject(line)
       if (!record) continue
-      if (wantsCwd) codexCwd = codexSessionCwd(record) ?? codexCwd
+      if (wantsCwd) {
+        codexCwd = codexSessionCwd(record) ?? codexCwd
+        codexSessionId = codexMetaSessionId(record) ?? codexSessionId
+      }
       if (wantsModel) codexModel = codexContextModel(record) ?? codexModel
       lastAt = timestamp(record.timestamp, lastAt)
-      const result = parseCodexUsageRecord(record, fileKey, index + 1, lastAt, previousCodexTotal, codexCwd, codexModel)
+      const result = parseCodexUsageRecord(record, fileKey, index + 1, lastAt, previousCodexTotal, codexCwd, codexModel, codexSessionId)
       if (!result) continue
       // Rebase the running baseline even when this event produced no
       // importable record (first sighting, repeat, or a reset) - otherwise a
@@ -572,12 +583,15 @@ function parseUsageLine(
     if (parsed) state.lastTimestamp = parsed.occurredAt
     return parsed
   }
-  const wantsCwd = state.codexCwd === undefined && line.includes('"session_meta"')
+  const wantsCwd = (state.codexCwd === undefined || state.codexSessionId === undefined) && line.includes('"session_meta"')
   const wantsModel = line.includes('"turn_context"') || (state.codexModel === undefined && line.includes('"session_meta"'))
   if (!wantsCwd && !wantsModel && !line.includes('"token_count"')) return null
   const record = parseObject(line)
   if (!record) return null
-  if (wantsCwd) state.codexCwd = codexSessionCwd(record) ?? state.codexCwd
+  if (wantsCwd) {
+    state.codexCwd = codexSessionCwd(record) ?? state.codexCwd
+    state.codexSessionId = codexMetaSessionId(record) ?? state.codexSessionId
+  }
   if (wantsModel) state.codexModel = codexContextModel(record) ?? state.codexModel
   state.lastTimestamp = timestamp(record.timestamp, state.lastTimestamp)
   const result = parseCodexUsageRecord(
@@ -588,6 +602,7 @@ function parseUsageLine(
     state.previousCodexTotal,
     state.codexCwd,
     state.codexModel,
+    state.codexSessionId,
   )
   if (!result) return null
   state.previousCodexTotal = result.cumulative
@@ -704,6 +719,14 @@ function codexSessionCwd(record: Record<string, unknown>): string | undefined {
   return payload ? text(payload.cwd) : undefined
 }
 
+// The rollout's thread id: what Codex hooks report as session_id. Newer builds
+// write `session_id` next to `id`; both hold the same UUID.
+function codexMetaSessionId(record: Record<string, unknown>): string | undefined {
+  if (record.type !== 'session_meta') return undefined
+  const payload = asRecord(record.payload)
+  return payload ? text(payload.session_id) ?? text(payload.id) : undefined
+}
+
 function parseCodexUsageRecord(
   record: Record<string, unknown>,
   fileKey: string,
@@ -712,6 +735,7 @@ function parseCodexUsageRecord(
   previousTotal: TokenCounters | null,
   fileCwd: string | undefined,
   fileModel: string | undefined,
+  fileSessionId: string | undefined,
 ): CodexUsageResult | null {
   if (record.type !== 'event_msg') return null
   const payload = asRecord(record.payload)
@@ -719,7 +743,7 @@ function parseCodexUsageRecord(
   const info = asRecord(payload.info)
   const usage = info ? asRecord(info.last_token_usage) : null
   if (!info || !usage) return null
-  return codexUsage(record, payload, info, usage, fileKey, lineNumber, inheritedAt, previousTotal, fileCwd, fileModel)
+  return codexUsage(record, payload, info, usage, fileKey, lineNumber, inheritedAt, previousTotal, fileCwd, fileModel, fileSessionId)
 }
 
 export class LocalUsageReader {
@@ -825,6 +849,7 @@ export class LocalUsageReader {
             previousCodexTotal: previous.previousCodexTotal,
             codexCwd: previous.codexCwd,
             codexModel: previous.codexModel,
+            codexSessionId: previous.codexSessionId,
             lastTimestamp: previous.lastTimestamp,
             discardingLongLine: previous.discardingLongLine,
           }
