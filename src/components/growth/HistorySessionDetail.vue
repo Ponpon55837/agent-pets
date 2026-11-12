@@ -4,17 +4,18 @@ import { t, type TranslationKey } from '@/i18n'
 import { isAgentState } from '@/types/agent'
 import {
   HISTORY_SESSION_TIMELINE_MAX,
-  HISTORY_TERMINAL_STATES,
   type HistorySessionDetail,
   type HistorySessionListItem,
   type HistorySessionOutcome,
 } from '@/types/history'
 import { useHistoryFormat } from '@/composables/useHistoryFormat'
 import Dialog from '@/components/ui/Dialog.vue'
+import SegmentedControl, { type SegmentedOption } from '@/components/ui/SegmentedControl.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
 import { agentDisplayName } from '@/utils/agent-label'
 import { AGENT_STATE_PRESENTATION } from '@/utils/agent-state-presentation'
 import { formatDateTime, formatTimeFull } from '@/utils/intl-format'
+import { buildTimelineRows, type TimelineOrder } from '@/utils/history-timeline'
 import { stateAriaLabel } from '@/utils/state-aria'
 
 // 單一工作階段的時間軸對話框：狀態轉換（工具只顯示名稱）與每段持續時間。
@@ -63,19 +64,13 @@ const description = computed(() => {
   return `${agentDisplayName(session.adapterId)} · ${range}`
 })
 
-/** 每一筆持續到下一筆；最後一筆持續到 session 最後一次活動。 */
-const timeline = computed(() => {
-  const entries = detail.value?.timeline ?? []
-  const endAt = current.value?.lastSeenAt ?? 0
-  return entries.map((entry, index) => ({
-    ...entry,
-    key: `${index}-${entry.occurredAt}`,
-    // 最後一筆若是結束狀態，本身沒有有意義的持續時間。
-    spanMs: index === entries.length - 1 && isAgentState(entry.state) && HISTORY_TERMINAL_STATES.has(entry.state)
-      ? null
-      : Math.max(0, (entries[index + 1]?.occurredAt ?? endAt) - entry.occurredAt),
-  }))
-})
+// 預設最新在前，不用捲動就能看到最近的進度；選擇在切換不同工作階段時保留。
+const timelineOrder = ref<TimelineOrder>('desc')
+const orderOptions = computed<SegmentedOption[]>(() => [
+  { value: 'desc', label: t('growth.sessionTimelineNewestFirst') },
+  { value: 'asc', label: t('growth.sessionTimelineOldestFirst') },
+])
+const timeline = computed(() => buildTimelineRows(detail.value?.timeline ?? [], current.value?.lastSeenAt ?? 0, timelineOrder.value))
 
 // 念成一句話：已翻譯的狀態、工具、時間與持續時間。
 function entryAriaLabel(entry: { occurredAt: number; state: string; toolName?: string; spanMs: number | null }): string {
@@ -125,7 +120,18 @@ function unknownOr(tracked: boolean, value: string): string {
         </div>
       </dl>
 
-      <h3 class="detail-heading">{{ t('growth.sessionTimeline') }}</h3>
+      <div class="detail-heading-row">
+        <h3 class="detail-heading">{{ t('growth.sessionTimeline') }}</h3>
+        <SegmentedControl
+          v-if="timeline.length > 0"
+          v-model="timelineOrder"
+          :options="orderOptions"
+          semantics="radio"
+          size="sm"
+          id-prefix="session-timeline-order-"
+          :ariaLabel="t('growth.sessionTimelineOrder')"
+        />
+      </div>
       <div v-if="loading" aria-busy="true"><Skeleton variant="line" :lines="4" /></div>
       <p v-else-if="failed" class="detail-muted" role="alert">{{ t('growth.sessionDetailError') }}</p>
       <p v-else-if="timeline.length === 0" class="detail-muted">{{ t('growth.sessionTimelineEmpty') }}</p>
@@ -187,8 +193,17 @@ function unknownOr(tracked: boolean, value: string): string {
   white-space: nowrap;
 }
 
+.detail-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
 .detail-heading {
-  margin: var(--space-2) 0 0;
+  margin: 0;
   color: var(--text-primary);
   font-size: var(--font-md);
   font-weight: var(--weight-bold);
